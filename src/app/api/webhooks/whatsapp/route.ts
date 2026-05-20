@@ -2,9 +2,11 @@ import { NextResponse, type NextRequest } from "next/server";
 import { processInboundMessage } from "@/lib/inbound-message";
 import {
   parseMetaWebhookMessages,
+  parseMetaWebhookStatuses,
   verifyMetaSignature
 } from "@/lib/meta-whatsapp";
 import { prisma } from "@/lib/db";
+import { updateCampaignDeliveryStatus } from "@/lib/campaigns";
 
 export async function GET(request: NextRequest) {
   const mode = request.nextUrl.searchParams.get("hub.mode");
@@ -96,6 +98,29 @@ export async function POST(request: NextRequest) {
       }
 
       return NextResponse.json({ ok: true, mode: "meta", results });
+    }
+
+    const metaStatuses = parseMetaWebhookStatuses(body);
+    if (metaStatuses.length) {
+      const results = [];
+
+      for (const status of metaStatuses) {
+        const updated = await updateCampaignDeliveryStatus({
+          providerMessageId: status.messageId,
+          status: status.status,
+          errorCode: status.errorCode,
+          errorMessage: status.errorMessage
+        });
+
+        results.push({
+          phoneNumberId: status.phoneNumberId,
+          messageId: status.messageId,
+          status: status.status,
+          updated: Boolean(updated)
+        });
+      }
+
+      return NextResponse.json({ ok: true, mode: "meta-status", results });
     }
 
     if (body && "entry" in body) {

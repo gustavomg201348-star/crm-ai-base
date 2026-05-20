@@ -8,85 +8,89 @@ datasource db {
 }
 
 model Company {
-  id          String    @id @default(cuid())
-  name        String
-  email       String?
-  phone       String?
-  segment     String?
-  createdAt   DateTime  @default(now())
-  users       User[]
-  contacts    Contact[]
-  channels    Channel[]
-  tags        Tag[]
-  stages      PipelineStage[]
-  origins     Origin[]
-  proposals   Proposal[]
-  tasks       Task[]
+  id        String          @id @default(cuid())
+  name      String
+  email     String?
+  phone     String?
+  segment   String?
+  createdAt DateTime        @default(now())
+  users     User[]
+  contacts  Contact[]
+  channels  Channel[]
+  campaigns Campaign[]
+  tags      Tag[]
+  stages    PipelineStage[]
+  origins   Origin[]
+  proposals Proposal[]
+  tasks     Task[]
 }
 
 model Channel {
-  id          String   @id @default(cuid())
-  companyId   String
-  name        String
-  type        String   @default("whatsapp")
-  provider    String   @default("sandbox")
-  externalId  String?
+  id            String     @id @default(cuid())
+  companyId     String
+  name          String
+  type          String     @default("whatsapp")
+  provider      String     @default("sandbox")
+  externalId    String?
   phoneNumberId String?
-  wabaId      String?
-  displayPhone String?
-  accessToken String?
-  verifyToken String?
-  appSecret   String?
-  status      String   @default("ACTIVE")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  company     Company  @relation(fields: [companyId], references: [id])
+  wabaId        String?
+  displayPhone  String?
+  accessToken   String?
+  verifyToken   String?
+  appSecret     String?
+  status        String     @default("ACTIVE")
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  company       Company    @relation(fields: [companyId], references: [id])
+  campaigns     Campaign[]
 
   @@index([companyId])
 }
 
 model User {
-  id        String   @id @default(cuid())
-  companyId String
-  name      String
-  email     String   @unique
-  passwordHash String
-  role      String   @default("AGENT")
-  avatar    String?
-  createdAt DateTime @default(now())
-  company   Company  @relation(fields: [companyId], references: [id])
-  contacts  Contact[]
+  id            String            @id @default(cuid())
+  companyId     String
+  name          String
+  email         String            @unique
+  passwordHash  String
+  role          String            @default("AGENT")
+  avatar        String?
+  createdAt     DateTime          @default(now())
+  company       Company           @relation(fields: [companyId], references: [id])
+  contacts      Contact[]
   conversations Conversation[]
-  activities ContactActivity[]
-  tasks     Task[]
+  activities    ContactActivity[]
+  campaigns     Campaign[]
+  tasks         Task[]
 
   @@index([companyId])
 }
 
 model Contact {
-  id          String          @id @default(cuid())
-  companyId   String
-  ownerId     String?
-  stageId     String?
-  originId    String?
-  name        String
-  phone       String
-  email       String?
-  cpf         String?
-  temperature String          @default("WARM")
-  lastMessage String?
-  archivedAt   DateTime?
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
-  company     Company         @relation(fields: [companyId], references: [id])
-  owner       User?           @relation(fields: [ownerId], references: [id])
-  stage       PipelineStage?  @relation(fields: [stageId], references: [id])
-  origin      Origin?         @relation(fields: [originId], references: [id])
-  tags        ContactTag[]
-  conversations Conversation[]
-  proposals   Proposal[]
-  activities  ContactActivity[]
-  tasks       Task[]
+  id                 String              @id @default(cuid())
+  companyId          String
+  ownerId            String?
+  stageId            String?
+  originId           String?
+  name               String
+  phone              String
+  email              String?
+  cpf                String?
+  temperature        String              @default("WARM")
+  lastMessage        String?
+  archivedAt         DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  company            Company             @relation(fields: [companyId], references: [id])
+  owner              User?               @relation(fields: [ownerId], references: [id])
+  stage              PipelineStage?      @relation(fields: [stageId], references: [id])
+  origin             Origin?             @relation(fields: [originId], references: [id])
+  tags               ContactTag[]
+  conversations      Conversation[]
+  campaignRecipients CampaignRecipient[]
+  proposals          Proposal[]
+  activities         ContactActivity[]
+  tasks              Task[]
 
   @@index([companyId])
   @@index([ownerId])
@@ -103,7 +107,7 @@ model ContactActivity {
   detail    String?
   createdAt DateTime @default(now())
   contact   Contact  @relation(fields: [contactId], references: [id])
-  user      User?     @relation(fields: [userId], references: [id])
+  user      User?    @relation(fields: [userId], references: [id])
 
   @@index([contactId])
   @@index([userId])
@@ -132,11 +136,11 @@ model Task {
 }
 
 model Tag {
-  id        String   @id @default(cuid())
+  id        String       @id @default(cuid())
   companyId String
   name      String
   color     String
-  company   Company  @relation(fields: [companyId], references: [id])
+  company   Company      @relation(fields: [companyId], references: [id])
   contacts  ContactTag[]
 
   @@index([companyId])
@@ -152,38 +156,38 @@ model ContactTag {
 }
 
 model Origin {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   companyId String
   name      String
-  company   Company  @relation(fields: [companyId], references: [id])
+  company   Company   @relation(fields: [companyId], references: [id])
   contacts  Contact[]
 
   @@index([companyId])
 }
 
 model PipelineStage {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   companyId String
   name      String
   color     String
   position  Int
-  company   Company  @relation(fields: [companyId], references: [id])
+  company   Company   @relation(fields: [companyId], references: [id])
   contacts  Contact[]
 
   @@index([companyId])
 }
 
 model Conversation {
-  id        String             @id @default(cuid())
+  id        String    @id @default(cuid())
   contactId String
   agentId   String?
-  status    String             @default("OPEN")
-  channel   String             @default("whatsapp")
+  status    String    @default("OPEN")
+  channel   String    @default("whatsapp")
   summary   String?
-  createdAt DateTime           @default(now())
-  updatedAt DateTime           @updatedAt
-  contact   Contact            @relation(fields: [contactId], references: [id])
-  agent     User?              @relation(fields: [agentId], references: [id])
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  contact   Contact   @relation(fields: [contactId], references: [id])
+  agent     User?     @relation(fields: [agentId], references: [id])
   messages  Message[]
 }
 
@@ -196,17 +200,72 @@ model Message {
   conversation   Conversation @relation(fields: [conversationId], references: [id])
 }
 
-model Proposal {
-  id          String         @id @default(cuid())
+model Campaign {
+  id          String              @id @default(cuid())
   companyId   String
-  contactId   String
-  bank        String
-  agreement   String
-  product     String
-  amount      Decimal
-  commission  Decimal
-  status      String         @default("DRAFT")
-  createdAt   DateTime       @default(now())
-  company     Company        @relation(fields: [companyId], references: [id])
-  contact     Contact        @relation(fields: [contactId], references: [id])
+  channelId   String
+  createdById String?
+  name        String
+  message     String
+  imagePath   String?
+  imageName   String?
+  imageMime   String?
+  imageSize   Int?
+  status      String              @default("PENDING")
+  total       Int                 @default(0)
+  sent        Int                 @default(0)
+  delivered   Int                 @default(0)
+  failed      Int                 @default(0)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  company     Company             @relation(fields: [companyId], references: [id])
+  channel     Channel             @relation(fields: [channelId], references: [id])
+  createdBy   User?               @relation(fields: [createdById], references: [id])
+  recipients  CampaignRecipient[]
+
+  @@index([companyId])
+  @@index([channelId])
+  @@index([createdById])
+}
+
+model CampaignRecipient {
+  id                String    @id @default(cuid())
+  campaignId        String
+  contactId         String
+  conversationId    String?
+  phone             String
+  status            String    @default("PENDING")
+  providerMessageId String?
+  errorCode         String?
+  errorMessage      String?
+  sentAt            DateTime?
+  deliveredAt       DateTime?
+  failedAt          DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  campaign          Campaign  @relation(fields: [campaignId], references: [id])
+  contact           Contact   @relation(fields: [contactId], references: [id])
+
+  @@unique([campaignId, contactId])
+  @@index([contactId])
+  @@index([conversationId])
+  @@index([providerMessageId])
+  @@index([status])
+}
+
+model Proposal {
+  id         String   @id @default(cuid())
+  companyId  String
+  contactId  String
+  bank       String
+  agreement  String
+  product    String
+  amount     Decimal
+  commission Decimal
+  status     String   @default("DRAFT")
+  createdAt  DateTime @default(now())
+  company    Company  @relation(fields: [companyId], references: [id])
+  contact    Contact  @relation(fields: [contactId], references: [id])
 }

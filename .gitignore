@@ -11,3 +11,4 @@ ngrok-error.log
 ngrok.log
 cloudflared.log
 npm-debug.log*
+public/uploads/

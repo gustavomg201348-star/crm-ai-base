@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import NextImage from "next/image";
 import clsx from "clsx";
 import {
   aiActions,
@@ -22,6 +23,7 @@ import {
   Edit3,
   FileText,
   Filter,
+  Image as ImageIcon,
   Menu,
   Plus,
   RotateCcw,
@@ -205,6 +207,42 @@ type ProposalMetrics = {
   ticketAverage: number;
 };
 
+type CampaignRow = {
+  id: string;
+  name: string;
+  message: string;
+  status: string;
+  total: number;
+  sent: number;
+  delivered: number;
+  failed: number;
+  imageName?: string | null;
+  imageMime?: string | null;
+  imageSize?: number | null;
+  createdAt: string;
+  updatedAt: string;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  channel: {
+    id: string;
+    name: string;
+    provider: string;
+    displayPhone?: string | null;
+  };
+  recipients: Array<{
+    id: string;
+    contactId: string;
+    contactName: string;
+    phone: string;
+    status: string;
+    errorCode?: string | null;
+    errorMessage?: string | null;
+    sentAt?: string | null;
+    deliveredAt?: string | null;
+    failedAt?: string | null;
+  }>;
+};
+
 type DashboardData = {
   metrics: {
     activeContacts: number;
@@ -334,6 +372,7 @@ export default function Home() {
   const [kanbanStages, setKanbanStages] = useState<KanbanStage[]>([]);
   const [conversationList, setConversationList] = useState<ConversationRow[]>([]);
   const [channels, setChannels] = useState<ChannelRow[]>([]);
+  const [campaigns, setCampaigns] = useState<CampaignRow[]>([]);
   const [proposals, setProposals] = useState<ProposalRow[]>([]);
   const [dashboard, setDashboard] = useState<DashboardData>(emptyDashboardData);
   const [selectedConversation, setSelectedConversation] =
@@ -380,6 +419,7 @@ export default function Home() {
   const [kanbanLoading, setKanbanLoading] = useState(false);
   const [conversationLoading, setConversationLoading] = useState(false);
   const [channelsLoading, setChannelsLoading] = useState(false);
+  const [campaignsLoading, setCampaignsLoading] = useState(false);
   const [proposalsLoading, setProposalsLoading] = useState(false);
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [appError, setAppError] = useState("");
@@ -505,6 +545,54 @@ export default function Home() {
     }
 
     setChannelsLoading(false);
+  }
+
+  async function loadCampaigns() {
+    setCampaignsLoading(true);
+    setAppError("");
+
+    const response = await fetch("/api/campaigns");
+    if (response.ok) {
+      const data = (await response.json()) as { campaigns: CampaignRow[] };
+      setCampaigns(data.campaigns);
+    } else {
+      setAppError("Nao foi possivel carregar disparos.");
+    }
+
+    setCampaignsLoading(false);
+  }
+
+  async function handleCreateCampaign(payload: {
+    channelId: string;
+    contactIds: string[];
+    message: string;
+    image?: File | null;
+  }) {
+    const formData = new FormData();
+    formData.set("channelId", payload.channelId);
+    formData.set("message", payload.message);
+    formData.set("contactIds", JSON.stringify(payload.contactIds));
+    if (payload.image) formData.set("image", payload.image);
+
+    const response = await fetch("/api/campaigns", {
+      method: "POST",
+      body: formData
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel enviar disparo.");
+      return null;
+    }
+
+    const data = (await response.json()) as { campaign: CampaignRow };
+    setCampaigns((current) => [data.campaign, ...current]);
+    await loadContacts(contactFilters);
+    await loadConversations(conversationFilters);
+    void loadDashboard(dashboardFilters);
+    return data.campaign;
   }
 
   async function handleCreateChannel(payload: {
@@ -1259,6 +1347,7 @@ export default function Home() {
     void loadReference();
     void loadKanban();
     void loadChannels();
+    void loadCampaigns();
     void loadConversations(conversationFilters);
     void loadProposals(proposalFilters);
   }, [
@@ -1456,6 +1545,15 @@ export default function Home() {
               loading={channelsLoading}
               onCreateChannel={handleCreateChannel}
               onSimulateInbound={handleSimulateInboundMessage}
+            />
+          )}
+          {active === "disparos" && (
+            <Disparos
+              campaigns={campaigns}
+              channels={channels}
+              contacts={contacts}
+              loading={campaignsLoading}
+              onCreateCampaign={handleCreateCampaign}
             />
           )}
           {active === "chatbot" && <Chatbot />}
@@ -4029,6 +4127,402 @@ function Canais({
           Webhook local: <span className="font-semibold">/api/webhooks/whatsapp</span>
         </div>
       </section>
+    </div>
+  );
+}
+
+function Disparos({
+  campaigns,
+  channels,
+  contacts,
+  loading,
+  onCreateCampaign
+}: {
+  campaigns: CampaignRow[];
+  channels: ChannelRow[];
+  contacts: ContactRow[];
+  loading: boolean;
+  onCreateCampaign: (payload: {
+    channelId: string;
+    contactIds: string[];
+    message: string;
+    image?: File | null;
+  }) => Promise<CampaignRow | null>;
+}) {
+  const metaChannels = channels.filter(
+    (channel) =>
+      channel.provider === "meta" &&
+      ["ACTIVE", "CONNECTED"].includes(channel.status) &&
+      channel.phoneNumberId &&
+      channel.hasAccessToken
+  );
+  const [channelId, setChannelId] = useState(metaChannels[0]?.id ?? "");
+  const [search, setSearch] = useState("");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [message, setMessage] = useState("");
+  const [image, setImage] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState("");
+  const [error, setError] = useState("");
+  const [sending, setSending] = useState(false);
+  const [lastCampaign, setLastCampaign] = useState<CampaignRow | null>(null);
+
+  useEffect(() => {
+    if (!channelId && metaChannels[0]?.id) {
+      setChannelId(metaChannels[0].id);
+    }
+  }, [channelId, metaChannels]);
+
+  useEffect(() => {
+    if (!image) {
+      setImagePreview("");
+      return;
+    }
+
+    const url = URL.createObjectURL(image);
+    setImagePreview(url);
+
+    return () => URL.revokeObjectURL(url);
+  }, [image]);
+
+  const filteredContacts = contacts.filter((contact) => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return !contact.archivedAt;
+
+    return (
+      !contact.archivedAt &&
+      [contact.name, contact.phone, contact.email ?? "", contact.cpf ?? ""]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle)
+    );
+  });
+  const selectedContacts = contacts.filter((contact) =>
+    selectedIds.includes(contact.id)
+  );
+
+  function toggleContact(id: string) {
+    setSelectedIds((current) =>
+      current.includes(id)
+        ? current.filter((contactId) => contactId !== id)
+        : [...current, id]
+    );
+  }
+
+  function handleImageChange(file?: File | null) {
+    setError("");
+    if (!file) {
+      setImage(null);
+      return;
+    }
+
+    const validTypes = ["image/jpeg", "image/png"];
+    if (!validTypes.includes(file.type)) {
+      setError("A imagem precisa ser JPG, JPEG ou PNG.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError("A imagem precisa ter no maximo 5MB.");
+      return;
+    }
+
+    setImage(file);
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+
+    if (!channelId) {
+      setError("Selecione um canal WhatsApp Meta ativo.");
+      return;
+    }
+    if (!selectedIds.length) {
+      setError("Selecione pelo menos um contato.");
+      return;
+    }
+    if (!message.trim()) {
+      setError("Escreva a mensagem do disparo.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Enviar disparo para ${selectedIds.length} contato(s)?`
+    );
+    if (!confirmed) return;
+
+    setSending(true);
+    const campaign = await onCreateCampaign({
+      channelId,
+      contactIds: selectedIds,
+      message,
+      image
+    });
+    setSending(false);
+
+    if (campaign) {
+      setLastCampaign(campaign);
+      setSelectedIds([]);
+      setMessage("");
+      setImage(null);
+    }
+  }
+
+  return (
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
+      <form
+        className="rounded border border-line bg-white p-4 shadow-soft"
+        onSubmit={handleSubmit}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-4">
+          <div>
+            <h3 className="text-lg font-bold">Disparo WhatsApp</h3>
+            <p className="text-sm text-slate-500">
+              Campanhas em massa pela API oficial da Meta.
+            </p>
+          </div>
+          <button
+            className="flex h-10 items-center gap-2 rounded bg-brand px-4 text-sm font-semibold text-white disabled:opacity-60"
+            disabled={sending || loading}
+            type="submit"
+          >
+            <Send className="h-4 w-4" />
+            {sending ? "Enviando..." : "Enviar disparo"}
+          </button>
+        </div>
+
+        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="space-y-4">
+            <label className="block text-sm font-semibold">
+              Canal de envio
+              <select
+                className="mt-2 h-11 w-full rounded border border-line bg-white px-3 font-normal outline-none focus:border-brand"
+                value={channelId}
+                onChange={(event) => setChannelId(event.target.value)}
+              >
+                <option value="">Selecione um canal Meta</option>
+                {metaChannels.map((channel) => (
+                  <option key={channel.id} value={channel.id}>
+                    {channel.name} {channel.displayPhone ? `- ${channel.displayPhone}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block text-sm font-semibold">
+              Mensagem do disparo
+              <textarea
+                className="mt-2 min-h-36 w-full rounded border border-line px-3 py-3 font-normal outline-none focus:border-brand"
+                placeholder="Digite a mensagem que sera enviada para os contatos selecionados."
+                value={message}
+                onChange={(event) => setMessage(event.target.value)}
+              />
+            </label>
+
+            <div className="rounded border border-line bg-slate-50 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold">Adicionar imagem</p>
+                  <p className="text-xs text-slate-500">
+                    JPG, JPEG ou PNG ate 5MB. A imagem sera enviada com legenda.
+                  </p>
+                </div>
+                <label className="flex h-10 cursor-pointer items-center gap-2 rounded border border-line bg-white px-3 text-sm font-semibold text-slate-700">
+                  <Upload className="h-4 w-4" />
+                  Escolher imagem
+                  <input
+                    accept="image/jpeg,image/png"
+                    className="hidden"
+                    type="file"
+                    onChange={(event) =>
+                      handleImageChange(event.target.files?.[0] ?? null)
+                    }
+                  />
+                </label>
+              </div>
+
+              {imagePreview && (
+                <div className="mt-3 flex items-start gap-3">
+                  <NextImage
+                    alt="Preview do disparo"
+                    className="h-28 w-28 rounded border border-line object-cover"
+                    height={112}
+                    src={imagePreview}
+                    unoptimized
+                    width={112}
+                  />
+                  <div className="min-w-0 flex-1 text-sm">
+                    <p className="truncate font-semibold">{image?.name}</p>
+                    <p className="text-slate-500">
+                      {image ? `${(image.size / 1024 / 1024).toFixed(2)} MB` : ""}
+                    </p>
+                    <button
+                      className="mt-3 inline-flex h-9 items-center gap-2 rounded border border-line bg-white px-3 font-semibold text-slate-600"
+                      type="button"
+                      onClick={() => setImage(null)}
+                    >
+                      <X className="h-4 w-4" />
+                      Remover imagem
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {error && (
+              <div className="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                {error}
+              </div>
+            )}
+
+            {lastCampaign && (
+              <div className="rounded border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+                Disparo criado: {lastCampaign.sent} enviado(s),{" "}
+                {lastCampaign.failed} falha(s).
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-4">
+            <div className="rounded border border-line bg-white p-3">
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-sm font-semibold">
+                  Contatos selecionados: {selectedIds.length}
+                </p>
+                <button
+                  className="text-xs font-semibold text-brand"
+                  type="button"
+                  onClick={() =>
+                    setSelectedIds(
+                      selectedIds.length === filteredContacts.length
+                        ? []
+                        : filteredContacts.map((contact) => contact.id)
+                    )
+                  }
+                >
+                  {selectedIds.length === filteredContacts.length
+                    ? "Limpar"
+                    : "Selecionar todos"}
+                </button>
+              </div>
+              <div className="relative">
+                <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
+                <input
+                  className="h-10 w-full rounded border border-line pl-9 pr-3 text-sm outline-none focus:border-brand"
+                  placeholder="Buscar contatos..."
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                />
+              </div>
+              <div className="mt-3 max-h-96 space-y-2 overflow-auto pr-1">
+                {filteredContacts.map((contact) => (
+                  <label
+                    key={contact.id}
+                    className="flex cursor-pointer items-center gap-3 rounded border border-line p-3 text-sm hover:bg-slate-50"
+                  >
+                    <input
+                      checked={selectedIds.includes(contact.id)}
+                      type="checkbox"
+                      onChange={() => toggleContact(contact.id)}
+                    />
+                    <span className="min-w-0">
+                      <span className="block truncate font-semibold">
+                        {contact.name}
+                      </span>
+                      <span className="text-xs text-slate-500">{contact.phone}</span>
+                    </span>
+                  </label>
+                ))}
+                {!filteredContacts.length && (
+                  <p className="rounded border border-dashed border-line p-4 text-center text-sm text-slate-500">
+                    Nenhum contato encontrado.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </form>
+
+      <aside className="space-y-4">
+        <div className="rounded border border-line bg-white p-4 shadow-soft">
+          <h3 className="font-bold">Previa da mensagem</h3>
+          <div className="mt-3 rounded bg-[#e7ffdb] p-3 text-sm text-slate-800">
+            {imagePreview ? (
+              <NextImage
+                alt="Preview da imagem"
+                className="mb-3 max-h-56 w-full rounded object-cover"
+                height={224}
+                src={imagePreview}
+                unoptimized
+                width={320}
+              />
+            ) : (
+              <div className="mb-3 grid h-32 place-items-center rounded border border-dashed border-emerald-300 bg-white/40 text-emerald-700">
+                <ImageIcon className="h-8 w-8" />
+              </div>
+            )}
+            <p className="whitespace-pre-wrap">
+              {message || "Sua mensagem aparecera aqui."}
+            </p>
+          </div>
+          <div className="mt-3 rounded border border-line p-3 text-xs text-slate-500">
+            {selectedContacts.slice(0, 3).map((contact) => contact.name).join(", ") ||
+              "Selecione contatos para ver destinatarios."}
+            {selectedContacts.length > 3
+              ? ` e mais ${selectedContacts.length - 3}`
+              : ""}
+          </div>
+        </div>
+
+        <div className="rounded border border-line bg-white p-4 shadow-soft">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="font-bold">Historico de disparos</h3>
+            <span className="text-xs text-slate-500">
+              {loading ? "Carregando..." : `${campaigns.length} campanhas`}
+            </span>
+          </div>
+          <div className="space-y-3">
+            {campaigns.slice(0, 8).map((campaign) => (
+              <div key={campaign.id} className="rounded border border-line p-3 text-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold">{campaign.name}</p>
+                    <p className="text-xs text-slate-500">
+                      {formatRelativeDate(campaign.createdAt)}
+                    </p>
+                  </div>
+                  <span className="rounded bg-slate-100 px-2 py-1 text-xs font-semibold">
+                    {campaign.status}
+                  </span>
+                </div>
+                <div className="mt-3 grid grid-cols-4 gap-2 text-center text-xs">
+                  <span className="rounded bg-slate-50 p-2">Total {campaign.total}</span>
+                  <span className="rounded bg-emerald-50 p-2">
+                    Env. {campaign.sent}
+                  </span>
+                  <span className="rounded bg-teal-50 p-2">
+                    Ent. {campaign.delivered}
+                  </span>
+                  <span className="rounded bg-rose-50 p-2">
+                    Erro {campaign.failed}
+                  </span>
+                </div>
+                {campaign.recipients.some((recipient) => recipient.errorMessage) && (
+                  <p className="mt-2 line-clamp-2 text-xs text-rose-700">
+                    {campaign.recipients.find((recipient) => recipient.errorMessage)
+                      ?.errorMessage}
+                  </p>
+                )}
+              </div>
+            ))}
+            {!campaigns.length && (
+              <p className="rounded border border-dashed border-line p-4 text-center text-sm text-slate-500">
+                Nenhum disparo registrado ainda.
+              </p>
+            )}
+          </div>
+        </div>
+      </aside>
     </div>
   );
 }
