@@ -105,3 +105,19 @@ Crie o canal Meta no menu Canais ou migre o canal atual do banco local:
 - Numero: `+55 33 8433-3103`
 
 Nunca publique token da Meta em chat, README ou repositorio.
+
+## 8. Checagens rapidas
+
+Healthcheck publico usado pelo Railway:
+
+```text
+https://crm.seudominio.com/api/health
+```
+
+Diagnostico autenticado, depois de fazer login no CRM:
+
+```text
+https://crm.seudominio.com/api/system/readiness
+```
+
+Esse diagnostico confirma banco, contagens basicas e se os canais WhatsApp Meta tem os campos minimos sem expor tokens.
