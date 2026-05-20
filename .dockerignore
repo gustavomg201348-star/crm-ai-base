@@ -1,0 +1,8 @@
+node_modules
+.next
+prisma/dev.db
+*.log
+.env
+.env.local
+.env.production
+npm-debug.log*

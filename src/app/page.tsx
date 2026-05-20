@@ -1,0 +1,4800 @@
+"use client";
+
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import clsx from "clsx";
+import {
+  aiActions,
+  navItems,
+  MessageSquareText,
+  ShieldCheck,
+  Sparkles,
+  Tags
+} from "@/lib/mock-data";
+import {
+  ArrowRight,
+  Archive,
+  Banknote,
+  Bell,
+  Check,
+  CircleDollarSign,
+  Clock3,
+  Download,
+  Edit3,
+  FileText,
+  Filter,
+  Menu,
+  Plus,
+  RotateCcw,
+  Search,
+  Send,
+  SlidersHorizontal,
+  Trash2,
+  Upload,
+  X
+} from "lucide-react";
+
+type Section = (typeof navItems)[number]["id"];
+
+type Session = {
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+  };
+  company: {
+    id: string;
+    name: string;
+    segment?: string | null;
+  };
+};
+
+type ContactRow = {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string | null;
+  cpf?: string | null;
+  origin: string;
+  owner: string;
+  stage: string;
+  ownerId?: string | null;
+  originId?: string | null;
+  stageId?: string | null;
+  temperature: "HOT" | "WARM" | "COLD";
+  lastMessage?: string | null;
+  archivedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  tags: Array<{ id: string; name: string; color: string }>;
+  conversations: Array<{
+    id: string;
+    status: string;
+    channel: string;
+    summary?: string | null;
+    updatedAt: string;
+    messages: Array<{
+      id: string;
+      direction: string;
+      body: string;
+      createdAt: string;
+    }>;
+  }>;
+  proposals: Array<{
+    id: string;
+    bank: string;
+    agreement: string;
+    product: string;
+    amount: string;
+    commission: string;
+    status: string;
+    createdAt: string;
+  }>;
+};
+
+type ReferenceData = {
+  origins: Array<{ id: string; name: string }>;
+  stages: Array<{ id: string; name: string; color?: string; position?: number }>;
+  tags: Array<{ id: string; name: string; color: string }>;
+  users: Array<{ id: string; name: string; email: string; role: UserRole }>;
+};
+
+type UserRole = "ADMIN" | "SUPERVISOR" | "AGENT";
+
+type KanbanStage = {
+  id: string;
+  name: string;
+  color: string;
+  position: number;
+  contacts: ContactRow[];
+};
+
+type ConversationRow = {
+  id: string;
+  status: "OPEN" | "PENDING" | "BOT" | "SOLD" | "RESOLVED";
+  channel: string;
+  summary?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  agent: { id: string; name: string; email: string } | null;
+  contact: {
+    id: string;
+    name: string;
+    phone: string;
+    email?: string | null;
+    cpf?: string | null;
+    origin: string;
+    stage: string;
+    temperature: string;
+    owner: string;
+    lastMessage?: string | null;
+    tags: Array<{ id: string; name: string; color: string }>;
+  };
+  lastMessage: {
+    id: string;
+    direction: string;
+    body: string;
+    createdAt: string;
+  } | null;
+  messages: Array<{
+    id: string;
+    direction: string;
+    body: string;
+    createdAt: string;
+  }>;
+};
+
+type ChannelRow = {
+  id: string;
+  name: string;
+  type: string;
+  provider: string;
+  externalId?: string | null;
+  phoneNumberId?: string | null;
+  wabaId?: string | null;
+  displayPhone?: string | null;
+  hasAccessToken?: boolean;
+  hasVerifyToken?: boolean;
+  hasAppSecret?: boolean;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type AiAnalysis = {
+  summary: string;
+  temperature: ContactRow["temperature"];
+  nextAction: string;
+  suggestedReply: string;
+  confidence: number;
+};
+
+type ProposalStatus = "DRAFT" | "FORMALIZING" | "PAID" | "CANCELED" | "REWORK";
+
+type ProposalRow = {
+  id: string;
+  contactId: string;
+  bank: string;
+  agreement: string;
+  product: string;
+  amount: string;
+  commission: string;
+  status: ProposalStatus;
+  createdAt: string;
+  contact: {
+    id: string;
+    name: string;
+    phone: string;
+    email?: string | null;
+    cpf?: string | null;
+    origin: string;
+    stage: string;
+    temperature: string;
+    owner: string;
+    lastMessage?: string | null;
+    tags: Array<{ id: string; name: string; color: string }>;
+  };
+};
+
+type ProposalMetrics = {
+  count: number;
+  totalAmount: number;
+  paidAmount: number;
+  formalizingAmount: number;
+  commissionForecast: number;
+  ticketAverage: number;
+};
+
+type DashboardData = {
+  metrics: {
+    activeContacts: number;
+    newContacts: number;
+    hotContacts: number;
+    openConversations: number;
+    staleConversations: number;
+    proposals: number;
+    formalizingProposals: number;
+    paidProposals: number;
+    totalProposalAmount: number;
+    paidAmount: number;
+    commissionForecast: number;
+    conversionRate: number;
+  };
+  funnel: Array<{ id: string; label: string; color: string; count: number }>;
+  proposalStatus: Array<{ status: ProposalStatus; count: number }>;
+  tasks: TaskRow[];
+  priorities: Array<{
+    id: string;
+    type: string;
+    title: string;
+    detail: string;
+    meta: string;
+    severity: "high" | "medium" | "low";
+  }>;
+};
+
+type TaskRow = {
+  id: string;
+  contactId?: string;
+  assigneeId?: string | null;
+  title: string;
+  note?: string | null;
+  dueAt: string;
+  status: "PENDING" | "DONE";
+  completedAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  contact: { id: string; name: string; phone: string };
+  assignee: { id: string; name: string; email: string } | null;
+};
+
+type ImportResult = {
+  summary: {
+    totalRows: number;
+    created: number;
+    ignored: number;
+    errors: number;
+  };
+  ignored: Array<{ row: number; reason: string }>;
+  errors: Array<{ row: number; reason: string }>;
+};
+
+type ContactActivityRow = {
+  id: string;
+  contactId: string;
+  type: string;
+  title: string;
+  detail?: string | null;
+  createdAt: string;
+  user: { id: string; name: string; email: string } | null;
+};
+
+const temperatureLabels = {
+  HOT: "Quente",
+  WARM: "Morno",
+  COLD: "Frio"
+} as const;
+
+const proposalStatusLabels: Record<ProposalStatus, string> = {
+  DRAFT: "Rascunho",
+  FORMALIZING: "Formalizacao",
+  PAID: "Pago",
+  CANCELED: "Cancelado",
+  REWORK: "Pendencia"
+};
+
+function formatRelativeDate(value: string) {
+  const date = new Date(value);
+  const diff = Date.now() - date.getTime();
+  const minutes = Math.max(1, Math.floor(diff / 60000));
+
+  if (minutes < 60) return `ha ${minutes} min`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `ha ${hours} h`;
+
+  return `ha ${Math.floor(hours / 24)} dia(s)`;
+}
+
+function formatCurrency(value: number | string) {
+  return Number(value || 0).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL"
+  });
+}
+
+function emptyDashboardData(): DashboardData {
+  return {
+    metrics: {
+      activeContacts: 0,
+      newContacts: 0,
+      hotContacts: 0,
+      openConversations: 0,
+      staleConversations: 0,
+      proposals: 0,
+      formalizingProposals: 0,
+      paidProposals: 0,
+      totalProposalAmount: 0,
+      paidAmount: 0,
+      commissionForecast: 0,
+      conversionRate: 0
+    },
+    funnel: [],
+    proposalStatus: [],
+    tasks: [],
+    priorities: []
+  };
+}
+
+export default function Home() {
+  const [active, setActive] = useState<Section>("dashboard");
+  const [session, setSession] = useState<Session | null>(null);
+  const [sessionLoading, setSessionLoading] = useState(true);
+  const [contacts, setContacts] = useState<ContactRow[]>([]);
+  const [kanbanStages, setKanbanStages] = useState<KanbanStage[]>([]);
+  const [conversationList, setConversationList] = useState<ConversationRow[]>([]);
+  const [channels, setChannels] = useState<ChannelRow[]>([]);
+  const [proposals, setProposals] = useState<ProposalRow[]>([]);
+  const [dashboard, setDashboard] = useState<DashboardData>(emptyDashboardData);
+  const [selectedConversation, setSelectedConversation] =
+    useState<ConversationRow | null>(null);
+  const [conversationFilters, setConversationFilters] = useState({
+    search: "",
+    status: "OPEN"
+  });
+  const [aiAnalysis, setAiAnalysis] = useState<AiAnalysis | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [contactFilters, setContactFilters] = useState({
+    search: "",
+    status: "active",
+    originId: "",
+    stageId: "",
+    ownerId: "",
+    tagId: "",
+    temperature: ""
+  });
+  const [proposalFilters, setProposalFilters] = useState({
+    search: "",
+    status: ""
+  });
+  const [dashboardFilters, setDashboardFilters] = useState({
+    period: "30d",
+    originId: "",
+    ownerId: ""
+  });
+  const [proposalMetrics, setProposalMetrics] = useState<ProposalMetrics>({
+    count: 0,
+    totalAmount: 0,
+    paidAmount: 0,
+    formalizingAmount: 0,
+    commissionForecast: 0,
+    ticketAverage: 0
+  });
+  const [reference, setReference] = useState<ReferenceData>({
+    origins: [],
+    stages: [],
+    tags: [],
+    users: []
+  });
+  const [contactsLoading, setContactsLoading] = useState(false);
+  const [kanbanLoading, setKanbanLoading] = useState(false);
+  const [conversationLoading, setConversationLoading] = useState(false);
+  const [channelsLoading, setChannelsLoading] = useState(false);
+  const [proposalsLoading, setProposalsLoading] = useState(false);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [appError, setAppError] = useState("");
+
+  const pageTitle = useMemo(() => {
+    return navItems.find((item) => item.id === active)?.label ?? "Dashboard";
+  }, [active]);
+
+  async function loadSession() {
+    setSessionLoading(true);
+    const response = await fetch("/api/auth/session");
+
+    if (response.ok) {
+      setSession((await response.json()) as Session);
+    } else {
+      setSession(null);
+    }
+
+    setSessionLoading(false);
+  }
+
+  const loadContacts = useCallback(async (filters = contactFilters) => {
+    setContactsLoading(true);
+    setAppError("");
+
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) params.set(key, value);
+    });
+
+    const response = await fetch(`/api/contacts?${params.toString()}`);
+    if (response.ok) {
+      const data = (await response.json()) as { contacts: ContactRow[] };
+      setContacts(data.contacts);
+    } else {
+      setAppError("Nao foi possivel carregar contatos. Confira banco e login.");
+    }
+
+    setContactsLoading(false);
+  }, [contactFilters]);
+
+  async function loadReference() {
+    const response = await fetch("/api/reference");
+    if (response.ok) {
+      setReference((await response.json()) as ReferenceData);
+    }
+  }
+
+  async function refreshOperationalViews() {
+    await loadReference();
+    await loadKanban();
+    void loadDashboard(dashboardFilters);
+    void loadContacts(contactFilters);
+  }
+
+  async function loadKanban() {
+    setKanbanLoading(true);
+    setAppError("");
+
+    const response = await fetch("/api/kanban");
+    if (response.ok) {
+      const data = (await response.json()) as { stages: KanbanStage[] };
+      setKanbanStages(data.stages);
+    } else {
+      setAppError("Nao foi possivel carregar o Kanban.");
+    }
+
+    setKanbanLoading(false);
+  }
+
+  const loadConversations = useCallback(
+    async (
+      filters = conversationFilters,
+      options: { silent?: boolean } = {}
+    ) => {
+      if (!options.silent) {
+        setConversationLoading(true);
+        setAppError("");
+      }
+
+      const params = new URLSearchParams();
+      Object.entries(filters).forEach(([key, value]) => {
+        if (value) params.set(key, value);
+      });
+
+      const response = await fetch(`/api/conversations?${params.toString()}`);
+      if (response.ok) {
+        const data = (await response.json()) as {
+          conversations: ConversationRow[];
+        };
+        setConversationList(data.conversations);
+        setSelectedConversation((current) => {
+          if (!current) return data.conversations[0] ?? null;
+          return (
+            data.conversations.find((conversation) => conversation.id === current.id) ??
+            data.conversations[0] ??
+            null
+          );
+        });
+      } else {
+        if (!options.silent) {
+          setAppError("Nao foi possivel carregar conversas.");
+        }
+      }
+
+      if (!options.silent) {
+        setConversationLoading(false);
+      }
+    },
+    [conversationFilters]
+  );
+
+  async function loadChannels() {
+    setChannelsLoading(true);
+    setAppError("");
+
+    const response = await fetch("/api/channels");
+    if (response.ok) {
+      const data = (await response.json()) as { channels: ChannelRow[] };
+      setChannels(data.channels);
+    } else {
+      setAppError("Nao foi possivel carregar canais.");
+    }
+
+    setChannelsLoading(false);
+  }
+
+  async function handleCreateChannel(payload: {
+    name: string;
+    displayPhone: string;
+    phoneNumberId: string;
+    wabaId: string;
+    accessToken: string;
+    verifyToken: string;
+    appSecret: string;
+  }) {
+    const response = await fetch("/api/channels", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...payload, provider: "meta" })
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel criar canal.");
+      return;
+    }
+
+    await loadChannels();
+  }
+
+  const loadProposals = useCallback(async (filters = proposalFilters) => {
+    setProposalsLoading(true);
+    setAppError("");
+
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) params.set(key, value);
+    });
+
+    const response = await fetch(`/api/proposals?${params.toString()}`);
+    if (response.ok) {
+      const data = (await response.json()) as {
+        proposals: ProposalRow[];
+        metrics: ProposalMetrics;
+      };
+      setProposals(data.proposals);
+      setProposalMetrics(data.metrics);
+    } else {
+      setAppError("Nao foi possivel carregar propostas.");
+    }
+
+    setProposalsLoading(false);
+  }, [proposalFilters]);
+
+  const loadDashboard = useCallback(async (filters = dashboardFilters) => {
+    setDashboardLoading(true);
+    setAppError("");
+
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) params.set(key, value);
+    });
+
+    const response = await fetch(`/api/dashboard?${params.toString()}`);
+    if (response.ok) {
+      setDashboard((await response.json()) as DashboardData);
+    } else {
+      setAppError("Nao foi possivel carregar dashboard.");
+    }
+
+    setDashboardLoading(false);
+  }, [dashboardFilters]);
+
+  async function handleLogin(email: string, password: string) {
+    setAppError("");
+
+    const response = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password })
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel entrar.");
+      return;
+    }
+
+    setSession((await response.json()) as Session);
+  }
+
+  async function handleLogout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    setSession(null);
+    setContacts([]);
+  }
+
+  async function handleCreateContact(payload: {
+    name: string;
+    phone: string;
+    email: string;
+    cpf: string;
+    originId: string;
+    stageId: string;
+    ownerId: string;
+    tagIds?: string[];
+    temperature: ContactRow["temperature"];
+  }) {
+    const response = await fetch("/api/contacts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel criar contato.");
+      return;
+    }
+
+    const data = (await response.json()) as { contact: ContactRow };
+    setContacts((current) => [data.contact, ...current]);
+  }
+
+  async function handleImportContacts(payload: {
+    csv: string;
+    defaults: { originId: string; stageId: string; ownerId: string };
+  }) {
+    const response = await fetch("/api/contacts/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel importar contatos.");
+      return null;
+    }
+
+    const data = (await response.json()) as ImportResult;
+    await loadContacts(contactFilters);
+    await loadReference();
+    await loadKanban();
+    void loadDashboard(dashboardFilters);
+    return data;
+  }
+
+  async function handleUpdateContact(
+    id: string,
+    payload: Partial<{
+      name: string;
+      phone: string;
+      email: string;
+      cpf: string;
+      originId: string;
+      stageId: string;
+      ownerId: string;
+      tagIds: string[];
+      temperature: ContactRow["temperature"];
+      lastMessage: string;
+      archived: boolean;
+    }>
+  ) {
+    const response = await fetch(`/api/contacts/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel atualizar contato.");
+      return null;
+    }
+
+    const data = (await response.json()) as { contact: ContactRow };
+    setContacts((current) =>
+      current.map((contact) => (contact.id === id ? data.contact : contact))
+    );
+    return data.contact;
+  }
+
+  async function handleArchiveContact(id: string) {
+    const response = await fetch(`/api/contacts/${id}`, { method: "DELETE" });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel arquivar contato.");
+      return;
+    }
+
+    setContacts((current) => current.filter((contact) => contact.id !== id));
+    setKanbanStages((current) =>
+      current.map((stage) => ({
+        ...stage,
+        contacts: stage.contacts.filter((contact) => contact.id !== id)
+      }))
+    );
+  }
+
+  async function handleBulkContacts(payload: {
+    contactIds: string[];
+    ownerId?: string;
+    stageId?: string;
+    tagId?: string;
+    archived?: boolean;
+  }) {
+    const response = await fetch("/api/contacts/bulk", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel aplicar acao em massa.");
+      return;
+    }
+
+    await loadContacts(contactFilters);
+    await loadKanban();
+    void loadDashboard(dashboardFilters);
+  }
+
+  async function handleCreateContactNote(contactId: string, detail: string) {
+    const response = await fetch(`/api/contacts/${contactId}/activities`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ detail })
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel salvar anotacao.");
+      return null;
+    }
+
+    const data = (await response.json()) as { activity: ContactActivityRow };
+    return data.activity;
+  }
+
+  async function handleCreateTask(payload: {
+    contactId: string;
+    assigneeId: string;
+    title: string;
+    note: string;
+    dueAt: string;
+  }) {
+    const response = await fetch("/api/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel criar tarefa.");
+      return null;
+    }
+
+    const data = (await response.json()) as { task: TaskRow };
+    void loadDashboard(dashboardFilters);
+    return data.task;
+  }
+
+  async function handleCompleteTask(taskId: string) {
+    const response = await fetch(`/api/tasks/${taskId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "DONE" })
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel concluir tarefa.");
+      return null;
+    }
+
+    const data = (await response.json()) as { task: TaskRow };
+    void loadDashboard(dashboardFilters);
+    return data.task;
+  }
+
+  async function handleMoveKanbanContact(contactId: string, stageId: string) {
+    const response = await fetch(`/api/contacts/${contactId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stageId })
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel mover o lead.");
+      return;
+    }
+
+    await loadKanban();
+    void loadContacts(contactFilters);
+  }
+
+  async function handleConversationStatus(
+    conversationId: string,
+    status: ConversationRow["status"]
+  ) {
+    const response = await fetch(`/api/conversations/${conversationId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status })
+    });
+
+    if (!response.ok) {
+      setAppError("Nao foi possivel atualizar status da conversa.");
+      return;
+    }
+
+    const data = (await response.json()) as { conversation: ConversationRow };
+    setSelectedConversation(data.conversation);
+    setConversationList((current) =>
+      current.map((conversation) =>
+        conversation.id === data.conversation.id ? data.conversation : conversation
+      )
+    );
+    void loadConversations(conversationFilters);
+  }
+
+  async function handleSendMessage(conversationId: string, body: string) {
+    const conversation =
+      selectedConversation?.id === conversationId
+        ? selectedConversation
+        : conversationList.find((item) => item.id === conversationId);
+    const channelId = conversation?.channel.startsWith("whatsapp:")
+      ? conversation.channel.replace("whatsapp:", "")
+      : null;
+    const response =
+      channelId && conversation?.contact.phone
+        ? await fetch(`/api/channels/${channelId}/messages`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              conversationId,
+              to: conversation.contact.phone,
+              body
+            })
+          })
+        : await fetch(`/api/conversations/${conversationId}/messages`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ body, direction: "outbound" })
+          });
+
+    if (!response.ok) {
+      setAppError("Nao foi possivel enviar mensagem.");
+      return;
+    }
+
+    const data = (await response.json()) as { conversation: ConversationRow };
+    setSelectedConversation(data.conversation);
+    setConversationList((current) =>
+      current.map((conversation) =>
+        conversation.id === data.conversation.id ? data.conversation : conversation
+      )
+    );
+  }
+
+  async function handleAnalyzeConversation(conversationId: string) {
+    setAiLoading(true);
+    setAppError("");
+
+    const response = await fetch(`/api/conversations/${conversationId}/ai`, {
+      method: "POST"
+    });
+
+    if (!response.ok) {
+      setAppError("Nao foi possivel gerar analise IA.");
+      setAiLoading(false);
+      return;
+    }
+
+    const data = (await response.json()) as {
+      analysis: AiAnalysis;
+      conversation: ConversationRow;
+    };
+
+    setAiAnalysis(data.analysis);
+    setSelectedConversation(data.conversation);
+    setConversationList((current) =>
+      current.map((conversation) =>
+        conversation.id === data.conversation.id ? data.conversation : conversation
+      )
+    );
+    setAiLoading(false);
+  }
+
+  async function handleSimulateInboundMessage(payload: {
+    channelId: string;
+    name: string;
+    phone: string;
+    message: string;
+  }) {
+    const response = await fetch("/api/channels/simulate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel simular mensagem.");
+      return;
+    }
+
+    const data = (await response.json()) as { conversation: ConversationRow };
+    setSelectedConversation(data.conversation);
+    setConversationFilters({ search: "", status: "OPEN" });
+    await loadConversations({ search: "", status: "OPEN" });
+    void loadContacts(contactFilters);
+  }
+
+  async function handleCreateProposal(payload: {
+    contactId: string;
+    bank: string;
+    agreement: string;
+    product: string;
+    amount: string;
+    commission: string;
+    status: ProposalStatus;
+  }) {
+    const response = await fetch("/api/proposals", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel criar proposta.");
+      return;
+    }
+
+    const data = (await response.json()) as { proposal: ProposalRow };
+    setProposals((current) => [data.proposal, ...current]);
+    await loadProposals(proposalFilters);
+    void loadDashboard(dashboardFilters);
+    await loadKanban();
+    void loadContacts(contactFilters);
+  }
+
+  async function handleUpdateProposal(
+    id: string,
+    payload: Partial<{
+      bank: string;
+      agreement: string;
+      product: string;
+      amount: string;
+      commission: string;
+      status: ProposalStatus;
+    }>
+  ) {
+    const response = await fetch(`/api/proposals/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel atualizar proposta.");
+      return;
+    }
+
+    const data = (await response.json()) as { proposal: ProposalRow };
+    setProposals((current) =>
+      current.map((proposal) => (proposal.id === id ? data.proposal : proposal))
+    );
+    void loadProposals(proposalFilters);
+    void loadDashboard(dashboardFilters);
+  }
+
+  async function handleDeleteProposal(id: string) {
+    const response = await fetch(`/api/proposals/${id}`, { method: "DELETE" });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel remover proposta.");
+      return;
+    }
+
+    setProposals((current) => current.filter((proposal) => proposal.id !== id));
+    void loadProposals(proposalFilters);
+    void loadDashboard(dashboardFilters);
+    void loadContacts(contactFilters);
+  }
+
+  async function handleCreateOrigin(name: string) {
+    const response = await fetch("/api/settings/origins", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name })
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel criar origem.");
+      return;
+    }
+
+    await refreshOperationalViews();
+  }
+
+  async function handleUpdateOrigin(id: string, name: string) {
+    const response = await fetch(`/api/settings/origins/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name })
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel atualizar origem.");
+      return;
+    }
+
+    await refreshOperationalViews();
+  }
+
+  async function handleDeleteOrigin(id: string) {
+    const response = await fetch(`/api/settings/origins/${id}`, { method: "DELETE" });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel remover origem.");
+      return;
+    }
+
+    await refreshOperationalViews();
+  }
+
+  async function handleCreateStage(payload: {
+    name: string;
+    color: string;
+    position: number;
+  }) {
+    const response = await fetch("/api/settings/stages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel criar etapa.");
+      return;
+    }
+
+    await refreshOperationalViews();
+  }
+
+  async function handleUpdateStage(
+    id: string,
+    payload: { name: string; color: string; position: number }
+  ) {
+    const response = await fetch(`/api/settings/stages/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel atualizar etapa.");
+      return;
+    }
+
+    await refreshOperationalViews();
+  }
+
+  async function handleDeleteStage(id: string) {
+    const response = await fetch(`/api/settings/stages/${id}`, { method: "DELETE" });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel remover etapa.");
+      return;
+    }
+
+    await refreshOperationalViews();
+  }
+
+  async function handleCreateUser(payload: {
+    name: string;
+    email: string;
+    password: string;
+    role: UserRole;
+  }) {
+    const response = await fetch("/api/settings/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel criar usuario.");
+      return;
+    }
+
+    await refreshOperationalViews();
+  }
+
+  async function handleUpdateUser(
+    id: string,
+    payload: {
+      name: string;
+      email: string;
+      password?: string;
+      role: UserRole;
+    }
+  ) {
+    const response = await fetch(`/api/settings/users/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel atualizar usuario.");
+      return;
+    }
+
+    await refreshOperationalViews();
+  }
+
+  async function handleDeleteUser(id: string) {
+    const response = await fetch(`/api/settings/users/${id}`, { method: "DELETE" });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel remover usuario.");
+      return;
+    }
+
+    await refreshOperationalViews();
+  }
+
+  async function handleCreateTag(payload: { name: string; color: string }) {
+    const response = await fetch("/api/settings/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel criar tag.");
+      return;
+    }
+
+    await refreshOperationalViews();
+  }
+
+  async function handleUpdateTag(
+    id: string,
+    payload: { name: string; color: string }
+  ) {
+    const response = await fetch(`/api/settings/tags/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel atualizar tag.");
+      return;
+    }
+
+    await refreshOperationalViews();
+  }
+
+  async function handleDeleteTag(id: string) {
+    const response = await fetch(`/api/settings/tags/${id}`, { method: "DELETE" });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel remover tag.");
+      return;
+    }
+
+    await refreshOperationalViews();
+  }
+
+  useEffect(() => {
+    void loadSession();
+  }, []);
+
+  useEffect(() => {
+    if (!session) return;
+
+    void loadContacts(contactFilters);
+    void loadReference();
+    void loadKanban();
+    void loadChannels();
+    void loadConversations(conversationFilters);
+    void loadProposals(proposalFilters);
+  }, [
+    contactFilters,
+    conversationFilters,
+    loadContacts,
+    loadConversations,
+    loadProposals,
+    proposalFilters,
+    session
+  ]);
+
+  useEffect(() => {
+    if (!session) return;
+
+    void loadDashboard(dashboardFilters);
+  }, [dashboardFilters, loadDashboard, session]);
+
+  useEffect(() => {
+    if (!session || active !== "atendimento") return;
+
+    const interval = window.setInterval(() => {
+      void loadConversations(conversationFilters, { silent: true });
+    }, 3000);
+
+    return () => window.clearInterval(interval);
+  }, [active, conversationFilters, loadConversations, session]);
+
+  if (sessionLoading) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-paper text-ink">
+        <div className="rounded border border-line bg-white p-6 shadow-soft">
+          Carregando CRM...
+        </div>
+      </main>
+    );
+  }
+
+  if (!session) {
+    return <LoginScreen error={appError} onLogin={handleLogin} />;
+  }
+
+  return (
+    <main className="min-h-screen bg-paper text-ink">
+      <aside className="fixed left-0 top-0 hidden h-screen w-72 border-r border-line bg-white xl:block">
+        <div className="flex h-20 items-center gap-3 border-b border-line px-6">
+          <div className="grid h-11 w-11 place-items-center rounded bg-brand text-base font-bold text-white">
+            AI
+          </div>
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-wide text-brand">
+              CRM
+            </p>
+            <h1 className="text-lg font-bold">Operacao Inteligente</h1>
+          </div>
+        </div>
+        <nav className="space-y-1 px-3 py-4">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.id}
+                className={clsx(
+                  "flex h-11 w-full items-center justify-between rounded px-3 text-left text-sm font-medium",
+                  active === item.id
+                    ? "bg-teal-50 text-brand"
+                    : "text-slate-600 hover:bg-slate-100"
+                )}
+                onClick={() => setActive(item.id)}
+              >
+                <span className="flex items-center gap-3">
+                  <Icon className="h-4 w-4" />
+                  {item.label}
+                </span>
+                {"count" in item && (
+                  <span className="rounded bg-berry px-2 py-0.5 text-xs text-white">
+                    {item.count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+        <div className="absolute bottom-0 left-0 right-0 border-t border-line p-4">
+          <div className="rounded border border-line bg-slate-50 p-3">
+            <p className="text-xs font-semibold uppercase text-slate-500">
+              Contexto da IA
+            </p>
+            <p className="mt-1 text-sm text-slate-700">
+              Correspondente bancario com foco em FGTS, CLT e INSS.
+            </p>
+          </div>
+        </div>
+      </aside>
+
+      <section className="xl:pl-72">
+        <header className="sticky top-0 z-10 flex h-20 items-center justify-between border-b border-line bg-white/95 px-4 backdrop-blur md:px-8">
+          <div className="flex items-center gap-3">
+            <button className="grid h-10 w-10 place-items-center rounded border border-line xl:hidden">
+              <Menu className="h-5 w-5" />
+            </button>
+            <div>
+              <p className="text-sm text-slate-500">Base inicial</p>
+              <h2 className="text-xl font-bold md:text-2xl">{pageTitle}</h2>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button className="grid h-10 w-10 place-items-center rounded border border-line bg-white">
+              <Bell className="h-4 w-4" />
+            </button>
+            <button className="hidden h-10 items-center gap-2 rounded bg-brand px-4 text-sm font-semibold text-white md:flex">
+              <Plus className="h-4 w-4" />
+              Nova conversa
+            </button>
+            <button
+              className="hidden h-10 rounded border border-line px-3 text-sm font-semibold text-slate-600 md:block"
+              onClick={handleLogout}
+            >
+              Sair
+            </button>
+          </div>
+        </header>
+
+        <div className="p-4 md:p-8">
+          {appError && (
+            <div className="mb-4 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              {appError}
+            </div>
+          )}
+          {active === "dashboard" && (
+            <Dashboard
+              data={dashboard}
+              filters={dashboardFilters}
+              loading={dashboardLoading}
+              reference={reference}
+              onFiltersChange={setDashboardFilters}
+              onCompleteTask={handleCompleteTask}
+            />
+          )}
+          {active === "atendimento" && (
+            <Atendimento
+              conversations={conversationList}
+              filters={conversationFilters}
+              loading={conversationLoading}
+              selectedConversation={selectedConversation}
+              onFiltersChange={setConversationFilters}
+              onSelectConversation={setSelectedConversation}
+              onSendMessage={handleSendMessage}
+              onUpdateStatus={handleConversationStatus}
+              aiAnalysis={aiAnalysis}
+              aiLoading={aiLoading}
+              onAnalyzeConversation={handleAnalyzeConversation}
+            />
+          )}
+          {active === "kanban" && (
+            <Kanban
+              loading={kanbanLoading}
+              stages={kanbanStages}
+              onMoveContact={handleMoveKanbanContact}
+            />
+          )}
+          {active === "contatos" && (
+            <Contatos
+              contacts={contacts}
+              loading={contactsLoading}
+              filters={contactFilters}
+              reference={reference}
+              onFiltersChange={setContactFilters}
+              onCreateContact={handleCreateContact}
+              onImportContacts={handleImportContacts}
+              onBulkContacts={handleBulkContacts}
+              onCreateContactNote={handleCreateContactNote}
+              onCreateTask={handleCreateTask}
+              onCompleteTask={handleCompleteTask}
+              onUpdateContact={handleUpdateContact}
+              onArchiveContact={handleArchiveContact}
+            />
+          )}
+          {active === "multicred" && (
+            <Multicred
+              contacts={contacts}
+              filters={proposalFilters}
+              loading={proposalsLoading}
+              metrics={proposalMetrics}
+              proposals={proposals}
+              onCreateProposal={handleCreateProposal}
+              onDeleteProposal={handleDeleteProposal}
+              onFiltersChange={setProposalFilters}
+              onUpdateProposal={handleUpdateProposal}
+            />
+          )}
+          {active === "canais" && (
+            <Canais
+              channels={channels}
+              loading={channelsLoading}
+              onCreateChannel={handleCreateChannel}
+              onSimulateInbound={handleSimulateInboundMessage}
+            />
+          )}
+          {active === "chatbot" && <Chatbot />}
+          {active === "config" && (
+            <Configuracoes
+              reference={reference}
+              onCreateOrigin={handleCreateOrigin}
+              onCreateStage={handleCreateStage}
+              onCreateTag={handleCreateTag}
+              onCreateUser={handleCreateUser}
+              onDeleteOrigin={handleDeleteOrigin}
+              onDeleteStage={handleDeleteStage}
+              onDeleteTag={handleDeleteTag}
+              onDeleteUser={handleDeleteUser}
+              onUpdateOrigin={handleUpdateOrigin}
+              onUpdateStage={handleUpdateStage}
+              onUpdateTag={handleUpdateTag}
+              onUpdateUser={handleUpdateUser}
+            />
+          )}
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function LoginScreen({
+  error,
+  onLogin
+}: {
+  error: string;
+  onLogin: (email: string, password: string) => Promise<void>;
+}) {
+  const [email, setEmail] = useState("admin@crm.local");
+  const [password, setPassword] = useState("admin123");
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoading(true);
+    await onLogin(email, password);
+    setLoading(false);
+  }
+
+  return (
+    <main className="grid min-h-screen place-items-center bg-paper p-4 text-ink">
+      <form
+        className="w-full max-w-md rounded border border-line bg-white p-6 shadow-soft"
+        onSubmit={handleSubmit}
+      >
+        <div className="flex items-center gap-3">
+          <div className="grid h-11 w-11 place-items-center rounded bg-brand text-base font-bold text-white">
+            AI
+          </div>
+          <div>
+            <p className="text-sm font-semibold uppercase text-brand">CRM</p>
+            <h1 className="text-xl font-bold">Entrar na operacao</h1>
+          </div>
+        </div>
+
+        <div className="mt-6 space-y-4">
+          <label className="block text-sm font-semibold">
+            Email
+            <input
+              className="mt-2 h-11 w-full rounded border border-line px-3 font-normal outline-none focus:border-brand"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="admin@crm.local"
+              type="email"
+            />
+          </label>
+          <label className="block text-sm font-semibold">
+            Senha
+            <input
+              className="mt-2 h-11 w-full rounded border border-line px-3 font-normal outline-none focus:border-brand"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="admin123"
+              type="password"
+            />
+          </label>
+        </div>
+
+        {error && (
+          <div className="mt-4 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            {error}
+          </div>
+        )}
+
+        <button
+          className="mt-6 h-11 w-full rounded bg-brand font-semibold text-white disabled:opacity-60"
+          disabled={loading}
+          type="submit"
+        >
+          {loading ? "Entrando..." : "Entrar"}
+        </button>
+
+        <p className="mt-4 text-sm text-slate-500">
+          Rode `npm run prisma:push` e `npm run prisma:seed` para criar o usuario
+          inicial.
+        </p>
+      </form>
+    </main>
+  );
+}
+
+function Dashboard({
+  data,
+  filters,
+  loading,
+  reference,
+  onFiltersChange,
+  onCompleteTask
+}: {
+  data: DashboardData;
+  filters: { period: string; originId: string; ownerId: string };
+  loading: boolean;
+  reference: ReferenceData;
+  onFiltersChange: (filters: {
+    period: string;
+    originId: string;
+    ownerId: string;
+  }) => void;
+  onCompleteTask: (taskId: string) => Promise<TaskRow | null>;
+}) {
+  const maxFunnel = Math.max(...data.funnel.map((item) => item.count), 1);
+  const maxStatus = Math.max(...data.proposalStatus.map((item) => item.count), 1);
+  const cards = [
+    {
+      label: "Conversas abertas",
+      value: data.metrics.openConversations.toString(),
+      hint: `${data.metrics.staleConversations} aguardando ha mais de 4h`
+    },
+    {
+      label: "Leads ativos",
+      value: data.metrics.activeContacts.toString(),
+      hint: `${data.metrics.newContacts} novo(s) no periodo`
+    },
+    {
+      label: "Propostas",
+      value: data.metrics.proposals.toString(),
+      hint: formatCurrency(data.metrics.totalProposalAmount)
+    },
+    {
+      label: "Conversao",
+      value: `${data.metrics.conversionRate}%`,
+      hint: `${data.metrics.paidProposals} proposta(s) paga(s)`
+    }
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col gap-3 rounded border border-line bg-white p-4 shadow-soft md:flex-row md:items-center md:justify-between">
+        <div>
+          <p className="text-sm font-semibold uppercase text-brand">Visao de gestao</p>
+          <h2 className="mt-1 text-xl font-bold">Dashboard operacional</h2>
+        </div>
+        <div className="flex flex-col gap-2 md:flex-row">
+          <select
+            className="h-10 rounded border border-line px-3 text-sm outline-none"
+            value={filters.period}
+            onChange={(event) =>
+              onFiltersChange({ ...filters, period: event.target.value })
+            }
+          >
+            <option value="7d">Ultimos 7 dias</option>
+            <option value="30d">Ultimos 30 dias</option>
+            <option value="90d">Ultimos 90 dias</option>
+            <option value="all">Todo periodo</option>
+          </select>
+          <select
+            className="h-10 rounded border border-line px-3 text-sm outline-none"
+            value={filters.originId}
+            onChange={(event) =>
+              onFiltersChange({ ...filters, originId: event.target.value })
+            }
+          >
+            <option value="">Todas as origens</option>
+            {reference.origins.map((origin) => (
+              <option key={origin.id} value={origin.id}>
+                {origin.name}
+              </option>
+            ))}
+          </select>
+          <select
+            className="h-10 rounded border border-line px-3 text-sm outline-none"
+            value={filters.ownerId}
+            onChange={(event) =>
+              onFiltersChange({ ...filters, ownerId: event.target.value })
+            }
+          >
+            <option value="">Todos os responsaveis</option>
+            {reference.users.map((user) => (
+              <option key={user.id} value={user.id}>
+                {user.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-4">
+        {cards.map(({ label, value, hint }) => (
+          <div key={label} className="rounded border border-line bg-white p-5 shadow-soft">
+            <p className="text-sm text-slate-500">{label}</p>
+            <strong className="mt-2 block text-3xl">{value}</strong>
+            <span className="mt-3 inline-flex rounded bg-slate-100 px-2 py-1 text-xs text-slate-600">
+              {hint}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-[1.4fr_0.8fr]">
+        <div className="rounded border border-line bg-white p-5 shadow-soft">
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="text-lg font-bold">Prioridades do dia</h3>
+            <span className="flex h-9 items-center gap-2 rounded border border-line px-3 text-sm text-slate-600">
+              <Filter className="h-4 w-4" />
+              {loading ? "Atualizando" : `${data.priorities.length} item(ns)`}
+            </span>
+          </div>
+          <div className="space-y-3">
+            {data.priorities.map((item) => (
+              <div
+                key={`${item.type}-${item.id}`}
+                className="grid gap-3 rounded border border-line p-4 md:grid-cols-[1fr_auto]"
+              >
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-semibold">{item.title}</p>
+                    <span
+                      className={clsx(
+                        "rounded px-2 py-0.5 text-xs font-semibold",
+                        item.severity === "high"
+                          ? "bg-rose-50 text-rose-700"
+                          : "bg-amber-50 text-amber-700"
+                      )}
+                    >
+                      {item.type}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-sm text-slate-600">{item.detail}</p>
+                  <p className="mt-2 text-xs text-slate-500">{item.meta}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="rounded bg-teal-50 px-2 py-1 text-xs font-semibold text-brand">
+                    {item.severity === "high" ? "Alta" : "Media"}
+                  </span>
+                  <ArrowRight className="h-4 w-4 text-slate-400" />
+                </div>
+              </div>
+            ))}
+            {!loading && data.priorities.length === 0 && (
+              <div className="rounded border border-dashed border-line p-6 text-sm text-slate-500">
+                Nenhuma prioridade critica no filtro atual.
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-6">
+          <section className="rounded border border-line bg-white p-5 shadow-soft">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold">Minhas tarefas</h3>
+              <span className="text-sm text-slate-500">{data.tasks.length} pendente(s)</span>
+            </div>
+            <div className="mt-5 space-y-3">
+              {data.tasks.map((task) => {
+                const overdue = new Date(task.dueAt).getTime() < Date.now();
+                return (
+                  <div key={task.id} className="rounded border border-line p-3 text-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-semibold">{task.title}</p>
+                        <p className="mt-1 text-slate-600">{task.contact.name}</p>
+                        <p
+                          className={clsx(
+                            "mt-1 text-xs",
+                            overdue ? "text-rose-600" : "text-slate-500"
+                          )}
+                        >
+                          {new Date(task.dueAt).toLocaleString("pt-BR")}
+                        </p>
+                      </div>
+                      <button
+                        className="grid h-8 w-8 place-items-center rounded border border-line text-brand"
+                        onClick={() => void onCompleteTask(task.id)}
+                        title="Concluir tarefa"
+                      >
+                        <Check className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+              {!loading && data.tasks.length === 0 && (
+                <p className="text-sm text-slate-500">Nenhuma tarefa pendente.</p>
+              )}
+            </div>
+          </section>
+
+          <section className="rounded border border-line bg-white p-5 shadow-soft">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold">Funil de leads</h3>
+              <span className="text-sm text-slate-500">{data.metrics.hotContacts} quente(s)</span>
+            </div>
+            <div className="mt-5 space-y-4">
+              {data.funnel.map((item) => (
+                <div key={item.id}>
+                  <div className="mb-1 flex items-center justify-between text-sm">
+                    <span>{item.label}</span>
+                    <strong>{item.count}</strong>
+                  </div>
+                  <div className="h-2 rounded bg-slate-100">
+                    <div
+                      className="h-2 rounded"
+                      style={{
+                        width: `${Math.max(6, (item.count / maxFunnel) * 100)}%`,
+                        backgroundColor: item.color
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+              {!loading && data.funnel.length === 0 && (
+                <p className="text-sm text-slate-500">Sem leads no filtro atual.</p>
+              )}
+            </div>
+          </section>
+
+          <section className="rounded border border-line bg-white p-5 shadow-soft">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold">Status Multicred</h3>
+              <span className="text-sm text-slate-500">
+                {formatCurrency(data.metrics.commissionForecast)}
+              </span>
+            </div>
+            <div className="mt-5 space-y-4">
+              {data.proposalStatus.map((item) => (
+                <div key={item.status}>
+                  <div className="mb-1 flex items-center justify-between text-sm">
+                    <span>{proposalStatusLabels[item.status] ?? item.status}</span>
+                    <strong>{item.count}</strong>
+                  </div>
+                  <div className="h-2 rounded bg-slate-100">
+                    <div
+                      className="h-2 rounded bg-brand"
+                      style={{ width: `${Math.max(6, (item.count / maxStatus) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Atendimento({
+  conversations,
+  filters,
+  loading,
+  selectedConversation,
+  onFiltersChange,
+  onSelectConversation,
+  onSendMessage,
+  onUpdateStatus,
+  aiAnalysis,
+  aiLoading,
+  onAnalyzeConversation
+}: {
+  conversations: ConversationRow[];
+  filters: { search: string; status: string };
+  loading: boolean;
+  selectedConversation: ConversationRow | null;
+  onFiltersChange: (filters: { search: string; status: string }) => void;
+  onSelectConversation: (conversation: ConversationRow) => void;
+  onSendMessage: (conversationId: string, body: string) => Promise<void>;
+  onUpdateStatus: (
+    conversationId: string,
+    status: ConversationRow["status"]
+  ) => Promise<void>;
+  aiAnalysis: AiAnalysis | null;
+  aiLoading: boolean;
+  onAnalyzeConversation: (conversationId: string) => Promise<void>;
+}) {
+  const [message, setMessage] = useState("");
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedConversation || !message.trim()) return;
+
+    await onSendMessage(selectedConversation.id, message);
+    setMessage("");
+  }
+
+  return (
+    <div className="grid min-h-[calc(100vh-8rem)] gap-4 lg:grid-cols-[360px_1fr_320px]">
+      <section className="rounded border border-line bg-white shadow-soft">
+        <div className="border-b border-line p-4">
+          <div className="flex items-center gap-2 rounded border border-line px-3 py-2">
+            <Search className="h-4 w-4 text-slate-400" />
+            <input
+              className="w-full outline-none"
+              placeholder="Buscar conversas..."
+              value={filters.search}
+              onChange={(event) =>
+                onFiltersChange({ ...filters, search: event.target.value })
+              }
+            />
+          </div>
+          <div className="mt-3 grid grid-cols-4 gap-2 text-xs">
+            {[
+              ["OPEN", "Aberto"],
+              ["PENDING", "Pend."],
+              ["BOT", "Robo"],
+              ["SOLD", "Vendas"]
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                className={clsx(
+                  "rounded border border-line py-2",
+                  filters.status === value && "bg-teal-50 font-semibold text-brand"
+                )}
+                onClick={() => onFiltersChange({ ...filters, status: value })}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="divide-y divide-line">
+          {conversations.map((item) => (
+            <button
+              key={item.id}
+              className={clsx(
+                "block w-full p-4 text-left hover:bg-slate-50",
+                selectedConversation?.id === item.id && "bg-teal-50/70"
+              )}
+              onClick={() => onSelectConversation(item)}
+            >
+              <div className="flex items-center justify-between">
+                <p className="font-semibold">{item.contact.name}</p>
+                <span className="text-xs text-slate-500">{item.status}</span>
+              </div>
+              <p className="mt-1 line-clamp-2 text-sm text-slate-600">
+                {item.lastMessage?.body ?? item.summary ?? "Sem mensagens."}
+              </p>
+              <span className="mt-2 inline-flex rounded bg-amber-50 px-2 py-1 text-xs font-semibold text-saffron">
+                {item.contact.origin}
+              </span>
+            </button>
+          ))}
+          {!loading && conversations.length === 0 && (
+            <div className="p-6 text-center text-sm text-slate-500">
+              Nenhuma conversa nesta fila.
+            </div>
+          )}
+          {loading && (
+            <div className="p-6 text-center text-sm text-slate-500">
+              Carregando conversas...
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="rounded border border-line bg-white shadow-soft">
+        <div className="flex h-16 items-center justify-between border-b border-line px-5">
+          <div>
+            <h3 className="font-bold">
+              {selectedConversation?.contact.name ?? "Selecione uma conversa"}
+            </h3>
+            <p className="text-sm text-slate-500">
+              {selectedConversation?.contact.phone ?? "Inbox interno"}
+            </p>
+          </div>
+          {selectedConversation && (
+            <select
+              className="h-9 rounded border border-line px-2 text-sm outline-none"
+              value={selectedConversation.status}
+              onChange={(event) =>
+                void onUpdateStatus(
+                  selectedConversation.id,
+                  event.target.value as ConversationRow["status"]
+                )
+              }
+            >
+              <option value="OPEN">Aberto</option>
+              <option value="PENDING">Pendente</option>
+              <option value="BOT">Robo</option>
+              <option value="SOLD">Vendas</option>
+              <option value="RESOLVED">Resolvido</option>
+            </select>
+          )}
+        </div>
+        <div className="min-h-[420px] space-y-4 p-5">
+          {!selectedConversation && (
+            <div className="grid h-80 place-items-center text-center text-sm text-slate-500">
+              Escolha uma conversa na lista para iniciar o atendimento.
+            </div>
+          )}
+          {selectedConversation?.messages.map((item) => (
+            <ChatBubble
+              key={item.id}
+              side={item.direction === "outbound" ? "right" : "left"}
+            >
+              {item.body}
+            </ChatBubble>
+          ))}
+        </div>
+        <form className="border-t border-line p-4" onSubmit={handleSubmit}>
+          <div className="flex items-center gap-2 rounded border border-line px-3 py-2">
+            <input
+              className="w-full outline-none"
+              disabled={!selectedConversation}
+              placeholder="Digite uma mensagem..."
+              value={message}
+              onChange={(event) => setMessage(event.target.value)}
+            />
+            <button
+              className="grid h-9 w-9 place-items-center rounded bg-brand text-white disabled:opacity-50"
+              disabled={!selectedConversation || !message.trim()}
+            >
+              <Send className="h-4 w-4" />
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section className="space-y-4">
+        <AiPanel
+          compact
+          analysis={aiAnalysis}
+          loading={aiLoading}
+          disabled={!selectedConversation}
+          onAnalyze={() =>
+            selectedConversation
+              ? void onAnalyzeConversation(selectedConversation.id)
+              : undefined
+          }
+        />
+        {aiAnalysis && (
+          <button
+            className="flex h-10 w-full items-center justify-center gap-2 rounded bg-brand px-3 text-sm font-semibold text-white"
+            disabled={!selectedConversation}
+            onClick={() => setMessage(aiAnalysis.suggestedReply)}
+          >
+            <Send className="h-4 w-4" />
+            Usar sugestao
+          </button>
+        )}
+        <div className="rounded border border-line bg-white p-4 shadow-soft">
+          <h3 className="font-bold">Ficha rapida</h3>
+          <dl className="mt-4 space-y-3 text-sm">
+            <Info label="Origem" value={selectedConversation?.contact.origin ?? "-"} />
+            <Info label="Etapa" value={selectedConversation?.contact.stage ?? "-"} />
+            <Info label="Responsavel" value={selectedConversation?.contact.owner ?? "-"} />
+            <Info
+              label="Temperatura"
+              value={
+                selectedConversation?.contact.temperature
+                  ? temperatureLabels[
+                      selectedConversation.contact
+                        .temperature as keyof typeof temperatureLabels
+                    ]
+                  : "-"
+              }
+            />
+          </dl>
+        </div>
+        {selectedConversation?.summary && (
+          <div className="rounded border border-line bg-white p-4 shadow-soft">
+            <h3 className="font-bold">Resumo salvo</h3>
+            <p className="mt-2 whitespace-pre-line text-sm text-slate-600">
+              {selectedConversation.summary}
+            </p>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function ChatBubble({
+  side,
+  children
+}: {
+  side: "left" | "right";
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={clsx("flex", side === "right" && "justify-end")}>
+      <div
+        className={clsx(
+          "max-w-[72%] rounded p-3 text-sm",
+          side === "right" ? "bg-brand text-white" : "bg-slate-100 text-slate-800"
+        )}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Kanban({
+  stages,
+  loading,
+  onMoveContact
+}: {
+  stages: KanbanStage[];
+  loading: boolean;
+  onMoveContact: (contactId: string, stageId: string) => Promise<void>;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h3 className="text-lg font-bold">Pipeline de leads</h3>
+          <p className="text-sm text-slate-500">
+            Leads ativos agrupados pela etapa salva no banco.
+          </p>
+        </div>
+        <div className="rounded border border-line bg-white px-3 py-2 text-sm text-slate-600">
+          {loading ? "Carregando..." : `${stages.reduce((sum, stage) => sum + stage.contacts.length, 0)} leads ativos`}
+        </div>
+      </div>
+
+      <div className="grid gap-4 overflow-x-auto pb-2 xl:grid-cols-4">
+        {stages.map((stage) => (
+          <section
+            key={stage.id || "unstaged"}
+            className="min-w-72 rounded border border-line bg-white p-4 shadow-soft"
+          >
+          <div className="flex items-center justify-between">
+            <h3 className="font-bold">{stage.name}</h3>
+            <span
+              className="h-3 w-3 rounded-full"
+              style={{ backgroundColor: stage.color }}
+            />
+          </div>
+          <p className="mt-1 text-xs text-slate-500">
+            {stage.contacts.length} contato(s)
+          </p>
+          <div className="mt-4 space-y-3">
+            {stage.contacts.map((contact) => (
+              <article key={contact.id} className="rounded border border-line p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold">{contact.name}</p>
+                    <p className="mt-1 text-sm text-slate-500">{contact.phone}</p>
+                  </div>
+                  <span
+                    className={clsx(
+                      "rounded px-2 py-1 text-xs font-semibold",
+                      contact.temperature === "HOT" && "bg-rose-50 text-rose-700",
+                      contact.temperature === "WARM" && "bg-amber-50 text-amber-700",
+                      contact.temperature === "COLD" && "bg-slate-100 text-slate-600"
+                    )}
+                  >
+                    {temperatureLabels[contact.temperature]}
+                  </span>
+                </div>
+                <p className="mt-3 text-sm text-slate-600">
+                  {contact.lastMessage ?? "Sem observacao registrada."}
+                </p>
+                <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
+                  <Clock3 className="h-3.5 w-3.5" />
+                  atualizado {formatRelativeDate(contact.updatedAt)}
+                </div>
+                <select
+                  className="mt-3 h-9 w-full rounded border border-line px-2 text-sm outline-none"
+                  value={contact.stageId ?? ""}
+                  onChange={(event) => void onMoveContact(contact.id, event.target.value)}
+                >
+                  {stages.map((option) => (
+                    <option key={option.id || "none"} value={option.id}>
+                      {option.name}
+                    </option>
+                  ))}
+                </select>
+              </article>
+            ))}
+            {!loading && stage.contacts.length === 0 && (
+              <div className="rounded border border-dashed border-line p-4 text-center text-sm text-slate-500">
+                Nenhum lead nesta etapa.
+              </div>
+            )}
+          </div>
+        </section>
+      ))}
+      </div>
+    </div>
+  );
+}
+
+function Contatos({
+  contacts,
+  loading,
+  filters,
+  reference,
+  onFiltersChange,
+  onCreateContact,
+  onImportContacts,
+  onBulkContacts,
+  onCreateContactNote,
+  onCreateTask,
+  onCompleteTask,
+  onUpdateContact,
+  onArchiveContact
+}: {
+  contacts: ContactRow[];
+  loading: boolean;
+  filters: {
+    search: string;
+    status: string;
+    originId: string;
+    stageId: string;
+    ownerId: string;
+    tagId: string;
+    temperature: string;
+  };
+  reference: ReferenceData;
+  onFiltersChange: (filters: {
+    search: string;
+    status: string;
+    originId: string;
+    stageId: string;
+    ownerId: string;
+    tagId: string;
+    temperature: string;
+  }) => void;
+  onCreateContact: (payload: {
+    name: string;
+    phone: string;
+    email: string;
+    cpf: string;
+    originId: string;
+    stageId: string;
+    ownerId: string;
+    tagIds?: string[];
+    temperature: ContactRow["temperature"];
+  }) => Promise<void>;
+  onImportContacts: (payload: {
+    csv: string;
+    defaults: { originId: string; stageId: string; ownerId: string };
+  }) => Promise<ImportResult | null>;
+  onBulkContacts: (payload: {
+    contactIds: string[];
+    ownerId?: string;
+    stageId?: string;
+    tagId?: string;
+    archived?: boolean;
+  }) => Promise<void>;
+  onCreateContactNote: (
+    contactId: string,
+    detail: string
+  ) => Promise<ContactActivityRow | null>;
+  onCreateTask: (payload: {
+    contactId: string;
+    assigneeId: string;
+    title: string;
+    note: string;
+    dueAt: string;
+  }) => Promise<TaskRow | null>;
+  onCompleteTask: (taskId: string) => Promise<TaskRow | null>;
+  onUpdateContact: (
+    id: string,
+    payload: Partial<{
+      name: string;
+      phone: string;
+      email: string;
+      cpf: string;
+      originId: string;
+      stageId: string;
+      ownerId: string;
+      tagIds: string[];
+      temperature: ContactRow["temperature"];
+      lastMessage: string;
+      archived: boolean;
+    }>
+  ) => Promise<ContactRow | null>;
+  onArchiveContact: (id: string) => Promise<void>;
+}) {
+  const [showForm, setShowForm] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [importForm, setImportForm] = useState({
+    csv: "",
+    fileName: "",
+    originId: "",
+    stageId: "",
+    ownerId: ""
+  });
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkForm, setBulkForm] = useState({
+    ownerId: "",
+    stageId: "",
+    tagId: ""
+  });
+  const [selectedContact, setSelectedContact] = useState<ContactRow | null>(null);
+  const [editingContact, setEditingContact] = useState<ContactRow | null>(null);
+  const [form, setForm] = useState({
+    name: "",
+    phone: "",
+    email: "",
+    cpf: "",
+    originId: "",
+    stageId: "",
+    ownerId: "",
+    temperature: "WARM" as ContactRow["temperature"]
+  });
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await onCreateContact(form);
+    setForm({
+      name: "",
+      phone: "",
+      email: "",
+      cpf: "",
+      originId: "",
+      stageId: "",
+      ownerId: "",
+      temperature: "WARM"
+    });
+    setShowForm(false);
+  }
+
+  async function handleImportSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!importForm.csv.trim()) return;
+
+    setImportLoading(true);
+    const result = await onImportContacts({
+      csv: importForm.csv,
+      defaults: {
+        originId: importForm.originId,
+        stageId: importForm.stageId,
+        ownerId: importForm.ownerId
+      }
+    });
+    setImportResult(result);
+    setImportLoading(false);
+  }
+
+  async function handleExportContacts() {
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) params.set(key, value);
+    });
+    const response = await fetch(`/api/contacts/export?${params.toString()}`);
+
+    if (!response.ok) return;
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `contatos-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function toggleSelected(id: string) {
+    setSelectedIds((current) =>
+      current.includes(id)
+        ? current.filter((contactId) => contactId !== id)
+        : [...current, id]
+    );
+  }
+
+  async function applyBulk(payload: {
+    ownerId?: string;
+    stageId?: string;
+    tagId?: string;
+    archived?: boolean;
+  }) {
+    if (!selectedIds.length) return;
+    await onBulkContacts({ contactIds: selectedIds, ...payload });
+    setSelectedIds([]);
+  }
+
+  return (
+    <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
+      <section className="rounded border border-line bg-white shadow-soft">
+        <div className="flex flex-col gap-3 border-b border-line p-5 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h3 className="text-lg font-bold">Contatos</h3>
+            <p className="text-sm text-slate-500">Leads, clientes e historico comercial.</p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              className="flex h-10 items-center gap-2 rounded border border-line px-3 text-sm"
+              onClick={() => void handleExportContacts()}
+            >
+              <Download className="h-4 w-4" />
+              Exportar
+            </button>
+            <button
+              className="flex h-10 items-center gap-2 rounded border border-line px-3 text-sm"
+              onClick={() => setShowImport((current) => !current)}
+            >
+              <Upload className="h-4 w-4" />
+              Importar
+            </button>
+            <button
+              className="flex h-10 items-center gap-2 rounded bg-brand px-3 text-sm font-semibold text-white"
+              onClick={() => setShowForm((current) => !current)}
+            >
+              <Plus className="h-4 w-4" />
+              Novo contato
+            </button>
+          </div>
+        </div>
+
+        {showImport && (
+          <form
+            className="space-y-4 border-b border-line bg-slate-50 p-5"
+            onSubmit={handleImportSubmit}
+          >
+            <div className="grid gap-3 md:grid-cols-[1fr_180px_180px_180px]">
+              <label className="flex h-10 cursor-pointer items-center gap-2 rounded border border-line bg-white px-3 text-sm">
+                <Upload className="h-4 w-4 text-slate-400" />
+                <span className="truncate">
+                  {importForm.fileName || "Selecionar CSV"}
+                </span>
+                <input
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  type="file"
+                  onChange={async (event) => {
+                    const file = event.target.files?.[0];
+                    if (!file) return;
+                    const csv = await file.text();
+                    setImportForm((current) => ({
+                      ...current,
+                      csv,
+                      fileName: file.name
+                    }));
+                    setImportResult(null);
+                  }}
+                />
+              </label>
+              <ReferenceSelect
+                label="Origem padrao"
+                value={importForm.originId}
+                options={reference.origins}
+                onChange={(value) =>
+                  setImportForm((current) => ({ ...current, originId: value }))
+                }
+              />
+              <ReferenceSelect
+                label="Etapa padrao"
+                value={importForm.stageId}
+                options={reference.stages}
+                onChange={(value) =>
+                  setImportForm((current) => ({ ...current, stageId: value }))
+                }
+              />
+              <ReferenceSelect
+                label="Responsavel padrao"
+                value={importForm.ownerId}
+                options={reference.users}
+                onChange={(value) =>
+                  setImportForm((current) => ({ ...current, ownerId: value }))
+                }
+              />
+            </div>
+
+            <textarea
+              className="min-h-28 w-full rounded border border-line bg-white p-3 text-sm outline-none"
+              placeholder="Ou cole aqui: nome,telefone,cpf,email,origem,etapa,responsavel,tags,temperatura"
+              value={importForm.csv}
+              onChange={(event) =>
+                setImportForm((current) => ({
+                  ...current,
+                  csv: event.target.value,
+                  fileName: current.fileName
+                }))
+              }
+            />
+
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <p className="text-xs text-slate-500">
+                Cabeçalhos aceitos: nome, telefone, CPF, email, origem, etapa,
+                responsavel, tags e temperatura.
+              </p>
+              <button
+                className="h-10 rounded bg-brand px-4 text-sm font-semibold text-white disabled:opacity-50"
+                disabled={importLoading || !importForm.csv.trim()}
+              >
+                {importLoading ? "Importando..." : "Processar CSV"}
+              </button>
+            </div>
+
+            {importResult && (
+              <div className="grid gap-3 rounded border border-line bg-white p-4 text-sm md:grid-cols-4">
+                <Info label="Linhas" value={String(importResult.summary.totalRows)} />
+                <Info label="Criados" value={String(importResult.summary.created)} />
+                <Info label="Ignorados" value={String(importResult.summary.ignored)} />
+                <Info label="Erros" value={String(importResult.summary.errors)} />
+                {(importResult.ignored.length > 0 || importResult.errors.length > 0) && (
+                  <div className="md:col-span-4">
+                    {[...importResult.errors, ...importResult.ignored].slice(0, 5).map((item) => (
+                      <p key={`${item.row}-${item.reason}`} className="text-xs text-slate-500">
+                        Linha {item.row}: {item.reason}
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </form>
+        )}
+
+        {showForm && (
+          <form
+            className="grid gap-3 border-b border-line bg-slate-50 p-5 md:grid-cols-3"
+            onSubmit={handleSubmit}
+          >
+            <ContactInput
+              placeholder="Nome"
+              required
+              value={form.name}
+              onChange={(value) => setForm((current) => ({ ...current, name: value }))}
+            />
+            <ContactInput
+              placeholder="Telefone"
+              required
+              value={form.phone}
+              onChange={(value) => setForm((current) => ({ ...current, phone: value }))}
+            />
+            <ContactInput
+              placeholder="CPF"
+              value={form.cpf}
+              onChange={(value) => setForm((current) => ({ ...current, cpf: value }))}
+            />
+            <ContactInput
+              placeholder="Email"
+              type="email"
+              value={form.email}
+              onChange={(value) => setForm((current) => ({ ...current, email: value }))}
+            />
+            <ReferenceSelect
+              label="Origem"
+              value={form.originId}
+              options={reference.origins}
+              onChange={(value) => setForm((current) => ({ ...current, originId: value }))}
+            />
+            <ReferenceSelect
+              label="Responsavel"
+              value={form.ownerId}
+              options={reference.users}
+              onChange={(value) => setForm((current) => ({ ...current, ownerId: value }))}
+            />
+            <div className="flex gap-2">
+              <ReferenceSelect
+                label="Etapa"
+                value={form.stageId}
+                options={reference.stages}
+                onChange={(value) => setForm((current) => ({ ...current, stageId: value }))}
+              />
+              <button className="h-10 rounded bg-brand px-4 text-sm font-semibold text-white">
+                Salvar
+              </button>
+            </div>
+          </form>
+        )}
+
+        <div className="grid gap-3 border-b border-line p-5 lg:grid-cols-[1.4fr_150px_150px_150px_150px_130px_120px]">
+          <div className="flex items-center gap-2 rounded border border-line px-3 py-2">
+            <Search className="h-4 w-4 text-slate-400" />
+            <input
+              className="w-full outline-none"
+              placeholder="Buscar por nome, telefone, CPF ou email..."
+              value={filters.search}
+              onChange={(event) =>
+                onFiltersChange({ ...filters, search: event.target.value })
+              }
+            />
+          </div>
+          <ReferenceSelect
+            label="Origem"
+            value={filters.originId}
+            options={reference.origins}
+            onChange={(value) => onFiltersChange({ ...filters, originId: value })}
+          />
+          <ReferenceSelect
+            label="Etapa"
+            value={filters.stageId}
+            options={reference.stages}
+            onChange={(value) => onFiltersChange({ ...filters, stageId: value })}
+          />
+          <ReferenceSelect
+            label="Responsavel"
+            value={filters.ownerId}
+            options={reference.users}
+            onChange={(value) => onFiltersChange({ ...filters, ownerId: value })}
+          />
+          <ReferenceSelect
+            label="Tag"
+            value={filters.tagId}
+            options={reference.tags}
+            onChange={(value) => onFiltersChange({ ...filters, tagId: value })}
+          />
+          <select
+            className="h-10 rounded border border-line px-3 outline-none"
+            value={filters.temperature}
+            onChange={(event) =>
+              onFiltersChange({ ...filters, temperature: event.target.value })
+            }
+          >
+            <option value="">Temperatura</option>
+            <option value="HOT">Quente</option>
+            <option value="WARM">Morno</option>
+            <option value="COLD">Frio</option>
+          </select>
+          <select
+            className="h-10 rounded border border-line px-3 outline-none"
+            value={filters.status}
+            onChange={(event) =>
+              onFiltersChange({ ...filters, status: event.target.value })
+            }
+          >
+            <option value="active">Ativos</option>
+            <option value="archived">Arquivados</option>
+          </select>
+        </div>
+
+        {selectedIds.length > 0 && (
+          <div className="grid gap-3 border-b border-line bg-teal-50 p-4 md:grid-cols-[auto_1fr_1fr_1fr_auto_auto] md:items-center">
+            <span className="text-sm font-semibold text-brand">
+              {selectedIds.length} selecionado(s)
+            </span>
+            <ReferenceSelect
+              label="Responsavel"
+              value={bulkForm.ownerId}
+              options={reference.users}
+              onChange={(value) => setBulkForm((current) => ({ ...current, ownerId: value }))}
+            />
+            <ReferenceSelect
+              label="Etapa"
+              value={bulkForm.stageId}
+              options={reference.stages}
+              onChange={(value) => setBulkForm((current) => ({ ...current, stageId: value }))}
+            />
+            <ReferenceSelect
+              label="Aplicar tag"
+              value={bulkForm.tagId}
+              options={reference.tags}
+              onChange={(value) => setBulkForm((current) => ({ ...current, tagId: value }))}
+            />
+            <button
+              className="h-10 rounded bg-brand px-3 text-sm font-semibold text-white disabled:opacity-50"
+              disabled={!bulkForm.ownerId && !bulkForm.stageId && !bulkForm.tagId}
+              onClick={() =>
+                void applyBulk({
+                  ...(bulkForm.ownerId ? { ownerId: bulkForm.ownerId } : {}),
+                  ...(bulkForm.stageId ? { stageId: bulkForm.stageId } : {}),
+                  ...(bulkForm.tagId ? { tagId: bulkForm.tagId } : {})
+                })
+              }
+            >
+              Aplicar
+            </button>
+            <button
+              className="h-10 rounded border border-rose-200 bg-white px-3 text-sm font-semibold text-rose-700"
+              onClick={() => void applyBulk({ archived: filters.status !== "archived" })}
+            >
+              {filters.status === "archived" ? "Reativar" : "Arquivar"}
+            </button>
+          </div>
+        )}
+
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[980px] border-collapse text-left text-sm">
+            <thead className="bg-slate-50 text-slate-500">
+              <tr>
+                <th className="border-b border-line px-5 py-3">
+                  <input
+                    checked={contacts.length > 0 && selectedIds.length === contacts.length}
+                    type="checkbox"
+                    onChange={(event) =>
+                      setSelectedIds(event.target.checked ? contacts.map((contact) => contact.id) : [])
+                    }
+                  />
+                </th>
+                {[
+                  "Nome",
+                  "Telefone",
+                  "Origem",
+                  "Etapa",
+                  "Responsavel",
+                  "Temperatura",
+                  "Atualizado",
+                  "Acoes"
+                ].map((head) => (
+                  <th key={head} className="border-b border-line px-5 py-3 font-semibold">
+                    {head}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {contacts.map((contact) => (
+                <tr
+                  key={contact.id}
+                  className={clsx(
+                    "hover:bg-slate-50",
+                    selectedContact?.id === contact.id && "bg-teal-50/60"
+                  )}
+                >
+                  <td className="border-b border-line px-5 py-4">
+                    <input
+                      checked={selectedIds.includes(contact.id)}
+                      type="checkbox"
+                      onChange={() => toggleSelected(contact.id)}
+                    />
+                  </td>
+                  <td className="border-b border-line px-5 py-4">
+                    <button
+                      className="text-left font-semibold text-ink"
+                      onClick={() => {
+                        setSelectedContact(contact);
+                        setEditingContact(null);
+                      }}
+                    >
+                      {contact.name}
+                      {contact.archivedAt && (
+                        <span className="ml-2 rounded bg-slate-200 px-2 py-0.5 text-xs font-normal text-slate-600">
+                          arquivado
+                        </span>
+                      )}
+                    </button>
+                    {contact.email && (
+                      <p className="mt-1 text-xs text-slate-500">{contact.email}</p>
+                    )}
+                  </td>
+                  <td className="border-b border-line px-5 py-4">{contact.phone}</td>
+                  <td className="border-b border-line px-5 py-4">{contact.origin}</td>
+                  <td className="border-b border-line px-5 py-4">{contact.stage}</td>
+                  <td className="border-b border-line px-5 py-4">{contact.owner}</td>
+                  <td className="border-b border-line px-5 py-4">
+                    {temperatureLabels[contact.temperature]}
+                  </td>
+                  <td className="border-b border-line px-5 py-4">
+                    {formatRelativeDate(contact.updatedAt)}
+                  </td>
+                  <td className="border-b border-line px-5 py-4">
+                    <div className="flex items-center gap-2">
+                      <button
+                        className="grid h-8 w-8 place-items-center rounded border border-line"
+                        title="Editar"
+                        onClick={() => {
+                          setSelectedContact(contact);
+                          setEditingContact(contact);
+                        }}
+                      >
+                        <Edit3 className="h-4 w-4" />
+                      </button>
+                      {contact.archivedAt ? (
+                        <button
+                          className="grid h-8 w-8 place-items-center rounded border border-line"
+                          title="Reativar"
+                          onClick={async () => {
+                            const updated = await onUpdateContact(contact.id, {
+                              archived: false
+                            });
+                            if (updated) setSelectedContact(updated);
+                          }}
+                        >
+                          <RotateCcw className="h-4 w-4" />
+                        </button>
+                      ) : (
+                        <button
+                          className="grid h-8 w-8 place-items-center rounded border border-line text-berry"
+                          title="Arquivar"
+                          onClick={() => void onArchiveContact(contact.id)}
+                        >
+                          <Archive className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!loading && contacts.length === 0 && (
+            <div className="p-8 text-center text-sm text-slate-500">
+              Nenhum contato encontrado.
+            </div>
+          )}
+          {loading && (
+            <div className="p-8 text-center text-sm text-slate-500">
+              Carregando contatos...
+            </div>
+          )}
+        </div>
+      </section>
+
+      <ContactDrawer
+        contact={selectedContact}
+        editingContact={editingContact}
+        reference={reference}
+        onClose={() => {
+          setSelectedContact(null);
+          setEditingContact(null);
+        }}
+        onEdit={() => setEditingContact(selectedContact)}
+        onCancelEdit={() => setEditingContact(null)}
+        onCreateNote={onCreateContactNote}
+        onCreateTask={onCreateTask}
+        onCompleteTask={onCompleteTask}
+        onSave={async (id, payload) => {
+          const updated = await onUpdateContact(id, payload);
+          if (updated) {
+            setSelectedContact(updated);
+            setEditingContact(null);
+          }
+        }}
+      />
+    </div>
+  );
+}
+
+function ContactInput({
+  value,
+  onChange,
+  ...props
+}: {
+  value: string;
+  onChange: (value: string) => void;
+} & Omit<React.InputHTMLAttributes<HTMLInputElement>, "onChange">) {
+  return (
+    <input
+      className="h-10 rounded border border-line px-3 outline-none"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      {...props}
+    />
+  );
+}
+
+function ReferenceSelect({
+  label,
+  value,
+  options,
+  onChange
+}: {
+  label: string;
+  value: string;
+  options: Array<{ id: string; name: string }>;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <select
+      className="h-10 min-w-0 rounded border border-line px-3 outline-none"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    >
+      <option value="">{label}</option>
+      {options.map((option) => (
+        <option key={option.id} value={option.id}>
+          {option.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function ContactDrawer({
+  contact,
+  editingContact,
+  reference,
+  onClose,
+  onEdit,
+  onCancelEdit,
+  onCreateNote,
+  onCreateTask,
+  onCompleteTask,
+  onSave
+}: {
+  contact: ContactRow | null;
+  editingContact: ContactRow | null;
+  reference: ReferenceData;
+  onClose: () => void;
+  onEdit: () => void;
+  onCancelEdit: () => void;
+  onCreateNote: (
+    contactId: string,
+    detail: string
+  ) => Promise<ContactActivityRow | null>;
+  onCreateTask: (payload: {
+    contactId: string;
+    assigneeId: string;
+    title: string;
+    note: string;
+    dueAt: string;
+  }) => Promise<TaskRow | null>;
+  onCompleteTask: (taskId: string) => Promise<TaskRow | null>;
+  onSave: (
+    id: string,
+    payload: Partial<{
+      name: string;
+      phone: string;
+      email: string;
+      cpf: string;
+      originId: string;
+      stageId: string;
+      ownerId: string;
+      tagIds: string[];
+      temperature: ContactRow["temperature"];
+      lastMessage: string;
+    }>
+  ) => Promise<void>;
+}) {
+  const [activities, setActivities] = useState<ContactActivityRow[]>([]);
+  const [activitiesLoading, setActivitiesLoading] = useState(false);
+  const [tasks, setTasks] = useState<TaskRow[]>([]);
+  const [tasksLoading, setTasksLoading] = useState(false);
+  const [note, setNote] = useState("");
+  const [taskForm, setTaskForm] = useState({
+    title: "",
+    note: "",
+    dueAt: "",
+    assigneeId: ""
+  });
+  const [draft, setDraft] = useState({
+    name: "",
+    phone: "",
+    email: "",
+    cpf: "",
+    originId: "",
+    stageId: "",
+    ownerId: "",
+    tagIds: [] as string[],
+    temperature: "WARM" as ContactRow["temperature"],
+    lastMessage: ""
+  });
+
+  useEffect(() => {
+    if (!editingContact) return;
+    setDraft({
+      name: editingContact.name,
+      phone: editingContact.phone,
+      email: editingContact.email ?? "",
+      cpf: editingContact.cpf ?? "",
+      originId: editingContact.originId ?? "",
+      stageId: editingContact.stageId ?? "",
+      ownerId: editingContact.ownerId ?? "",
+      tagIds: editingContact.tags.map((tag) => tag.id),
+      temperature: editingContact.temperature,
+      lastMessage: editingContact.lastMessage ?? ""
+    });
+  }, [editingContact]);
+
+  useEffect(() => {
+    if (!contact) {
+      setActivities([]);
+      return;
+    }
+
+    let active = true;
+    setActivitiesLoading(true);
+    fetch(`/api/contacts/${contact.id}/activities`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { activities?: ContactActivityRow[] } | null) => {
+        if (active) setActivities(data?.activities ?? []);
+      })
+      .finally(() => {
+        if (active) setActivitiesLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [contact]);
+
+  useEffect(() => {
+    if (!contact) {
+      setTasks([]);
+      return;
+    }
+
+    let active = true;
+    setTasksLoading(true);
+    fetch(`/api/tasks?contactId=${contact.id}&status=ALL`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { tasks?: TaskRow[] } | null) => {
+        if (active) setTasks(data?.tasks ?? []);
+      })
+      .finally(() => {
+        if (active) setTasksLoading(false);
+      });
+
+    setTaskForm((current) => ({
+      ...current,
+      assigneeId: contact.ownerId ?? "",
+      dueAt: current.dueAt || new Date(Date.now() + 1000 * 60 * 60 * 24).toISOString().slice(0, 16)
+    }));
+
+    return () => {
+      active = false;
+    };
+  }, [contact]);
+
+  if (!contact) {
+    return (
+      <aside className="rounded border border-line bg-white p-5 shadow-soft">
+        <h3 className="font-bold">Ficha do cliente</h3>
+        <p className="mt-2 text-sm text-slate-500">
+          Selecione um contato para ver historico, dados comerciais e proximas acoes.
+        </p>
+      </aside>
+    );
+  }
+
+  const isEditing = Boolean(editingContact);
+
+  return (
+    <aside className="rounded border border-line bg-white shadow-soft">
+      <div className="flex items-start justify-between border-b border-line p-5">
+        <div>
+          <p className="text-xs font-semibold uppercase text-brand">Ficha</p>
+          <h3 className="mt-1 text-lg font-bold">{contact.name}</h3>
+          <p className="text-sm text-slate-500">{contact.phone}</p>
+        </div>
+        <button className="grid h-8 w-8 place-items-center rounded border border-line" onClick={onClose}>
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="space-y-5 p-5">
+        {isEditing ? (
+          <form
+            className="space-y-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void onSave(contact.id, draft);
+            }}
+          >
+            <ContactInput value={draft.name} onChange={(value) => setDraft((current) => ({ ...current, name: value }))} placeholder="Nome" />
+            <ContactInput value={draft.phone} onChange={(value) => setDraft((current) => ({ ...current, phone: value }))} placeholder="Telefone" />
+            <ContactInput value={draft.cpf} onChange={(value) => setDraft((current) => ({ ...current, cpf: value }))} placeholder="CPF" />
+            <ContactInput value={draft.email} onChange={(value) => setDraft((current) => ({ ...current, email: value }))} placeholder="Email" type="email" />
+            <ReferenceSelect label="Origem" value={draft.originId} options={reference.origins} onChange={(value) => setDraft((current) => ({ ...current, originId: value }))} />
+            <ReferenceSelect label="Etapa" value={draft.stageId} options={reference.stages} onChange={(value) => setDraft((current) => ({ ...current, stageId: value }))} />
+            <ReferenceSelect label="Responsavel" value={draft.ownerId} options={reference.users} onChange={(value) => setDraft((current) => ({ ...current, ownerId: value }))} />
+            <div className="rounded border border-line p-3">
+              <p className="mb-2 text-sm font-semibold">Tags</p>
+              <div className="flex flex-wrap gap-2">
+                {reference.tags.map((tag) => {
+                  const active = draft.tagIds.includes(tag.id);
+                  return (
+                    <button
+                      key={tag.id}
+                      className={clsx(
+                        "rounded border px-2 py-1 text-xs font-semibold",
+                        active ? "border-transparent text-white" : "border-line text-slate-600"
+                      )}
+                      onClick={() =>
+                        setDraft((current) => ({
+                          ...current,
+                          tagIds: active
+                            ? current.tagIds.filter((id) => id !== tag.id)
+                            : [...current.tagIds, tag.id]
+                        }))
+                      }
+                      style={active ? { backgroundColor: tag.color } : undefined}
+                      type="button"
+                    >
+                      {tag.name}
+                    </button>
+                  );
+                })}
+                {reference.tags.length === 0 && (
+                  <span className="text-sm text-slate-500">Nenhuma tag configurada.</span>
+                )}
+              </div>
+            </div>
+            <select
+              className="h-10 w-full rounded border border-line px-3 outline-none"
+              value={draft.temperature}
+              onChange={(event) =>
+                setDraft((current) => ({
+                  ...current,
+                  temperature: event.target.value as ContactRow["temperature"]
+                }))
+              }
+            >
+              <option value="HOT">Quente</option>
+              <option value="WARM">Morno</option>
+              <option value="COLD">Frio</option>
+            </select>
+            <textarea
+              className="min-h-24 w-full rounded border border-line p-3 text-sm outline-none"
+              value={draft.lastMessage}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, lastMessage: event.target.value }))
+              }
+              placeholder="Observacao ou ultima mensagem importante"
+            />
+            <div className="flex gap-2">
+              <button className="h-10 flex-1 rounded bg-brand px-4 text-sm font-semibold text-white">
+                Salvar
+              </button>
+              <button
+                className="h-10 rounded border border-line px-4 text-sm font-semibold"
+                onClick={onCancelEdit}
+                type="button"
+              >
+                Cancelar
+              </button>
+            </div>
+          </form>
+        ) : (
+          <>
+            <dl className="space-y-3 text-sm">
+              <Info label="Email" value={contact.email ?? "Nao informado"} />
+              <Info label="CPF" value={contact.cpf ?? "Nao informado"} />
+              <Info label="Origem" value={contact.origin} />
+              <Info label="Etapa" value={contact.stage} />
+              <Info label="Temperatura" value={temperatureLabels[contact.temperature]} />
+              <Info label="Responsavel" value={contact.owner} />
+              <Info label="Criado" value={new Date(contact.createdAt).toLocaleDateString("pt-BR")} />
+            </dl>
+            <div className="flex flex-wrap gap-2">
+              {contact.tags.map((tag) => (
+                <span
+                  key={tag.id}
+                  className="rounded px-2 py-1 text-xs font-semibold text-white"
+                  style={{ backgroundColor: tag.color }}
+                >
+                  {tag.name}
+                </span>
+              ))}
+              {contact.tags.length === 0 && (
+                <span className="text-sm text-slate-500">Sem tags aplicadas.</span>
+              )}
+            </div>
+            <button
+              className="flex h-10 w-full items-center justify-center gap-2 rounded border border-line text-sm font-semibold"
+              onClick={onEdit}
+            >
+              <Edit3 className="h-4 w-4" />
+              Editar ficha
+            </button>
+          </>
+        )}
+
+        <div className="rounded border border-line p-4">
+          <h4 className="font-semibold">Resumo operacional</h4>
+          <p className="mt-2 text-sm text-slate-600">
+            {contact.lastMessage ?? "Sem observacoes registradas para este contato."}
+          </p>
+        </div>
+
+        <div className="rounded border border-line p-4">
+          <h4 className="font-semibold">Anotacao manual</h4>
+          <form
+            className="mt-3 space-y-2"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              if (!note.trim()) return;
+              const activity = await onCreateNote(contact.id, note);
+              if (activity) {
+                setActivities((current) => [activity, ...current]);
+                setNote("");
+              }
+            }}
+          >
+            <textarea
+              className="min-h-20 w-full rounded border border-line p-3 text-sm outline-none"
+              placeholder="Registrar observacao, combinados ou pendencias"
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+            />
+            <button
+              className="h-9 rounded bg-brand px-3 text-sm font-semibold text-white disabled:opacity-50"
+              disabled={!note.trim()}
+            >
+              Salvar anotacao
+            </button>
+          </form>
+        </div>
+
+        <div className="rounded border border-line p-4">
+          <h4 className="font-semibold">Follow-up</h4>
+          <form
+            className="mt-3 space-y-2"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              if (!taskForm.title.trim() || !taskForm.dueAt) return;
+
+              const task = await onCreateTask({
+                contactId: contact.id,
+                assigneeId: taskForm.assigneeId,
+                title: taskForm.title,
+                note: taskForm.note,
+                dueAt: new Date(taskForm.dueAt).toISOString()
+              });
+
+              if (task) {
+                setTasks((current) => [task, ...current]);
+                setTaskForm((current) => ({ ...current, title: "", note: "" }));
+              }
+            }}
+          >
+            <ContactInput
+              placeholder="Proximo passo"
+              value={taskForm.title}
+              onChange={(value) =>
+                setTaskForm((current) => ({ ...current, title: value }))
+              }
+            />
+            <div className="grid gap-2 md:grid-cols-2">
+              <input
+                className="h-10 rounded border border-line px-3 text-sm outline-none"
+                type="datetime-local"
+                value={taskForm.dueAt}
+                onChange={(event) =>
+                  setTaskForm((current) => ({ ...current, dueAt: event.target.value }))
+                }
+              />
+              <ReferenceSelect
+                label="Responsavel"
+                value={taskForm.assigneeId}
+                options={reference.users}
+                onChange={(value) =>
+                  setTaskForm((current) => ({ ...current, assigneeId: value }))
+                }
+              />
+            </div>
+            <textarea
+              className="min-h-16 w-full rounded border border-line p-3 text-sm outline-none"
+              placeholder="Detalhe opcional"
+              value={taskForm.note}
+              onChange={(event) =>
+                setTaskForm((current) => ({ ...current, note: event.target.value }))
+              }
+            />
+            <button
+              className="h-9 rounded bg-brand px-3 text-sm font-semibold text-white disabled:opacity-50"
+              disabled={!taskForm.title.trim() || !taskForm.dueAt}
+            >
+              Criar tarefa
+            </button>
+          </form>
+
+          <div className="mt-4 space-y-2">
+            {tasksLoading && <p className="text-sm text-slate-500">Carregando tarefas...</p>}
+            {!tasksLoading && tasks.length === 0 && (
+              <p className="text-sm text-slate-500">Nenhuma tarefa registrada.</p>
+            )}
+            {tasks.map((task) => {
+              const overdue =
+                task.status === "PENDING" && new Date(task.dueAt).getTime() < Date.now();
+              return (
+                <div key={task.id} className="rounded border border-line p-3 text-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold">{task.title}</p>
+                      {task.note && <p className="mt-1 text-slate-600">{task.note}</p>}
+                      <p
+                        className={clsx(
+                          "mt-1 text-xs",
+                          overdue ? "text-rose-600" : "text-slate-500"
+                        )}
+                      >
+                        {new Date(task.dueAt).toLocaleString("pt-BR")}
+                        {task.assignee ? ` por ${task.assignee.name}` : ""}
+                      </p>
+                    </div>
+                    {task.status === "PENDING" ? (
+                      <button
+                        className="grid h-8 w-8 place-items-center rounded border border-line text-brand"
+                        onClick={async () => {
+                          const updated = await onCompleteTask(task.id);
+                          if (updated) {
+                            setTasks((current) =>
+                              current.map((item) => (item.id === updated.id ? updated : item))
+                            );
+                          }
+                        }}
+                        title="Concluir tarefa"
+                        type="button"
+                      >
+                        <Check className="h-4 w-4" />
+                      </button>
+                    ) : (
+                      <span className="rounded bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">
+                        Concluida
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div>
+          <h4 className="font-semibold">Historico</h4>
+          <div className="mt-3 space-y-3">
+            {activitiesLoading && (
+              <p className="text-sm text-slate-500">Carregando historico...</p>
+            )}
+            {!activitiesLoading && activities.length === 0 && (
+              <p className="text-sm text-slate-500">Nenhuma atividade registrada.</p>
+            )}
+            {activities.map((activity) => (
+              <div key={activity.id} className="rounded border border-line p-3 text-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold">{activity.title}</p>
+                    {activity.detail && (
+                      <p className="mt-1 text-slate-600">{activity.detail}</p>
+                    )}
+                  </div>
+                  <span className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-500">
+                    {activity.type}
+                  </span>
+                </div>
+                <p className="mt-2 text-xs text-slate-500">
+                  {formatRelativeDate(activity.createdAt)}
+                  {activity.user ? ` por ${activity.user.name}` : ""}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <h4 className="font-semibold">Conversas recentes</h4>
+          <div className="mt-3 space-y-2">
+            {contact.conversations.length === 0 && (
+              <p className="text-sm text-slate-500">Nenhuma conversa registrada.</p>
+            )}
+            {contact.conversations.map((conversation) => (
+              <div key={conversation.id} className="rounded border border-line p-3 text-sm">
+                <p className="font-semibold">{conversation.channel} - {conversation.status}</p>
+                <p className="mt-1 text-slate-500">{formatRelativeDate(conversation.updatedAt)}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <h4 className="font-semibold">Propostas</h4>
+          <div className="mt-3 space-y-2">
+            {contact.proposals.length === 0 && (
+              <p className="text-sm text-slate-500">Nenhuma proposta criada.</p>
+            )}
+            {contact.proposals.map((proposal) => (
+              <div key={proposal.id} className="rounded border border-line p-3 text-sm">
+                <p className="font-semibold">{proposal.product} - {proposal.bank}</p>
+                <p className="mt-1 text-slate-500">R$ {proposal.amount} - {proposal.status}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </aside>
+  );
+}
+function Multicred({
+  contacts,
+  filters,
+  loading,
+  metrics,
+  proposals,
+  onCreateProposal,
+  onDeleteProposal,
+  onFiltersChange,
+  onUpdateProposal
+}: {
+  contacts: ContactRow[];
+  filters: { search: string; status: string };
+  loading: boolean;
+  metrics: ProposalMetrics;
+  proposals: ProposalRow[];
+  onCreateProposal: (payload: {
+    contactId: string;
+    bank: string;
+    agreement: string;
+    product: string;
+    amount: string;
+    commission: string;
+    status: ProposalStatus;
+  }) => Promise<void>;
+  onDeleteProposal: (id: string) => Promise<void>;
+  onFiltersChange: (filters: { search: string; status: string }) => void;
+  onUpdateProposal: (
+    id: string,
+    payload: Partial<{
+      bank: string;
+      agreement: string;
+      product: string;
+      amount: string;
+      commission: string;
+      status: ProposalStatus;
+    }>
+  ) => Promise<void>;
+}) {
+  const [showForm, setShowForm] = useState(false);
+  const [editingProposalId, setEditingProposalId] = useState<string | null>(null);
+  const [form, setForm] = useState({
+    contactId: "",
+    bank: "Banco Master",
+    agreement: "FGTS",
+    product: "Antecipacao FGTS",
+    amount: "",
+    commission: "",
+    status: "DRAFT" as ProposalStatus
+  });
+  const [editForm, setEditForm] = useState({
+    bank: "",
+    agreement: "",
+    product: "",
+    amount: "",
+    commission: "",
+    status: "DRAFT" as ProposalStatus
+  });
+
+  const selectedContactId = form.contactId || contacts[0]?.id || "";
+  const statusOptions = Object.entries(proposalStatusLabels) as Array<
+    [ProposalStatus, string]
+  >;
+  const stats = [
+    {
+      label: "Carteira ativa",
+      value: formatCurrency(metrics.totalAmount),
+      icon: CircleDollarSign
+    },
+    {
+      label: "Em formalizacao",
+      value: formatCurrency(metrics.formalizingAmount),
+      icon: Clock3
+    },
+    {
+      label: "Comissao prevista",
+      value: formatCurrency(metrics.commissionForecast),
+      icon: Banknote
+    },
+    {
+      label: "Ticket medio",
+      value: formatCurrency(metrics.ticketAverage),
+      icon: FileText
+    }
+  ];
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedContactId) return;
+
+    await onCreateProposal({ ...form, contactId: selectedContactId });
+    setForm((current) => ({
+      ...current,
+      amount: "",
+      commission: "",
+      contactId: selectedContactId
+    }));
+    setShowForm(false);
+  }
+
+  function startEdit(proposal: ProposalRow) {
+    setEditingProposalId(proposal.id);
+    setEditForm({
+      bank: proposal.bank,
+      agreement: proposal.agreement,
+      product: proposal.product,
+      amount: proposal.amount,
+      commission: proposal.commission,
+      status: proposal.status
+    });
+  }
+
+  async function handleEditSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingProposalId) return;
+
+    await onUpdateProposal(editingProposalId, editForm);
+    setEditingProposalId(null);
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-4 md:grid-cols-4">
+        {stats.map((stat) => {
+          const Icon = stat.icon;
+          return (
+            <div key={stat.label} className="rounded border border-line bg-white p-5 shadow-soft">
+              <Icon className="h-5 w-5 text-brand" />
+              <p className="mt-4 text-sm text-slate-500">{stat.label}</p>
+              <strong className="mt-2 block text-2xl">{stat.value}</strong>
+            </div>
+          );
+        })}
+      </div>
+      <section className="rounded border border-line bg-white p-5 shadow-soft">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h3 className="text-lg font-bold">Esteira de propostas</h3>
+            <p className="text-sm text-slate-500">
+              {loading ? "Carregando propostas..." : `${metrics.count} proposta(s) ativa(s)`}
+            </p>
+          </div>
+          <button
+            className="flex h-10 items-center gap-2 rounded bg-brand px-3 text-sm font-semibold text-white"
+            onClick={() => setShowForm((current) => !current)}
+          >
+            <Plus className="h-4 w-4" />
+            Nova proposta
+          </button>
+        </div>
+
+        {showForm && (
+          <form
+            className="mt-5 grid gap-3 rounded border border-line bg-slate-50 p-4 md:grid-cols-3"
+            onSubmit={handleSubmit}
+          >
+            <select
+              className="h-10 rounded border border-line px-3 text-sm outline-none"
+              value={selectedContactId}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, contactId: event.target.value }))
+              }
+            >
+              {contacts.map((contact) => (
+                <option key={contact.id} value={contact.id}>
+                  {contact.name} - {contact.phone}
+                </option>
+              ))}
+            </select>
+            <ContactInput
+              placeholder="Banco"
+              required
+              value={form.bank}
+              onChange={(value) => setForm((current) => ({ ...current, bank: value }))}
+            />
+            <ContactInput
+              placeholder="Convenio"
+              required
+              value={form.agreement}
+              onChange={(value) =>
+                setForm((current) => ({ ...current, agreement: value }))
+              }
+            />
+            <ContactInput
+              placeholder="Produto"
+              required
+              value={form.product}
+              onChange={(value) =>
+                setForm((current) => ({ ...current, product: value }))
+              }
+            />
+            <ContactInput
+              placeholder="Valor liberado"
+              required
+              value={form.amount}
+              onChange={(value) =>
+                setForm((current) => ({ ...current, amount: value }))
+              }
+            />
+            <ContactInput
+              placeholder="Comissao"
+              required
+              value={form.commission}
+              onChange={(value) =>
+                setForm((current) => ({ ...current, commission: value }))
+              }
+            />
+            <select
+              className="h-10 rounded border border-line px-3 text-sm outline-none"
+              value={form.status}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  status: event.target.value as ProposalStatus
+                }))
+              }
+            >
+              {statusOptions.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <button
+              className="h-10 rounded bg-brand px-4 text-sm font-semibold text-white disabled:opacity-50 md:col-span-2"
+              disabled={!selectedContactId}
+            >
+              Salvar proposta
+            </button>
+          </form>
+        )}
+
+        <div className="mt-5 flex flex-col gap-3 md:flex-row">
+          <label className="flex h-10 flex-1 items-center gap-2 rounded border border-line px-3">
+            <Search className="h-4 w-4 text-slate-400" />
+            <input
+              className="w-full bg-transparent text-sm outline-none"
+              placeholder="Buscar por cliente, banco, CPF ou produto"
+              value={filters.search}
+              onChange={(event) =>
+                onFiltersChange({ ...filters, search: event.target.value })
+              }
+            />
+          </label>
+          <select
+            className="h-10 rounded border border-line px-3 text-sm outline-none"
+            value={filters.status}
+            onChange={(event) => onFiltersChange({ ...filters, status: event.target.value })}
+          >
+            <option value="">Todos os status</option>
+            {statusOptions.map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {editingProposalId && (
+          <form
+            className="mt-5 grid gap-3 rounded border border-brand bg-teal-50 p-4 md:grid-cols-3"
+            onSubmit={handleEditSubmit}
+          >
+            <div className="md:col-span-3">
+              <p className="text-sm font-semibold text-brand">Editando proposta</p>
+              <p className="text-xs text-slate-600">
+                Ajuste banco, produto, valores ou status e salve a alteracao.
+              </p>
+            </div>
+            <ContactInput
+              placeholder="Banco"
+              required
+              value={editForm.bank}
+              onChange={(value) =>
+                setEditForm((current) => ({ ...current, bank: value }))
+              }
+            />
+            <ContactInput
+              placeholder="Convenio"
+              required
+              value={editForm.agreement}
+              onChange={(value) =>
+                setEditForm((current) => ({ ...current, agreement: value }))
+              }
+            />
+            <ContactInput
+              placeholder="Produto"
+              required
+              value={editForm.product}
+              onChange={(value) =>
+                setEditForm((current) => ({ ...current, product: value }))
+              }
+            />
+            <ContactInput
+              placeholder="Valor liberado"
+              required
+              value={editForm.amount}
+              onChange={(value) =>
+                setEditForm((current) => ({ ...current, amount: value }))
+              }
+            />
+            <ContactInput
+              placeholder="Comissao"
+              required
+              value={editForm.commission}
+              onChange={(value) =>
+                setEditForm((current) => ({ ...current, commission: value }))
+              }
+            />
+            <select
+              className="h-10 rounded border border-line px-3 text-sm outline-none"
+              value={editForm.status}
+              onChange={(event) =>
+                setEditForm((current) => ({
+                  ...current,
+                  status: event.target.value as ProposalStatus
+                }))
+              }
+            >
+              {statusOptions.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <button className="flex h-10 items-center justify-center gap-2 rounded bg-brand px-4 text-sm font-semibold text-white">
+              <Check className="h-4 w-4" />
+              Salvar alteracoes
+            </button>
+            <button
+              className="flex h-10 items-center justify-center gap-2 rounded border border-line bg-white px-4 text-sm font-semibold"
+              onClick={() => setEditingProposalId(null)}
+              type="button"
+            >
+              <X className="h-4 w-4" />
+              Cancelar edicao
+            </button>
+          </form>
+        )}
+
+        <div className="mt-5 overflow-hidden rounded border border-line">
+          <div className="hidden grid-cols-[1.2fr_1fr_1fr_0.8fr_0.8fr_0.7fr] bg-slate-50 px-4 py-3 text-xs font-semibold uppercase text-slate-500 md:grid">
+            <span>Cliente</span>
+            <span>Produto</span>
+            <span>Banco</span>
+            <span>Valores</span>
+            <span>Status</span>
+            <span>Acoes</span>
+          </div>
+          <div className="divide-y divide-line">
+            {proposals.map((proposal) => (
+              <div
+                key={proposal.id}
+                className={clsx(
+                  "grid gap-3 px-4 py-4 text-sm md:grid-cols-[1.2fr_1fr_1fr_0.8fr_0.8fr_0.7fr]",
+                  editingProposalId === proposal.id && "bg-teal-50"
+                )}
+              >
+                <div>
+                  <p className="font-semibold">{proposal.contact.name}</p>
+                  <p className="text-xs text-slate-500">
+                    {proposal.contact.phone} {proposal.contact.cpf ? `- ${proposal.contact.cpf}` : ""}
+                  </p>
+                </div>
+                <div>
+                  <p className="font-medium">{proposal.product}</p>
+                  <p className="text-xs text-slate-500">{proposal.agreement}</p>
+                </div>
+                <div>
+                  <p>{proposal.bank}</p>
+                  <p className="text-xs text-slate-500">
+                    Criada {formatRelativeDate(proposal.createdAt)}
+                  </p>
+                </div>
+                <div>
+                  <p className="font-semibold">{formatCurrency(proposal.amount)}</p>
+                  <p className="text-xs text-slate-500">
+                    Comissao {formatCurrency(proposal.commission)}
+                  </p>
+                </div>
+                <select
+                  className={clsx(
+                    "h-9 rounded border px-2 text-xs font-semibold outline-none",
+                    proposal.status === "PAID" && "border-emerald-200 bg-emerald-50 text-emerald-700",
+                    proposal.status === "FORMALIZING" && "border-amber-200 bg-amber-50 text-amber-700",
+                    proposal.status === "CANCELED" && "border-rose-200 bg-rose-50 text-rose-700",
+                    proposal.status === "REWORK" && "border-orange-200 bg-orange-50 text-orange-700",
+                    proposal.status === "DRAFT" && "border-line bg-white text-slate-700"
+                  )}
+                  value={proposal.status}
+                  onChange={(event) =>
+                    void onUpdateProposal(proposal.id, {
+                      status: event.target.value as ProposalStatus
+                    })
+                  }
+                >
+                  {statusOptions.map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+                <div className="flex items-center gap-2">
+                  <button
+                    className="grid h-9 w-9 place-items-center rounded border border-line text-slate-600 hover:bg-slate-50"
+                    onClick={() => startEdit(proposal)}
+                    title="Editar proposta"
+                    type="button"
+                  >
+                    <Edit3 className="h-4 w-4" />
+                  </button>
+                  <button
+                    className="grid h-9 w-9 place-items-center rounded border border-rose-200 text-rose-600 hover:bg-rose-50"
+                    onClick={() => {
+                      if (window.confirm("Remover esta proposta da esteira?")) {
+                        void onDeleteProposal(proposal.id);
+                      }
+                    }}
+                    title="Remover proposta"
+                    type="button"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+            {!loading && proposals.length === 0 && (
+              <div className="p-6 text-sm text-slate-500">
+                Nenhuma proposta encontrada.
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function Canais({
+  channels,
+  loading,
+  onCreateChannel,
+  onSimulateInbound
+}: {
+  channels: ChannelRow[];
+  loading: boolean;
+  onCreateChannel: (payload: {
+    name: string;
+    displayPhone: string;
+    phoneNumberId: string;
+    wabaId: string;
+    accessToken: string;
+    verifyToken: string;
+    appSecret: string;
+  }) => Promise<void>;
+  onSimulateInbound: (payload: {
+    channelId: string;
+    name: string;
+    phone: string;
+    message: string;
+  }) => Promise<void>;
+}) {
+  const [form, setForm] = useState({
+    channelId: "",
+    name: "Cliente Sandbox",
+    phone: "11999990000",
+    message: "Oi, vi o anuncio e quero saber se consigo simular hoje."
+  });
+  const [channelForm, setChannelForm] = useState({
+    name: "",
+    displayPhone: "",
+    phoneNumberId: "",
+    wabaId: "",
+    accessToken: "",
+    verifyToken: "",
+    appSecret: ""
+  });
+
+  const selectedChannelId = form.channelId || channels[0]?.id || "";
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await onSimulateInbound({ ...form, channelId: selectedChannelId });
+  }
+
+  async function handleCreate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await onCreateChannel(channelForm);
+    setChannelForm({
+      name: "",
+      displayPhone: "",
+      phoneNumberId: "",
+      wabaId: "",
+      accessToken: "",
+      verifyToken: "",
+      appSecret: ""
+    });
+  }
+
+  return (
+    <div className="grid gap-4 xl:grid-cols-[1fr_420px]">
+      <div className="space-y-4">
+        <section className="rounded border border-line bg-white p-5 shadow-soft">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-bold">Adicionar WhatsApp Meta</h3>
+              <p className="text-sm text-slate-500">
+                Cadastre um numero da Cloud API por canal. O roteamento usa o Phone Number ID.
+              </p>
+            </div>
+            <Plus className="h-5 w-5 text-slate-400" />
+          </div>
+
+          <form className="mt-5 grid gap-3 lg:grid-cols-2" onSubmit={handleCreate}>
+            <ContactInput
+              placeholder="Nome do canal"
+              required
+              value={channelForm.name}
+              onChange={(value) =>
+                setChannelForm((current) => ({ ...current, name: value }))
+              }
+            />
+            <ContactInput
+              placeholder="Telefone exibido"
+              value={channelForm.displayPhone}
+              onChange={(value) =>
+                setChannelForm((current) => ({ ...current, displayPhone: value }))
+              }
+            />
+            <ContactInput
+              placeholder="Phone Number ID"
+              required
+              value={channelForm.phoneNumberId}
+              onChange={(value) =>
+                setChannelForm((current) => ({ ...current, phoneNumberId: value }))
+              }
+            />
+            <ContactInput
+              placeholder="WABA ID"
+              value={channelForm.wabaId}
+              onChange={(value) =>
+                setChannelForm((current) => ({ ...current, wabaId: value }))
+              }
+            />
+            <ContactInput
+              placeholder="Access token"
+              required
+              value={channelForm.accessToken}
+              onChange={(value) =>
+                setChannelForm((current) => ({ ...current, accessToken: value }))
+              }
+            />
+            <ContactInput
+              placeholder="Verify token"
+              required
+              value={channelForm.verifyToken}
+              onChange={(value) =>
+                setChannelForm((current) => ({ ...current, verifyToken: value }))
+              }
+            />
+            <ContactInput
+              placeholder="App secret"
+              value={channelForm.appSecret}
+              onChange={(value) =>
+                setChannelForm((current) => ({ ...current, appSecret: value }))
+              }
+            />
+            <button className="h-10 rounded bg-brand px-4 text-sm font-semibold text-white">
+              Cadastrar canal Meta
+            </button>
+          </form>
+        </section>
+
+        <section className="rounded border border-line bg-white p-5 shadow-soft">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-bold">Canais conectados</h3>
+            <p className="text-sm text-slate-500">
+              WhatsApp Meta, sandbox, webhooks e filas de atendimento.
+            </p>
+          </div>
+          <span className="rounded border border-line px-3 py-2 text-sm text-slate-600">
+            {loading ? "Carregando..." : `${channels.length} canal(is)`}
+          </span>
+        </div>
+        <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {channels.map((channel) => (
+            <div key={channel.id} className="rounded border border-line p-4">
+              <div className="flex items-center justify-between gap-3">
+                <p className="font-semibold">{channel.name}</p>
+                <span
+                  className={clsx(
+                    "rounded px-2 py-1 text-xs font-semibold",
+                    channel.status === "ACTIVE"
+                      ? "bg-emerald-50 text-emerald-700"
+                      : "bg-slate-100 text-slate-600"
+                  )}
+                >
+                  {channel.status === "ACTIVE" ? "Ativo" : channel.status}
+                </span>
+              </div>
+              <p className="mt-2 text-sm text-slate-600">
+                {channel.provider === "meta" ? "Meta Cloud API" : channel.provider} -{" "}
+                {channel.type}
+              </p>
+              <p className="mt-2 text-xs text-slate-500">
+                Telefone: {channel.displayPhone ?? "nao informado"}
+              </p>
+              <p className="mt-1 break-all text-xs text-slate-500">
+                Phone ID: {channel.phoneNumberId ?? channel.externalId ?? "nao informado"}
+              </p>
+              {channel.wabaId && (
+                <p className="mt-1 break-all text-xs text-slate-500">
+                  WABA: {channel.wabaId}
+                </p>
+              )}
+              <div className="mt-3 flex flex-wrap gap-2">
+                {[
+                  ["Token", channel.hasAccessToken],
+                  ["Verify", channel.hasVerifyToken],
+                  ["Assinatura", channel.hasAppSecret]
+                ].map(([label, enabled]) => (
+                  <span
+                    key={String(label)}
+                    className={clsx(
+                      "rounded px-2 py-1 text-xs font-semibold",
+                      enabled
+                        ? "bg-emerald-50 text-emerald-700"
+                        : "bg-slate-100 text-slate-500"
+                    )}
+                  >
+                    {label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+          {!loading && channels.length === 0 && (
+            <div className="rounded border border-dashed border-line p-4 text-sm text-slate-500">
+              Nenhum canal configurado.
+            </div>
+          )}
+        </div>
+      </section>
+      </div>
+
+      <section className="rounded border border-line bg-white p-5 shadow-soft">
+        <div className="flex items-center gap-2">
+          <MessageSquareText className="h-5 w-5 text-brand" />
+          <h3 className="font-bold">Simular WhatsApp recebido</h3>
+        </div>
+        <p className="mt-2 text-sm text-slate-500">
+          A mensagem entra pelo mesmo fluxo do webhook e aparece no Atendimento.
+        </p>
+
+        <form className="mt-5 space-y-3" onSubmit={handleSubmit}>
+          <select
+            className="h-10 w-full rounded border border-line px-3 outline-none"
+            value={selectedChannelId}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, channelId: event.target.value }))
+            }
+          >
+            {channels.map((channel) => (
+              <option key={channel.id} value={channel.id}>
+                {channel.name}
+              </option>
+            ))}
+          </select>
+          <ContactInput
+            placeholder="Nome"
+            value={form.name}
+            onChange={(value) => setForm((current) => ({ ...current, name: value }))}
+          />
+          <ContactInput
+            placeholder="Telefone"
+            required
+            value={form.phone}
+            onChange={(value) => setForm((current) => ({ ...current, phone: value }))}
+          />
+          <textarea
+            className="min-h-28 w-full rounded border border-line p-3 text-sm outline-none"
+            required
+            value={form.message}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, message: event.target.value }))
+            }
+            placeholder="Mensagem recebida"
+          />
+          <button
+            className="h-10 w-full rounded bg-brand px-4 text-sm font-semibold text-white disabled:opacity-50"
+            disabled={!selectedChannelId}
+          >
+            Receber mensagem sandbox
+          </button>
+        </form>
+
+        <div className="mt-5 rounded border border-line bg-slate-50 p-3 text-xs text-slate-600">
+          Webhook local: <span className="font-semibold">/api/webhooks/whatsapp</span>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function Chatbot() {
+  return (
+    <section className="rounded border border-line bg-white p-5 shadow-soft">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-bold">Construtor de chatbot</h3>
+          <p className="text-sm text-slate-500">Fluxos, perguntas, tags e follow-up automatico.</p>
+        </div>
+        <button className="rounded bg-brand px-4 py-2 text-sm font-semibold text-white">
+          Novo fluxo
+        </button>
+      </div>
+      <div className="mt-5 grid gap-4 md:grid-cols-3">
+        {["Qualificacao", "Follow-up por tag", "Transferencia para agente"].map((flow) => (
+          <div key={flow} className="rounded border border-line p-4">
+            <p className="font-semibold">{flow}</p>
+            <p className="mt-2 text-sm text-slate-600">Blocos preparados para a proxima etapa.</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function Configuracoes({
+  reference,
+  onCreateOrigin,
+  onCreateStage,
+  onCreateTag,
+  onCreateUser,
+  onDeleteOrigin,
+  onDeleteStage,
+  onDeleteTag,
+  onDeleteUser,
+  onUpdateOrigin,
+  onUpdateStage,
+  onUpdateTag,
+  onUpdateUser
+}: {
+  reference: ReferenceData;
+  onCreateOrigin: (name: string) => Promise<void>;
+  onCreateStage: (payload: {
+    name: string;
+    color: string;
+    position: number;
+  }) => Promise<void>;
+  onCreateTag: (payload: { name: string; color: string }) => Promise<void>;
+  onCreateUser: (payload: {
+    name: string;
+    email: string;
+    password: string;
+    role: UserRole;
+  }) => Promise<void>;
+  onDeleteOrigin: (id: string) => Promise<void>;
+  onDeleteStage: (id: string) => Promise<void>;
+  onDeleteTag: (id: string) => Promise<void>;
+  onDeleteUser: (id: string) => Promise<void>;
+  onUpdateOrigin: (id: string, name: string) => Promise<void>;
+  onUpdateStage: (
+    id: string,
+    payload: { name: string; color: string; position: number }
+  ) => Promise<void>;
+  onUpdateTag: (id: string, payload: { name: string; color: string }) => Promise<void>;
+  onUpdateUser: (
+    id: string,
+    payload: { name: string; email: string; password?: string; role: UserRole }
+  ) => Promise<void>;
+}) {
+  const [originName, setOriginName] = useState("");
+  const [editingOrigin, setEditingOrigin] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [stageForm, setStageForm] = useState({
+    name: "",
+    color: "#0f766e",
+    position: reference.stages.length + 1
+  });
+  const [editingStage, setEditingStage] = useState<{
+    id: string;
+    name: string;
+    color: string;
+    position: number;
+  } | null>(null);
+  const [tagForm, setTagForm] = useState({
+    name: "",
+    color: "#0f766e"
+  });
+  const [editingTag, setEditingTag] = useState<{
+    id: string;
+    name: string;
+    color: string;
+  } | null>(null);
+  const [userForm, setUserForm] = useState({
+    name: "",
+    email: "",
+    password: "",
+    role: "AGENT" as UserRole
+  });
+  const [editingUser, setEditingUser] = useState<{
+    id: string;
+    name: string;
+    email: string;
+    password: string;
+    role: UserRole;
+  } | null>(null);
+
+  useEffect(() => {
+    setStageForm((current) => ({
+      ...current,
+      position: current.name ? current.position : reference.stages.length + 1
+    }));
+  }, [reference.stages.length]);
+
+  async function submitOrigin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!originName.trim()) return;
+
+    await onCreateOrigin(originName);
+    setOriginName("");
+  }
+
+  async function submitStage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!stageForm.name.trim()) return;
+
+    await onCreateStage(stageForm);
+    setStageForm({
+      name: "",
+      color: "#0f766e",
+      position: reference.stages.length + 2
+    });
+  }
+
+  async function submitUser(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!userForm.name.trim() || !userForm.email.trim() || !userForm.password) return;
+
+    await onCreateUser(userForm);
+    setUserForm({ name: "", email: "", password: "", role: "AGENT" });
+  }
+
+  async function submitTag(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!tagForm.name.trim()) return;
+
+    await onCreateTag(tagForm);
+    setTagForm({ name: "", color: "#0f766e" });
+  }
+
+  return (
+    <div className="grid gap-6 xl:grid-cols-3">
+      <section className="rounded border border-line bg-white p-5 shadow-soft">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-bold">Equipe</h3>
+            <p className="text-sm text-slate-500">
+              Usuarios, funcoes e responsaveis comerciais.
+            </p>
+          </div>
+          <SlidersHorizontal className="h-5 w-5 text-slate-400" />
+        </div>
+
+        <form className="mt-5 grid gap-2" onSubmit={submitUser}>
+          <ContactInput
+            placeholder="Nome"
+            required
+            value={userForm.name}
+            onChange={(name) => setUserForm((current) => ({ ...current, name }))}
+          />
+          <ContactInput
+            placeholder="Email"
+            required
+            type="email"
+            value={userForm.email}
+            onChange={(email) => setUserForm((current) => ({ ...current, email }))}
+          />
+          <div className="grid gap-2 md:grid-cols-[1fr_140px_40px]">
+            <ContactInput
+              placeholder="Senha inicial"
+              required
+              type="password"
+              value={userForm.password}
+              onChange={(password) =>
+                setUserForm((current) => ({ ...current, password }))
+              }
+            />
+            <select
+              className="h-10 rounded border border-line px-3 text-sm outline-none"
+              value={userForm.role}
+              onChange={(event) =>
+                setUserForm((current) => ({
+                  ...current,
+                  role: event.target.value as UserRole
+                }))
+              }
+            >
+              <option value="AGENT">Agente</option>
+              <option value="SUPERVISOR">Supervisor</option>
+              <option value="ADMIN">Admin</option>
+            </select>
+            <button className="grid h-10 w-10 place-items-center rounded bg-brand text-white">
+              <Plus className="h-4 w-4" />
+            </button>
+          </div>
+        </form>
+
+        <div className="mt-5 divide-y divide-line rounded border border-line">
+          {reference.users.map((user) => (
+            <div key={user.id} className="p-3">
+              {editingUser?.id === user.id ? (
+                <form
+                  className="grid gap-2"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void onUpdateUser(user.id, {
+                      name: editingUser.name,
+                      email: editingUser.email,
+                      role: editingUser.role,
+                      ...(editingUser.password ? { password: editingUser.password } : {})
+                    }).then(() => setEditingUser(null));
+                  }}
+                >
+                  <ContactInput
+                    placeholder="Nome"
+                    required
+                    value={editingUser.name}
+                    onChange={(name) =>
+                      setEditingUser((current) =>
+                        current ? { ...current, name } : current
+                      )
+                    }
+                  />
+                  <ContactInput
+                    placeholder="Email"
+                    required
+                    type="email"
+                    value={editingUser.email}
+                    onChange={(email) =>
+                      setEditingUser((current) =>
+                        current ? { ...current, email } : current
+                      )
+                    }
+                  />
+                  <ContactInput
+                    placeholder="Nova senha opcional"
+                    type="password"
+                    value={editingUser.password}
+                    onChange={(password) =>
+                      setEditingUser((current) =>
+                        current ? { ...current, password } : current
+                      )
+                    }
+                  />
+                  <div className="grid gap-2 md:grid-cols-[1fr_40px_40px]">
+                    <select
+                      className="h-10 rounded border border-line px-3 text-sm outline-none"
+                      value={editingUser.role}
+                      onChange={(event) =>
+                        setEditingUser((current) =>
+                          current
+                            ? { ...current, role: event.target.value as UserRole }
+                            : current
+                        )
+                      }
+                    >
+                      <option value="AGENT">Agente</option>
+                      <option value="SUPERVISOR">Supervisor</option>
+                      <option value="ADMIN">Admin</option>
+                    </select>
+                    <button className="grid h-10 w-10 place-items-center rounded bg-brand text-white">
+                      <Check className="h-4 w-4" />
+                    </button>
+                    <button
+                      className="grid h-10 w-10 place-items-center rounded border border-line"
+                      onClick={() => setEditingUser(null)}
+                      type="button"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{user.name}</p>
+                    <p className="truncate text-xs text-slate-500">{user.email}</p>
+                    <span className="mt-2 inline-flex rounded bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
+                      {user.role === "ADMIN"
+                        ? "Admin"
+                        : user.role === "SUPERVISOR"
+                          ? "Supervisor"
+                          : "Agente"}
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      className="grid h-9 w-9 place-items-center rounded border border-line text-slate-600"
+                      onClick={() =>
+                        setEditingUser({
+                          id: user.id,
+                          name: user.name,
+                          email: user.email,
+                          password: "",
+                          role: user.role
+                        })
+                      }
+                      type="button"
+                    >
+                      <Edit3 className="h-4 w-4" />
+                    </button>
+                    <button
+                      className="grid h-9 w-9 place-items-center rounded border border-rose-200 text-rose-600"
+                      onClick={() => {
+                        if (window.confirm("Remover este usuario da equipe?")) {
+                          void onDeleteUser(user.id);
+                        }
+                      }}
+                      type="button"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="rounded border border-line bg-white p-5 shadow-soft">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-bold">Tags de segmentacao</h3>
+            <p className="text-sm text-slate-500">
+              Classificam contatos para filtros e follow-up.
+            </p>
+          </div>
+          <Tags className="h-5 w-5 text-slate-400" />
+        </div>
+
+        <form className="mt-5 grid gap-2 md:grid-cols-[1fr_88px_40px]" onSubmit={submitTag}>
+          <ContactInput
+            placeholder="Nova tag"
+            required
+            value={tagForm.name}
+            onChange={(name) => setTagForm((current) => ({ ...current, name }))}
+          />
+          <input
+            className="h-10 rounded border border-line px-2 outline-none"
+            type="color"
+            value={tagForm.color}
+            onChange={(event) =>
+              setTagForm((current) => ({ ...current, color: event.target.value }))
+            }
+          />
+          <button className="grid h-10 w-10 place-items-center rounded bg-brand text-white">
+            <Plus className="h-4 w-4" />
+          </button>
+        </form>
+
+        <div className="mt-5 divide-y divide-line rounded border border-line">
+          {reference.tags.map((tag) => (
+            <div key={tag.id} className="p-3">
+              {editingTag?.id === tag.id ? (
+                <form
+                  className="grid gap-2 md:grid-cols-[1fr_88px_40px_40px]"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void onUpdateTag(tag.id, editingTag).then(() => setEditingTag(null));
+                  }}
+                >
+                  <ContactInput
+                    placeholder="Tag"
+                    required
+                    value={editingTag.name}
+                    onChange={(name) =>
+                      setEditingTag((current) =>
+                        current ? { ...current, name } : current
+                      )
+                    }
+                  />
+                  <input
+                    className="h-10 rounded border border-line px-2 outline-none"
+                    type="color"
+                    value={editingTag.color}
+                    onChange={(event) =>
+                      setEditingTag((current) =>
+                        current ? { ...current, color: event.target.value } : current
+                      )
+                    }
+                  />
+                  <button className="grid h-10 w-10 place-items-center rounded bg-brand text-white">
+                    <Check className="h-4 w-4" />
+                  </button>
+                  <button
+                    className="grid h-10 w-10 place-items-center rounded border border-line"
+                    onClick={() => setEditingTag(null)}
+                    type="button"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </form>
+              ) : (
+                <div className="flex items-center justify-between gap-3">
+                  <span
+                    className="rounded px-2 py-1 text-xs font-semibold text-white"
+                    style={{ backgroundColor: tag.color }}
+                  >
+                    {tag.name}
+                  </span>
+                  <div className="flex gap-2">
+                    <button
+                      className="grid h-9 w-9 place-items-center rounded border border-line text-slate-600"
+                      onClick={() => setEditingTag(tag)}
+                      type="button"
+                    >
+                      <Edit3 className="h-4 w-4" />
+                    </button>
+                    <button
+                      className="grid h-9 w-9 place-items-center rounded border border-rose-200 text-rose-600"
+                      onClick={() => {
+                        if (window.confirm("Remover esta tag dos contatos?")) {
+                          void onDeleteTag(tag.id);
+                        }
+                      }}
+                      type="button"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+          {reference.tags.length === 0 && (
+            <div className="p-3 text-sm text-slate-500">Nenhuma tag configurada.</div>
+          )}
+        </div>
+      </section>
+
+      <section className="rounded border border-line bg-white p-5 shadow-soft">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-bold">Origens dos leads</h3>
+            <p className="text-sm text-slate-500">
+              Usadas nos contatos, filtros e Dashboard.
+            </p>
+          </div>
+          <SlidersHorizontal className="h-5 w-5 text-slate-400" />
+        </div>
+
+        <form className="mt-5 flex gap-2" onSubmit={submitOrigin}>
+          <ContactInput
+            placeholder="Nova origem"
+            required
+            value={originName}
+            onChange={setOriginName}
+          />
+          <button className="grid h-10 w-10 shrink-0 place-items-center rounded bg-brand text-white">
+            <Plus className="h-4 w-4" />
+          </button>
+        </form>
+
+        <div className="mt-5 divide-y divide-line rounded border border-line">
+          {reference.origins.map((origin) => (
+            <div key={origin.id} className="p-3">
+              {editingOrigin?.id === origin.id ? (
+                <form
+                  className="flex gap-2"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void onUpdateOrigin(origin.id, editingOrigin.name).then(() =>
+                      setEditingOrigin(null)
+                    );
+                  }}
+                >
+                  <ContactInput
+                    placeholder="Origem"
+                    required
+                    value={editingOrigin.name}
+                    onChange={(name) =>
+                      setEditingOrigin((current) =>
+                        current ? { ...current, name } : current
+                      )
+                    }
+                  />
+                  <button className="grid h-10 w-10 shrink-0 place-items-center rounded bg-brand text-white">
+                    <Check className="h-4 w-4" />
+                  </button>
+                  <button
+                    className="grid h-10 w-10 shrink-0 place-items-center rounded border border-line"
+                    onClick={() => setEditingOrigin(null)}
+                    type="button"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </form>
+              ) : (
+                <div className="flex items-center justify-between gap-3">
+                  <p className="font-medium">{origin.name}</p>
+                  <div className="flex gap-2">
+                    <button
+                      className="grid h-9 w-9 place-items-center rounded border border-line text-slate-600"
+                      onClick={() => setEditingOrigin(origin)}
+                      type="button"
+                    >
+                      <Edit3 className="h-4 w-4" />
+                    </button>
+                    <button
+                      className="grid h-9 w-9 place-items-center rounded border border-rose-200 text-rose-600"
+                      onClick={() => {
+                        if (window.confirm("Remover esta origem dos filtros?")) {
+                          void onDeleteOrigin(origin.id);
+                        }
+                      }}
+                      type="button"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="rounded border border-line bg-white p-5 shadow-soft">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-bold">Etapas do funil</h3>
+            <p className="text-sm text-slate-500">
+              Controlam o Kanban, a ficha do cliente e a criacao de propostas.
+            </p>
+          </div>
+          <SlidersHorizontal className="h-5 w-5 text-slate-400" />
+        </div>
+
+        <form className="mt-5 grid gap-2 md:grid-cols-[1fr_88px_96px_40px]" onSubmit={submitStage}>
+          <ContactInput
+            placeholder="Nova etapa"
+            required
+            value={stageForm.name}
+            onChange={(name) => setStageForm((current) => ({ ...current, name }))}
+          />
+          <input
+            className="h-10 rounded border border-line px-2 outline-none"
+            type="color"
+            value={stageForm.color}
+            onChange={(event) =>
+              setStageForm((current) => ({ ...current, color: event.target.value }))
+            }
+          />
+          <input
+            className="h-10 rounded border border-line px-3 text-sm outline-none"
+            min={1}
+            type="number"
+            value={stageForm.position}
+            onChange={(event) =>
+              setStageForm((current) => ({
+                ...current,
+                position: Number(event.target.value)
+              }))
+            }
+          />
+          <button className="grid h-10 w-10 place-items-center rounded bg-brand text-white">
+            <Plus className="h-4 w-4" />
+          </button>
+        </form>
+
+        <div className="mt-5 divide-y divide-line rounded border border-line">
+          {reference.stages.map((stage) => (
+            <div key={stage.id} className="p-3">
+              {editingStage?.id === stage.id ? (
+                <form
+                  className="grid gap-2 md:grid-cols-[1fr_88px_96px_40px_40px]"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void onUpdateStage(stage.id, editingStage).then(() =>
+                      setEditingStage(null)
+                    );
+                  }}
+                >
+                  <ContactInput
+                    placeholder="Etapa"
+                    required
+                    value={editingStage.name}
+                    onChange={(name) =>
+                      setEditingStage((current) =>
+                        current ? { ...current, name } : current
+                      )
+                    }
+                  />
+                  <input
+                    className="h-10 rounded border border-line px-2 outline-none"
+                    type="color"
+                    value={editingStage.color}
+                    onChange={(event) =>
+                      setEditingStage((current) =>
+                        current ? { ...current, color: event.target.value } : current
+                      )
+                    }
+                  />
+                  <input
+                    className="h-10 rounded border border-line px-3 text-sm outline-none"
+                    min={1}
+                    type="number"
+                    value={editingStage.position}
+                    onChange={(event) =>
+                      setEditingStage((current) =>
+                        current
+                          ? { ...current, position: Number(event.target.value) }
+                          : current
+                      )
+                    }
+                  />
+                  <button className="grid h-10 w-10 place-items-center rounded bg-brand text-white">
+                    <Check className="h-4 w-4" />
+                  </button>
+                  <button
+                    className="grid h-10 w-10 place-items-center rounded border border-line"
+                    onClick={() => setEditingStage(null)}
+                    type="button"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </form>
+              ) : (
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <span
+                      className="h-4 w-4 rounded"
+                      style={{ backgroundColor: stage.color ?? "#0f766e" }}
+                    />
+                    <div>
+                      <p className="font-medium">{stage.name}</p>
+                      <p className="text-xs text-slate-500">
+                        Posicao {stage.position ?? 0}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      className="grid h-9 w-9 place-items-center rounded border border-line text-slate-600"
+                      onClick={() =>
+                        setEditingStage({
+                          id: stage.id,
+                          name: stage.name,
+                          color: stage.color ?? "#0f766e",
+                          position: stage.position ?? 1
+                        })
+                      }
+                      type="button"
+                    >
+                      <Edit3 className="h-4 w-4" />
+                    </button>
+                    <button
+                      className="grid h-9 w-9 place-items-center rounded border border-rose-200 text-rose-600"
+                      onClick={() => {
+                        if (window.confirm("Remover esta etapa do funil?")) {
+                          void onDeleteStage(stage.id);
+                        }
+                      }}
+                      type="button"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function AiPanel({
+  compact = false,
+  analysis,
+  loading = false,
+  disabled = false,
+  onAnalyze
+}: {
+  compact?: boolean;
+  analysis?: AiAnalysis | null;
+  loading?: boolean;
+  disabled?: boolean;
+  onAnalyze?: () => void;
+}) {
+  return (
+    <aside className="rounded border border-line bg-white p-5 shadow-soft">
+      <div className="flex items-center gap-2">
+        <Sparkles className="h-5 w-5 text-saffron" />
+        <h3 className="font-bold">Copiloto IA</h3>
+      </div>
+      <p className="mt-2 text-sm text-slate-600">
+        {compact
+          ? "Sugestao para a conversa atual."
+          : "Analise do funil e proximas acoes recomendadas."}
+      </p>
+      {onAnalyze && (
+        <button
+          className="mt-4 h-10 w-full rounded bg-saffron px-3 text-sm font-semibold text-white disabled:opacity-50"
+          disabled={disabled || loading}
+          onClick={onAnalyze}
+        >
+          {loading ? "Analisando..." : "Gerar analise IA"}
+        </button>
+      )}
+      {analysis && (
+        <div className="mt-4 space-y-3 rounded border border-amber-200 bg-amber-50 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-semibold text-amber-950">
+              Lead {temperatureLabels[analysis.temperature]}
+            </p>
+            <span className="rounded bg-white px-2 py-1 text-xs text-amber-900">
+              {analysis.confidence}% confianca
+            </span>
+          </div>
+          <p className="text-sm text-amber-950">{analysis.summary}</p>
+          <p className="text-sm font-semibold text-amber-950">
+            {analysis.nextAction}
+          </p>
+          <p className="rounded bg-white p-2 text-sm text-slate-700">
+            {analysis.suggestedReply}
+          </p>
+        </div>
+      )}
+      <div className="mt-4 space-y-3">
+        {aiActions.slice(0, compact ? 2 : 4).map((action) => (
+          <div key={action} className="flex gap-3 rounded border border-line p-3">
+            <Check className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
+            <p className="text-sm text-slate-700">{action}</p>
+          </div>
+        ))}
+      </div>
+      <div className="mt-5 grid grid-cols-3 gap-2 text-center text-xs">
+        <Metric icon={<MessageSquareText className="h-4 w-4" />} label="Resumo" />
+        <Metric icon={<Tags className="h-4 w-4" />} label="Tags" />
+        <Metric icon={<ShieldCheck className="h-4 w-4" />} label="Risco" />
+      </div>
+    </aside>
+  );
+}
+
+function Metric({ icon, label }: { icon: React.ReactNode; label: string }) {
+  return (
+    <div className="grid place-items-center gap-1 rounded border border-line p-2 text-slate-600">
+      {icon}
+      {label}
+    </div>
+  );
+}
+
+function Info({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between gap-3">
+      <dt className="text-slate-500">{label}</dt>
+      <dd className="font-semibold">{value}</dd>
+    </div>
+  );
+}

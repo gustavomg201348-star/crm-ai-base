@@ -1,0 +1,212 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Company {
+  id          String    @id @default(cuid())
+  name        String
+  email       String?
+  phone       String?
+  segment     String?
+  createdAt   DateTime  @default(now())
+  users       User[]
+  contacts    Contact[]
+  channels    Channel[]
+  tags        Tag[]
+  stages      PipelineStage[]
+  origins     Origin[]
+  proposals   Proposal[]
+  tasks       Task[]
+}
+
+model Channel {
+  id          String   @id @default(cuid())
+  companyId   String
+  name        String
+  type        String   @default("whatsapp")
+  provider    String   @default("sandbox")
+  externalId  String?
+  phoneNumberId String?
+  wabaId      String?
+  displayPhone String?
+  accessToken String?
+  verifyToken String?
+  appSecret   String?
+  status      String   @default("ACTIVE")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  company     Company  @relation(fields: [companyId], references: [id])
+
+  @@index([companyId])
+}
+
+model User {
+  id        String   @id @default(cuid())
+  companyId String
+  name      String
+  email     String   @unique
+  passwordHash String
+  role      String   @default("AGENT")
+  avatar    String?
+  createdAt DateTime @default(now())
+  company   Company  @relation(fields: [companyId], references: [id])
+  contacts  Contact[]
+  conversations Conversation[]
+  activities ContactActivity[]
+  tasks     Task[]
+
+  @@index([companyId])
+}
+
+model Contact {
+  id          String          @id @default(cuid())
+  companyId   String
+  ownerId     String?
+  stageId     String?
+  originId    String?
+  name        String
+  phone       String
+  email       String?
+  cpf         String?
+  temperature String          @default("WARM")
+  lastMessage String?
+  archivedAt   DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  company     Company         @relation(fields: [companyId], references: [id])
+  owner       User?           @relation(fields: [ownerId], references: [id])
+  stage       PipelineStage?  @relation(fields: [stageId], references: [id])
+  origin      Origin?         @relation(fields: [originId], references: [id])
+  tags        ContactTag[]
+  conversations Conversation[]
+  proposals   Proposal[]
+  activities  ContactActivity[]
+  tasks       Task[]
+
+  @@index([companyId])
+  @@index([ownerId])
+  @@index([stageId])
+  @@index([originId])
+}
+
+model ContactActivity {
+  id        String   @id @default(cuid())
+  contactId String
+  userId    String?
+  type      String
+  title     String
+  detail    String?
+  createdAt DateTime @default(now())
+  contact   Contact  @relation(fields: [contactId], references: [id])
+  user      User?     @relation(fields: [userId], references: [id])
+
+  @@index([contactId])
+  @@index([userId])
+}
+
+model Task {
+  id          String    @id @default(cuid())
+  companyId   String
+  contactId   String
+  assigneeId  String?
+  title       String
+  note        String?
+  dueAt       DateTime
+  status      String    @default("PENDING")
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  company     Company   @relation(fields: [companyId], references: [id])
+  contact     Contact   @relation(fields: [contactId], references: [id])
+  assignee    User?     @relation(fields: [assigneeId], references: [id])
+
+  @@index([companyId])
+  @@index([contactId])
+  @@index([assigneeId])
+  @@index([dueAt])
+}
+
+model Tag {
+  id        String   @id @default(cuid())
+  companyId String
+  name      String
+  color     String
+  company   Company  @relation(fields: [companyId], references: [id])
+  contacts  ContactTag[]
+
+  @@index([companyId])
+}
+
+model ContactTag {
+  contactId String
+  tagId     String
+  contact   Contact @relation(fields: [contactId], references: [id])
+  tag       Tag     @relation(fields: [tagId], references: [id])
+
+  @@id([contactId, tagId])
+}
+
+model Origin {
+  id        String   @id @default(cuid())
+  companyId String
+  name      String
+  company   Company  @relation(fields: [companyId], references: [id])
+  contacts  Contact[]
+
+  @@index([companyId])
+}
+
+model PipelineStage {
+  id        String   @id @default(cuid())
+  companyId String
+  name      String
+  color     String
+  position  Int
+  company   Company  @relation(fields: [companyId], references: [id])
+  contacts  Contact[]
+
+  @@index([companyId])
+}
+
+model Conversation {
+  id        String             @id @default(cuid())
+  contactId String
+  agentId   String?
+  status    String             @default("OPEN")
+  channel   String             @default("whatsapp")
+  summary   String?
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  contact   Contact            @relation(fields: [contactId], references: [id])
+  agent     User?              @relation(fields: [agentId], references: [id])
+  messages  Message[]
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  direction      String
+  body           String
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+}
+
+model Proposal {
+  id          String         @id @default(cuid())
+  companyId   String
+  contactId   String
+  bank        String
+  agreement   String
+  product     String
+  amount      Decimal
+  commission  Decimal
+  status      String         @default("DRAFT")
+  createdAt   DateTime       @default(now())
+  company     Company        @relation(fields: [companyId], references: [id])
+  contact     Contact        @relation(fields: [contactId], references: [id])
+}

@@ -1,0 +1,13 @@
+node_modules/
+.next/
+prisma/dev.db
+*.log
+.env
+.env.local
+.env.production
+dev-server.err.log
+dev-server.log
+ngrok-error.log
+ngrok.log
+cloudflared.log
+npm-debug.log*
