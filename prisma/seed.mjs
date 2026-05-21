@@ -22,14 +22,21 @@ async function main() {
     }
   });
 
+  const adminPasswordHash = hashPassword(process.env.SEED_ADMIN_PASSWORD || "admin123");
+
   const admin = await prisma.user.upsert({
     where: { email: "admin@crm.local" },
-    update: {},
+    update: {
+      companyId: company.id,
+      name: "Administrador",
+      passwordHash: adminPasswordHash,
+      role: "ADMIN"
+    },
     create: {
       companyId: company.id,
       name: "Administrador",
       email: "admin@crm.local",
-      passwordHash: hashPassword("admin123"),
+      passwordHash: adminPasswordHash,
       role: "ADMIN"
     }
   });
