@@ -398,6 +398,7 @@ export default function Home() {
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notificationSidebarOpen, setNotificationSidebarOpen] = useState(false);
   const [desktopPermission, setDesktopPermission] = useState<
     NotificationPermission | "unsupported"
   >("unsupported");
@@ -644,6 +645,7 @@ export default function Home() {
 
       setNotifications((current) => [notification, ...current].slice(0, 20));
       setUnreadNotifications((current) => current + 1);
+      setNotificationSidebarOpen(true);
       showDesktopNotification(notification);
       void loadConversations(conversationFilters, { silent: true });
     },
@@ -689,6 +691,7 @@ export default function Home() {
         }
 
         if (!options.silent) {
+          setNotificationSidebarOpen(true);
           showDesktopNotification(notification);
         }
       }
@@ -1686,7 +1689,10 @@ export default function Home() {
             <div className="relative">
               <button
                 className="relative grid h-10 w-10 place-items-center rounded border border-line bg-white"
-                onClick={() => setNotificationsOpen((current) => !current)}
+                onClick={() => {
+                  setNotificationsOpen(false);
+                  setNotificationSidebarOpen(true);
+                }}
                 title="Notificacoes"
               >
                 <Bell className="h-4 w-4" />
@@ -1779,6 +1785,20 @@ export default function Home() {
             </button>
           </div>
         </header>
+
+        <NotificationSidebar
+          open={notificationSidebarOpen}
+          notifications={notifications}
+          unreadNotifications={unreadNotifications}
+          desktopPermission={desktopPermission}
+          onClose={() => setNotificationSidebarOpen(false)}
+          onRequestDesktopNotifications={requestDesktopNotifications}
+          onOpenNotification={(conversationId) => {
+            setNotificationSidebarOpen(false);
+            return openConversationById(conversationId);
+          }}
+          onMarkAllNotificationsRead={() => markNotificationsRead({ all: true })}
+        />
 
         <div className="p-4 md:p-8">
           {appError && (
@@ -2589,6 +2609,121 @@ function AtendimentoNotificationsPanel({
         ))}
       </div>
     </div>
+  );
+}
+
+function NotificationSidebar({
+  open,
+  notifications,
+  unreadNotifications,
+  desktopPermission,
+  onClose,
+  onRequestDesktopNotifications,
+  onOpenNotification,
+  onMarkAllNotificationsRead
+}: {
+  open: boolean;
+  notifications: NotificationRow[];
+  unreadNotifications: number;
+  desktopPermission: NotificationPermission | "unsupported";
+  onClose: () => void;
+  onRequestDesktopNotifications: () => Promise<void>;
+  onOpenNotification: (conversationId: string) => Promise<void>;
+  onMarkAllNotificationsRead: () => Promise<void>;
+}) {
+  return (
+    <aside
+      className={clsx(
+        "fixed right-4 top-24 z-40 w-[min(24rem,calc(100vw-2rem))] rounded border border-line bg-white shadow-2xl transition-all duration-200",
+        open
+          ? "translate-x-0 opacity-100"
+          : "pointer-events-none translate-x-6 opacity-0"
+      )}
+      aria-hidden={!open}
+    >
+      <div className="flex items-center justify-between border-b border-line p-4">
+        <div className="flex items-center gap-2">
+          <div className="relative grid h-9 w-9 place-items-center rounded border border-line bg-white">
+            <Bell className="h-4 w-4 text-brand" />
+            {unreadNotifications > 0 && (
+              <span className="absolute -right-1 -top-1 min-w-5 rounded-full bg-berry px-1.5 py-0.5 text-center text-[10px] font-bold text-white">
+                {unreadNotifications > 99 ? "99+" : unreadNotifications}
+              </span>
+            )}
+          </div>
+          <div>
+            <h3 className="font-bold">Notificacoes</h3>
+            <p className="text-xs text-slate-500">
+              {unreadNotifications} mensagem(ns) nao lida(s)
+            </p>
+          </div>
+        </div>
+        <button
+          className="grid h-8 w-8 place-items-center rounded border border-line text-slate-500 hover:bg-slate-50"
+          onClick={onClose}
+          title="Fechar notificacoes"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="flex items-center justify-between gap-2 border-b border-line p-3">
+        <button
+          className="rounded border border-line px-2 py-1 text-xs font-semibold text-slate-600"
+          onClick={() => void onMarkAllNotificationsRead()}
+        >
+          Marcar todas
+        </button>
+        {desktopPermission !== "granted" && (
+          <button
+            className="rounded bg-brand px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+            disabled={desktopPermission === "denied" || desktopPermission === "unsupported"}
+            onClick={() => void onRequestDesktopNotifications()}
+          >
+            {desktopPermission === "denied"
+              ? "Bloqueadas no navegador"
+              : desktopPermission === "unsupported"
+                ? "Desktop indisponivel"
+                : "Ativar no computador"}
+          </button>
+        )}
+      </div>
+
+      <div className="max-h-[calc(100vh-15rem)] divide-y divide-line overflow-y-auto">
+        {notifications.length === 0 && (
+          <div className="p-4 text-sm text-slate-500">
+            As novas mensagens dos clientes vao aparecer aqui.
+          </div>
+        )}
+        {notifications.map((notification) => (
+          <button
+            key={notification.id}
+            className={clsx(
+              "block w-full p-4 text-left hover:bg-slate-50",
+              !notification.readAt && "bg-teal-50/70"
+            )}
+            onClick={() => void onOpenNotification(notification.conversationId)}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate font-semibold text-slate-900">
+                  {notification.customerName || notification.phone || "Cliente"}
+                </p>
+                <p className="mt-0.5 truncate text-xs text-slate-500">
+                  {notification.phone || "Sem telefone"} - {notification.channelLabel || "WhatsApp"}
+                </p>
+              </div>
+              <span className="shrink-0 text-xs text-slate-400">
+                {formatRelativeDate(notification.createdAt)}
+              </span>
+            </div>
+            <p className="mt-2 line-clamp-2 text-sm text-slate-600">
+              {notification.message}
+            </p>
+          </button>
+        ))}
+      </div>
+    </aside>
   );
 }
 
