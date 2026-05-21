@@ -1,6 +1,7 @@
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
-import { createInboundMessageNotification } from "@/lib/notifications";
+import { publishInboundNotification } from "@/lib/notification-stream";
+import { createInboundMessageNotification, mapNotification } from "@/lib/notifications";
 
 function normalizePhone(phone: string) {
   return phone.replace(/\D/g, "");
@@ -107,7 +108,7 @@ export async function processInboundMessage({
       })
     : null;
 
-  await createInboundMessageNotification({
+  const notification = await createInboundMessageNotification({
     companyId,
     userId: updated.agent?.id ?? null,
     conversationId: updated.id,
@@ -117,6 +118,12 @@ export async function processInboundMessage({
     phone: updated.contact.phone,
     message: body,
     channelLabel: channel?.displayPhone ?? channel?.name ?? updated.channel
+  });
+
+  publishInboundNotification({
+    companyId,
+    userId: updated.agent?.id ?? null,
+    notification: mapNotification(notification)
   });
 
   return mapConversation(updated);

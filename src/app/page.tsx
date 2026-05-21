@@ -630,6 +630,31 @@ export default function Home() {
     };
   }, [openConversationById]);
 
+  const handleIncomingNotification = useCallback(
+    (notification: NotificationRow) => {
+      if (knownNotificationIdsRef.current.has(notification.id)) return;
+
+      knownNotificationIdsRef.current.add(notification.id);
+
+      if (notification.conversationId === selectedConversationRef.current) {
+        void markNotificationsRead({ conversationId: notification.conversationId });
+        void loadConversations(conversationFilters, { silent: true });
+        return;
+      }
+
+      setNotifications((current) => [notification, ...current].slice(0, 20));
+      setUnreadNotifications((current) => current + 1);
+      showDesktopNotification(notification);
+      void loadConversations(conversationFilters, { silent: true });
+    },
+    [
+      conversationFilters,
+      loadConversations,
+      markNotificationsRead,
+      showDesktopNotification
+    ]
+  );
+
   const loadNotifications = useCallback(
     async (options: { silent?: boolean } = {}) => {
       const response = await fetch("/api/notifications?limit=20");
@@ -1547,9 +1572,34 @@ export default function Home() {
   useEffect(() => {
     if (!session) return;
 
-    const interval = window.setInterval(() => {
+    if (typeof window !== "undefined" && "EventSource" in window) {
+      const events = new EventSource("/api/notifications/stream");
+
+      events.addEventListener("new_inbound_message", (event) => {
+        const notification = JSON.parse((event as MessageEvent).data) as NotificationRow;
+        handleIncomingNotification(notification);
+      });
+
+      events.onerror = () => {
+        void loadNotifications();
+      };
+
+      return () => events.close();
+    }
+
+    const interval = globalThis.setInterval(() => {
       void loadNotifications();
     }, 3000);
+
+    return () => globalThis.clearInterval(interval);
+  }, [handleIncomingNotification, loadNotifications, session]);
+
+  useEffect(() => {
+    if (!session) return;
+
+    const interval = window.setInterval(() => {
+      void loadNotifications();
+    }, 30000);
 
     return () => window.clearInterval(interval);
   }, [loadNotifications, session]);
