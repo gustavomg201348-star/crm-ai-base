@@ -14,10 +14,13 @@ import {
 import {
   ArrowRight,
   Archive,
+  Activity,
   Banknote,
   Bell,
   Check,
+  ChevronDown,
   CircleDollarSign,
+  Command,
   Clock3,
   Download,
   Edit3,
@@ -25,13 +28,17 @@ import {
   Filter,
   Image as ImageIcon,
   Menu,
+  MessageCircle,
+  MoreHorizontal,
   Plus,
   RotateCcw,
   Search,
   Send,
   SlidersHorizontal,
+  TrendingUp,
   Trash2,
   Upload,
+  UserRound,
   X
 } from "lucide-react";
 
@@ -1623,38 +1630,68 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-paper text-ink">
-      <aside className="fixed left-0 top-0 hidden h-screen w-72 border-r border-line bg-white xl:block">
-        <div className="flex h-20 items-center gap-3 border-b border-line px-6">
-          <div className="grid h-11 w-11 place-items-center rounded bg-brand text-base font-bold text-white">
+      <aside className="fixed left-0 top-0 hidden h-screen w-[264px] border-r border-line/80 bg-white/95 backdrop-blur xl:block">
+        <div className="flex h-20 items-center gap-3 px-5">
+          <div className="grid h-10 w-10 place-items-center rounded-2xl bg-brand text-sm font-bold text-white shadow-soft">
             AI
           </div>
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-wide text-brand">
+          <div className="min-w-0">
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-brand">
               CRM
             </p>
-            <h1 className="text-lg font-bold">Operacao Inteligente</h1>
+            <h1 className="truncate text-[15px] font-bold text-slate-950">
+              Operacao Inteligente
+            </h1>
           </div>
         </div>
-        <nav className="space-y-1 px-3 py-4">
+
+        <div className="mx-4 rounded-2xl border border-line/80 bg-slate-50/80 p-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            Workspace
+          </p>
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-slate-900">
+                {session.company.name}
+              </p>
+              <p className="truncate text-xs text-slate-500">
+                {session.company.segment ?? "Credito consignado"}
+              </p>
+            </div>
+            <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
+          </div>
+        </div>
+
+        <nav className="mt-5 space-y-1 px-3">
+          <p className="px-3 pb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">
+            Navegacao
+          </p>
           {navItems.map((item) => {
             const Icon = item.icon;
             return (
               <button
                 key={item.id}
                 className={clsx(
-                  "flex h-11 w-full items-center justify-between rounded px-3 text-left text-sm font-medium",
+                  "group flex h-10 w-full items-center justify-between rounded-xl px-3 text-left text-sm font-medium",
                   active === item.id
-                    ? "bg-teal-50 text-brand"
-                    : "text-slate-600 hover:bg-slate-100"
+                    ? "bg-blue-50 text-brand shadow-[inset_0_0_0_1px_rgba(37,99,235,0.10)]"
+                    : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"
                 )}
                 onClick={() => setActive(item.id)}
               >
                 <span className="flex items-center gap-3">
-                  <Icon className="h-4 w-4" />
+                  <Icon
+                    className={clsx(
+                      "h-4 w-4",
+                      active === item.id
+                        ? "text-brand"
+                        : "text-slate-400 group-hover:text-slate-600"
+                    )}
+                  />
                   {item.label}
                 </span>
                 {"count" in item && (
-                  <span className="rounded bg-berry px-2 py-0.5 text-xs text-white">
+                  <span className="rounded-full bg-rose-500 px-2 py-0.5 text-[11px] font-bold text-white">
                     {item.count}
                   </span>
                 )}
@@ -1662,33 +1699,64 @@ export default function Home() {
             );
           })}
         </nav>
-        <div className="absolute bottom-0 left-0 right-0 border-t border-line p-4">
-          <div className="rounded border border-line bg-slate-50 p-3">
-            <p className="text-xs font-semibold uppercase text-slate-500">
-              Contexto da IA
-            </p>
-            <p className="mt-1 text-sm text-slate-700">
+
+        <div className="absolute bottom-0 left-0 right-0 space-y-3 border-t border-line/70 p-4">
+          <div className="rounded-2xl bg-gradient-to-br from-blue-50 to-white p-3 ring-1 ring-blue-100">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-brand" />
+              <p className="text-xs font-bold uppercase tracking-wide text-brand">
+                IA ativa
+              </p>
+            </div>
+            <p className="mt-2 text-sm leading-5 text-slate-600">
               Correspondente bancario com foco em FGTS, CLT e INSS.
             </p>
+          </div>
+          <div className="flex items-center gap-3 rounded-2xl p-2 hover:bg-slate-50">
+            <div className="grid h-9 w-9 place-items-center rounded-full bg-slate-900 text-xs font-bold text-white">
+              {session.user.name.slice(0, 1).toUpperCase()}
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-slate-900">
+                {session.user.name}
+              </p>
+              <p className="truncate text-xs text-slate-500">{session.user.role}</p>
+            </div>
           </div>
         </div>
       </aside>
 
-      <section className="xl:pl-72">
-        <header className="sticky top-0 z-10 flex h-20 items-center justify-between border-b border-line bg-white/95 px-4 backdrop-blur md:px-8">
-          <div className="flex items-center gap-3">
-            <button className="grid h-10 w-10 place-items-center rounded border border-line xl:hidden">
+      <section className="xl:pl-[264px]">
+        <header className="sticky top-0 z-10 flex min-h-20 items-center justify-between border-b border-line/70 bg-white/90 px-4 backdrop-blur-xl md:px-8">
+          <div className="flex min-w-0 items-center gap-4">
+            <button className="grid h-10 w-10 place-items-center rounded-xl border border-line bg-white text-slate-600 shadow-sm xl:hidden">
               <Menu className="h-5 w-5" />
             </button>
-            <div>
-              <p className="text-sm text-slate-500">Base inicial</p>
-              <h2 className="text-xl font-bold md:text-2xl">{pageTitle}</h2>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-xs text-slate-500">
+                <span>Base inicial</span>
+                <span>/</span>
+                <span className="font-medium text-slate-700">{pageTitle}</span>
+              </div>
+              <h2 className="truncate text-xl font-bold tracking-tight text-slate-950 md:text-2xl">
+                {pageTitle}
+              </h2>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 md:gap-3">
+            <div className="hidden h-10 w-[min(26vw,360px)] items-center gap-2 rounded-full border border-line bg-slate-50 px-3 text-sm text-slate-500 ring-0 focus-within:border-blue-200 focus-within:bg-white focus-within:shadow-soft lg:flex">
+              <Search className="h-4 w-4 text-slate-400" />
+              <input
+                className="w-full bg-transparent outline-none"
+                placeholder="Buscar cliente, telefone ou conversa"
+              />
+              <kbd className="rounded-md border border-line bg-white px-1.5 py-0.5 text-[10px] text-slate-400">
+                ⌘K
+              </kbd>
+            </div>
             <div className="relative">
               <button
-                className="relative grid h-10 w-10 place-items-center rounded border border-line bg-white"
+                className="relative grid h-10 w-10 place-items-center rounded-full border border-line bg-white text-slate-600 shadow-sm hover:-translate-y-0.5 hover:shadow-soft"
                 onClick={() => {
                   setNotificationsOpen(false);
                   setNotificationSidebarOpen(true);
@@ -1697,7 +1765,7 @@ export default function Home() {
               >
                 <Bell className="h-4 w-4" />
                 {unreadNotifications > 0 && (
-                  <span className="absolute -right-1 -top-1 min-w-5 rounded-full bg-berry px-1.5 py-0.5 text-[10px] font-bold text-white">
+                  <span className="absolute -right-1 -top-1 min-w-5 rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold text-white ring-2 ring-white">
                     {unreadNotifications > 99 ? "99+" : unreadNotifications}
                   </span>
                 )}
@@ -1773,12 +1841,18 @@ export default function Home() {
                 </div>
               )}
             </div>
-            <button className="hidden h-10 items-center gap-2 rounded bg-brand px-4 text-sm font-semibold text-white md:flex">
+            <button className="hidden h-10 items-center gap-2 rounded-full bg-brand px-4 text-sm font-semibold text-white shadow-soft hover:-translate-y-0.5 hover:bg-blue-700 md:flex">
               <Plus className="h-4 w-4" />
               Nova conversa
             </button>
+            <button className="hidden h-10 items-center gap-2 rounded-full border border-line bg-white px-2.5 text-sm font-semibold text-slate-700 shadow-sm md:flex">
+              <div className="grid h-7 w-7 place-items-center rounded-full bg-slate-900 text-[11px] font-bold text-white">
+                {session.user.name.slice(0, 1).toUpperCase()}
+              </div>
+              <ChevronDown className="h-4 w-4 text-slate-400" />
+            </button>
             <button
-              className="hidden h-10 rounded border border-line px-3 text-sm font-semibold text-slate-600 md:block"
+              className="hidden h-10 rounded-full border border-line bg-white px-3 text-sm font-semibold text-slate-600 shadow-sm hover:bg-slate-50 md:block"
               onClick={handleLogout}
             >
               Sair
@@ -2020,35 +2094,55 @@ function Dashboard({
     {
       label: "Conversas abertas",
       value: data.metrics.openConversations.toString(),
-      hint: `${data.metrics.staleConversations} aguardando ha mais de 4h`
+      hint: `${data.metrics.staleConversations} aguardando ha mais de 4h`,
+      trend: "+12%",
+      icon: MessageCircle,
+      tone: "blue"
     },
     {
       label: "Leads ativos",
       value: data.metrics.activeContacts.toString(),
-      hint: `${data.metrics.newContacts} novo(s) no periodo`
+      hint: `${data.metrics.newContacts} novo(s) no periodo`,
+      trend: "+8%",
+      icon: UserRound,
+      tone: "slate"
     },
     {
       label: "Propostas",
       value: data.metrics.proposals.toString(),
-      hint: formatCurrency(data.metrics.totalProposalAmount)
+      hint: formatCurrency(data.metrics.totalProposalAmount),
+      trend: "+4%",
+      icon: CircleDollarSign,
+      tone: "emerald"
     },
     {
       label: "Conversao",
       value: `${data.metrics.conversionRate}%`,
-      hint: `${data.metrics.paidProposals} proposta(s) paga(s)`
+      hint: `${data.metrics.paidProposals} proposta(s) paga(s)`,
+      trend: "estavel",
+      icon: Activity,
+      tone: "violet"
     }
   ];
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 rounded border border-line bg-white p-4 shadow-soft md:flex-row md:items-center md:justify-between">
+      <div className="flex flex-col gap-4 rounded-[1.35rem] border border-line/80 bg-white p-5 shadow-soft md:flex-row md:items-center md:justify-between">
         <div>
-          <p className="text-sm font-semibold uppercase text-brand">Visao de gestao</p>
-          <h2 className="mt-1 text-xl font-bold">Dashboard operacional</h2>
+          <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-xs font-bold uppercase tracking-wide text-brand">
+            <Sparkles className="h-3.5 w-3.5" />
+            Visao de gestao
+          </div>
+          <h2 className="mt-3 text-2xl font-bold tracking-tight text-slate-950">
+            Dashboard operacional
+          </h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Indicadores principais, prioridades e funil comercial em tempo real.
+          </p>
         </div>
-        <div className="flex flex-col gap-2 md:flex-row">
+        <div className="grid gap-2 sm:grid-cols-3">
           <select
-            className="h-10 rounded border border-line px-3 text-sm outline-none"
+            className="h-10 rounded-full border border-line bg-slate-50 px-3 text-sm text-slate-700 outline-none hover:bg-white focus:border-blue-200 focus:bg-white focus:shadow-soft"
             value={filters.period}
             onChange={(event) =>
               onFiltersChange({ ...filters, period: event.target.value })
@@ -2060,7 +2154,7 @@ function Dashboard({
             <option value="all">Todo periodo</option>
           </select>
           <select
-            className="h-10 rounded border border-line px-3 text-sm outline-none"
+            className="h-10 rounded-full border border-line bg-slate-50 px-3 text-sm text-slate-700 outline-none hover:bg-white focus:border-blue-200 focus:bg-white focus:shadow-soft"
             value={filters.originId}
             onChange={(event) =>
               onFiltersChange({ ...filters, originId: event.target.value })
@@ -2074,7 +2168,7 @@ function Dashboard({
             ))}
           </select>
           <select
-            className="h-10 rounded border border-line px-3 text-sm outline-none"
+            className="h-10 rounded-full border border-line bg-slate-50 px-3 text-sm text-slate-700 outline-none hover:bg-white focus:border-blue-200 focus:bg-white focus:shadow-soft"
             value={filters.ownerId}
             onChange={(event) =>
               onFiltersChange({ ...filters, ownerId: event.target.value })
@@ -2090,60 +2184,33 @@ function Dashboard({
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
-        {cards.map(({ label, value, hint }) => (
-          <div key={label} className="rounded border border-line bg-white p-5 shadow-soft">
-            <p className="text-sm text-slate-500">{label}</p>
-            <strong className="mt-2 block text-3xl">{value}</strong>
-            <span className="mt-3 inline-flex rounded bg-slate-100 px-2 py-1 text-xs text-slate-600">
-              {hint}
-            </span>
-          </div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {cards.map((card) => (
+          <MetricCard key={card.label} {...card} />
         ))}
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1.4fr_0.8fr]">
-        <div className="rounded border border-line bg-white p-5 shadow-soft">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.75fr)]">
+        <div className="rounded-[1.35rem] border border-line/80 bg-white p-5 shadow-soft">
           <div className="mb-4 flex items-center justify-between">
-            <h3 className="text-lg font-bold">Prioridades do dia</h3>
-            <span className="flex h-9 items-center gap-2 rounded border border-line px-3 text-sm text-slate-600">
+            <div>
+              <h3 className="text-lg font-bold text-slate-950">Prioridades do dia</h3>
+              <p className="text-sm text-slate-500">Fila inteligente para evitar perda de lead.</p>
+            </div>
+            <span className="flex h-9 items-center gap-2 rounded-full border border-line bg-slate-50 px-3 text-sm text-slate-600">
               <Filter className="h-4 w-4" />
               {loading ? "Atualizando" : `${data.priorities.length} item(ns)`}
             </span>
           </div>
-          <div className="space-y-3">
+          <div className="divide-y divide-line/70">
             {data.priorities.map((item) => (
-              <div
+              <PriorityItem
                 key={`${item.type}-${item.id}`}
-                className="grid gap-3 rounded border border-line p-4 md:grid-cols-[1fr_auto]"
-              >
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-semibold">{item.title}</p>
-                    <span
-                      className={clsx(
-                        "rounded px-2 py-0.5 text-xs font-semibold",
-                        item.severity === "high"
-                          ? "bg-rose-50 text-rose-700"
-                          : "bg-amber-50 text-amber-700"
-                      )}
-                    >
-                      {item.type}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-sm text-slate-600">{item.detail}</p>
-                  <p className="mt-2 text-xs text-slate-500">{item.meta}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="rounded bg-teal-50 px-2 py-1 text-xs font-semibold text-brand">
-                    {item.severity === "high" ? "Alta" : "Media"}
-                  </span>
-                  <ArrowRight className="h-4 w-4 text-slate-400" />
-                </div>
-              </div>
+                item={item}
+              />
             ))}
             {!loading && data.priorities.length === 0 && (
-              <div className="rounded border border-dashed border-line p-6 text-sm text-slate-500">
+              <div className="rounded-2xl border border-dashed border-line p-6 text-sm text-slate-500">
                 Nenhuma prioridade critica no filtro atual.
               </div>
             )}
@@ -2151,19 +2218,22 @@ function Dashboard({
         </div>
 
         <div className="space-y-6">
-          <section className="rounded border border-line bg-white p-5 shadow-soft">
+          <section className="rounded-[1.35rem] border border-line/80 bg-white p-5 shadow-soft">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-bold">Minhas tarefas</h3>
-              <span className="text-sm text-slate-500">{data.tasks.length} pendente(s)</span>
+              <div>
+                <h3 className="text-lg font-bold text-slate-950">Minhas tarefas</h3>
+                <p className="text-sm text-slate-500">{data.tasks.length} pendente(s)</p>
+              </div>
+              <MoreHorizontal className="h-5 w-5 text-slate-400" />
             </div>
             <div className="mt-5 space-y-3">
               {data.tasks.map((task) => {
                 const overdue = new Date(task.dueAt).getTime() < Date.now();
                 return (
-                  <div key={task.id} className="rounded border border-line p-3 text-sm">
+                  <div key={task.id} className="rounded-2xl border border-line/80 bg-slate-50/60 p-3 text-sm hover:bg-white hover:shadow-soft">
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <p className="font-semibold">{task.title}</p>
+                        <p className="font-semibold text-slate-950">{task.title}</p>
                         <p className="mt-1 text-slate-600">{task.contact.name}</p>
                         <p
                           className={clsx(
@@ -2175,7 +2245,7 @@ function Dashboard({
                         </p>
                       </div>
                       <button
-                        className="grid h-8 w-8 place-items-center rounded border border-line text-brand"
+                        className="grid h-8 w-8 place-items-center rounded-full border border-line bg-white text-brand hover:border-blue-200 hover:bg-blue-50"
                         onClick={() => void onCompleteTask(task.id)}
                         title="Concluir tarefa"
                       >
@@ -2191,62 +2261,182 @@ function Dashboard({
             </div>
           </section>
 
-          <section className="rounded border border-line bg-white p-5 shadow-soft">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-bold">Funil de leads</h3>
-              <span className="text-sm text-slate-500">{data.metrics.hotContacts} quente(s)</span>
-            </div>
-            <div className="mt-5 space-y-4">
-              {data.funnel.map((item) => (
-                <div key={item.id}>
-                  <div className="mb-1 flex items-center justify-between text-sm">
-                    <span>{item.label}</span>
-                    <strong>{item.count}</strong>
-                  </div>
-                  <div className="h-2 rounded bg-slate-100">
-                    <div
-                      className="h-2 rounded"
-                      style={{
-                        width: `${Math.max(6, (item.count / maxFunnel) * 100)}%`,
-                        backgroundColor: item.color
-                      }}
-                    />
-                  </div>
+          <PipelineCard
+            title="Funil de leads"
+            subtitle={`${data.metrics.hotContacts} quente(s)`}
+            empty="Sem leads no filtro atual."
+            loading={loading}
+          >
+            {data.funnel.map((item) => (
+              <div key={item.id} className="group">
+                <div className="mb-2 flex items-center justify-between text-sm">
+                  <span className="font-medium text-slate-700">{item.label}</span>
+                  <strong className="text-slate-950">{item.count}</strong>
                 </div>
-              ))}
-              {!loading && data.funnel.length === 0 && (
-                <p className="text-sm text-slate-500">Sem leads no filtro atual.</p>
-              )}
-            </div>
-          </section>
+                <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className="h-2.5 rounded-full transition-all duration-500 group-hover:brightness-95"
+                    style={{
+                      width: `${Math.max(6, (item.count / maxFunnel) * 100)}%`,
+                      backgroundColor: item.color
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
+          </PipelineCard>
 
-          <section className="rounded border border-line bg-white p-5 shadow-soft">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-bold">Status Multicred</h3>
-              <span className="text-sm text-slate-500">
-                {formatCurrency(data.metrics.commissionForecast)}
-              </span>
-            </div>
-            <div className="mt-5 space-y-4">
-              {data.proposalStatus.map((item) => (
-                <div key={item.status}>
-                  <div className="mb-1 flex items-center justify-between text-sm">
-                    <span>{proposalStatusLabels[item.status] ?? item.status}</span>
-                    <strong>{item.count}</strong>
-                  </div>
-                  <div className="h-2 rounded bg-slate-100">
-                    <div
-                      className="h-2 rounded bg-brand"
-                      style={{ width: `${Math.max(6, (item.count / maxStatus) * 100)}%` }}
-                    />
-                  </div>
+          <PipelineCard
+            title="Status Multicred"
+            subtitle={formatCurrency(data.metrics.commissionForecast)}
+            empty="Sem propostas no filtro atual."
+            loading={loading}
+          >
+            {data.proposalStatus.map((item) => (
+              <div key={item.status} className="group">
+                <div className="mb-2 flex items-center justify-between text-sm">
+                  <span className="font-medium text-slate-700">
+                    {proposalStatusLabels[item.status] ?? item.status}
+                  </span>
+                  <strong className="text-slate-950">{item.count}</strong>
                 </div>
-              ))}
-            </div>
-          </section>
+                <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className="h-2.5 rounded-full bg-brand transition-all duration-500 group-hover:bg-blue-700"
+                    style={{ width: `${Math.max(6, (item.count / maxStatus) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </PipelineCard>
         </div>
       </div>
     </div>
+  );
+}
+
+function MetricCard({
+  label,
+  value,
+  hint,
+  trend,
+  icon: Icon,
+  tone
+}: {
+  label: string;
+  value: string;
+  hint: string;
+  trend: string;
+  icon: typeof MessageCircle;
+  tone: string;
+}) {
+  const toneClass =
+    tone === "emerald"
+      ? "bg-emerald-50 text-emerald-600 ring-emerald-100"
+      : tone === "violet"
+        ? "bg-violet-50 text-violet-600 ring-violet-100"
+        : tone === "slate"
+          ? "bg-slate-100 text-slate-600 ring-slate-200"
+          : "bg-blue-50 text-brand ring-blue-100";
+
+  return (
+    <div className="group rounded-[1.35rem] border border-line/80 bg-white p-5 shadow-soft hover:-translate-y-0.5 hover:shadow-lift">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-slate-500">{label}</p>
+          <strong className="mt-3 block text-3xl font-bold tracking-tight text-slate-950">
+            {value}
+          </strong>
+        </div>
+        <div className={clsx("grid h-10 w-10 place-items-center rounded-2xl ring-1", toneClass)}>
+          <Icon className="h-4 w-4" />
+        </div>
+      </div>
+      <div className="mt-4 flex items-center justify-between gap-2">
+        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">
+          <TrendingUp className="h-3.5 w-3.5" />
+          {trend}
+        </span>
+        <span className="truncate text-xs text-slate-500">{hint}</span>
+      </div>
+    </div>
+  );
+}
+
+function PriorityItem({
+  item
+}: {
+  item: DashboardData["priorities"][number];
+}) {
+  const initials = item.title
+    .split(" ")
+    .map((part) => part.slice(0, 1))
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  return (
+    <button className="grid w-full gap-3 py-4 text-left hover:bg-slate-50/70 md:grid-cols-[auto_1fr_auto]">
+      <div className="grid h-10 w-10 place-items-center rounded-full bg-slate-900 text-xs font-bold text-white">
+        {initials || "LD"}
+      </div>
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="font-semibold text-slate-950">{item.title}</p>
+          <span
+            className={clsx(
+              "rounded-full px-2 py-0.5 text-xs font-semibold",
+              item.severity === "high"
+                ? "bg-rose-50 text-rose-700"
+                : "bg-amber-50 text-amber-700"
+            )}
+          >
+            {item.severity === "high" ? "Alta prioridade" : "Media prioridade"}
+          </span>
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
+            {item.type}
+          </span>
+        </div>
+        <p className="mt-1 line-clamp-1 text-sm text-slate-600">{item.detail}</p>
+        <p className="mt-2 text-xs text-slate-400">{item.meta}</p>
+      </div>
+      <div className="flex items-center gap-2 self-center text-sm font-semibold text-brand">
+        Abrir
+        <ArrowRight className="h-4 w-4" />
+      </div>
+    </button>
+  );
+}
+
+function PipelineCard({
+  title,
+  subtitle,
+  empty,
+  loading,
+  children
+}: {
+  title: string;
+  subtitle: string;
+  empty: string;
+  loading: boolean;
+  children: React.ReactNode;
+}) {
+  const hasChildren = Array.isArray(children) ? children.length > 0 : Boolean(children);
+
+  return (
+    <section className="rounded-[1.35rem] border border-line/80 bg-white p-5 shadow-soft">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-bold text-slate-950">{title}</h3>
+          <p className="text-sm text-slate-500">{subtitle}</p>
+        </div>
+        <Activity className="h-5 w-5 text-slate-400" />
+      </div>
+      <div className="mt-5 space-y-4">
+        {children}
+        {!loading && !hasChildren && <p className="text-sm text-slate-500">{empty}</p>}
+      </div>
+    </section>
   );
 }
 
@@ -2301,130 +2491,99 @@ function Atendimento({
   }
 
   return (
-    <div className="grid min-h-[calc(100vh-8rem)] gap-4 lg:grid-cols-[360px_1fr_320px]">
-      <section className="rounded border border-line bg-white shadow-soft">
-        <div className="border-b border-line p-4">
-          <div className="flex items-center gap-2 rounded border border-line px-3 py-2">
-            <Search className="h-4 w-4 text-slate-400" />
-            <input
-              className="w-full outline-none"
-              placeholder="Buscar conversas..."
-              value={filters.search}
-              onChange={(event) =>
-                onFiltersChange({ ...filters, search: event.target.value })
-              }
-            />
-          </div>
-          <div className="mt-3 grid grid-cols-4 gap-2 text-xs">
-            {[
-              ["OPEN", "Aberto"],
-              ["PENDING", "Pend."],
-              ["BOT", "Robo"],
-              ["SOLD", "Vendas"]
-            ].map(([value, label]) => (
-              <button
-                key={value}
-                className={clsx(
-                  "rounded border border-line py-2",
-                  filters.status === value && "bg-teal-50 font-semibold text-brand"
-                )}
-                onClick={() => onFiltersChange({ ...filters, status: value })}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="divide-y divide-line">
-          {conversations.map((item) => (
-            <button
-              key={item.id}
-              className={clsx(
-                "block w-full p-4 text-left hover:bg-slate-50",
-                selectedConversation?.id === item.id && "bg-teal-50/70"
-              )}
-              onClick={() => onSelectConversation(item)}
-            >
-              <div className="flex items-center justify-between">
-                <p className="font-semibold">{item.contact.name}</p>
-                <span className="text-xs text-slate-500">{item.status}</span>
-              </div>
-              <p className="mt-1 line-clamp-2 text-sm text-slate-600">
-                {item.lastMessage?.body ?? item.summary ?? "Sem mensagens."}
-              </p>
-              <span className="mt-2 inline-flex rounded bg-amber-50 px-2 py-1 text-xs font-semibold text-saffron">
-                {item.contact.origin}
-              </span>
-            </button>
-          ))}
-          {!loading && conversations.length === 0 && (
-            <div className="p-6 text-center text-sm text-slate-500">
-              Nenhuma conversa nesta fila.
-            </div>
-          )}
-          {loading && (
-            <div className="p-6 text-center text-sm text-slate-500">
-              Carregando conversas...
-            </div>
-          )}
-        </div>
-      </section>
+    <div className="grid min-h-[calc(100vh-8rem)] gap-4 xl:grid-cols-[340px_minmax(0,1fr)_320px]">
+      <ConversationList
+        conversations={conversations}
+        filters={filters}
+        loading={loading}
+        selectedConversation={selectedConversation}
+        onFiltersChange={onFiltersChange}
+        onSelectConversation={onSelectConversation}
+      />
 
-      <section className="rounded border border-line bg-white shadow-soft">
-        <div className="flex h-16 items-center justify-between border-b border-line px-5">
-          <div>
-            <h3 className="font-bold">
-              {selectedConversation?.contact.name ?? "Selecione uma conversa"}
-            </h3>
-            <p className="text-sm text-slate-500">
-              {selectedConversation?.contact.phone ?? "Inbox interno"}
-            </p>
+      <section className="flex min-h-[680px] flex-col overflow-hidden rounded-[1.5rem] border border-line/80 bg-white shadow-soft">
+        <div className="flex min-h-20 items-center justify-between gap-3 border-b border-line/70 px-5">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="relative grid h-11 w-11 place-items-center rounded-full bg-blue-50 text-sm font-bold text-brand ring-1 ring-blue-100">
+              {selectedConversation?.contact.name.slice(0, 1).toUpperCase() ?? "C"}
+              <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-emerald-500" />
+            </div>
+            <div className="min-w-0">
+              <h3 className="truncate font-bold text-slate-950">
+                {selectedConversation?.contact.name ?? "Selecione uma conversa"}
+              </h3>
+              <p className="truncate text-sm text-slate-500">
+                {selectedConversation?.contact.phone ?? "Inbox interno"}
+              </p>
+            </div>
           </div>
           {selectedConversation && (
-            <select
-              className="h-9 rounded border border-line px-2 text-sm outline-none"
-              value={selectedConversation.status}
-              onChange={(event) =>
-                void onUpdateStatus(
-                  selectedConversation.id,
-                  event.target.value as ConversationRow["status"]
-                )
-              }
-            >
-              <option value="OPEN">Aberto</option>
-              <option value="PENDING">Pendente</option>
-              <option value="BOT">Robo</option>
-              <option value="SOLD">Vendas</option>
-              <option value="RESOLVED">Resolvido</option>
-            </select>
+            <div className="flex items-center gap-2">
+              <span className="hidden rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 md:inline-flex">
+                Online
+              </span>
+              <select
+                className="h-10 rounded-full border border-line bg-slate-50 px-3 text-sm font-medium text-slate-700 outline-none hover:bg-white focus:border-blue-200 focus:bg-white"
+                value={selectedConversation.status}
+                onChange={(event) =>
+                  void onUpdateStatus(
+                    selectedConversation.id,
+                    event.target.value as ConversationRow["status"]
+                  )
+                }
+              >
+                <option value="OPEN">Aberto</option>
+                <option value="PENDING">Pendente</option>
+                <option value="BOT">Robo</option>
+                <option value="SOLD">Vendas</option>
+                <option value="RESOLVED">Resolvido</option>
+              </select>
+            </div>
           )}
         </div>
-        <div className="min-h-[420px] space-y-4 p-5">
+
+        <div className="flex-1 space-y-4 overflow-y-auto bg-[linear-gradient(180deg,#FFFFFF_0%,#F8FAFC_100%)] p-5">
           {!selectedConversation && (
             <div className="grid h-80 place-items-center text-center text-sm text-slate-500">
-              Escolha uma conversa na lista para iniciar o atendimento.
+              <div>
+                <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-blue-50 text-brand">
+                  <MessageCircle className="h-5 w-5" />
+                </div>
+                <p className="mt-3 font-medium text-slate-700">
+                  Escolha uma conversa na lista para iniciar o atendimento.
+                </p>
+              </div>
             </div>
           )}
           {selectedConversation?.messages.map((item) => (
             <ChatBubble
               key={item.id}
               side={item.direction === "outbound" ? "right" : "left"}
+              timestamp={formatRelativeDate(item.createdAt)}
             >
               {item.body}
             </ChatBubble>
           ))}
         </div>
-        <form className="border-t border-line p-4" onSubmit={handleSubmit}>
-          <div className="flex items-center gap-2 rounded border border-line px-3 py-2">
+
+        <form className="border-t border-line/70 bg-white p-4" onSubmit={handleSubmit}>
+          <div className="flex items-center gap-2 rounded-2xl border border-line bg-slate-50 px-3 py-2 focus-within:border-blue-200 focus-within:bg-white focus-within:shadow-soft">
+            <button
+              className="grid h-9 w-9 place-items-center rounded-full text-slate-400 hover:bg-white hover:text-brand"
+              type="button"
+              disabled={!selectedConversation}
+            >
+              <Plus className="h-4 w-4" />
+            </button>
             <input
-              className="w-full outline-none"
+              className="w-full bg-transparent text-sm outline-none"
               disabled={!selectedConversation}
               placeholder="Digite uma mensagem..."
               value={message}
               onChange={(event) => setMessage(event.target.value)}
             />
             <button
-              className="grid h-9 w-9 place-items-center rounded bg-brand text-white disabled:opacity-50"
+              className="grid h-10 w-10 place-items-center rounded-full bg-brand text-white shadow-soft disabled:opacity-40"
               disabled={!selectedConversation || !message.trim()}
             >
               <Send className="h-4 w-4" />
@@ -2495,22 +2654,150 @@ function Atendimento({
   );
 }
 
+function ConversationList({
+  conversations,
+  filters,
+  loading,
+  selectedConversation,
+  onFiltersChange,
+  onSelectConversation
+}: {
+  conversations: ConversationRow[];
+  filters: { search: string; status: string };
+  loading: boolean;
+  selectedConversation: ConversationRow | null;
+  onFiltersChange: (filters: { search: string; status: string }) => void;
+  onSelectConversation: (conversation: ConversationRow) => void;
+}) {
+  return (
+    <section className="overflow-hidden rounded-[1.5rem] border border-line/80 bg-white shadow-soft">
+      <div className="border-b border-line/70 p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-bold text-slate-950">Conversas</h3>
+            <p className="text-sm text-slate-500">{conversations.length} atendimentos</p>
+          </div>
+          <button className="grid h-9 w-9 place-items-center rounded-full border border-line bg-slate-50 text-slate-500 hover:bg-white">
+            <SlidersHorizontal className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="mt-4 flex items-center gap-2 rounded-2xl border border-line bg-slate-50 px-3 py-2 focus-within:border-blue-200 focus-within:bg-white">
+          <Search className="h-4 w-4 text-slate-400" />
+          <input
+            className="w-full bg-transparent text-sm outline-none"
+            placeholder="Buscar conversas..."
+            value={filters.search}
+            onChange={(event) =>
+              onFiltersChange({ ...filters, search: event.target.value })
+            }
+          />
+        </div>
+        <div className="mt-3 grid grid-cols-4 gap-1.5 text-xs">
+          {[
+            ["OPEN", "Aberto"],
+            ["PENDING", "Pend."],
+            ["BOT", "Robo"],
+            ["SOLD", "Vendas"]
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              className={clsx(
+                "rounded-full border px-2 py-2 font-semibold",
+                filters.status === value
+                  ? "border-blue-200 bg-blue-50 text-brand"
+                  : "border-line bg-white text-slate-500 hover:bg-slate-50"
+              )}
+              onClick={() => onFiltersChange({ ...filters, status: value })}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="max-h-[calc(100vh-16rem)] divide-y divide-line/70 overflow-y-auto">
+        {conversations.map((item) => {
+          const selected = selectedConversation?.id === item.id;
+          return (
+            <button
+              key={item.id}
+              className={clsx(
+                "group block w-full p-4 text-left hover:bg-slate-50",
+                selected && "bg-blue-50/70"
+              )}
+              onClick={() => onSelectConversation(item)}
+            >
+              <div className="flex items-start gap-3">
+                <div className="relative grid h-10 w-10 shrink-0 place-items-center rounded-full bg-slate-100 text-xs font-bold text-slate-700">
+                  {item.contact.name.slice(0, 2).toUpperCase()}
+                  <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-emerald-500" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="truncate font-semibold text-slate-950">
+                      {item.contact.name}
+                    </p>
+                    <span className="shrink-0 text-[11px] text-slate-400">
+                      {item.lastMessage ? formatRelativeDate(item.lastMessage.createdAt) : item.status}
+                    </span>
+                  </div>
+                  <p className="mt-1 line-clamp-2 text-sm text-slate-500">
+                    {item.lastMessage?.body ?? item.summary ?? "Sem mensagens."}
+                  </p>
+                  <div className="mt-3 flex items-center gap-2">
+                    <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-brand">
+                      {item.contact.origin}
+                    </span>
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+                      {temperatureLabels[item.contact.temperature as keyof typeof temperatureLabels] ?? item.contact.temperature}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </button>
+          );
+        })}
+        {!loading && conversations.length === 0 && (
+          <div className="p-6 text-center text-sm text-slate-500">
+            Nenhuma conversa nesta fila.
+          </div>
+        )}
+        {loading && (
+          <div className="space-y-3 p-4">
+            {[0, 1, 2].map((item) => (
+              <div key={item} className="h-20 animate-pulse rounded-2xl bg-slate-100" />
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function ChatBubble({
   side,
+  timestamp,
   children
 }: {
   side: "left" | "right";
+  timestamp?: string;
   children: React.ReactNode;
 }) {
   return (
     <div className={clsx("flex", side === "right" && "justify-end")}>
-      <div
-        className={clsx(
-          "max-w-[72%] rounded p-3 text-sm",
-          side === "right" ? "bg-brand text-white" : "bg-slate-100 text-slate-800"
+      <div className={clsx("max-w-[76%]", side === "right" && "text-right")}>
+        <div
+          className={clsx(
+            "rounded-2xl px-4 py-3 text-sm leading-6 shadow-sm",
+            side === "right"
+              ? "rounded-br-md bg-brand text-white"
+              : "rounded-bl-md border border-line/70 bg-white text-slate-800"
+          )}
+        >
+          {children}
+        </div>
+        {timestamp && (
+          <p className="mt-1 px-1 text-[11px] text-slate-400">{timestamp}</p>
         )}
-      >
-        {children}
       </div>
     </div>
   );
