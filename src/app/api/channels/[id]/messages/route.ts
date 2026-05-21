@@ -3,7 +3,7 @@ import { getSessionFromRequest } from "@/lib/auth";
 import { createActivity } from "@/lib/activities";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
-import { sendMetaTextMessage } from "@/lib/meta-whatsapp";
+import { readMetaMessageId, sendMetaTextMessage } from "@/lib/meta-whatsapp";
 
 type RouteContext = {
   params: { id: string };
@@ -58,6 +58,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       to: body.to.replace(/\D/g, ""),
       body: message
     });
+    const providerMessageId = readMetaMessageId(sent);
 
     const normalizedPhone = body.to.replace(/\D/g, "");
     let conversation = body.conversationId
@@ -124,7 +125,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
         data: {
           conversationId: conversation.id,
           direction: "outbound",
-          body: message
+          body: message,
+          type: "text",
+          status: "sent",
+          providerMessageId
         }
       });
 

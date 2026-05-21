@@ -60,14 +60,29 @@ export function mapConversation(conversation: ConversationWithRelations) {
           id: lastMessage.id,
           direction: lastMessage.direction,
           body: lastMessage.body,
-          createdAt: lastMessage.createdAt
+          createdAt: lastMessage.createdAt,
+          type: lastMessage.type,
+          fileName: lastMessage.fileName,
+          mimeType: lastMessage.mimeType,
+          templateName: lastMessage.templateName,
+          status: lastMessage.status
         }
       : null,
     messages: conversation.messages.map((message) => ({
       id: message.id,
       direction: message.direction,
       body: message.body,
-      createdAt: message.createdAt
+      createdAt: message.createdAt,
+      type: message.type,
+      mediaUrl: message.mediaUrl,
+      mediaId: message.mediaId,
+      fileName: message.fileName,
+      mimeType: message.mimeType,
+      templateName: message.templateName,
+      templateLanguage: message.templateLanguage,
+      templateVariables: message.templateVariables,
+      status: message.status,
+      providerMessageId: message.providerMessageId
     }))
   };
 }

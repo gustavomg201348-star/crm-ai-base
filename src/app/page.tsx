@@ -20,21 +20,26 @@ import {
   Check,
   ChevronDown,
   CircleDollarSign,
-  Command,
   Clock3,
   Download,
   Edit3,
+  File as FileIcon,
   FileText,
   Filter,
   Image as ImageIcon,
+  Loader2,
   Menu,
   MessageCircle,
+  Mic,
   MoreHorizontal,
+  Paperclip,
   Plus,
   RotateCcw,
   Search,
   Send,
   SlidersHorizontal,
+  Smile,
+  Square,
   TrendingUp,
   Trash2,
   Upload,
@@ -144,13 +149,38 @@ type ConversationRow = {
     direction: string;
     body: string;
     createdAt: string;
+    type?: string;
+    fileName?: string | null;
+    mimeType?: string | null;
+    templateName?: string | null;
+    status?: string;
   } | null;
   messages: Array<{
     id: string;
     direction: string;
     body: string;
     createdAt: string;
+    type?: string;
+    mediaUrl?: string | null;
+    mediaId?: string | null;
+    fileName?: string | null;
+    mimeType?: string | null;
+    templateName?: string | null;
+    templateLanguage?: string | null;
+    templateVariables?: string | null;
+    status?: string;
+    providerMessageId?: string | null;
   }>;
+};
+
+type WhatsAppTemplateRow = {
+  id: string;
+  name: string;
+  category: string;
+  language: string;
+  status: string;
+  preview: string;
+  variableCount: number;
 };
 
 type ChannelRow = {
@@ -1229,6 +1259,62 @@ export default function Home() {
     mergeConversation(data.conversation);
   }
 
+  async function handleSendMedia(conversationId: string, file: File, caption?: string) {
+    const formData = new FormData();
+    formData.set("file", file);
+    if (caption?.trim()) formData.set("caption", caption.trim());
+
+    const response = await fetch(`/api/conversations/${conversationId}/messages/media`, {
+      method: "POST",
+      body: formData
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      throw new Error(data?.error ?? "Nao foi possivel enviar arquivo.");
+    }
+
+    const data = (await response.json()) as { conversation: ConversationRow };
+    mergeConversation(data.conversation);
+  }
+
+  async function handleLoadTemplates(conversationId: string) {
+    const response = await fetch(`/api/whatsapp/templates?conversationId=${conversationId}`);
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      throw new Error(data?.error ?? "Nao foi possivel buscar templates.");
+    }
+
+    const data = (await response.json()) as { templates: WhatsAppTemplateRow[] };
+    return data.templates;
+  }
+
+  async function handleSendTemplate(
+    conversationId: string,
+    payload: { templateName: string; language: string; variables: string[] }
+  ) {
+    const response = await fetch(`/api/conversations/${conversationId}/messages/template`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      throw new Error(data?.error ?? "Nao foi possivel enviar template.");
+    }
+
+    const data = (await response.json()) as { conversation: ConversationRow };
+    mergeConversation(data.conversation);
+  }
+
   async function handleAnalyzeConversation(conversationId: string) {
     setAiLoading(true);
     setAppError("");
@@ -1942,6 +2028,9 @@ export default function Home() {
               onFiltersChange={setConversationFilters}
               onSelectConversation={(conversation) => void handleSelectConversation(conversation)}
               onSendMessage={handleSendMessage}
+              onSendMedia={handleSendMedia}
+              onLoadTemplates={handleLoadTemplates}
+              onSendTemplate={handleSendTemplate}
               onUpdateStatus={handleConversationStatus}
               aiAnalysis={aiAnalysis}
               aiLoading={aiLoading}
@@ -2485,6 +2574,9 @@ function Atendimento({
   onFiltersChange,
   onSelectConversation,
   onSendMessage,
+  onSendMedia,
+  onLoadTemplates,
+  onSendTemplate,
   onUpdateStatus,
   aiAnalysis,
   aiLoading,
@@ -2497,6 +2589,12 @@ function Atendimento({
   onFiltersChange: (filters: { search: string; status: string }) => void;
   onSelectConversation: (conversation: ConversationRow) => void;
   onSendMessage: (conversationId: string, body: string) => Promise<void>;
+  onSendMedia: (conversationId: string, file: File, caption?: string) => Promise<void>;
+  onLoadTemplates: (conversationId: string) => Promise<WhatsAppTemplateRow[]>;
+  onSendTemplate: (
+    conversationId: string,
+    payload: { templateName: string; language: string; variables: string[] }
+  ) => Promise<void>;
   onUpdateStatus: (
     conversationId: string,
     status: ConversationRow["status"]
@@ -2506,11 +2604,36 @@ function Atendimento({
   onAnalyzeConversation: (conversationId: string) => Promise<void>;
 }) {
   const [message, setMessage] = useState("");
+  const [composerError, setComposerError] = useState("");
+  const [sendingAttachment, setSendingAttachment] = useState(false);
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templates, setTemplates] = useState<WhatsAppTemplateRow[]>([]);
+  const [selectedTemplate, setSelectedTemplate] = useState<WhatsAppTemplateRow | null>(null);
+  const [templateValues, setTemplateValues] = useState<string[]>([]);
+  const [filePreview, setFilePreview] = useState<{ file: File; url?: string } | null>(null);
+  const [audioPreview, setAudioPreview] = useState<{ file: File; url: string } | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ block: "end" });
   }, [selectedConversation?.id, selectedConversation?.messages.length]);
+
+  useEffect(() => {
+    return () => {
+      clearRecordingTimer();
+      if (filePreview?.url) URL.revokeObjectURL(filePreview.url);
+      if (audioPreview?.url) URL.revokeObjectURL(audioPreview.url);
+    };
+  }, [audioPreview?.url, filePreview?.url]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2518,6 +2641,148 @@ function Atendimento({
 
     await onSendMessage(selectedConversation.id, message);
     setMessage("");
+  }
+
+  function insertEmoji(emoji: string) {
+    setMessage((current) => `${current}${emoji}`);
+    setEmojiOpen(false);
+    window.setTimeout(() => inputRef.current?.focus(), 0);
+  }
+
+  function clearRecordingTimer() {
+    if (recordingTimerRef.current) {
+      window.clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+  }
+
+  async function startRecording() {
+    setComposerError("");
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setComposerError("Este navegador nao suporta gravacao de audio.");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
+      };
+      recorder.onstop = () => {
+        clearRecordingTimer();
+        stream.getTracks().forEach((track) => track.stop());
+        const blob = new Blob(audioChunksRef.current, {
+          type: recorder.mimeType || "audio/webm"
+        });
+        const file = new File([blob], `audio-${Date.now()}.webm`, {
+          type: blob.type || "audio/webm"
+        });
+        if (audioPreview?.url) URL.revokeObjectURL(audioPreview.url);
+        setAudioPreview({ file, url: URL.createObjectURL(blob) });
+        setRecording(false);
+      };
+
+      setAudioPreview(null);
+      setRecordingSeconds(0);
+      setRecording(true);
+      recorder.start();
+      recordingTimerRef.current = window.setInterval(() => {
+        setRecordingSeconds((current) => {
+          if (current >= 180) {
+            mediaRecorderRef.current?.stop();
+            return current;
+          }
+          return current + 1;
+        });
+      }, 1000);
+    } catch {
+      setComposerError("Permissao de microfone bloqueada ou indisponivel.");
+    }
+  }
+
+  function cancelRecording() {
+    clearRecordingTimer();
+    mediaRecorderRef.current?.stream.getTracks().forEach((track) => track.stop());
+    mediaRecorderRef.current = null;
+    audioChunksRef.current = [];
+    setRecording(false);
+    setRecordingSeconds(0);
+  }
+
+  function stopRecording() {
+    if (mediaRecorderRef.current?.state === "recording") {
+      mediaRecorderRef.current.stop();
+    }
+  }
+
+  function handleFileChange(file?: File) {
+    if (!file) return;
+    setComposerError("");
+    if (file.size > 16 * 1024 * 1024) {
+      setComposerError("Arquivo acima do limite de 16 MB.");
+      return;
+    }
+    if (filePreview?.url) URL.revokeObjectURL(filePreview.url);
+    setFilePreview({
+      file,
+      url: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined
+    });
+  }
+
+  async function sendMediaPreview(preview: { file: File }, caption?: string) {
+    if (!selectedConversation || sendingAttachment) return;
+    setSendingAttachment(true);
+    setComposerError("");
+    try {
+      await onSendMedia(selectedConversation.id, preview.file, caption);
+      if (filePreview?.url) URL.revokeObjectURL(filePreview.url);
+      if (audioPreview?.url) URL.revokeObjectURL(audioPreview.url);
+      setFilePreview(null);
+      setAudioPreview(null);
+    } catch (error) {
+      setComposerError(error instanceof Error ? error.message : "Falha ao enviar midia.");
+    } finally {
+      setSendingAttachment(false);
+    }
+  }
+
+  async function openTemplates() {
+    if (!selectedConversation) return;
+    setTemplatesOpen((current) => !current);
+    if (templates.length) return;
+    setTemplatesLoading(true);
+    setComposerError("");
+    try {
+      setTemplates(await onLoadTemplates(selectedConversation.id));
+    } catch (error) {
+      setComposerError(error instanceof Error ? error.message : "Falha ao buscar templates.");
+    } finally {
+      setTemplatesLoading(false);
+    }
+  }
+
+  async function sendTemplate() {
+    if (!selectedConversation || !selectedTemplate || sendingAttachment) return;
+    setSendingAttachment(true);
+    setComposerError("");
+    try {
+      await onSendTemplate(selectedConversation.id, {
+        templateName: selectedTemplate.name,
+        language: selectedTemplate.language,
+        variables: templateValues
+      });
+      setSelectedTemplate(null);
+      setTemplateValues([]);
+      setTemplatesOpen(false);
+    } catch (error) {
+      setComposerError(error instanceof Error ? error.message : "Falha ao enviar template.");
+    } finally {
+      setSendingAttachment(false);
+    }
   }
 
   return (
@@ -2598,15 +2863,176 @@ function Atendimento({
         </div>
 
         <form className="border-t border-line/70 bg-white p-4" onSubmit={handleSubmit}>
-          <div className="flex items-center gap-2 rounded-2xl border border-line bg-slate-50 px-3 py-2 focus-within:border-blue-200 focus-within:bg-white focus-within:shadow-soft">
-            <button
-              className="grid h-9 w-9 place-items-center rounded-full text-slate-400 hover:bg-white hover:text-brand"
-              type="button"
-              disabled={!selectedConversation}
-            >
-              <Plus className="h-4 w-4" />
-            </button>
+          {composerError && (
+            <div className="mb-3 rounded-2xl border border-rose-100 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              {composerError}
+            </div>
+          )}
+
+          {recording && (
+            <div className="mb-3 flex items-center justify-between rounded-2xl border border-rose-100 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              <span className="flex items-center gap-2">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-rose-500" />
+                Gravando audio {formatRecordingTime(recordingSeconds)}
+              </span>
+              <div className="flex items-center gap-2">
+                <button type="button" className="rounded-full px-3 py-1 hover:bg-white" onClick={cancelRecording}>
+                  Cancelar
+                </button>
+                <button type="button" className="rounded-full bg-rose-600 px-3 py-1 font-semibold text-white" onClick={stopRecording}>
+                  Parar
+                </button>
+              </div>
+            </div>
+          )}
+
+          {(filePreview || audioPreview) && (
+            <div className="mb-3 rounded-2xl border border-line bg-slate-50 p-3">
+              {filePreview && (
+                <div className="flex items-center gap-3">
+                  {filePreview.url ? (
+                    <div
+                      className="h-14 w-14 rounded-xl bg-cover bg-center"
+                      style={{ backgroundImage: `url(${filePreview.url})` }}
+                    />
+                  ) : (
+                    <div className="grid h-14 w-14 place-items-center rounded-xl bg-white text-slate-500">
+                      <FileIcon className="h-5 w-5" />
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-slate-900">{filePreview.file.name}</p>
+                    <p className="text-xs text-slate-500">{formatFileSize(filePreview.file.size)}</p>
+                  </div>
+                  <button type="button" className="rounded-full px-3 py-1 text-sm text-slate-500 hover:bg-white" onClick={() => setFilePreview(null)}>
+                    Remover
+                  </button>
+                  <button type="button" className="rounded-full bg-brand px-3 py-1 text-sm font-semibold text-white disabled:opacity-50" disabled={sendingAttachment} onClick={() => void sendMediaPreview(filePreview, message)}>
+                    {sendingAttachment ? "Enviando..." : "Enviar"}
+                  </button>
+                </div>
+              )}
+              {audioPreview && (
+                <div className="flex items-center gap-3">
+                  <audio className="min-w-0 flex-1" controls src={audioPreview.url} />
+                  <button type="button" className="rounded-full px-3 py-1 text-sm text-slate-500 hover:bg-white" onClick={() => setAudioPreview(null)}>
+                    Descartar
+                  </button>
+                  <button type="button" className="rounded-full bg-brand px-3 py-1 text-sm font-semibold text-white disabled:opacity-50" disabled={sendingAttachment} onClick={() => void sendMediaPreview(audioPreview)}>
+                    {sendingAttachment ? "Enviando..." : "Enviar audio"}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {templatesOpen && (
+            <div className="mb-3 max-h-72 overflow-y-auto rounded-2xl border border-line bg-white p-3 shadow-soft">
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-sm font-bold text-slate-900">Templates aprovados</p>
+                <button type="button" className="text-xs font-semibold text-slate-500" onClick={() => setTemplatesOpen(false)}>
+                  Fechar
+                </button>
+              </div>
+              {templatesLoading && <p className="text-sm text-slate-500">Buscando templates...</p>}
+              {!templatesLoading && templates.length === 0 && (
+                <p className="text-sm text-slate-500">Nenhum template aprovado encontrado para este numero.</p>
+              )}
+              <div className="space-y-2">
+                {templates.map((template) => (
+                  <button
+                    key={`${template.name}-${template.language}`}
+                    type="button"
+                    className={clsx(
+                      "w-full rounded-2xl border p-3 text-left hover:bg-slate-50",
+                      selectedTemplate?.name === template.name && selectedTemplate.language === template.language
+                        ? "border-blue-200 bg-blue-50"
+                        : "border-line"
+                    )}
+                    onClick={() => {
+                      setSelectedTemplate(template);
+                      setTemplateValues(Array.from({ length: template.variableCount }, () => ""));
+                    }}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="font-semibold text-slate-900">{template.name}</p>
+                      <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700">
+                        {template.status}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">{template.category} - {template.language}</p>
+                    <p className="mt-2 line-clamp-2 text-sm text-slate-600">{template.preview}</p>
+                  </button>
+                ))}
+              </div>
+              {selectedTemplate && (
+                <div className="mt-3 rounded-2xl bg-slate-50 p-3">
+                  {selectedTemplate.variableCount > 0 && (
+                    <div className="space-y-2">
+                      {templateValues.map((value, index) => (
+                        <input
+                          key={index}
+                          className="h-9 w-full rounded-xl border border-line px-3 text-sm outline-none focus:border-blue-200"
+                          placeholder={`Variavel ${index + 1}`}
+                          value={value}
+                          onChange={(event) =>
+                            setTemplateValues((current) =>
+                              current.map((item, itemIndex) =>
+                                itemIndex === index ? event.target.value : item
+                              )
+                            )
+                          }
+                        />
+                      ))}
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    className="mt-3 h-9 w-full rounded-full bg-brand text-sm font-semibold text-white disabled:opacity-50"
+                    disabled={sendingAttachment}
+                    onClick={() => void sendTemplate()}
+                  >
+                    {sendingAttachment ? "Enviando..." : "Enviar template"}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          <input
+            ref={fileInputRef}
+            className="hidden"
+            type="file"
+            accept="image/jpeg,image/png,application/pdf,audio/mpeg,audio/ogg,audio/webm,video/mp4,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            onChange={(event) => handleFileChange(event.target.files?.[0])}
+          />
+
+          <div className="relative flex items-center gap-2 rounded-2xl border border-line bg-slate-50 px-3 py-2 focus-within:border-blue-200 focus-within:bg-white focus-within:shadow-soft">
+            <ComposerButton title="Anexar arquivo" disabled={!selectedConversation} onClick={() => fileInputRef.current?.click()}>
+              <Paperclip className="h-4 w-4" />
+            </ComposerButton>
+            <ComposerButton title="Emoji" disabled={!selectedConversation} onClick={() => setEmojiOpen((current) => !current)}>
+              <Smile className="h-4 w-4" />
+            </ComposerButton>
+            <ComposerButton title="Gravar audio" disabled={!selectedConversation || recording} onClick={() => void startRecording()}>
+              {recording ? <Square className="h-4 w-4 text-rose-500" /> : <Mic className="h-4 w-4" />}
+            </ComposerButton>
+            <ComposerButton title="Templates Meta" disabled={!selectedConversation} onClick={() => void openTemplates()}>
+              <FileText className="h-4 w-4" />
+            </ComposerButton>
+
+            {emojiOpen && (
+              <div className="absolute bottom-14 left-12 z-20 grid grid-cols-8 gap-1 rounded-2xl border border-line bg-white p-2 shadow-lift">
+                {commonEmojis.map((emoji) => (
+                  <button key={emoji} type="button" className="grid h-8 w-8 place-items-center rounded-lg hover:bg-slate-50" onClick={() => insertEmoji(emoji)}>
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            )}
+
             <input
+              ref={inputRef}
               className="w-full bg-transparent text-sm outline-none"
               disabled={!selectedConversation}
               placeholder="Digite uma mensagem..."
@@ -2824,6 +3250,45 @@ function ChatBubble({
       </div>
     </div>
   );
+}
+
+const commonEmojis = ["😀", "🙂", "😉", "👍", "🙏", "✅", "🔥", "🚀", "📌", "💬", "📄", "⏰", "❤️", "👏", "🤝", "💰"];
+
+function ComposerButton({
+  title,
+  disabled,
+  onClick,
+  children
+}: {
+  title: string;
+  disabled?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-slate-400 hover:bg-white hover:text-brand disabled:cursor-not-allowed disabled:opacity-40"
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+}
+
+function formatRecordingTime(seconds: number) {
+  const minutes = Math.floor(seconds / 60)
+    .toString()
+    .padStart(2, "0");
+  const rest = (seconds % 60).toString().padStart(2, "0");
+  return `${minutes}:${rest}`;
+}
+
+function formatFileSize(size: number) {
+  if (size < 1024 * 1024) return `${Math.ceil(size / 1024)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function Kanban({

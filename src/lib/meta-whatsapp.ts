@@ -290,6 +290,164 @@ export async function sendMetaImageMessage({
   return data;
 }
 
+export type MetaMediaType = "image" | "audio" | "document" | "video";
+
+export async function sendMetaMediaMessage({
+  phoneNumberId,
+  accessToken,
+  to,
+  mediaId,
+  mediaType,
+  caption,
+  fileName
+}: {
+  phoneNumberId: string;
+  accessToken: string;
+  to: string;
+  mediaId: string;
+  mediaType: MetaMediaType;
+  caption?: string;
+  fileName?: string;
+}) {
+  const apiVersion = process.env.META_GRAPH_VERSION || "v20.0";
+  const mediaPayload =
+    mediaType === "document"
+      ? { id: mediaId, ...(caption ? { caption } : {}), ...(fileName ? { filename: fileName } : {}) }
+      : mediaType === "image" || mediaType === "video"
+        ? { id: mediaId, ...(caption ? { caption } : {}) }
+        : { id: mediaId };
+
+  const response = await fetch(
+    `https://graph.facebook.com/${apiVersion}/${phoneNumberId}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to,
+        type: mediaType,
+        [mediaType]: mediaPayload
+      })
+    }
+  );
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(
+      typeof data?.error?.message === "string"
+        ? data.error.message
+        : "Falha ao enviar midia pela Meta."
+    );
+  }
+
+  return data;
+}
+
+export type MetaTemplate = {
+  id?: string;
+  name: string;
+  status: string;
+  category?: string;
+  language: string;
+  components?: Array<{
+    type?: string;
+    format?: string;
+    text?: string;
+  }>;
+};
+
+export async function getMetaApprovedTemplates({
+  wabaId,
+  accessToken
+}: {
+  wabaId: string;
+  accessToken: string;
+}) {
+  const apiVersion = process.env.META_GRAPH_VERSION || "v20.0";
+  const response = await fetch(
+    `https://graph.facebook.com/${apiVersion}/${wabaId}/message_templates?fields=id,name,status,category,language,components&limit=100`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    }
+  );
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(
+      typeof data?.error?.message === "string"
+        ? data.error.message
+        : "Falha ao buscar templates da Meta."
+    );
+  }
+
+  const templates = (data?.data ?? []) as MetaTemplate[];
+  return templates.filter((template) => template.status === "APPROVED");
+}
+
+export async function sendMetaTemplateMessage({
+  phoneNumberId,
+  accessToken,
+  to,
+  name,
+  language,
+  variables
+}: {
+  phoneNumberId: string;
+  accessToken: string;
+  to: string;
+  name: string;
+  language: string;
+  variables: string[];
+}) {
+  const apiVersion = process.env.META_GRAPH_VERSION || "v20.0";
+  const components = variables.length
+    ? [
+        {
+          type: "body",
+          parameters: variables.map((value) => ({
+            type: "text",
+            text: value
+          }))
+        }
+      ]
+    : undefined;
+
+  const response = await fetch(
+    `https://graph.facebook.com/${apiVersion}/${phoneNumberId}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to,
+        type: "template",
+        template: {
+          name,
+          language: { code: language },
+          ...(components ? { components } : {})
+        }
+      })
+    }
+  );
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(
+      typeof data?.error?.message === "string"
+        ? data.error.message
+        : "Falha ao enviar template pela Meta."
+    );
+  }
+
+  return data;
+}
+
 export function readMetaMessageId(response: unknown) {
   const data = response as { messages?: Array<{ id?: string }> } | null;
   return data?.messages?.[0]?.id ?? null;

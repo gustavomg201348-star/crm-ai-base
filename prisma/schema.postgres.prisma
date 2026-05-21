@@ -196,12 +196,24 @@ model Conversation {
 }
 
 model Message {
-  id             String       @id @default(cuid())
-  conversationId String
-  direction      String
-  body           String
-  createdAt      DateTime     @default(now())
-  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  id                String       @id @default(cuid())
+  conversationId    String
+  direction         String
+  body              String
+  type              String       @default("text")
+  mediaUrl          String?
+  mediaId           String?
+  fileName          String?
+  mimeType          String?
+  templateName      String?
+  templateLanguage  String?
+  templateVariables String?
+  status            String       @default("sent")
+  providerMessageId String?
+  createdAt         DateTime     @default(now())
+  conversation      Conversation @relation(fields: [conversationId], references: [id])
+
+  @@index([providerMessageId])
 }
 
 model Notification {

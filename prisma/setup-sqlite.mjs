@@ -139,6 +139,16 @@ CREATE TABLE IF NOT EXISTS Message (
   conversationId TEXT NOT NULL,
   direction TEXT NOT NULL,
   body TEXT NOT NULL,
+  type TEXT NOT NULL DEFAULT 'text',
+  mediaUrl TEXT,
+  mediaId TEXT,
+  fileName TEXT,
+  mimeType TEXT,
+  templateName TEXT,
+  templateLanguage TEXT,
+  templateVariables TEXT,
+  status TEXT NOT NULL DEFAULT 'sent',
+  providerMessageId TEXT,
   createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT Message_conversationId_fkey FOREIGN KEY (conversationId) REFERENCES Conversation (id) ON DELETE RESTRICT ON UPDATE CASCADE
 );
@@ -247,6 +257,30 @@ for (const [name, type] of [
     db.exec(`ALTER TABLE Channel ADD COLUMN ${name} ${type};`);
   }
 }
+
+const messageColumns = db
+  .prepare("PRAGMA table_info(Message)")
+  .all()
+  .map((column) => column.name);
+
+for (const [name, type] of [
+  ["type", "TEXT NOT NULL DEFAULT 'text'"],
+  ["mediaUrl", "TEXT"],
+  ["mediaId", "TEXT"],
+  ["fileName", "TEXT"],
+  ["mimeType", "TEXT"],
+  ["templateName", "TEXT"],
+  ["templateLanguage", "TEXT"],
+  ["templateVariables", "TEXT"],
+  ["status", "TEXT NOT NULL DEFAULT 'sent'"],
+  ["providerMessageId", "TEXT"]
+]) {
+  if (!messageColumns.includes(name)) {
+    db.exec(`ALTER TABLE Message ADD COLUMN ${name} ${type};`);
+  }
+}
+
+db.exec("CREATE INDEX IF NOT EXISTS Message_providerMessageId_idx ON Message(providerMessageId);");
 
 db.close();
 

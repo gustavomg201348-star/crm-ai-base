@@ -48,7 +48,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
         data: {
           conversationId: conversation.id,
           direction,
-          body: messageBody
+          body: messageBody,
+          type: "text",
+          status: "sent"
         }
       });
 
