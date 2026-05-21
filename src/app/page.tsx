@@ -128,6 +128,11 @@ type ConversationRow = {
   status: "OPEN" | "PENDING" | "BOT" | "SOLD" | "RESOLVED";
   channel: string;
   summary?: string | null;
+  unreadCount: number;
+  lastMessageAt?: string | null;
+  lastMessagePreview?: string | null;
+  lastInboundMessageAt?: string | null;
+  lastReadAt?: string | null;
   createdAt: string;
   updatedAt: string;
   agent: { id: string; name: string; email: string } | null;
@@ -154,6 +159,8 @@ type ConversationRow = {
     mimeType?: string | null;
     templateName?: string | null;
     status?: string;
+    readAt?: string | null;
+    senderType?: string | null;
   } | null;
   messages: Array<{
     id: string;
@@ -170,6 +177,8 @@ type ConversationRow = {
     templateVariables?: string | null;
     status?: string;
     providerMessageId?: string | null;
+    readAt?: string | null;
+    senderType?: string | null;
   }>;
 };
 
@@ -493,6 +502,15 @@ export default function Home() {
     return navItems.find((item) => item.id === active)?.label ?? "Dashboard";
   }, [active]);
 
+  const atendimentoUnread = useMemo(
+    () =>
+      conversationList.reduce(
+        (total, conversation) => total + (conversation.unreadCount ?? 0),
+        0
+      ),
+    [conversationList]
+  );
+
   async function loadSession() {
     setSessionLoading(true);
     const response = await fetch("/api/auth/session");
@@ -577,12 +595,8 @@ export default function Home() {
         };
         setConversationList(data.conversations);
         setSelectedConversation((current) => {
-          if (!current) return data.conversations[0] ?? null;
-          return (
-            data.conversations.find((conversation) => conversation.id === current.id) ??
-            data.conversations[0] ??
-            null
-          );
+          if (!current) return null;
+          return data.conversations.find((conversation) => conversation.id === current.id) ?? null;
         });
       } else {
         if (!options.silent) {
@@ -619,6 +633,21 @@ export default function Home() {
       if (!id) return null;
 
       const response = await fetch(`/api/conversations/${id}`);
+      if (!response.ok) return null;
+
+      const data = (await response.json()) as { conversation: ConversationRow };
+      mergeConversation(data.conversation);
+      return data.conversation;
+    },
+    [mergeConversation]
+  );
+
+  const markConversationRead = useCallback(
+    async (conversationId: string) => {
+      const response = await fetch(`/api/conversations/${conversationId}/read`, {
+        method: "POST"
+      });
+
       if (!response.ok) return null;
 
       const data = (await response.json()) as { conversation: ConversationRow };
@@ -672,10 +701,11 @@ export default function Home() {
               )
             : [data.conversation, ...current];
         });
+        await markConversationRead(conversationId);
         await markNotificationsRead({ conversationId });
       }
     },
-    [markNotificationsRead]
+    [markConversationRead, markNotificationsRead]
   );
 
   const showDesktopNotification = useCallback((notification: NotificationRow) => {
@@ -706,7 +736,7 @@ export default function Home() {
 
       if (notification.conversationId === selectedConversationRef.current) {
         void markNotificationsRead({ conversationId: notification.conversationId });
-        void refreshConversation(notification.conversationId);
+        void markConversationRead(notification.conversationId);
         void loadConversations(conversationFilters, { silent: true });
         return;
       }
@@ -719,8 +749,8 @@ export default function Home() {
     [
       conversationFilters,
       loadConversations,
+      markConversationRead,
       markNotificationsRead,
-      refreshConversation,
       showDesktopNotification
     ]
   );
@@ -755,7 +785,7 @@ export default function Home() {
       for (const notification of unreadNewNotifications) {
         if (notification.conversationId === activeConversationId) {
           void markNotificationsRead({ conversationId: notification.conversationId });
-          void refreshConversation(notification.conversationId);
+          void markConversationRead(notification.conversationId);
           continue;
         }
 
@@ -764,7 +794,7 @@ export default function Home() {
         }
       }
     },
-    [markNotificationsRead, refreshConversation, showDesktopNotification]
+    [markConversationRead, markNotificationsRead, showDesktopNotification]
   );
 
   async function requestDesktopNotifications() {
@@ -779,14 +809,22 @@ export default function Home() {
 
   async function handleSelectConversation(conversation: ConversationRow) {
     setSelectedConversation(conversation);
+    void markConversationRead(conversation.id);
     await markNotificationsRead({ conversationId: conversation.id });
-    void refreshConversation(conversation.id);
   }
 
   useEffect(() => {
     if (!session || active !== "atendimento" || !selectedConversation?.id) return;
+    void markConversationRead(selectedConversation.id);
     void markNotificationsRead({ conversationId: selectedConversation.id });
-  }, [active, markNotificationsRead, selectedConversation?.id, session]);
+  }, [
+    active,
+    markConversationRead,
+    markNotificationsRead,
+    selectedConversation?.id,
+    selectedConversation?.unreadCount,
+    session
+  ]);
 
   async function loadChannels() {
     setChannelsLoading(true);
@@ -1206,6 +1244,10 @@ export default function Home() {
     const optimisticConversation: ConversationRow = {
       ...conversation,
       updatedAt: now,
+      unreadCount: 0,
+      lastReadAt: now,
+      lastMessageAt: now,
+      lastMessagePreview: messageBody,
       contact: {
         ...conversation.contact,
         lastMessage: messageBody
@@ -1814,6 +1856,12 @@ export default function Home() {
           </p>
           {navItems.map((item) => {
             const Icon = item.icon;
+            const itemCount =
+              item.id === "atendimento"
+                ? atendimentoUnread
+                : "count" in item && typeof item.count === "number"
+                  ? item.count
+                  : 0;
             return (
               <button
                 key={item.id}
@@ -1836,9 +1884,9 @@ export default function Home() {
                   />
                   {item.label}
                 </span>
-                {"count" in item && (
+                {itemCount > 0 && (
                   <span className="rounded-full bg-rose-500 px-2 py-0.5 text-[11px] font-bold text-white">
-                    {item.count}
+                    {itemCount > 99 ? "99+" : itemCount}
                   </span>
                 )}
               </button>
@@ -3166,11 +3214,20 @@ function ConversationList({
       <div className="min-h-0 flex-1 divide-y divide-line/70 overflow-y-auto overscroll-contain">
         {conversations.map((item) => {
           const selected = selectedConversation?.id === item.id;
+          const unread = item.unreadCount ?? 0;
+          const hasUnread = unread > 0;
+          const preview =
+            item.lastMessagePreview ??
+            item.lastMessage?.body ??
+            item.summary ??
+            "Sem mensagens.";
+          const messageTime = item.lastMessageAt ?? item.lastMessage?.createdAt;
           return (
             <button
               key={item.id}
               className={clsx(
-                "group block w-full p-4 text-left hover:bg-slate-50",
+                "group block w-full p-4 text-left transition-colors hover:bg-slate-50",
+                hasUnread && "bg-emerald-50/45",
                 selected && "bg-blue-50/70"
               )}
               onClick={() => onSelectConversation(item)}
@@ -3182,18 +3239,45 @@ function ConversationList({
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="truncate font-semibold text-slate-950">
+                    <p
+                      className={clsx(
+                        "truncate text-slate-950",
+                        hasUnread ? "font-bold" : "font-semibold"
+                      )}
+                    >
                       {item.contact.name}
                     </p>
-                    <span className="shrink-0 text-[11px] text-slate-400">
-                      {item.lastMessage ? formatRelativeDate(item.lastMessage.createdAt) : item.status}
+                    <span
+                      className={clsx(
+                        "shrink-0 text-[11px]",
+                        hasUnread ? "font-bold text-emerald-600" : "text-slate-400"
+                      )}
+                    >
+                      {messageTime ? formatRelativeDate(messageTime) : item.status}
                     </span>
                   </div>
-                  <p className="mt-1 line-clamp-2 text-sm text-slate-500">
-                    {item.lastMessage?.body ?? item.summary ?? "Sem mensagens."}
-                  </p>
+                  <div className="mt-1 flex items-start justify-between gap-3">
+                    <p
+                      className={clsx(
+                        "line-clamp-2 min-w-0 text-sm",
+                        hasUnread ? "font-semibold text-slate-800" : "text-slate-500"
+                      )}
+                    >
+                      {preview}
+                    </p>
+                    {hasUnread && (
+                      <span className="grid h-5 min-w-[1.25rem] shrink-0 place-items-center rounded-full bg-emerald-500 px-1.5 text-[11px] font-bold leading-none text-white shadow-sm">
+                        {unread > 99 ? "99+" : unread}
+                      </span>
+                    )}
+                  </div>
                   <div className="mt-3 flex items-center gap-2">
-                    <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-brand">
+                    <span
+                      className={clsx(
+                        "rounded-full px-2 py-0.5 text-[11px] font-semibold",
+                        hasUnread ? "bg-white text-brand" : "bg-blue-50 text-brand"
+                      )}
+                    >
                       {item.contact.origin}
                     </span>
                     <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">

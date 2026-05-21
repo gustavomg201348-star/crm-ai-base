@@ -43,14 +43,17 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     const updated = await prisma.$transaction(async (tx) => {
       const direction = body?.direction ?? "outbound";
+      const now = new Date();
 
       await tx.message.create({
         data: {
           conversationId: conversation.id,
           direction,
+          senderType: direction === "inbound" ? "customer" : "agent",
           body: messageBody,
           type: "text",
-          status: "sent"
+          status: "sent",
+          readAt: direction === "inbound" ? null : now
         }
       });
 
@@ -69,7 +72,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
             direction === "outbound" && conversation.status === "PENDING"
               ? "OPEN"
               : conversation.status,
-          updatedAt: new Date(),
+          unreadCount: direction === "inbound" ? { increment: 1 } : 0,
+          lastReadAt: direction === "outbound" ? now : conversation.lastReadAt,
+          lastMessageAt: now,
+          lastMessagePreview: messageBody,
+          lastInboundMessageAt:
+            direction === "inbound" ? now : conversation.lastInboundMessageAt,
+          updatedAt: now,
           contact: {
             update: {
               lastMessage: messageBody

@@ -91,7 +91,8 @@ export async function POST(request: NextRequest) {
           channelId: channel.id,
           name: message.name,
           phone: message.from,
-          body: message.body
+          body: message.body,
+          providerMessageId: message.messageId
         });
 
         results.push({ phoneNumberId: message.phoneNumberId, ok: true, conversation });

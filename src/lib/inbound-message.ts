@@ -12,18 +12,37 @@ export async function processInboundMessage({
   channelId,
   name,
   phone,
-  body
+  body,
+  providerMessageId
 }: {
   companyId: string;
   channelId?: string | null;
   name?: string | null;
   phone: string;
   body: string;
+  providerMessageId?: string | null;
 }) {
   const normalizedPhone = normalizePhone(phone);
+  const messageBody = body.trim();
 
-  if (!normalizedPhone || !body.trim()) {
+  if (!normalizedPhone || !messageBody) {
     throw new Error("Mensagem invalida.");
+  }
+
+  if (providerMessageId) {
+    const existingMessage = await prisma.message.findFirst({
+      where: {
+        providerMessageId,
+        conversation: { contact: { companyId } }
+      },
+      include: {
+        conversation: { include: conversationInclude }
+      }
+    });
+
+    if (existingMessage) {
+      return mapConversation(existingMessage.conversation);
+    }
   }
 
   const [origin, stage] = await Promise.all([
@@ -52,7 +71,7 @@ export async function processInboundMessage({
         originId: origin?.id ?? null,
         stageId: stage?.id ?? null,
         temperature: "WARM",
-        lastMessage: body.trim()
+        lastMessage: messageBody
       }
     });
   } else {
@@ -60,7 +79,7 @@ export async function processInboundMessage({
       where: { id: contact.id },
       data: {
         name: contact.name || name?.trim() || normalizedPhone,
-        lastMessage: body.trim(),
+        lastMessage: messageBody,
         archivedAt: null
       }
     });
@@ -88,14 +107,21 @@ export async function processInboundMessage({
     data: {
       conversationId: conversation.id,
       direction: "inbound",
-      body: body.trim()
+      senderType: "customer",
+      body: messageBody,
+      providerMessageId: providerMessageId ?? null
     }
   });
 
+  const receivedAt = new Date();
   const updated = await prisma.conversation.update({
     where: { id: conversation.id },
     data: {
-      updatedAt: new Date()
+      unreadCount: { increment: 1 },
+      lastMessageAt: receivedAt,
+      lastMessagePreview: messageBody,
+      lastInboundMessageAt: receivedAt,
+      updatedAt: receivedAt
     },
     include: conversationInclude
   });
@@ -115,7 +141,7 @@ export async function processInboundMessage({
     channelId: channelId ?? null,
     customerName: updated.contact.name,
     phone: updated.contact.phone,
-    message: body,
+    message: messageBody,
     channelLabel: channel?.displayPhone ?? channel?.name ?? updated.channel
   });
 

@@ -187,6 +187,11 @@ model Conversation {
   status        String         @default("OPEN")
   channel       String         @default("whatsapp")
   summary       String?
+  unreadCount   Int            @default(0)
+  lastMessageAt DateTime?
+  lastMessagePreview String?
+  lastInboundMessageAt DateTime?
+  lastReadAt    DateTime?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   contact       Contact        @relation(fields: [contactId], references: [id])
@@ -210,6 +215,8 @@ model Message {
   templateVariables String?
   status            String       @default("sent")
   providerMessageId String?
+  readAt            DateTime?
+  senderType        String?
   createdAt         DateTime     @default(now())
   conversation      Conversation @relation(fields: [conversationId], references: [id])
 

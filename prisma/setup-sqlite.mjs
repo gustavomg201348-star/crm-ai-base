@@ -128,6 +128,11 @@ CREATE TABLE IF NOT EXISTS Conversation (
   status TEXT NOT NULL DEFAULT 'OPEN',
   channel TEXT NOT NULL DEFAULT 'whatsapp',
   summary TEXT,
+  unreadCount INTEGER NOT NULL DEFAULT 0,
+  lastMessageAt DATETIME,
+  lastMessagePreview TEXT,
+  lastInboundMessageAt DATETIME,
+  lastReadAt DATETIME,
   createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT Conversation_contactId_fkey FOREIGN KEY (contactId) REFERENCES Contact (id) ON DELETE RESTRICT ON UPDATE CASCADE,
@@ -149,6 +154,8 @@ CREATE TABLE IF NOT EXISTS Message (
   templateVariables TEXT,
   status TEXT NOT NULL DEFAULT 'sent',
   providerMessageId TEXT,
+  readAt DATETIME,
+  senderType TEXT,
   createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT Message_conversationId_fkey FOREIGN KEY (conversationId) REFERENCES Conversation (id) ON DELETE RESTRICT ON UPDATE CASCADE
 );
@@ -273,10 +280,29 @@ for (const [name, type] of [
   ["templateLanguage", "TEXT"],
   ["templateVariables", "TEXT"],
   ["status", "TEXT NOT NULL DEFAULT 'sent'"],
-  ["providerMessageId", "TEXT"]
+  ["providerMessageId", "TEXT"],
+  ["readAt", "DATETIME"],
+  ["senderType", "TEXT"]
 ]) {
   if (!messageColumns.includes(name)) {
     db.exec(`ALTER TABLE Message ADD COLUMN ${name} ${type};`);
+  }
+}
+
+const conversationColumns = db
+  .prepare("PRAGMA table_info(Conversation)")
+  .all()
+  .map((column) => column.name);
+
+for (const [name, type] of [
+  ["unreadCount", "INTEGER NOT NULL DEFAULT 0"],
+  ["lastMessageAt", "DATETIME"],
+  ["lastMessagePreview", "TEXT"],
+  ["lastInboundMessageAt", "DATETIME"],
+  ["lastReadAt", "DATETIME"]
+]) {
+  if (!conversationColumns.includes(name)) {
+    db.exec(`ALTER TABLE Conversation ADD COLUMN ${name} ${type};`);
   }
 }
 

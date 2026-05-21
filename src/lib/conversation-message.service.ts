@@ -90,6 +90,7 @@ export async function saveOutboundMessage({
       data: {
         conversationId,
         direction: "outbound",
+        senderType: "agent",
         body,
         type,
         mediaId,
@@ -99,7 +100,8 @@ export async function saveOutboundMessage({
         templateLanguage,
         templateVariables,
         providerMessageId,
-        status
+        status,
+        readAt: new Date()
       }
     });
 
@@ -111,11 +113,17 @@ export async function saveOutboundMessage({
       detail: body
     });
 
+    const sentAt = new Date();
+
     return tx.conversation.update({
       where: { id: conversationId },
       data: {
         status: conversation.status === "PENDING" ? "OPEN" : conversation.status,
-        updatedAt: new Date(),
+        unreadCount: 0,
+        lastReadAt: sentAt,
+        lastMessageAt: sentAt,
+        lastMessagePreview: body,
+        updatedAt: sentAt,
         contact: { update: { lastMessage: body } }
       },
       include: conversationInclude

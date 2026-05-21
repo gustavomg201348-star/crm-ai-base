@@ -29,6 +29,11 @@ export function mapConversation(conversation: ConversationWithRelations) {
     status: conversation.status as ConversationStatus,
     channel: conversation.channel,
     summary: conversation.summary,
+    unreadCount: conversation.unreadCount,
+    lastMessageAt: conversation.lastMessageAt,
+    lastMessagePreview: conversation.lastMessagePreview,
+    lastInboundMessageAt: conversation.lastInboundMessageAt,
+    lastReadAt: conversation.lastReadAt,
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
     agent: conversation.agent
@@ -65,7 +70,9 @@ export function mapConversation(conversation: ConversationWithRelations) {
           fileName: lastMessage.fileName,
           mimeType: lastMessage.mimeType,
           templateName: lastMessage.templateName,
-          status: lastMessage.status
+          status: lastMessage.status,
+          readAt: lastMessage.readAt,
+          senderType: lastMessage.senderType
         }
       : null,
     messages: conversation.messages.map((message) => ({
@@ -82,7 +89,9 @@ export function mapConversation(conversation: ConversationWithRelations) {
       templateLanguage: message.templateLanguage,
       templateVariables: message.templateVariables,
       status: message.status,
-      providerMessageId: message.providerMessageId
+      providerMessageId: message.providerMessageId,
+      readAt: message.readAt,
+      senderType: message.senderType
     }))
   };
 }

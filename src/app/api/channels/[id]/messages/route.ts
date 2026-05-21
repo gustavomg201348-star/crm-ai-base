@@ -121,14 +121,18 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
 
     const updated = await prisma.$transaction(async (tx) => {
+      const sentAt = new Date();
+
       await tx.message.create({
         data: {
           conversationId: conversation.id,
           direction: "outbound",
+          senderType: "agent",
           body: message,
           type: "text",
           status: "sent",
-          providerMessageId
+          providerMessageId,
+          readAt: sentAt
         }
       });
 
@@ -145,7 +149,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
         data: {
           channel: `whatsapp:${channel.id}`,
           status: conversation.status === "PENDING" ? "OPEN" : conversation.status,
-          updatedAt: new Date(),
+          unreadCount: 0,
+          lastReadAt: sentAt,
+          lastMessageAt: sentAt,
+          lastMessagePreview: message,
+          updatedAt: sentAt,
           contact: { update: { lastMessage: message } }
         },
         include: conversationInclude
