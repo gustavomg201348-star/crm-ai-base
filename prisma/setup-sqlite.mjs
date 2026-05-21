@@ -143,6 +143,31 @@ CREATE TABLE IF NOT EXISTS Message (
   CONSTRAINT Message_conversationId_fkey FOREIGN KEY (conversationId) REFERENCES Conversation (id) ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS Notification (
+  id TEXT PRIMARY KEY NOT NULL,
+  companyId TEXT NOT NULL,
+  userId TEXT,
+  conversationId TEXT NOT NULL,
+  contactId TEXT,
+  channelId TEXT,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  type TEXT NOT NULL DEFAULT 'NEW_INBOUND_MESSAGE',
+  channelLabel TEXT,
+  readAt DATETIME,
+  createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT Notification_companyId_fkey FOREIGN KEY (companyId) REFERENCES Company (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT Notification_userId_fkey FOREIGN KEY (userId) REFERENCES User (id) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT Notification_conversationId_fkey FOREIGN KEY (conversationId) REFERENCES Conversation (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT Notification_contactId_fkey FOREIGN KEY (contactId) REFERENCES Contact (id) ON DELETE SET NULL ON UPDATE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS Notification_companyId_createdAt_idx ON Notification(companyId, createdAt);
+CREATE INDEX IF NOT EXISTS Notification_companyId_readAt_idx ON Notification(companyId, readAt);
+CREATE INDEX IF NOT EXISTS Notification_userId_idx ON Notification(userId);
+CREATE INDEX IF NOT EXISTS Notification_conversationId_idx ON Notification(conversationId);
+CREATE INDEX IF NOT EXISTS Notification_contactId_idx ON Notification(contactId);
+
 CREATE TABLE IF NOT EXISTS ContactActivity (
   id TEXT PRIMARY KEY NOT NULL,
   contactId TEXT NOT NULL,

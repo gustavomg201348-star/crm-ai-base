@@ -1,5 +1,6 @@
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
+import { createInboundMessageNotification } from "@/lib/notifications";
 
 function normalizePhone(phone: string) {
   return phone.replace(/\D/g, "");
@@ -97,6 +98,25 @@ export async function processInboundMessage({
       updatedAt: new Date()
     },
     include: conversationInclude
+  });
+
+  const channel = channelId
+    ? await prisma.channel.findFirst({
+        where: { id: channelId, companyId },
+        select: { displayPhone: true, name: true }
+      })
+    : null;
+
+  await createInboundMessageNotification({
+    companyId,
+    userId: updated.agent?.id ?? null,
+    conversationId: updated.id,
+    contactId: updated.contact.id,
+    channelId: channelId ?? null,
+    customerName: updated.contact.name,
+    phone: updated.contact.phone,
+    message: body,
+    channelLabel: channel?.displayPhone ?? channel?.name ?? updated.channel
   });
 
   return mapConversation(updated);

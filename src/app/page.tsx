@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import NextImage from "next/image";
 import clsx from "clsx";
 import {
@@ -243,6 +243,21 @@ type CampaignRow = {
   }>;
 };
 
+type NotificationRow = {
+  id: string;
+  conversationId: string;
+  contactId?: string | null;
+  customerName?: string | null;
+  phone?: string | null;
+  title: string;
+  message: string;
+  type: string;
+  channelId?: string | null;
+  channelLabel?: string | null;
+  readAt?: string | null;
+  createdAt: string;
+};
+
 type DashboardData = {
   metrics: {
     activeContacts: number;
@@ -377,6 +392,15 @@ export default function Home() {
   const [dashboard, setDashboard] = useState<DashboardData>(emptyDashboardData);
   const [selectedConversation, setSelectedConversation] =
     useState<ConversationRow | null>(null);
+  const selectedConversationRef = useRef<string | null>(null);
+  const knownNotificationIdsRef = useRef<Set<string>>(new Set());
+  const notificationsLoadedRef = useRef(false);
+  const [notifications, setNotifications] = useState<NotificationRow[]>([]);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [desktopPermission, setDesktopPermission] = useState<
+    NotificationPermission | "unsupported"
+  >("unsupported");
   const [conversationFilters, setConversationFilters] = useState({
     search: "",
     status: "OPEN"
@@ -423,6 +447,10 @@ export default function Home() {
   const [proposalsLoading, setProposalsLoading] = useState(false);
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [appError, setAppError] = useState("");
+
+  useEffect(() => {
+    selectedConversationRef.current = selectedConversation?.id ?? null;
+  }, [selectedConversation?.id]);
 
   const pageTitle = useMemo(() => {
     return navItems.find((item) => item.id === active)?.label ?? "Dashboard";
@@ -531,6 +559,137 @@ export default function Home() {
     },
     [conversationFilters]
   );
+
+  const markNotificationsRead = useCallback(
+    async (payload: { id?: string; conversationId?: string; all?: boolean }) => {
+      const response = await fetch("/api/notifications", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      if (response.ok) {
+        const data = (await response.json()) as { unreadCount: number };
+        setUnreadNotifications(data.unreadCount);
+        setNotifications((current) =>
+          current.map((notification) => {
+            const shouldMark =
+              payload.all ||
+              notification.id === payload.id ||
+              notification.conversationId === payload.conversationId;
+
+            return shouldMark
+              ? { ...notification, readAt: notification.readAt ?? new Date().toISOString() }
+              : notification;
+          })
+        );
+      }
+    },
+    []
+  );
+
+  const openConversationById = useCallback(
+    async (conversationId: string) => {
+      const response = await fetch(`/api/conversations/${conversationId}`);
+
+      if (response.ok) {
+        const data = (await response.json()) as { conversation: ConversationRow };
+        setActive("atendimento");
+        setSelectedConversation(data.conversation);
+        setConversationList((current) => {
+          const exists = current.some((conversation) => conversation.id === data.conversation.id);
+          return exists
+            ? current.map((conversation) =>
+                conversation.id === data.conversation.id ? data.conversation : conversation
+              )
+            : [data.conversation, ...current];
+        });
+        await markNotificationsRead({ conversationId });
+      }
+    },
+    [markNotificationsRead]
+  );
+
+  const showDesktopNotification = useCallback((notification: NotificationRow) => {
+    if (typeof window === "undefined" || !("Notification" in window)) return;
+    if (window.Notification.permission !== "granted") return;
+
+    const desktop = new window.Notification(
+      `Nova mensagem de ${notification.customerName || notification.phone || "cliente"}`,
+      {
+        body: notification.message,
+        tag: notification.conversationId,
+        requireInteraction: false
+      }
+    );
+
+    desktop.onclick = () => {
+      window.focus();
+      void openConversationById(notification.conversationId);
+      desktop.close();
+    };
+  }, [openConversationById]);
+
+  const loadNotifications = useCallback(
+    async (options: { silent?: boolean } = {}) => {
+      const response = await fetch("/api/notifications?limit=20");
+
+      if (!response.ok) return;
+
+      const data = (await response.json()) as {
+        notifications: NotificationRow[];
+        unreadCount: number;
+      };
+      const previousIds = knownNotificationIdsRef.current;
+      const activeConversationId = selectedConversationRef.current;
+
+      setNotifications(data.notifications);
+      setUnreadNotifications(data.unreadCount);
+
+      const unreadNewNotifications = data.notifications.filter(
+        (notification) => !notification.readAt && !previousIds.has(notification.id)
+      );
+
+      data.notifications.forEach((notification) => previousIds.add(notification.id));
+
+      if (!notificationsLoadedRef.current) {
+        notificationsLoadedRef.current = true;
+        return;
+      }
+
+      for (const notification of unreadNewNotifications) {
+        if (notification.conversationId === activeConversationId) {
+          void markNotificationsRead({ conversationId: notification.conversationId });
+          continue;
+        }
+
+        if (!options.silent) {
+          showDesktopNotification(notification);
+        }
+      }
+    },
+    [markNotificationsRead, showDesktopNotification]
+  );
+
+  async function requestDesktopNotifications() {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      setDesktopPermission("unsupported");
+      return;
+    }
+
+    const permission = await window.Notification.requestPermission();
+    setDesktopPermission(permission);
+  }
+
+  async function handleSelectConversation(conversation: ConversationRow) {
+    setSelectedConversation(conversation);
+    await markNotificationsRead({ conversationId: conversation.id });
+  }
+
+  useEffect(() => {
+    if (!session || active !== "atendimento" || !selectedConversation?.id) return;
+    void markNotificationsRead({ conversationId: selectedConversation.id });
+  }, [active, markNotificationsRead, selectedConversation?.id, session]);
 
   async function loadChannels() {
     setChannelsLoading(true);
@@ -1349,16 +1508,25 @@ export default function Home() {
     void loadChannels();
     void loadCampaigns();
     void loadConversations(conversationFilters);
+    void loadNotifications({ silent: true });
     void loadProposals(proposalFilters);
   }, [
     contactFilters,
     conversationFilters,
     loadContacts,
     loadConversations,
+    loadNotifications,
     loadProposals,
     proposalFilters,
     session
   ]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setDesktopPermission(
+      "Notification" in window ? window.Notification.permission : "unsupported"
+    );
+  }, []);
 
   useEffect(() => {
     if (!session) return;
@@ -1375,6 +1543,16 @@ export default function Home() {
 
     return () => window.clearInterval(interval);
   }, [active, conversationFilters, loadConversations, session]);
+
+  useEffect(() => {
+    if (!session) return;
+
+    const interval = window.setInterval(() => {
+      void loadNotifications();
+    }, 3000);
+
+    return () => window.clearInterval(interval);
+  }, [loadNotifications, session]);
 
   if (sessionLoading) {
     return (
@@ -1455,9 +1633,90 @@ export default function Home() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button className="grid h-10 w-10 place-items-center rounded border border-line bg-white">
-              <Bell className="h-4 w-4" />
-            </button>
+            <div className="relative">
+              <button
+                className="relative grid h-10 w-10 place-items-center rounded border border-line bg-white"
+                onClick={() => setNotificationsOpen((current) => !current)}
+                title="Notificacoes"
+              >
+                <Bell className="h-4 w-4" />
+                {unreadNotifications > 0 && (
+                  <span className="absolute -right-1 -top-1 min-w-5 rounded-full bg-berry px-1.5 py-0.5 text-[10px] font-bold text-white">
+                    {unreadNotifications > 99 ? "99+" : unreadNotifications}
+                  </span>
+                )}
+              </button>
+              {notificationsOpen && (
+                <div className="absolute right-0 top-12 z-30 w-[min(22rem,calc(100vw-2rem))] rounded border border-line bg-white shadow-soft">
+                  <div className="flex items-center justify-between border-b border-line p-3">
+                    <div>
+                      <p className="text-sm font-bold">Notificacoes</p>
+                      <p className="text-xs text-slate-500">
+                        {unreadNotifications} nao lida(s)
+                      </p>
+                    </div>
+                    <button
+                      className="rounded border border-line px-2 py-1 text-xs font-semibold text-slate-600"
+                      onClick={() => void markNotificationsRead({ all: true })}
+                    >
+                      Marcar todas
+                    </button>
+                  </div>
+                  {desktopPermission !== "granted" && (
+                    <div className="border-b border-line p-3">
+                      <button
+                        className="w-full rounded bg-brand px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+                        disabled={desktopPermission === "denied" || desktopPermission === "unsupported"}
+                        onClick={requestDesktopNotifications}
+                      >
+                        {desktopPermission === "denied"
+                          ? "Notificacoes bloqueadas no navegador"
+                          : desktopPermission === "unsupported"
+                            ? "Navegador sem notificacoes desktop"
+                            : "Ativar notificacoes no computador"}
+                      </button>
+                    </div>
+                  )}
+                  <div className="max-h-96 overflow-y-auto">
+                    {notifications.length === 0 && (
+                      <p className="p-4 text-sm text-slate-500">
+                        Nenhuma notificacao recebida ainda.
+                      </p>
+                    )}
+                    {notifications.map((notification) => (
+                      <button
+                        key={notification.id}
+                        className={clsx(
+                          "block w-full border-b border-line p-3 text-left text-sm last:border-b-0 hover:bg-slate-50",
+                          !notification.readAt && "bg-teal-50"
+                        )}
+                        onClick={() => {
+                          setNotificationsOpen(false);
+                          void openConversationById(notification.conversationId);
+                        }}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-semibold text-slate-900">
+                              {notification.customerName || notification.phone || "Cliente"}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {notification.phone || "Sem telefone"} - {notification.channelLabel || "WhatsApp"}
+                            </p>
+                          </div>
+                          <span className="shrink-0 text-xs text-slate-400">
+                            {formatRelativeDate(notification.createdAt)}
+                          </span>
+                        </div>
+                        <p className="mt-2 line-clamp-2 text-slate-600">
+                          {notification.message}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
             <button className="hidden h-10 items-center gap-2 rounded bg-brand px-4 text-sm font-semibold text-white md:flex">
               <Plus className="h-4 w-4" />
               Nova conversa
@@ -1494,7 +1753,7 @@ export default function Home() {
               loading={conversationLoading}
               selectedConversation={selectedConversation}
               onFiltersChange={setConversationFilters}
-              onSelectConversation={setSelectedConversation}
+              onSelectConversation={(conversation) => void handleSelectConversation(conversation)}
               onSendMessage={handleSendMessage}
               onUpdateStatus={handleConversationStatus}
               aiAnalysis={aiAnalysis}

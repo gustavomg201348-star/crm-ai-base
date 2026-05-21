@@ -8,21 +8,22 @@ datasource db {
 }
 
 model Company {
-  id        String          @id @default(cuid())
-  name      String
-  email     String?
-  phone     String?
-  segment   String?
-  createdAt DateTime        @default(now())
-  users     User[]
-  contacts  Contact[]
-  channels  Channel[]
-  campaigns Campaign[]
-  tags      Tag[]
-  stages    PipelineStage[]
-  origins   Origin[]
-  proposals Proposal[]
-  tasks     Task[]
+  id            String          @id @default(cuid())
+  name          String
+  email         String?
+  phone         String?
+  segment       String?
+  createdAt     DateTime        @default(now())
+  users         User[]
+  contacts      Contact[]
+  channels      Channel[]
+  campaigns     Campaign[]
+  notifications Notification[]
+  tags          Tag[]
+  stages        PipelineStage[]
+  origins       Origin[]
+  proposals     Proposal[]
+  tasks         Task[]
 }
 
 model Channel {
@@ -61,6 +62,7 @@ model User {
   conversations Conversation[]
   activities    ContactActivity[]
   campaigns     Campaign[]
+  notifications Notification[]
   tasks         Task[]
 
   @@index([companyId])
@@ -91,6 +93,7 @@ model Contact {
   proposals          Proposal[]
   activities         ContactActivity[]
   tasks              Task[]
+  notifications      Notification[]
 
   @@index([companyId])
   @@index([ownerId])
@@ -178,17 +181,18 @@ model PipelineStage {
 }
 
 model Conversation {
-  id        String    @id @default(cuid())
-  contactId String
-  agentId   String?
-  status    String    @default("OPEN")
-  channel   String    @default("whatsapp")
-  summary   String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  contact   Contact   @relation(fields: [contactId], references: [id])
-  agent     User?     @relation(fields: [agentId], references: [id])
-  messages  Message[]
+  id            String         @id @default(cuid())
+  contactId     String
+  agentId       String?
+  status        String         @default("OPEN")
+  channel       String         @default("whatsapp")
+  summary       String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  contact       Contact        @relation(fields: [contactId], references: [id])
+  agent         User?          @relation(fields: [agentId], references: [id])
+  messages      Message[]
+  notifications Notification[]
 }
 
 model Message {
@@ -198,6 +202,31 @@ model Message {
   body           String
   createdAt      DateTime     @default(now())
   conversation   Conversation @relation(fields: [conversationId], references: [id])
+}
+
+model Notification {
+  id             String       @id @default(cuid())
+  companyId      String
+  userId         String?
+  conversationId String
+  contactId      String?
+  channelId      String?
+  title          String
+  message        String
+  type           String       @default("NEW_INBOUND_MESSAGE")
+  channelLabel   String?
+  readAt         DateTime?
+  createdAt      DateTime     @default(now())
+  company        Company      @relation(fields: [companyId], references: [id])
+  user           User?        @relation(fields: [userId], references: [id])
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  contact        Contact?     @relation(fields: [contactId], references: [id])
+
+  @@index([companyId, createdAt])
+  @@index([companyId, readAt])
+  @@index([userId])
+  @@index([conversationId])
+  @@index([contactId])
 }
 
 model Campaign {
