@@ -144,6 +144,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         where: { id: conversation.id },
         data: {
           channel: `whatsapp:${channel.id}`,
+          status: conversation.status === "PENDING" ? "OPEN" : conversation.status,
           updatedAt: new Date(),
           contact: { update: { lastMessage: message } }
         },

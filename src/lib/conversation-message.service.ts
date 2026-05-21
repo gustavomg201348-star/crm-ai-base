@@ -114,6 +114,7 @@ export async function saveOutboundMessage({
     return tx.conversation.update({
       where: { id: conversationId },
       data: {
+        status: conversation.status === "PENDING" ? "OPEN" : conversation.status,
         updatedAt: new Date(),
         contact: { update: { lastMessage: body } }
       },

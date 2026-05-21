@@ -78,7 +78,7 @@ export async function processInboundMessage({
     conversation = await prisma.conversation.create({
       data: {
         contactId: contact.id,
-        status: "OPEN",
+        status: "PENDING",
         channel: channelId ? `whatsapp:${channelId}` : "whatsapp"
       }
     });
@@ -95,7 +95,6 @@ export async function processInboundMessage({
   const updated = await prisma.conversation.update({
     where: { id: conversation.id },
     data: {
-      status: conversation.status === "RESOLVED" ? "OPEN" : conversation.status,
       updatedAt: new Date()
     },
     include: conversationInclude

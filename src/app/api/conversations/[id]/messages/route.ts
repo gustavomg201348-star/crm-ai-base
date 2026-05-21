@@ -65,6 +65,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return tx.conversation.update({
         where: { id: conversation.id },
         data: {
+          status:
+            direction === "outbound" && conversation.status === "PENDING"
+              ? "OPEN"
+              : conversation.status,
           updatedAt: new Date(),
           contact: {
             update: {
