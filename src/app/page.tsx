@@ -2453,7 +2453,7 @@ function Atendimento({
   }
 
   return (
-    <div className="grid min-h-[calc(100vh-8rem)] gap-4 xl:grid-cols-[340px_minmax(0,1fr)_320px]">
+    <div className="grid h-[calc(100vh-8.5rem)] min-h-0 gap-4 overflow-hidden xl:grid-cols-[340px_minmax(0,1fr)_320px]">
       <ConversationList
         conversations={conversations}
         filters={filters}
@@ -2463,7 +2463,7 @@ function Atendimento({
         onSelectConversation={onSelectConversation}
       />
 
-      <section className="flex min-h-[680px] flex-col overflow-hidden rounded-[1.5rem] border border-line/80 bg-white shadow-soft">
+      <section className="flex min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-line/80 bg-white shadow-soft">
         <div className="flex min-h-20 items-center justify-between gap-3 border-b border-line/70 px-5">
           <div className="flex min-w-0 items-center gap-3">
             <div className="relative grid h-11 w-11 place-items-center rounded-full bg-blue-50 text-sm font-bold text-brand ring-1 ring-blue-100">
@@ -2504,7 +2504,7 @@ function Atendimento({
           )}
         </div>
 
-        <div className="flex-1 space-y-4 overflow-y-auto bg-[linear-gradient(180deg,#FFFFFF_0%,#F8FAFC_100%)] p-5">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain bg-[linear-gradient(180deg,#FFFFFF_0%,#F8FAFC_100%)] p-5">
           {!selectedConversation && (
             <div className="grid h-80 place-items-center text-center text-sm text-slate-500">
               <div>
@@ -2554,7 +2554,7 @@ function Atendimento({
         </form>
       </section>
 
-      <section className="space-y-4">
+      <section className="min-h-0 space-y-4 overflow-y-auto overscroll-contain pr-1">
         <AiPanel
           compact
           analysis={aiAnalysis}
@@ -2624,7 +2624,7 @@ function ConversationList({
   onSelectConversation: (conversation: ConversationRow) => void;
 }) {
   return (
-    <section className="overflow-hidden rounded-[1.5rem] border border-line/80 bg-white shadow-soft">
+    <section className="flex min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-line/80 bg-white shadow-soft">
       <div className="border-b border-line/70 p-4">
         <div className="flex items-center justify-between">
           <div>
@@ -2668,7 +2668,7 @@ function ConversationList({
           ))}
         </div>
       </div>
-      <div className="max-h-[calc(100vh-16rem)] divide-y divide-line/70 overflow-y-auto">
+      <div className="min-h-0 flex-1 divide-y divide-line/70 overflow-y-auto overscroll-contain">
         {conversations.map((item) => {
           const selected = selectedConversation?.id === item.id;
           return (
