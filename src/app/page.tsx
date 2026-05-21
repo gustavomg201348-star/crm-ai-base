@@ -567,6 +567,37 @@ export default function Home() {
     [conversationFilters]
   );
 
+  const mergeConversation = useCallback((conversation: ConversationRow) => {
+    setSelectedConversation((current) =>
+      current?.id === conversation.id ? conversation : current
+    );
+    setConversationList((current) => {
+      const exists = current.some((item) => item.id === conversation.id);
+      const next = exists
+        ? current.map((item) => (item.id === conversation.id ? conversation : item))
+        : [conversation, ...current];
+
+      return [...next].sort(
+        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      );
+    });
+  }, []);
+
+  const refreshConversation = useCallback(
+    async (conversationId?: string | null) => {
+      const id = conversationId ?? selectedConversationRef.current;
+      if (!id) return null;
+
+      const response = await fetch(`/api/conversations/${id}`);
+      if (!response.ok) return null;
+
+      const data = (await response.json()) as { conversation: ConversationRow };
+      mergeConversation(data.conversation);
+      return data.conversation;
+    },
+    [mergeConversation]
+  );
+
   const markNotificationsRead = useCallback(
     async (payload: { id?: string; conversationId?: string; all?: boolean }) => {
       const response = await fetch("/api/notifications", {
@@ -645,6 +676,7 @@ export default function Home() {
 
       if (notification.conversationId === selectedConversationRef.current) {
         void markNotificationsRead({ conversationId: notification.conversationId });
+        void refreshConversation(notification.conversationId);
         void loadConversations(conversationFilters, { silent: true });
         return;
       }
@@ -658,6 +690,7 @@ export default function Home() {
       conversationFilters,
       loadConversations,
       markNotificationsRead,
+      refreshConversation,
       showDesktopNotification
     ]
   );
@@ -692,6 +725,7 @@ export default function Home() {
       for (const notification of unreadNewNotifications) {
         if (notification.conversationId === activeConversationId) {
           void markNotificationsRead({ conversationId: notification.conversationId });
+          void refreshConversation(notification.conversationId);
           continue;
         }
 
@@ -700,7 +734,7 @@ export default function Home() {
         }
       }
     },
-    [markNotificationsRead, showDesktopNotification]
+    [markNotificationsRead, refreshConversation, showDesktopNotification]
   );
 
   async function requestDesktopNotifications() {
@@ -716,6 +750,7 @@ export default function Home() {
   async function handleSelectConversation(conversation: ConversationRow) {
     setSelectedConversation(conversation);
     await markNotificationsRead({ conversationId: conversation.id });
+    void refreshConversation(conversation.id);
   }
 
   useEffect(() => {
@@ -1129,10 +1164,41 @@ export default function Home() {
   }
 
   async function handleSendMessage(conversationId: string, body: string) {
+    const messageBody = body.trim();
+    const now = new Date().toISOString();
     const conversation =
       selectedConversation?.id === conversationId
         ? selectedConversation
         : conversationList.find((item) => item.id === conversationId);
+
+    if (!conversation || !messageBody) return;
+
+    const optimisticConversation: ConversationRow = {
+      ...conversation,
+      updatedAt: now,
+      contact: {
+        ...conversation.contact,
+        lastMessage: messageBody
+      },
+      lastMessage: {
+        id: `optimistic-${now}`,
+        direction: "outbound",
+        body: messageBody,
+        createdAt: now
+      },
+      messages: [
+        ...conversation.messages,
+        {
+          id: `optimistic-${now}`,
+          direction: "outbound",
+          body: messageBody,
+          createdAt: now
+        }
+      ]
+    };
+
+    mergeConversation(optimisticConversation);
+
     const channelId = conversation?.channel.startsWith("whatsapp:")
       ? conversation.channel.replace("whatsapp:", "")
       : null;
@@ -1144,27 +1210,23 @@ export default function Home() {
             body: JSON.stringify({
               conversationId,
               to: conversation.contact.phone,
-              body
+              body: messageBody
             })
           })
         : await fetch(`/api/conversations/${conversationId}/messages`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ body, direction: "outbound" })
+            body: JSON.stringify({ body: messageBody, direction: "outbound" })
           });
 
     if (!response.ok) {
       setAppError("Nao foi possivel enviar mensagem.");
+      void refreshConversation(conversationId);
       return;
     }
 
     const data = (await response.json()) as { conversation: ConversationRow };
-    setSelectedConversation(data.conversation);
-    setConversationList((current) =>
-      current.map((conversation) =>
-        conversation.id === data.conversation.id ? data.conversation : conversation
-      )
-    );
+    mergeConversation(data.conversation);
   }
 
   async function handleAnalyzeConversation(conversationId: string) {
@@ -1570,11 +1632,12 @@ export default function Home() {
     if (!session || active !== "atendimento") return;
 
     const interval = window.setInterval(() => {
+      void refreshConversation();
       void loadConversations(conversationFilters, { silent: true });
     }, 3000);
 
     return () => window.clearInterval(interval);
-  }, [active, conversationFilters, loadConversations, session]);
+  }, [active, conversationFilters, loadConversations, refreshConversation, session]);
 
   useEffect(() => {
     if (!session) return;
@@ -2443,6 +2506,11 @@ function Atendimento({
   onAnalyzeConversation: (conversationId: string) => Promise<void>;
 }) {
   const [message, setMessage] = useState("");
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ block: "end" });
+  }, [selectedConversation?.id, selectedConversation?.messages.length]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2526,6 +2594,7 @@ function Atendimento({
               {item.body}
             </ChatBubble>
           ))}
+          <div ref={chatEndRef} />
         </div>
 
         <form className="border-t border-line/70 bg-white p-4" onSubmit={handleSubmit}>
