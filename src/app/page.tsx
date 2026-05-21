@@ -1809,6 +1809,12 @@ export default function Home() {
               aiAnalysis={aiAnalysis}
               aiLoading={aiLoading}
               onAnalyzeConversation={handleAnalyzeConversation}
+              notifications={notifications}
+              unreadNotifications={unreadNotifications}
+              desktopPermission={desktopPermission}
+              onRequestDesktopNotifications={requestDesktopNotifications}
+              onOpenNotification={openConversationById}
+              onMarkAllNotificationsRead={() => markNotificationsRead({ all: true })}
             />
           )}
           {active === "kanban" && (
@@ -2235,7 +2241,13 @@ function Atendimento({
   onUpdateStatus,
   aiAnalysis,
   aiLoading,
-  onAnalyzeConversation
+  onAnalyzeConversation,
+  notifications,
+  unreadNotifications,
+  desktopPermission,
+  onRequestDesktopNotifications,
+  onOpenNotification,
+  onMarkAllNotificationsRead
 }: {
   conversations: ConversationRow[];
   filters: { search: string; status: string };
@@ -2251,6 +2263,12 @@ function Atendimento({
   aiAnalysis: AiAnalysis | null;
   aiLoading: boolean;
   onAnalyzeConversation: (conversationId: string) => Promise<void>;
+  notifications: NotificationRow[];
+  unreadNotifications: number;
+  desktopPermission: NotificationPermission | "unsupported";
+  onRequestDesktopNotifications: () => Promise<void>;
+  onOpenNotification: (conversationId: string) => Promise<void>;
+  onMarkAllNotificationsRead: () => Promise<void>;
 }) {
   const [message, setMessage] = useState("");
 
@@ -2396,6 +2414,14 @@ function Atendimento({
       </section>
 
       <section className="space-y-4">
+        <AtendimentoNotificationsPanel
+          notifications={notifications}
+          unreadNotifications={unreadNotifications}
+          desktopPermission={desktopPermission}
+          onRequestDesktopNotifications={onRequestDesktopNotifications}
+          onOpenNotification={onOpenNotification}
+          onMarkAllNotificationsRead={onMarkAllNotificationsRead}
+        />
         <AiPanel
           compact
           analysis={aiAnalysis}
@@ -2465,6 +2491,102 @@ function ChatBubble({
         )}
       >
         {children}
+      </div>
+    </div>
+  );
+}
+
+function AtendimentoNotificationsPanel({
+  notifications,
+  unreadNotifications,
+  desktopPermission,
+  onRequestDesktopNotifications,
+  onOpenNotification,
+  onMarkAllNotificationsRead
+}: {
+  notifications: NotificationRow[];
+  unreadNotifications: number;
+  desktopPermission: NotificationPermission | "unsupported";
+  onRequestDesktopNotifications: () => Promise<void>;
+  onOpenNotification: (conversationId: string) => Promise<void>;
+  onMarkAllNotificationsRead: () => Promise<void>;
+}) {
+  return (
+    <div className="rounded border border-line bg-white shadow-soft">
+      <div className="flex items-center justify-between border-b border-line p-4">
+        <div className="flex items-center gap-2">
+          <div className="relative grid h-9 w-9 place-items-center rounded border border-line bg-white">
+            <Bell className="h-4 w-4 text-brand" />
+            {unreadNotifications > 0 && (
+              <span className="absolute -right-1 -top-1 min-w-5 rounded-full bg-berry px-1.5 py-0.5 text-center text-[10px] font-bold text-white">
+                {unreadNotifications > 99 ? "99+" : unreadNotifications}
+              </span>
+            )}
+          </div>
+          <div>
+            <h3 className="font-bold">Notificacoes</h3>
+            <p className="text-xs text-slate-500">
+              {unreadNotifications} mensagem(ns) nao lida(s)
+            </p>
+          </div>
+        </div>
+        <button
+          className="rounded border border-line px-2 py-1 text-xs font-semibold text-slate-600"
+          onClick={() => void onMarkAllNotificationsRead()}
+        >
+          Marcar todas
+        </button>
+      </div>
+
+      {desktopPermission !== "granted" && (
+        <div className="border-b border-line p-3">
+          <button
+            className="h-9 w-full rounded bg-brand px-3 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+            disabled={desktopPermission === "denied" || desktopPermission === "unsupported"}
+            onClick={() => void onRequestDesktopNotifications()}
+          >
+            {desktopPermission === "denied"
+              ? "Notificacoes bloqueadas no navegador"
+              : desktopPermission === "unsupported"
+                ? "Navegador sem notificacoes desktop"
+                : "Ativar notificacoes no computador"}
+          </button>
+        </div>
+      )}
+
+      <div className="max-h-80 divide-y divide-line overflow-y-auto">
+        {notifications.length === 0 && (
+          <div className="p-4 text-sm text-slate-500">
+            As novas mensagens dos clientes vao aparecer aqui.
+          </div>
+        )}
+        {notifications.map((notification) => (
+          <button
+            key={notification.id}
+            className={clsx(
+              "block w-full p-4 text-left hover:bg-slate-50",
+              !notification.readAt && "bg-teal-50/70"
+            )}
+            onClick={() => void onOpenNotification(notification.conversationId)}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate font-semibold text-slate-900">
+                  {notification.customerName || notification.phone || "Cliente"}
+                </p>
+                <p className="mt-0.5 truncate text-xs text-slate-500">
+                  {notification.phone || "Sem telefone"} - {notification.channelLabel || "WhatsApp"}
+                </p>
+              </div>
+              <span className="shrink-0 text-xs text-slate-400">
+                {formatRelativeDate(notification.createdAt)}
+              </span>
+            </div>
+            <p className="mt-2 line-clamp-2 text-sm text-slate-600">
+              {notification.message}
+            </p>
+          </button>
+        ))}
       </div>
     </div>
   );
