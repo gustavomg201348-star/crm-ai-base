@@ -7,6 +7,10 @@ import {
 } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
 
+function normalizePhone(phone: string) {
+  return phone.replace(/\D/g, "");
+}
+
 export async function GET(request: NextRequest) {
   try {
     const session = getSessionFromRequest(request);
@@ -62,33 +66,93 @@ export async function POST(request: NextRequest) {
     const body = (await request.json().catch(() => null)) as
       | {
           contactId?: string;
+          name?: string;
+          phone?: string;
           status?: ConversationStatus;
           summary?: string;
         }
       | null;
 
-    if (!body?.contactId) {
-      return NextResponse.json({ error: "Informe o contato." }, { status: 400 });
+    const phone = body?.phone?.trim();
+    const normalizedPhone = phone ? normalizePhone(phone) : "";
+    const name = body?.name?.trim();
+
+    let contact = body?.contactId
+      ? await prisma.contact.findFirst({
+          where: {
+            id: body.contactId,
+            companyId: session.companyId,
+            archivedAt: null
+          }
+        })
+      : null;
+
+    if (!contact && normalizedPhone) {
+      contact = await prisma.contact.findFirst({
+        where: {
+          companyId: session.companyId,
+          archivedAt: null,
+          OR: [{ phone: normalizedPhone }, { phone: phone ?? normalizedPhone }]
+        }
+      });
     }
 
-    const contact = await prisma.contact.findFirst({
-      where: {
-        id: body.contactId,
-        companyId: session.companyId,
-        archivedAt: null
-      }
-    });
+    if (!contact && normalizedPhone) {
+      const [origin, stage] = await Promise.all([
+        prisma.origin.findFirst({
+          where: { companyId: session.companyId, name: "WhatsApp" }
+        }),
+        prisma.pipelineStage.findFirst({
+          where: { companyId: session.companyId },
+          orderBy: { position: "asc" }
+        })
+      ]);
+
+      contact = await prisma.contact.create({
+        data: {
+          companyId: session.companyId,
+          ownerId: session.id,
+          name: name || normalizedPhone,
+          phone: normalizedPhone,
+          originId: origin?.id ?? null,
+          stageId: stage?.id ?? null,
+          temperature: "WARM"
+        }
+      });
+    }
 
     if (!contact) {
-      return NextResponse.json({ error: "Contato nao encontrado." }, { status: 404 });
+      return NextResponse.json(
+        { error: "Informe um contato ou telefone valido." },
+        { status: 400 }
+      );
     }
+
+    const existingConversation = await prisma.conversation.findFirst({
+      where: {
+        contactId: contact.id,
+        status: { not: "RESOLVED" }
+      },
+      include: conversationInclude,
+      orderBy: { updatedAt: "desc" }
+    });
+
+    if (existingConversation) {
+      return NextResponse.json({ conversation: mapConversation(existingConversation) });
+    }
+
+    const channel = await prisma.channel.findFirst({
+      where: { companyId: session.companyId, type: "whatsapp", status: "ACTIVE" },
+      orderBy: { updatedAt: "desc" }
+    });
 
     const conversation = await prisma.conversation.create({
       data: {
         contactId: contact.id,
         agentId: session.id,
-        status: body.status ?? "OPEN",
-        summary: body.summary?.trim() || null
+        status: body?.status ?? "OPEN",
+        channel: channel ? `whatsapp:${channel.id}` : "whatsapp",
+        summary: body?.summary?.trim() || null
       },
       include: conversationInclude
     });

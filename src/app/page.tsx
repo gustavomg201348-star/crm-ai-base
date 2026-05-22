@@ -444,6 +444,15 @@ export default function Home() {
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [newConversationOpen, setNewConversationOpen] = useState(false);
+  const [newConversationSaving, setNewConversationSaving] = useState(false);
+  const [newConversationError, setNewConversationError] = useState("");
+  const [newConversationForm, setNewConversationForm] = useState({
+    search: "",
+    contactId: "",
+    name: "",
+    phone: ""
+  });
   const [desktopPermission, setDesktopPermission] = useState<
     NotificationPermission | "unsupported"
   >("unsupported");
@@ -811,6 +820,53 @@ export default function Home() {
     setSelectedConversation(conversation);
     void markConversationRead(conversation.id);
     await markNotificationsRead({ conversationId: conversation.id });
+  }
+
+  async function handleStartNewConversation() {
+    const selectedContact = contacts.find(
+      (contact) => contact.id === newConversationForm.contactId
+    );
+    const payload = selectedContact
+      ? { contactId: selectedContact.id, status: "OPEN" }
+      : {
+          name: newConversationForm.name.trim(),
+          phone: newConversationForm.phone.trim(),
+          status: "OPEN"
+        };
+
+    if (!payload.contactId && (!payload.name || !payload.phone)) {
+      setNewConversationError("Escolha um contato ou informe nome e telefone.");
+      return;
+    }
+
+    setNewConversationSaving(true);
+    setNewConversationError("");
+
+    const response = await fetch("/api/conversations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setNewConversationError(data?.error ?? "Nao foi possivel iniciar conversa.");
+      setNewConversationSaving(false);
+      return;
+    }
+
+    const data = (await response.json()) as { conversation: ConversationRow };
+    setActive("atendimento");
+    setConversationFilters({ search: "", status: "OPEN" });
+    setSelectedConversation(data.conversation);
+    mergeConversation(data.conversation);
+    setNewConversationOpen(false);
+    setNewConversationForm({ search: "", contactId: "", name: "", phone: "" });
+    setNewConversationSaving(false);
+    void loadContacts(contactFilters);
+    void markConversationRead(data.conversation.id);
   }
 
   useEffect(() => {
@@ -2032,7 +2088,13 @@ export default function Home() {
                 </div>
               )}
             </div>
-            <button className="hidden h-10 items-center gap-2 rounded-full bg-brand px-4 text-sm font-semibold text-white shadow-soft hover:-translate-y-0.5 hover:bg-blue-700 md:flex">
+            <button
+              className="hidden h-10 items-center gap-2 rounded-full bg-brand px-4 text-sm font-semibold text-white shadow-soft hover:-translate-y-0.5 hover:bg-blue-700 md:flex"
+              onClick={() => {
+                setNewConversationError("");
+                setNewConversationOpen(true);
+              }}
+            >
               <Plus className="h-4 w-4" />
               Nova conversa
             </button>
@@ -2159,7 +2221,193 @@ export default function Home() {
           )}
         </div>
       </section>
+      {newConversationOpen && (
+        <NewConversationModal
+          contacts={contacts}
+          form={newConversationForm}
+          saving={newConversationSaving}
+          error={newConversationError}
+          onClose={() => {
+            if (!newConversationSaving) setNewConversationOpen(false);
+          }}
+          onChange={setNewConversationForm}
+          onSubmit={() => void handleStartNewConversation()}
+        />
+      )}
     </main>
+  );
+}
+
+function NewConversationModal({
+  contacts,
+  form,
+  saving,
+  error,
+  onClose,
+  onChange,
+  onSubmit
+}: {
+  contacts: ContactRow[];
+  form: { search: string; contactId: string; name: string; phone: string };
+  saving: boolean;
+  error: string;
+  onClose: () => void;
+  onChange: (form: { search: string; contactId: string; name: string; phone: string }) => void;
+  onSubmit: () => void;
+}) {
+  const normalizedSearch = form.search.trim().toLowerCase();
+  const filteredContacts = contacts
+    .filter((contact) => {
+      if (!normalizedSearch) return true;
+      return [contact.name, contact.phone, contact.cpf ?? "", contact.email ?? ""]
+        .join(" ")
+        .toLowerCase()
+        .includes(normalizedSearch);
+    })
+    .slice(0, 6);
+
+  const selectedContact = contacts.find((contact) => contact.id === form.contactId);
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/30 px-4 backdrop-blur-sm">
+      <div className="w-full max-w-xl overflow-hidden rounded-[1.5rem] border border-line bg-white shadow-soft">
+        <div className="flex items-start justify-between gap-4 border-b border-line/70 p-5">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-brand">
+              Atendimento
+            </p>
+            <h3 className="mt-1 text-xl font-bold text-slate-950">
+              Iniciar nova conversa
+            </h3>
+            <p className="mt-1 text-sm text-slate-500">
+              Escolha um contato existente ou informe um novo cliente.
+            </p>
+          </div>
+          <button
+            className="grid h-9 w-9 place-items-center rounded-full border border-line bg-white text-slate-500 hover:bg-slate-50"
+            onClick={onClose}
+            type="button"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-5 p-5">
+          {error && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              {error}
+            </div>
+          )}
+
+          <div>
+            <label className="text-sm font-semibold text-slate-800">
+              Buscar contato existente
+            </label>
+            <div className="mt-2 flex items-center gap-2 rounded-2xl border border-line bg-slate-50 px-3 py-2 focus-within:border-blue-200 focus-within:bg-white">
+              <Search className="h-4 w-4 text-slate-400" />
+              <input
+                className="w-full bg-transparent text-sm outline-none"
+                placeholder="Nome, telefone, CPF ou email"
+                value={form.search}
+                onChange={(event) =>
+                  onChange({ ...form, search: event.target.value, contactId: "" })
+                }
+              />
+            </div>
+            <div className="mt-3 max-h-56 space-y-2 overflow-y-auto">
+              {filteredContacts.map((contact) => {
+                const selected = contact.id === form.contactId;
+                return (
+                  <button
+                    key={contact.id}
+                    className={clsx(
+                      "flex w-full items-center gap-3 rounded-2xl border p-3 text-left transition-colors",
+                      selected
+                        ? "border-blue-200 bg-blue-50"
+                        : "border-line bg-white hover:bg-slate-50"
+                    )}
+                    onClick={() =>
+                      onChange({
+                        ...form,
+                        contactId: selected ? "" : contact.id,
+                        name: selected ? form.name : contact.name,
+                        phone: selected ? form.phone : contact.phone
+                      })
+                    }
+                    type="button"
+                  >
+                    <div className="grid h-9 w-9 place-items-center rounded-full bg-slate-100 text-xs font-bold text-slate-700">
+                      {contact.name.slice(0, 2).toUpperCase()}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-bold text-slate-950">
+                        {contact.name}
+                      </p>
+                      <p className="truncate text-xs text-slate-500">
+                        {contact.phone} - {contact.origin}
+                      </p>
+                    </div>
+                    {selected && <Check className="h-4 w-4 text-brand" />}
+                  </button>
+                );
+              })}
+              {filteredContacts.length === 0 && (
+                <p className="rounded-2xl bg-slate-50 p-3 text-sm text-slate-500">
+                  Nenhum contato encontrado. Preencha os dados abaixo para criar.
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="text-sm font-semibold text-slate-800">
+              Nome do cliente
+              <input
+                className="mt-2 h-11 w-full rounded-2xl border border-line bg-white px-3 text-sm outline-none focus:border-blue-200"
+                disabled={Boolean(selectedContact)}
+                placeholder="Ex: Maria Silva"
+                value={form.name}
+                onChange={(event) =>
+                  onChange({ ...form, name: event.target.value, contactId: "" })
+                }
+              />
+            </label>
+            <label className="text-sm font-semibold text-slate-800">
+              WhatsApp
+              <input
+                className="mt-2 h-11 w-full rounded-2xl border border-line bg-white px-3 text-sm outline-none focus:border-blue-200"
+                disabled={Boolean(selectedContact)}
+                placeholder="Ex: 5533999999999"
+                value={form.phone}
+                onChange={(event) =>
+                  onChange({ ...form, phone: event.target.value, contactId: "" })
+                }
+              />
+            </label>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-line/70 bg-slate-50 px-5 py-4">
+          <button
+            className="h-10 rounded-full border border-line bg-white px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+            disabled={saving}
+            onClick={onClose}
+            type="button"
+          >
+            Cancelar
+          </button>
+          <button
+            className="inline-flex h-10 items-center gap-2 rounded-full bg-brand px-4 text-sm font-semibold text-white shadow-soft disabled:cursor-not-allowed disabled:bg-slate-300"
+            disabled={saving}
+            onClick={onSubmit}
+            type="button"
+          >
+            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            Iniciar conversa
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
