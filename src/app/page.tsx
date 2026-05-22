@@ -1973,8 +1973,8 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-paper text-ink">
-      <aside className="fixed left-0 top-0 hidden h-screen w-[264px] border-r border-line/80 bg-white/95 backdrop-blur xl:block">
-        <div className="flex h-20 items-center gap-3 px-5">
+      <aside className="fixed left-0 top-0 hidden h-screen w-[264px] flex-col border-r border-line/80 bg-white/95 backdrop-blur xl:flex">
+        <div className="flex h-20 shrink-0 items-center gap-3 px-5">
           <div className="grid h-10 w-10 place-items-center rounded-2xl bg-brand text-sm font-bold text-white shadow-soft">
             AI
           </div>
@@ -1988,7 +1988,7 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="mx-4 rounded-2xl border border-line/80 bg-slate-50/80 p-3">
+        <div className="mx-4 shrink-0 rounded-2xl border border-line/80 bg-slate-50/80 p-3">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
             Workspace
           </p>
@@ -2005,7 +2005,7 @@ export default function Home() {
           </div>
         </div>
 
-        <nav className="mt-5 max-h-[calc(100vh-24rem)] space-y-1 overflow-y-auto px-3 pb-2">
+        <nav className="mt-5 min-h-0 flex-1 space-y-1 overflow-y-scroll px-3 pb-4 pr-2 [scrollbar-color:#CBD5E1_transparent] [scrollbar-width:thin]">
           <p className="px-3 pb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">
             Navegacao
           </p>
@@ -2049,7 +2049,7 @@ export default function Home() {
           })}
         </nav>
 
-        <div className="absolute bottom-0 left-0 right-0 space-y-3 border-t border-line/70 p-4">
+        <div className="shrink-0 space-y-3 border-t border-line/70 p-4">
           <div className="rounded-2xl bg-gradient-to-br from-blue-50 to-white p-3 ring-1 ring-blue-100">
             <div className="flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-brand" />
