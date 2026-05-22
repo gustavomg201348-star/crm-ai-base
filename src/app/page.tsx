@@ -422,6 +422,10 @@ function formatRelativeDate(value: string) {
   return `ha ${Math.floor(hours / 24)} dia(s)`;
 }
 
+function formatMessagePreview(value?: string | null) {
+  return value?.replace(/\s+/g, " ").trim() || "Sem mensagens.";
+}
+
 function formatCurrency(value: number | string) {
   return Number(value || 0).toLocaleString("pt-BR", {
     style: "currency",
@@ -3779,11 +3783,9 @@ function ConversationList({
           const selected = selectedConversation?.id === item.id;
           const unread = item.unreadCount ?? 0;
           const hasUnread = unread > 0;
-          const preview =
-            item.lastMessagePreview ??
-            item.lastMessage?.body ??
-            item.summary ??
-            "Sem mensagens.";
+          const preview = formatMessagePreview(
+            item.lastMessagePreview ?? item.lastMessage?.body ?? item.summary
+          );
           const messageTime = item.lastMessageAt ?? item.lastMessage?.createdAt;
           return (
             <button
@@ -3822,7 +3824,7 @@ function ConversationList({
                   <div className="mt-1 flex items-start justify-between gap-3">
                     <p
                       className={clsx(
-                        "line-clamp-2 min-w-0 text-sm",
+                        "line-clamp-2 min-w-0 break-words text-sm",
                         hasUnread ? "font-semibold text-slate-800" : "text-slate-500"
                       )}
                     >
@@ -3890,10 +3892,10 @@ function ChatBubble({
 }) {
   return (
     <div className={clsx("flex", side === "right" && "justify-end")}>
-      <div className={clsx("max-w-[76%]", side === "right" && "text-right")}>
+      <div className="max-w-[82%] sm:max-w-[74%]">
         <div
           className={clsx(
-            "rounded-2xl px-4 py-3 text-sm leading-6 shadow-sm",
+            "whitespace-pre-wrap break-words rounded-2xl px-4 py-3 text-left text-sm leading-6 shadow-sm [overflow-wrap:anywhere]",
             side === "right"
               ? "rounded-br-md bg-brand text-white"
               : "rounded-bl-md border border-line/70 bg-white text-slate-800"
@@ -3902,7 +3904,14 @@ function ChatBubble({
           {children}
         </div>
         {timestamp && (
-          <p className="mt-1 px-1 text-[11px] text-slate-400">{timestamp}</p>
+          <p
+            className={clsx(
+              "mt-1 px-1 text-[11px] text-slate-400",
+              side === "right" && "text-right"
+            )}
+          >
+            {timestamp}
+          </p>
         )}
       </div>
     </div>
