@@ -149,7 +149,7 @@ model Tag {
   category  String?
   isActive  Boolean           @default(true)
   createdAt DateTime          @default(now())
-  updatedAt DateTime          @updatedAt
+  updatedAt DateTime          @default(now()) @updatedAt
   company   Company           @relation(fields: [companyId], references: [id])
   contacts  ContactTag[]
   conversations ConversationTag[]
