@@ -12,10 +12,27 @@ export async function GET(request: NextRequest) {
 
     const tags = await prisma.tag.findMany({
       where: { companyId: session.companyId },
-      orderBy: [{ isActive: "desc" }, { name: "asc" }]
+      orderBy: [{ isActive: "desc" }, { name: "asc" }],
+      include: {
+        _count: {
+          select: { conversations: true }
+        }
+      }
     });
 
-    return NextResponse.json({ tags });
+    return NextResponse.json({
+      tags: tags.map((tag) => ({
+        id: tag.id,
+        name: tag.name,
+        color: tag.color,
+        textColor: tag.textColor,
+        category: tag.category,
+        isActive: tag.isActive,
+        createdAt: tag.createdAt,
+        updatedAt: tag.updatedAt,
+        conversationCount: tag._count.conversations
+      }))
+    });
   } catch {
     return NextResponse.json(
       { error: "Nao foi possivel listar tags." },

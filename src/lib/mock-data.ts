@@ -26,6 +26,7 @@ export const navItems = [
   { id: "canais", label: "Canais", icon: Webhook },
   { id: "disparos", label: "Disparos", icon: Megaphone },
   { id: "chatbot", label: "Chatbot", icon: Bot },
+  { id: "tags", label: "Tags", icon: Tags },
   { id: "config", label: "Configurações", icon: Settings }
 ] as const;
 
