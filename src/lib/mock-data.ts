@@ -22,11 +22,11 @@ export const navItems = [
   { id: "atendimento", label: "Atendimento", icon: Headphones, count: 23 },
   { id: "kanban", label: "Kanban", icon: KanbanSquare },
   { id: "contatos", label: "Contatos", icon: ContactRound },
+  { id: "tags", label: "Tags", icon: Tags },
   { id: "multicred", label: "Multicred", icon: CircleDollarSign },
   { id: "canais", label: "Canais", icon: Webhook },
   { id: "disparos", label: "Disparos", icon: Megaphone },
   { id: "chatbot", label: "Chatbot", icon: Bot },
-  { id: "tags", label: "Tags", icon: Tags },
   { id: "config", label: "Configurações", icon: Settings }
 ] as const;
 

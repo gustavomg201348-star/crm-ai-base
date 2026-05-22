@@ -2005,7 +2005,7 @@ export default function Home() {
           </div>
         </div>
 
-        <nav className="mt-5 space-y-1 px-3">
+        <nav className="mt-5 max-h-[calc(100vh-24rem)] space-y-1 overflow-y-auto px-3 pb-2">
           <p className="px-3 pb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">
             Navegacao
           </p>
