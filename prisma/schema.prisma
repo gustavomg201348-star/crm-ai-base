@@ -20,6 +20,7 @@ model Company {
   campaigns     Campaign[]
   notifications Notification[]
   tags          Tag[]
+  conversationTags ConversationTag[]
   stages        PipelineStage[]
   origins       Origin[]
   proposals     Proposal[]
@@ -64,6 +65,7 @@ model User {
   campaigns     Campaign[]
   notifications Notification[]
   tasks         Task[]
+  createdConversationTags ConversationTag[]
 
   @@index([companyId])
 }
@@ -139,12 +141,18 @@ model Task {
 }
 
 model Tag {
-  id        String       @id @default(cuid())
+  id        String            @id @default(cuid())
   companyId String
   name      String
   color     String
-  company   Company      @relation(fields: [companyId], references: [id])
+  textColor String?           @default("#ffffff")
+  category  String?
+  isActive  Boolean           @default(true)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  company   Company           @relation(fields: [companyId], references: [id])
   contacts  ContactTag[]
+  conversations ConversationTag[]
 
   @@index([companyId])
 }
@@ -198,6 +206,26 @@ model Conversation {
   agent         User?          @relation(fields: [agentId], references: [id])
   messages      Message[]
   notifications Notification[]
+  tags          ConversationTag[]
+}
+
+model ConversationTag {
+  id              String       @id @default(cuid())
+  companyId       String
+  conversationId  String
+  tagId           String
+  createdByUserId String?
+  createdAt       DateTime     @default(now())
+  company         Company      @relation(fields: [companyId], references: [id])
+  conversation    Conversation @relation(fields: [conversationId], references: [id])
+  tag             Tag          @relation(fields: [tagId], references: [id])
+  createdBy       User?        @relation(fields: [createdByUserId], references: [id])
+
+  @@unique([conversationId, tagId])
+  @@index([companyId])
+  @@index([conversationId])
+  @@index([tagId])
+  @@index([createdByUserId])
 }
 
 model Message {

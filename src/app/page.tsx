@@ -109,7 +109,14 @@ type ContactRow = {
 type ReferenceData = {
   origins: Array<{ id: string; name: string }>;
   stages: Array<{ id: string; name: string; color?: string; position?: number }>;
-  tags: Array<{ id: string; name: string; color: string }>;
+  tags: Array<{
+    id: string;
+    name: string;
+    color: string;
+    textColor?: string | null;
+    category?: string | null;
+    isActive?: boolean;
+  }>;
   users: Array<{ id: string; name: string; email: string; role: UserRole }>;
 };
 
@@ -149,6 +156,14 @@ type ConversationRow = {
     lastMessage?: string | null;
     tags: Array<{ id: string; name: string; color: string }>;
   };
+  tags: Array<{
+    id: string;
+    name: string;
+    color: string;
+    textColor?: string | null;
+    category?: string | null;
+    isActive?: boolean;
+  }>;
   lastMessage: {
     id: string;
     direction: string;
@@ -458,7 +473,8 @@ export default function Home() {
   >("unsupported");
   const [conversationFilters, setConversationFilters] = useState({
     search: "",
-    status: "OPEN"
+    status: "OPEN",
+    tagIds: [] as string[]
   });
   const [aiAnalysis, setAiAnalysis] = useState<AiAnalysis | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -565,6 +581,7 @@ export default function Home() {
     await loadKanban();
     void loadDashboard(dashboardFilters);
     void loadContacts(contactFilters);
+    void loadConversations(conversationFilters);
   }
 
   async function loadKanban() {
@@ -594,6 +611,13 @@ export default function Home() {
 
       const params = new URLSearchParams();
       Object.entries(filters).forEach(([key, value]) => {
+        if (Array.isArray(value)) {
+          value.forEach((item) => {
+            if (item) params.append(key === "tagIds" ? "tagId" : key, item);
+          });
+          return;
+        }
+
         if (value) params.set(key, value);
       });
 
@@ -859,7 +883,7 @@ export default function Home() {
 
     const data = (await response.json()) as { conversation: ConversationRow };
     setActive("atendimento");
-    setConversationFilters({ search: "", status: "OPEN" });
+    setConversationFilters({ search: "", status: "OPEN", tagIds: [] });
     setSelectedConversation(data.conversation);
     mergeConversation(data.conversation);
     setNewConversationOpen(false);
@@ -1413,6 +1437,38 @@ export default function Home() {
     mergeConversation(data.conversation);
   }
 
+  async function handleAddConversationTags(conversationId: string, tagIds: string[]) {
+    if (!tagIds.length) return;
+
+    const response = await fetch(`/api/conversations/${conversationId}/tags`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tagIds, mode: "append" })
+    });
+
+    if (!response.ok) {
+      setAppError("Nao foi possivel aplicar tag na conversa.");
+      return;
+    }
+
+    const data = (await response.json()) as { conversation: ConversationRow };
+    mergeConversation(data.conversation);
+  }
+
+  async function handleRemoveConversationTag(conversationId: string, tagId: string) {
+    const response = await fetch(`/api/conversations/${conversationId}/tags/${tagId}`, {
+      method: "DELETE"
+    });
+
+    if (!response.ok) {
+      setAppError("Nao foi possivel remover tag da conversa.");
+      return;
+    }
+
+    const data = (await response.json()) as { conversation: ConversationRow };
+    mergeConversation(data.conversation);
+  }
+
   async function handleAnalyzeConversation(conversationId: string) {
     setAiLoading(true);
     setAppError("");
@@ -1464,8 +1520,8 @@ export default function Home() {
 
     const data = (await response.json()) as { conversation: ConversationRow };
     setSelectedConversation(data.conversation);
-    setConversationFilters({ search: "", status: "OPEN" });
-    await loadConversations({ search: "", status: "OPEN" });
+    setConversationFilters({ search: "", status: "OPEN", tagIds: [] });
+    await loadConversations({ search: "", status: "OPEN", tagIds: [] });
     void loadContacts(contactFilters);
   }
 
@@ -2133,6 +2189,7 @@ export default function Home() {
             <Atendimento
               conversations={conversationList}
               filters={conversationFilters}
+              availableTags={reference.tags}
               loading={conversationLoading}
               selectedConversation={selectedConversation}
               onFiltersChange={setConversationFilters}
@@ -2145,6 +2202,8 @@ export default function Home() {
               aiAnalysis={aiAnalysis}
               aiLoading={aiLoading}
               onAnalyzeConversation={handleAnalyzeConversation}
+              onAddTags={handleAddConversationTags}
+              onRemoveTag={handleRemoveConversationTag}
             />
           )}
           {active === "kanban" && (
@@ -2865,6 +2924,7 @@ function PipelineCard({
 function Atendimento({
   conversations,
   filters,
+  availableTags,
   loading,
   selectedConversation,
   onFiltersChange,
@@ -2876,13 +2936,16 @@ function Atendimento({
   onUpdateStatus,
   aiAnalysis,
   aiLoading,
-  onAnalyzeConversation
+  onAnalyzeConversation,
+  onAddTags,
+  onRemoveTag
 }: {
   conversations: ConversationRow[];
-  filters: { search: string; status: string };
+  filters: { search: string; status: string; tagIds: string[] };
+  availableTags: ReferenceData["tags"];
   loading: boolean;
   selectedConversation: ConversationRow | null;
-  onFiltersChange: (filters: { search: string; status: string }) => void;
+  onFiltersChange: (filters: { search: string; status: string; tagIds: string[] }) => void;
   onSelectConversation: (conversation: ConversationRow) => void;
   onSendMessage: (conversationId: string, body: string) => Promise<void>;
   onSendMedia: (conversationId: string, file: File, caption?: string) => Promise<void>;
@@ -2898,6 +2961,8 @@ function Atendimento({
   aiAnalysis: AiAnalysis | null;
   aiLoading: boolean;
   onAnalyzeConversation: (conversationId: string) => Promise<void>;
+  onAddTags: (conversationId: string, tagIds: string[]) => Promise<void>;
+  onRemoveTag: (conversationId: string, tagId: string) => Promise<void>;
 }) {
   const [message, setMessage] = useState("");
   const [composerError, setComposerError] = useState("");
@@ -3086,6 +3151,7 @@ function Atendimento({
       <ConversationList
         conversations={conversations}
         filters={filters}
+        availableTags={availableTags}
         loading={loading}
         selectedConversation={selectedConversation}
         onFiltersChange={onFiltersChange}
@@ -3110,6 +3176,12 @@ function Atendimento({
           </div>
           {selectedConversation && (
             <div className="flex items-center gap-2">
+              <ConversationTagSelector
+                availableTags={availableTags}
+                selectedTags={selectedConversation.tags}
+                onAdd={(tagIds) => onAddTags(selectedConversation.id, tagIds)}
+                onRemove={(tagId) => onRemoveTag(selectedConversation.id, tagId)}
+              />
               <span className="hidden rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 md:inline-flex">
                 Online
               </span>
@@ -3132,6 +3204,18 @@ function Atendimento({
             </div>
           )}
         </div>
+
+        {selectedConversation && selectedConversation.tags.length > 0 && (
+          <div className="flex flex-wrap gap-2 border-b border-line/70 px-5 py-3">
+            {selectedConversation.tags.map((tag) => (
+              <TagBadge
+                key={tag.id}
+                tag={tag}
+                onRemove={() => onRemoveTag(selectedConversation.id, tag.id)}
+              />
+            ))}
+          </div>
+        )}
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain bg-[linear-gradient(180deg,#FFFFFF_0%,#F8FAFC_100%)] p-5">
           {!selectedConversation && (
@@ -3399,21 +3483,144 @@ function Atendimento({
   );
 }
 
+function TagBadge({
+  tag,
+  compact,
+  onRemove
+}: {
+  tag: {
+    id: string;
+    name: string;
+    color: string;
+    textColor?: string | null;
+  };
+  compact?: boolean;
+  onRemove?: () => void;
+}) {
+  return (
+    <span
+      className={clsx(
+        "inline-flex max-w-full items-center gap-1 rounded-full font-semibold",
+        compact ? "px-2 py-0.5 text-[11px]" : "px-2.5 py-1 text-xs"
+      )}
+      style={{
+        backgroundColor: tag.color,
+        color: tag.textColor || "#ffffff"
+      }}
+      title={tag.name}
+    >
+      <span className="truncate">{tag.name}</span>
+      {onRemove && (
+        <button
+          className="grid h-4 w-4 place-items-center rounded-full bg-white/20 hover:bg-white/30"
+          onClick={onRemove}
+          type="button"
+          title="Remover tag"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      )}
+    </span>
+  );
+}
+
+function ConversationTagSelector({
+  availableTags,
+  selectedTags,
+  onAdd,
+  onRemove
+}: {
+  availableTags: ReferenceData["tags"];
+  selectedTags: ConversationRow["tags"];
+  onAdd: (tagIds: string[]) => Promise<void>;
+  onRemove: (tagId: string) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [saving, setSaving] = useState(false);
+  const selectedIds = new Set(selectedTags.map((tag) => tag.id));
+  const filteredTags = availableTags
+    .filter((tag) => tag.isActive !== false)
+    .filter((tag) => tag.name.toLowerCase().includes(search.trim().toLowerCase()));
+
+  async function toggleTag(tagId: string) {
+    setSaving(true);
+    if (selectedIds.has(tagId)) {
+      await onRemove(tagId);
+    } else {
+      await onAdd([tagId]);
+    }
+    setSaving(false);
+  }
+
+  return (
+    <div className="relative">
+      <button
+        className="inline-flex h-10 items-center gap-2 rounded-full border border-line bg-white px-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+        onClick={() => setOpen((current) => !current)}
+        type="button"
+      >
+        <Tags className="h-4 w-4" />
+        Tags
+      </button>
+      {open && (
+        <div className="absolute right-0 top-12 z-30 w-72 rounded-2xl border border-line bg-white p-3 shadow-soft">
+          <div className="flex items-center gap-2 rounded-xl border border-line bg-slate-50 px-3 py-2">
+            <Search className="h-4 w-4 text-slate-400" />
+            <input
+              className="w-full bg-transparent text-sm outline-none"
+              placeholder="Buscar tag..."
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </div>
+          <div className="mt-3 max-h-64 space-y-1 overflow-y-auto">
+            {filteredTags.map((tag) => {
+              const selected = selectedIds.has(tag.id);
+              return (
+                <button
+                  key={tag.id}
+                  className="flex w-full items-center justify-between gap-2 rounded-xl px-2 py-2 text-left hover:bg-slate-50 disabled:opacity-60"
+                  disabled={saving}
+                  onClick={() => void toggleTag(tag.id)}
+                  type="button"
+                >
+                  <TagBadge tag={tag} compact />
+                  {selected && <Check className="h-4 w-4 text-brand" />}
+                </button>
+              );
+            })}
+            {filteredTags.length === 0 && (
+              <p className="p-3 text-sm text-slate-500">
+                Nenhuma tag ativa encontrada.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ConversationList({
   conversations,
   filters,
+  availableTags,
   loading,
   selectedConversation,
   onFiltersChange,
   onSelectConversation
 }: {
   conversations: ConversationRow[];
-  filters: { search: string; status: string };
+  filters: { search: string; status: string; tagIds: string[] };
+  availableTags: ReferenceData["tags"];
   loading: boolean;
   selectedConversation: ConversationRow | null;
-  onFiltersChange: (filters: { search: string; status: string }) => void;
+  onFiltersChange: (filters: { search: string; status: string; tagIds: string[] }) => void;
   onSelectConversation: (conversation: ConversationRow) => void;
 }) {
+  const activeTags = availableTags.filter((tag) => tag.isActive !== false);
+
   return (
     <section className="flex min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-line/80 bg-white shadow-soft">
       <div className="border-b border-line/70 p-4">
@@ -3458,6 +3665,49 @@ function ConversationList({
             </button>
           ))}
         </div>
+        {activeTags.length > 0 && (
+          <div className="mt-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold text-slate-500">Filtrar por tag</p>
+              {filters.tagIds.length > 0 && (
+                <button
+                  className="text-xs font-semibold text-brand"
+                  onClick={() => onFiltersChange({ ...filters, tagIds: [] })}
+                  type="button"
+                >
+                  Limpar
+                </button>
+              )}
+            </div>
+            <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
+              {activeTags.map((tag) => {
+                const selected = filters.tagIds.includes(tag.id);
+                return (
+                  <button
+                    key={tag.id}
+                    className={clsx(
+                      "shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors",
+                      selected
+                        ? "border-blue-200 bg-blue-50 text-brand"
+                        : "border-line bg-white text-slate-600 hover:bg-slate-50"
+                    )}
+                    onClick={() =>
+                      onFiltersChange({
+                        ...filters,
+                        tagIds: selected
+                          ? filters.tagIds.filter((tagId) => tagId !== tag.id)
+                          : [...filters.tagIds, tag.id]
+                      })
+                    }
+                    type="button"
+                  >
+                    {tag.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
       <div className="min-h-0 flex-1 divide-y divide-line/70 overflow-y-auto overscroll-contain">
         {conversations.map((item) => {
@@ -3520,14 +3770,24 @@ function ConversationList({
                     )}
                   </div>
                   <div className="mt-3 flex items-center gap-2">
-                    <span
-                      className={clsx(
-                        "rounded-full px-2 py-0.5 text-[11px] font-semibold",
-                        hasUnread ? "bg-white text-brand" : "bg-blue-50 text-brand"
-                      )}
-                    >
-                      {item.contact.origin}
-                    </span>
+                    {item.tags.slice(0, 3).map((tag) => (
+                      <TagBadge key={tag.id} tag={tag} compact />
+                    ))}
+                    {item.tags.length > 3 && (
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+                        +{item.tags.length - 3}
+                      </span>
+                    )}
+                    {item.tags.length === 0 && (
+                      <span
+                        className={clsx(
+                          "rounded-full px-2 py-0.5 text-[11px] font-semibold",
+                          hasUnread ? "bg-white text-brand" : "bg-blue-50 text-brand"
+                        )}
+                      >
+                        {item.contact.origin}
+                      </span>
+                    )}
                     <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
                       {temperatureLabels[item.contact.temperature as keyof typeof temperatureLabels] ?? item.contact.temperature}
                     </span>

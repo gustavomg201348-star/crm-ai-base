@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
         orderBy: { position: "asc" }
       }),
       prisma.tag.findMany({
-        where: { companyId: session.companyId },
+        where: { companyId: session.companyId, isActive: true },
         orderBy: { name: "asc" }
       }),
       prisma.user.findMany({

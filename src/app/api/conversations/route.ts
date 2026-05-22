@@ -21,6 +21,11 @@ export async function GET(request: NextRequest) {
 
     const search = request.nextUrl.searchParams.get("search")?.trim();
     const status = request.nextUrl.searchParams.get("status") ?? "OPEN";
+    const tagIds = request.nextUrl.searchParams
+      .getAll("tagId")
+      .concat(request.nextUrl.searchParams.get("tagIds")?.split(",") ?? [])
+      .map((tagId) => tagId.trim())
+      .filter(Boolean);
 
     const conversations = await prisma.conversation.findMany({
       where: {
@@ -37,6 +42,17 @@ export async function GET(request: NextRequest) {
               }
             : {})
         },
+        ...(tagIds.length
+          ? {
+              tags: {
+                some: {
+                  tagId: { in: tagIds },
+                  companyId: session.companyId,
+                  tag: { companyId: session.companyId, isActive: true }
+                }
+              }
+            }
+          : {}),
         ...(status === "ALL" ? {} : { status })
       },
       include: conversationInclude,

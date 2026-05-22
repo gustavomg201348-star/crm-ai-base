@@ -12,6 +12,10 @@ export const conversationInclude = {
     }
   },
   agent: true,
+  tags: {
+    include: { tag: true },
+    orderBy: { createdAt: "asc" }
+  },
   messages: {
     orderBy: { createdAt: "asc" }
   }
@@ -60,6 +64,14 @@ export function mapConversation(conversation: ConversationWithRelations) {
         color: item.tag.color
       }))
     },
+    tags: conversation.tags.map((item) => ({
+      id: item.tag.id,
+      name: item.tag.name,
+      color: item.tag.color,
+      textColor: item.tag.textColor,
+      category: item.tag.category,
+      isActive: item.tag.isActive
+    })),
     lastMessage: lastMessage
       ? {
           id: lastMessage.id,

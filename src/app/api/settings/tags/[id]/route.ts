@@ -15,10 +15,18 @@ export async function PATCH(
 
     const { id } = await params;
     const body = (await request.json().catch(() => null)) as
-      | { name?: string; color?: string }
+      | {
+          name?: string;
+          color?: string;
+          textColor?: string;
+          category?: string | null;
+          isActive?: boolean;
+        }
       | null;
     const name = body?.name?.trim();
     const color = body?.color?.trim();
+    const textColor = body?.textColor?.trim();
+    const category = body?.category === null ? null : body?.category?.trim();
 
     const current = await prisma.tag.findFirst({
       where: { id, companyId: session.companyId }
@@ -36,7 +44,10 @@ export async function PATCH(
       where: { id },
       data: {
         ...(name !== undefined ? { name } : {}),
-        ...(color !== undefined ? { color } : {})
+        ...(color !== undefined ? { color } : {}),
+        ...(textColor !== undefined ? { textColor } : {}),
+        ...(category !== undefined ? { category } : {}),
+        ...(body?.isActive !== undefined ? { isActive: body.isActive } : {})
       }
     });
 
@@ -69,10 +80,10 @@ export async function DELETE(
       return NextResponse.json({ error: "Tag nao encontrada." }, { status: 404 });
     }
 
-    await prisma.$transaction([
-      prisma.contactTag.deleteMany({ where: { tagId: id } }),
-      prisma.tag.delete({ where: { id } })
-    ]);
+    await prisma.tag.update({
+      where: { id },
+      data: { isActive: false }
+    });
 
     return NextResponse.json({ ok: true });
   } catch {

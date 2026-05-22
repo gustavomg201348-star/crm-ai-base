@@ -82,6 +82,11 @@ CREATE TABLE IF NOT EXISTS Tag (
   companyId TEXT NOT NULL,
   name TEXT NOT NULL,
   color TEXT NOT NULL,
+  textColor TEXT DEFAULT '#ffffff',
+  category TEXT,
+  isActive BOOLEAN NOT NULL DEFAULT true,
+  createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT Tag_companyId_fkey FOREIGN KEY (companyId) REFERENCES Company (id) ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
@@ -185,6 +190,25 @@ CREATE INDEX IF NOT EXISTS Notification_userId_idx ON Notification(userId);
 CREATE INDEX IF NOT EXISTS Notification_conversationId_idx ON Notification(conversationId);
 CREATE INDEX IF NOT EXISTS Notification_contactId_idx ON Notification(contactId);
 
+CREATE TABLE IF NOT EXISTS ConversationTag (
+  id TEXT PRIMARY KEY NOT NULL,
+  companyId TEXT NOT NULL,
+  conversationId TEXT NOT NULL,
+  tagId TEXT NOT NULL,
+  createdByUserId TEXT,
+  createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT ConversationTag_companyId_fkey FOREIGN KEY (companyId) REFERENCES Company (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT ConversationTag_conversationId_fkey FOREIGN KEY (conversationId) REFERENCES Conversation (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT ConversationTag_tagId_fkey FOREIGN KEY (tagId) REFERENCES Tag (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT ConversationTag_createdByUserId_fkey FOREIGN KEY (createdByUserId) REFERENCES User (id) ON DELETE SET NULL ON UPDATE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ConversationTag_conversationId_tagId_key ON ConversationTag(conversationId, tagId);
+CREATE INDEX IF NOT EXISTS ConversationTag_companyId_idx ON ConversationTag(companyId);
+CREATE INDEX IF NOT EXISTS ConversationTag_conversationId_idx ON ConversationTag(conversationId);
+CREATE INDEX IF NOT EXISTS ConversationTag_tagId_idx ON ConversationTag(tagId);
+CREATE INDEX IF NOT EXISTS ConversationTag_createdByUserId_idx ON ConversationTag(createdByUserId);
+
 CREATE TABLE IF NOT EXISTS ContactActivity (
   id TEXT PRIMARY KEY NOT NULL,
   contactId TEXT NOT NULL,
@@ -264,6 +288,30 @@ for (const [name, type] of [
     db.exec(`ALTER TABLE Channel ADD COLUMN ${name} ${type};`);
   }
 }
+
+const tagColumns = db
+  .prepare("PRAGMA table_info(Tag)")
+  .all()
+  .map((column) => column.name);
+
+for (const [name, type] of [
+  ["textColor", "TEXT DEFAULT '#ffffff'"],
+  ["category", "TEXT"],
+  ["isActive", "BOOLEAN NOT NULL DEFAULT true"],
+  ["createdAt", "DATETIME"],
+  ["updatedAt", "DATETIME"]
+]) {
+  if (!tagColumns.includes(name)) {
+    db.exec(`ALTER TABLE Tag ADD COLUMN ${name} ${type};`);
+  }
+}
+
+db.exec(`
+UPDATE Tag SET textColor = '#ffffff' WHERE textColor IS NULL;
+UPDATE Tag SET isActive = true WHERE isActive IS NULL;
+UPDATE Tag SET createdAt = CURRENT_TIMESTAMP WHERE createdAt IS NULL;
+UPDATE Tag SET updatedAt = CURRENT_TIMESTAMP WHERE updatedAt IS NULL;
+`);
 
 const messageColumns = db
   .prepare("PRAGMA table_info(Message)")

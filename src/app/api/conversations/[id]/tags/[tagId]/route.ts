@@ -1,0 +1,61 @@
+import { NextResponse, type NextRequest } from "next/server";
+import { getSessionFromRequest } from "@/lib/auth";
+import { conversationInclude, mapConversation } from "@/lib/conversations";
+import { prisma } from "@/lib/db";
+
+type RouteContext = {
+  params: { id: string; tagId: string };
+};
+
+export async function DELETE(request: NextRequest, context: RouteContext) {
+  try {
+    const session = getSessionFromRequest(request);
+
+    if (!session) {
+      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+    }
+
+    const conversation = await prisma.conversation.findFirst({
+      where: {
+        id: context.params.id,
+        contact: { companyId: session.companyId }
+      },
+      select: { id: true }
+    });
+
+    if (!conversation) {
+      return NextResponse.json({ error: "Conversa nao encontrada." }, { status: 404 });
+    }
+
+    const tag = await prisma.tag.findFirst({
+      where: { id: context.params.tagId, companyId: session.companyId },
+      select: { id: true }
+    });
+
+    if (!tag) {
+      return NextResponse.json({ error: "Tag nao encontrada." }, { status: 404 });
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.conversationTag.deleteMany({
+        where: {
+          conversationId: conversation.id,
+          tagId: tag.id,
+          companyId: session.companyId
+        }
+      });
+
+      return tx.conversation.findFirstOrThrow({
+        where: { id: conversation.id },
+        include: conversationInclude
+      });
+    });
+
+    return NextResponse.json({ conversation: mapConversation(updated) });
+  } catch {
+    return NextResponse.json(
+      { error: "Nao foi possivel remover tag da conversa." },
+      { status: 500 }
+    );
+  }
+}
