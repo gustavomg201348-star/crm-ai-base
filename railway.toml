@@ -3,8 +3,7 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-preDeployCommand = "npm run railway:predeploy"
-startCommand = "npm run start"
+startCommand = "node prisma/retry-command.mjs npm run prisma:push:prod && npm run start"
 healthcheckPath = "/api/health"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
