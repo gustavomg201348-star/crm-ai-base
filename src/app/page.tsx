@@ -2050,6 +2050,19 @@ export default function Home() {
         </nav>
 
         <div className="shrink-0 space-y-3 border-t border-line/70 p-4">
+          <button
+            className={clsx(
+              "flex h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-semibold transition-colors",
+              active === "tags"
+                ? "bg-blue-50 text-brand shadow-[inset_0_0_0_1px_rgba(37,99,235,0.10)]"
+                : "bg-white text-slate-600 ring-1 ring-line hover:bg-slate-50 hover:text-slate-950"
+            )}
+            onClick={() => setActive("tags")}
+            type="button"
+          >
+            <Tags className={clsx("h-4 w-4", active === "tags" ? "text-brand" : "text-slate-400")} />
+            Gerenciar tags
+          </button>
           <div className="rounded-2xl bg-gradient-to-br from-blue-50 to-white p-3 ring-1 ring-blue-100">
             <div className="flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-brand" />
