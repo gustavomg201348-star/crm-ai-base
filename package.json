@@ -13,7 +13,7 @@
     "prisma:push:prod": "prisma db push --schema prisma/schema.postgres.prisma",
     "prisma:seed": "prisma db seed",
     "prisma:seed:prod": "node prisma/seed.mjs",
-    "railway:predeploy": "npm run prisma:push:prod && npm run prisma:seed:prod",
+    "railway:predeploy": "node prisma/retry-command.mjs npm run prisma:push:prod && node prisma/retry-command.mjs npm run prisma:seed:prod",
     "db:setup": "node prisma/setup-sqlite.mjs && npm run prisma:seed"
   },
   "prisma": {
