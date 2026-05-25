@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
+import { saveFailedOutboundMessage } from "@/lib/message-delivery";
 import { maxMediaSize, sendConversationMedia } from "@/lib/whatsapp-media.service";
 
 type RouteContext = {
@@ -41,12 +42,19 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     return NextResponse.json({ conversation });
   } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Nao foi possivel enviar midia.";
+
+    await saveFailedOutboundMessage({
+      conversationId: context.params.id,
+      body: "Falha ao enviar midia.",
+      type: "document",
+      errorMessage: message
+    }).catch(() => null);
+
     return NextResponse.json(
       {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Nao foi possivel enviar midia."
+        error: message
       },
       { status: 500 }
     );

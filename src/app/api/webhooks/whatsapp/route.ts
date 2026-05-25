@@ -7,6 +7,7 @@ import {
 } from "@/lib/meta-whatsapp";
 import { prisma } from "@/lib/db";
 import { updateCampaignDeliveryStatus } from "@/lib/campaigns";
+import { updateMessageDeliveryStatus } from "@/lib/message-delivery";
 
 export async function GET(request: NextRequest) {
   const mode = request.nextUrl.searchParams.get("hub.mode");
@@ -106,18 +107,36 @@ export async function POST(request: NextRequest) {
       const results = [];
 
       for (const status of metaStatuses) {
-        const updated = await updateCampaignDeliveryStatus({
-          providerMessageId: status.messageId,
-          status: status.status,
-          errorCode: status.errorCode,
-          errorMessage: status.errorMessage
-        });
+        const [campaignUpdated, messageUpdated] = await Promise.all([
+          updateCampaignDeliveryStatus({
+            providerMessageId: status.messageId,
+            status: status.status,
+            errorCode: status.errorCode,
+            errorMessage: status.errorMessage
+          }),
+          updateMessageDeliveryStatus({
+            providerMessageId: status.messageId,
+            status: status.status
+          })
+        ]);
+
+        const updated =
+          Boolean(campaignUpdated) || Boolean(messageUpdated);
+
+        if (status.status.toLowerCase() === "failed" && !updated) {
+          await updateCampaignDeliveryStatus({
+            providerMessageId: status.messageId,
+            status: status.status,
+            errorCode: status.errorCode,
+            errorMessage: status.errorMessage
+          });
+        }
 
         results.push({
           phoneNumberId: status.phoneNumberId,
           messageId: status.messageId,
           status: status.status,
-          updated: Boolean(updated)
+          updated
         });
       }
 

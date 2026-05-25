@@ -273,6 +273,22 @@ type ChannelStatusData = {
   channels: ChannelStatusRow[];
 };
 
+type MessageLogRow = {
+  id: string;
+  conversationId: string;
+  contact: { id: string; name: string; phone: string };
+  channelId?: string | null;
+  type: string;
+  status: string;
+  body: string;
+  fileName?: string | null;
+  mimeType?: string | null;
+  templateName?: string | null;
+  providerMessageId?: string | null;
+  createdAt: string;
+  readAt?: string | null;
+};
+
 type AiAnalysis = {
   summary: string;
   temperature: ContactRow["temperature"];
@@ -502,6 +518,7 @@ export default function Home() {
   const [conversationList, setConversationList] = useState<ConversationRow[]>([]);
   const [channels, setChannels] = useState<ChannelRow[]>([]);
   const [channelStatus, setChannelStatus] = useState<ChannelStatusData | null>(null);
+  const [messageLogs, setMessageLogs] = useState<MessageLogRow[]>([]);
   const [campaigns, setCampaigns] = useState<CampaignRow[]>([]);
   const [proposals, setProposals] = useState<ProposalRow[]>([]);
   const [dashboard, setDashboard] = useState<DashboardData>(emptyDashboardData);
@@ -571,6 +588,7 @@ export default function Home() {
   const [conversationLoading, setConversationLoading] = useState(false);
   const [channelsLoading, setChannelsLoading] = useState(false);
   const [channelStatusLoading, setChannelStatusLoading] = useState(false);
+  const [messageLogsLoading, setMessageLogsLoading] = useState(false);
   const [campaignsLoading, setCampaignsLoading] = useState(false);
   const [proposalsLoading, setProposalsLoading] = useState(false);
   const [dashboardLoading, setDashboardLoading] = useState(false);
@@ -1008,6 +1026,21 @@ export default function Home() {
     setChannelStatusLoading(false);
   }
 
+  async function loadMessageLogs() {
+    setMessageLogsLoading(true);
+    setAppError("");
+
+    const response = await fetch("/api/messages/logs?take=50");
+    if (response.ok) {
+      const data = (await response.json()) as { logs: MessageLogRow[] };
+      setMessageLogs(data.logs);
+    } else {
+      setAppError("Nao foi possivel carregar logs de mensagens.");
+    }
+
+    setMessageLogsLoading(false);
+  }
+
   async function loadCampaigns() {
     setCampaignsLoading(true);
     setAppError("");
@@ -1081,6 +1114,7 @@ export default function Home() {
 
     await loadChannels();
     await loadChannelStatus();
+    await loadMessageLogs();
   }
 
   const loadProposals = useCallback(async (filters = proposalFilters) => {
@@ -1942,6 +1976,7 @@ export default function Home() {
     void loadKanban();
     void loadChannels();
     void loadChannelStatus();
+    void loadMessageLogs();
     void loadCampaigns();
     void loadConversations(conversationFilters);
     void loadNotifications({ silent: true });
@@ -2363,10 +2398,13 @@ export default function Home() {
             <Canais
               channels={channels}
               channelStatus={channelStatus}
+              messageLogs={messageLogs}
               loading={channelsLoading}
               statusLoading={channelStatusLoading}
+              logsLoading={messageLogsLoading}
               onCreateChannel={handleCreateChannel}
               onRefreshStatus={loadChannelStatus}
+              onRefreshLogs={loadMessageLogs}
               onSimulateInbound={handleSimulateInboundMessage}
             />
           )}
@@ -3372,6 +3410,7 @@ function Atendimento({
             <ChatBubble
               key={item.id}
               side={item.direction === "outbound" ? "right" : "left"}
+              status={item.status}
               timestamp={formatRelativeDate(item.createdAt)}
             >
               {item.body}
@@ -3952,26 +3991,37 @@ function ConversationList({
 
 function ChatBubble({
   side,
+  status,
   timestamp,
   children
 }: {
   side: "left" | "right";
+  status?: string;
   timestamp?: string;
   children: React.ReactNode;
 }) {
+  const failed = status?.toLowerCase() === "failed";
+
   return (
     <div className={clsx("flex", side === "right" && "justify-end")}>
       <div className="max-w-[82%] sm:max-w-[74%]">
         <div
           className={clsx(
             "whitespace-pre-wrap break-words rounded-2xl px-4 py-3 text-left text-sm leading-6 shadow-sm [overflow-wrap:anywhere]",
-            side === "right"
+            failed
+              ? "rounded-br-md border border-rose-100 bg-rose-50 text-rose-700"
+              : side === "right"
               ? "rounded-br-md bg-brand text-white"
               : "rounded-bl-md border border-line/70 bg-white text-slate-800"
           )}
         >
           {children}
         </div>
+        {failed && (
+          <p className="mt-1 px-1 text-[11px] font-semibold text-rose-600">
+            Falha ao enviar
+          </p>
+        )}
         {timestamp && (
           <p
             className={clsx(
@@ -5732,16 +5782,21 @@ function Multicred({
 function Canais({
   channels,
   channelStatus,
+  messageLogs,
   loading,
   statusLoading,
+  logsLoading,
   onCreateChannel,
   onRefreshStatus,
+  onRefreshLogs,
   onSimulateInbound
 }: {
   channels: ChannelRow[];
   channelStatus: ChannelStatusData | null;
+  messageLogs: MessageLogRow[];
   loading: boolean;
   statusLoading: boolean;
+  logsLoading: boolean;
   onCreateChannel: (payload: {
     name: string;
     displayPhone: string;
@@ -5752,6 +5807,7 @@ function Canais({
     appSecret: string;
   }) => Promise<void>;
   onRefreshStatus: () => Promise<void>;
+  onRefreshLogs: () => Promise<void>;
   onSimulateInbound: (payload: {
     channelId: string;
     name: string;
@@ -5945,6 +6001,82 @@ function Canais({
                 Verificando canais...
               </div>
             )}
+          </div>
+        </section>
+
+        <section className="rounded border border-line bg-white p-5 shadow-soft">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="text-lg font-bold">Logs de mensagens WhatsApp</h3>
+              <p className="text-sm text-slate-500">
+                Últimos envios, status retornado pela Meta e falhas registradas.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-line px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+              disabled={logsLoading}
+              onClick={() => void onRefreshLogs()}
+            >
+              {logsLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCcw className="h-4 w-4" />
+              )}
+              Atualizar logs
+            </button>
+          </div>
+
+          <div className="mt-4 overflow-hidden rounded-2xl border border-line">
+            <div className="grid grid-cols-[1.3fr_0.8fr_0.8fr_0.7fr] gap-3 bg-slate-50 px-4 py-3 text-xs font-bold uppercase text-slate-500">
+              <span>Cliente</span>
+              <span>Tipo</span>
+              <span>Status</span>
+              <span className="text-right">Hora</span>
+            </div>
+            <div className="divide-y divide-line/70">
+              {messageLogs.map((log) => (
+                <div
+                  key={log.id}
+                  className="grid grid-cols-[1.3fr_0.8fr_0.8fr_0.7fr] gap-3 px-4 py-3 text-sm"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold text-slate-900">
+                      {log.contact.name}
+                    </p>
+                    <p className="truncate text-xs text-slate-500">
+                      {log.contact.phone} · {formatMessagePreview(log.body)}
+                    </p>
+                    {log.providerMessageId && (
+                      <p className="mt-1 truncate font-mono text-[10px] text-slate-400">
+                        {log.providerMessageId}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-start">
+                    <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">
+                      {messageTypeLabel(log.type)}
+                    </span>
+                  </div>
+                  <div className="flex items-start">
+                    <MessageStatusBadge status={log.status} />
+                  </div>
+                  <p className="text-right text-xs text-slate-500">
+                    {formatRelativeDate(log.createdAt)}
+                  </p>
+                </div>
+              ))}
+              {!logsLoading && messageLogs.length === 0 && (
+                <div className="px-4 py-8 text-center text-sm text-slate-500">
+                  Nenhum envio registrado ainda.
+                </div>
+              )}
+              {logsLoading && (
+                <div className="px-4 py-8 text-center text-sm text-slate-500">
+                  Carregando logs...
+                </div>
+              )}
+            </div>
           </div>
         </section>
 
@@ -6186,6 +6318,50 @@ function StatusPill({ label, ok }: { label: string; ok: boolean }) {
       )}
     >
       {ok ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+      {label}
+    </span>
+  );
+}
+
+function messageTypeLabel(type: string) {
+  const labels: Record<string, string> = {
+    text: "Texto",
+    image: "Imagem",
+    audio: "Áudio",
+    document: "Arquivo",
+    video: "Vídeo",
+    template: "Template"
+  };
+
+  return labels[type] ?? type;
+}
+
+function MessageStatusBadge({ status }: { status: string }) {
+  const normalized = status.toLowerCase();
+  const label =
+    normalized === "sent"
+      ? "Enviado"
+      : normalized === "delivered"
+        ? "Entregue"
+        : normalized === "read"
+          ? "Lido"
+          : normalized === "failed"
+            ? "Falhou"
+            : normalized;
+
+  return (
+    <span
+      className={clsx(
+        "rounded-full px-2 py-1 text-xs font-bold",
+        normalized === "failed"
+          ? "bg-rose-50 text-rose-700"
+          : normalized === "read"
+            ? "bg-blue-50 text-blue-700"
+            : normalized === "delivered"
+              ? "bg-emerald-50 text-emerald-700"
+              : "bg-slate-100 text-slate-600"
+      )}
+    >
       {label}
     </span>
   );
