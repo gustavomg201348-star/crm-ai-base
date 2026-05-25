@@ -8,6 +8,7 @@ import {
   getConversationIntegration,
   saveOutboundMessage
 } from "@/lib/conversation-message.service";
+import { convertWebmAudioToOgg } from "@/lib/media-conversion";
 
 export const allowedMediaTypes = new Set([
   "image/jpeg",
@@ -28,6 +29,28 @@ export const maxMediaSize = 16 * 1024 * 1024;
 
 export function normalizeMimeType(mimeType: string) {
   return mimeType.split(";")[0]?.trim().toLowerCase() || "application/octet-stream";
+}
+
+async function prepareMediaForMeta({
+  fileName,
+  mimeType,
+  bytes
+}: {
+  fileName: string;
+  mimeType: string;
+  bytes: Buffer;
+}) {
+  const normalizedMimeType = normalizeMimeType(mimeType);
+
+  if (normalizedMimeType === "audio/webm") {
+    return convertWebmAudioToOgg({ bytes, fileName });
+  }
+
+  return {
+    fileName,
+    mimeType: normalizedMimeType,
+    bytes
+  };
 }
 
 export function resolveMetaMediaType(mimeType: string): MetaMediaType {
@@ -55,13 +78,13 @@ export async function sendConversationMedia({
   bytes: Buffer;
   caption?: string;
 }) {
-  const normalizedMimeType = normalizeMimeType(mimeType);
+  const preparedMedia = await prepareMediaForMeta({ fileName, mimeType, bytes });
 
-  if (!allowedMediaTypes.has(normalizedMimeType)) {
+  if (!allowedMediaTypes.has(preparedMedia.mimeType)) {
     throw new Error("Tipo de arquivo nao aceito para envio pelo WhatsApp.");
   }
 
-  if (bytes.byteLength > maxMediaSize) {
+  if (preparedMedia.bytes.byteLength > maxMediaSize) {
     throw new Error("Arquivo acima do limite de 16 MB.");
   }
 
@@ -73,11 +96,11 @@ export async function sendConversationMedia({
   const uploaded = await uploadMetaMedia({
     phoneNumberId: channel.phoneNumberId!,
     accessToken: channel.accessToken!,
-    fileName,
-    mimeType: normalizedMimeType,
-    bytes
+    fileName: preparedMedia.fileName,
+    mimeType: preparedMedia.mimeType,
+    bytes: preparedMedia.bytes
   });
-  const mediaType = resolveMetaMediaType(normalizedMimeType);
+  const mediaType = resolveMetaMediaType(preparedMedia.mimeType);
   const metaResponse = await sendMetaMediaMessage({
     phoneNumberId: channel.phoneNumberId!,
     accessToken: channel.accessToken!,
@@ -88,7 +111,7 @@ export async function sendConversationMedia({
     fileName
   });
   const label = mediaType === "audio" ? "Audio" : mediaType === "image" ? "Imagem" : mediaType === "video" ? "Video" : "Arquivo";
-  const body = caption?.trim() || `[${label}: ${fileName}]`;
+  const body = caption?.trim() || `[${label}: ${preparedMedia.fileName}]`;
 
   return saveOutboundMessage({
     conversationId,
@@ -96,8 +119,8 @@ export async function sendConversationMedia({
     body,
     type: mediaType,
     mediaId: uploaded.id,
-    fileName,
-    mimeType: normalizedMimeType,
+    fileName: preparedMedia.fileName,
+    mimeType: preparedMedia.mimeType,
     providerMessageId: readMetaMessageId(metaResponse)
   });
 }
