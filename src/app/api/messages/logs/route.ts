@@ -11,6 +11,7 @@ export async function GET(request: NextRequest) {
 
     const status = request.nextUrl.searchParams.get("status")?.trim();
     const channelId = request.nextUrl.searchParams.get("channelId")?.trim();
+    const type = request.nextUrl.searchParams.get("type")?.trim();
     const take = Math.min(
       100,
       Math.max(10, Number(request.nextUrl.searchParams.get("take") ?? 50))
@@ -20,6 +21,7 @@ export async function GET(request: NextRequest) {
       where: {
         direction: "outbound",
         ...(status && status !== "ALL" ? { status } : {}),
+        ...(type && type !== "ALL" ? { type } : {}),
         conversation: {
           ...(channelId ? { channel: `whatsapp:${channelId}` } : {}),
           contact: { companyId: session.companyId }
@@ -56,6 +58,7 @@ export async function GET(request: NextRequest) {
           fileName: message.fileName,
           mimeType: message.mimeType,
           templateName: message.templateName,
+          errorMessage: message.errorMessage,
           providerMessageId: message.providerMessageId,
           createdAt: message.createdAt,
           readAt: message.readAt

@@ -243,6 +243,7 @@ model Message {
   templateVariables String?
   status            String       @default("sent")
   providerMessageId String?
+  errorMessage      String?
   readAt            DateTime?
   senderType        String?
   createdAt         DateTime     @default(now())

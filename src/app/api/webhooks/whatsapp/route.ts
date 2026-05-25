@@ -116,7 +116,8 @@ export async function POST(request: NextRequest) {
           }),
           updateMessageDeliveryStatus({
             providerMessageId: status.messageId,
-            status: status.status
+            status: status.status,
+            errorMessage: status.errorMessage
           })
         ]);
 

@@ -15,10 +15,12 @@ export function normalizeDeliveryStatus(status: string) {
 
 export async function updateMessageDeliveryStatus({
   providerMessageId,
-  status
+  status,
+  errorMessage
 }: {
   providerMessageId: string;
   status: string;
+  errorMessage?: string | null;
 }) {
   const normalizedStatus = normalizeDeliveryStatus(status);
   const readAt = normalizedStatus === "read" ? new Date() : undefined;
@@ -27,6 +29,7 @@ export async function updateMessageDeliveryStatus({
     where: { providerMessageId },
     data: {
       status: normalizedStatus,
+      ...(errorMessage !== undefined ? { errorMessage } : {}),
       ...(readAt ? { readAt } : {})
     }
   });
@@ -73,7 +76,8 @@ export async function saveFailedOutboundMessage({
       mimeType,
       templateName,
       templateLanguage,
-      status: "failed"
+      status: "failed",
+      errorMessage
     }
   });
 }

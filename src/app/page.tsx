@@ -284,6 +284,7 @@ type MessageLogRow = {
   fileName?: string | null;
   mimeType?: string | null;
   templateName?: string | null;
+  errorMessage?: string | null;
   providerMessageId?: string | null;
   createdAt: string;
   readAt?: string | null;
@@ -519,6 +520,11 @@ export default function Home() {
   const [channels, setChannels] = useState<ChannelRow[]>([]);
   const [channelStatus, setChannelStatus] = useState<ChannelStatusData | null>(null);
   const [messageLogs, setMessageLogs] = useState<MessageLogRow[]>([]);
+  const [messageLogFilters, setMessageLogFilters] = useState({
+    channelId: "",
+    status: "ALL",
+    type: "ALL"
+  });
   const [campaigns, setCampaigns] = useState<CampaignRow[]>([]);
   const [proposals, setProposals] = useState<ProposalRow[]>([]);
   const [dashboard, setDashboard] = useState<DashboardData>(emptyDashboardData);
@@ -1026,11 +1032,20 @@ export default function Home() {
     setChannelStatusLoading(false);
   }
 
-  async function loadMessageLogs() {
+  const loadMessageLogs = useCallback(async (filters: {
+    channelId: string;
+    status: string;
+    type: string;
+  }) => {
     setMessageLogsLoading(true);
     setAppError("");
 
-    const response = await fetch("/api/messages/logs?take=50");
+    const params = new URLSearchParams({ take: "50" });
+    if (filters.channelId) params.set("channelId", filters.channelId);
+    if (filters.status && filters.status !== "ALL") params.set("status", filters.status);
+    if (filters.type && filters.type !== "ALL") params.set("type", filters.type);
+
+    const response = await fetch(`/api/messages/logs?${params.toString()}`);
     if (response.ok) {
       const data = (await response.json()) as { logs: MessageLogRow[] };
       setMessageLogs(data.logs);
@@ -1039,7 +1054,7 @@ export default function Home() {
     }
 
     setMessageLogsLoading(false);
-  }
+  }, []);
 
   async function loadCampaigns() {
     setCampaignsLoading(true);
@@ -1114,7 +1129,7 @@ export default function Home() {
 
     await loadChannels();
     await loadChannelStatus();
-    await loadMessageLogs();
+    await loadMessageLogs(messageLogFilters);
   }
 
   const loadProposals = useCallback(async (filters = proposalFilters) => {
@@ -1976,7 +1991,7 @@ export default function Home() {
     void loadKanban();
     void loadChannels();
     void loadChannelStatus();
-    void loadMessageLogs();
+    void loadMessageLogs({ channelId: "", status: "ALL", type: "ALL" });
     void loadCampaigns();
     void loadConversations(conversationFilters);
     void loadNotifications({ silent: true });
@@ -1987,6 +2002,7 @@ export default function Home() {
     loadContacts,
     loadSettingsTags,
     loadConversations,
+    loadMessageLogs,
     loadNotifications,
     loadProposals,
     proposalFilters,
@@ -2399,12 +2415,17 @@ export default function Home() {
               channels={channels}
               channelStatus={channelStatus}
               messageLogs={messageLogs}
+              messageLogFilters={messageLogFilters}
               loading={channelsLoading}
               statusLoading={channelStatusLoading}
               logsLoading={messageLogsLoading}
               onCreateChannel={handleCreateChannel}
               onRefreshStatus={loadChannelStatus}
-              onRefreshLogs={loadMessageLogs}
+              onMessageLogFiltersChange={(filters) => {
+                setMessageLogFilters(filters);
+                void loadMessageLogs(filters);
+              }}
+              onRefreshLogs={() => loadMessageLogs(messageLogFilters)}
               onSimulateInbound={handleSimulateInboundMessage}
             />
           )}
@@ -5783,17 +5804,20 @@ function Canais({
   channels,
   channelStatus,
   messageLogs,
+  messageLogFilters,
   loading,
   statusLoading,
   logsLoading,
   onCreateChannel,
   onRefreshStatus,
+  onMessageLogFiltersChange,
   onRefreshLogs,
   onSimulateInbound
 }: {
   channels: ChannelRow[];
   channelStatus: ChannelStatusData | null;
   messageLogs: MessageLogRow[];
+  messageLogFilters: { channelId: string; status: string; type: string };
   loading: boolean;
   statusLoading: boolean;
   logsLoading: boolean;
@@ -5807,6 +5831,7 @@ function Canais({
     appSecret: string;
   }) => Promise<void>;
   onRefreshStatus: () => Promise<void>;
+  onMessageLogFiltersChange: (filters: { channelId: string; status: string; type: string }) => void;
   onRefreshLogs: () => Promise<void>;
   onSimulateInbound: (payload: {
     channelId: string;
@@ -6027,6 +6052,89 @@ function Canais({
             </button>
           </div>
 
+          <div className="mt-4 grid gap-3 md:grid-cols-4">
+            <label className="text-xs font-bold uppercase text-slate-500">
+              Canal
+              <select
+                className="mt-2 h-10 w-full rounded-2xl border border-line bg-white px-3 text-sm font-semibold normal-case text-slate-700 outline-none focus:border-primary"
+                value={messageLogFilters.channelId}
+                onChange={(event) =>
+                  onMessageLogFiltersChange({
+                    ...messageLogFilters,
+                    channelId: event.target.value
+                  })
+                }
+              >
+                <option value="">Todos os canais</option>
+                {channels
+                  .filter((channel) => channel.type === "whatsapp")
+                  .map((channel) => (
+                    <option key={channel.id} value={channel.id}>
+                      {channel.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+
+            <label className="text-xs font-bold uppercase text-slate-500">
+              Status
+              <select
+                className="mt-2 h-10 w-full rounded-2xl border border-line bg-white px-3 text-sm font-semibold normal-case text-slate-700 outline-none focus:border-primary"
+                value={messageLogFilters.status}
+                onChange={(event) =>
+                  onMessageLogFiltersChange({
+                    ...messageLogFilters,
+                    status: event.target.value
+                  })
+                }
+              >
+                <option value="ALL">Todos os status</option>
+                <option value="sent">Enviado</option>
+                <option value="delivered">Entregue</option>
+                <option value="read">Lido</option>
+                <option value="failed">Erro/Falha</option>
+              </select>
+            </label>
+
+            <label className="text-xs font-bold uppercase text-slate-500">
+              Tipo
+              <select
+                className="mt-2 h-10 w-full rounded-2xl border border-line bg-white px-3 text-sm font-semibold normal-case text-slate-700 outline-none focus:border-primary"
+                value={messageLogFilters.type}
+                onChange={(event) =>
+                  onMessageLogFiltersChange({
+                    ...messageLogFilters,
+                    type: event.target.value
+                  })
+                }
+              >
+                <option value="ALL">Todos os tipos</option>
+                <option value="text">Texto</option>
+                <option value="image">Imagem</option>
+                <option value="audio">Audio</option>
+                <option value="document">Documento</option>
+                <option value="video">Video</option>
+                <option value="template">Template</option>
+              </select>
+            </label>
+
+            <div className="flex items-end">
+              <button
+                type="button"
+                className="h-10 w-full rounded-2xl border border-line px-4 text-sm font-bold text-slate-600 hover:bg-slate-50"
+                onClick={() =>
+                  onMessageLogFiltersChange({
+                    channelId: "",
+                    status: "ALL",
+                    type: "ALL"
+                  })
+                }
+              >
+                Limpar filtros
+              </button>
+            </div>
+          </div>
+
           <div className="mt-4 overflow-hidden rounded-2xl border border-line">
             <div className="grid grid-cols-[1.3fr_0.8fr_0.8fr_0.7fr] gap-3 bg-slate-50 px-4 py-3 text-xs font-bold uppercase text-slate-500">
               <span>Cliente</span>
@@ -6064,6 +6172,12 @@ function Canais({
                   <p className="text-right text-xs text-slate-500">
                     {formatRelativeDate(log.createdAt)}
                   </p>
+                  {resolveMessageLogError(log) && (
+                    <div className="col-span-full rounded-2xl border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">
+                      <span className="font-bold">Erro:</span>{" "}
+                      {resolveMessageLogError(log)}
+                    </div>
+                  )}
                 </div>
               ))}
               {!logsLoading && messageLogs.length === 0 && (
@@ -6334,6 +6448,17 @@ function messageTypeLabel(type: string) {
   };
 
   return labels[type] ?? type;
+}
+
+function resolveMessageLogError(log: MessageLogRow) {
+  if (log.errorMessage) return log.errorMessage;
+  if (log.status.toLowerCase() !== "failed") return "";
+
+  const marker = "Falha:";
+  const markerIndex = log.body.indexOf(marker);
+  if (markerIndex === -1) return "";
+
+  return log.body.slice(markerIndex + marker.length).trim();
 }
 
 function MessageStatusBadge({ status }: { status: string }) {
