@@ -3095,7 +3095,15 @@ function Atendimento({
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
+      const preferredMimeType = [
+        "audio/ogg;codecs=opus",
+        "audio/webm;codecs=opus",
+        "audio/webm"
+      ].find((mimeType) => MediaRecorder.isTypeSupported(mimeType));
+      const recorder = new MediaRecorder(
+        stream,
+        preferredMimeType ? { mimeType: preferredMimeType } : undefined
+      );
       audioChunksRef.current = [];
       mediaRecorderRef.current = recorder;
 
@@ -3108,7 +3116,9 @@ function Atendimento({
         const blob = new Blob(audioChunksRef.current, {
           type: recorder.mimeType || "audio/webm"
         });
-        const file = new File([blob], `audio-${Date.now()}.webm`, {
+        const baseMimeType = (blob.type || "audio/webm").split(";")[0];
+        const extension = baseMimeType.includes("ogg") ? "ogg" : "webm";
+        const file = new File([blob], `audio-${Date.now()}.${extension}`, {
           type: blob.type || "audio/webm"
         });
         if (audioPreview?.url) URL.revokeObjectURL(audioPreview.url);

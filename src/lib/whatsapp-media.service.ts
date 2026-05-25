@@ -13,6 +13,9 @@ export const allowedMediaTypes = new Set([
   "image/jpeg",
   "image/png",
   "application/pdf",
+  "audio/aac",
+  "audio/amr",
+  "audio/mp4",
   "audio/mpeg",
   "audio/ogg",
   "audio/webm",
@@ -23,10 +26,15 @@ export const allowedMediaTypes = new Set([
 
 export const maxMediaSize = 16 * 1024 * 1024;
 
+export function normalizeMimeType(mimeType: string) {
+  return mimeType.split(";")[0]?.trim().toLowerCase() || "application/octet-stream";
+}
+
 export function resolveMetaMediaType(mimeType: string): MetaMediaType {
-  if (mimeType.startsWith("image/")) return "image";
-  if (mimeType.startsWith("audio/")) return "audio";
-  if (mimeType.startsWith("video/")) return "video";
+  const normalizedMimeType = normalizeMimeType(mimeType);
+  if (normalizedMimeType.startsWith("image/")) return "image";
+  if (normalizedMimeType.startsWith("audio/")) return "audio";
+  if (normalizedMimeType.startsWith("video/")) return "video";
   return "document";
 }
 
@@ -47,7 +55,9 @@ export async function sendConversationMedia({
   bytes: Buffer;
   caption?: string;
 }) {
-  if (!allowedMediaTypes.has(mimeType)) {
+  const normalizedMimeType = normalizeMimeType(mimeType);
+
+  if (!allowedMediaTypes.has(normalizedMimeType)) {
     throw new Error("Tipo de arquivo nao aceito para envio pelo WhatsApp.");
   }
 
@@ -64,10 +74,10 @@ export async function sendConversationMedia({
     phoneNumberId: channel.phoneNumberId!,
     accessToken: channel.accessToken!,
     fileName,
-    mimeType,
+    mimeType: normalizedMimeType,
     bytes
   });
-  const mediaType = resolveMetaMediaType(mimeType);
+  const mediaType = resolveMetaMediaType(normalizedMimeType);
   const metaResponse = await sendMetaMediaMessage({
     phoneNumberId: channel.phoneNumberId!,
     accessToken: channel.accessToken!,
@@ -87,7 +97,7 @@ export async function sendConversationMedia({
     type: mediaType,
     mediaId: uploaded.id,
     fileName,
-    mimeType,
+    mimeType: normalizedMimeType,
     providerMessageId: readMetaMessageId(metaResponse)
   });
 }
