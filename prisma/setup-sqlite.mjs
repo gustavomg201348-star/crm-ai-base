@@ -159,7 +159,6 @@ CREATE TABLE IF NOT EXISTS Message (
   templateVariables TEXT,
   status TEXT NOT NULL DEFAULT 'sent',
   providerMessageId TEXT,
-  errorMessage TEXT,
   readAt DATETIME,
   senderType TEXT,
   createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -330,7 +329,6 @@ for (const [name, type] of [
   ["templateVariables", "TEXT"],
   ["status", "TEXT NOT NULL DEFAULT 'sent'"],
   ["providerMessageId", "TEXT"],
-  ["errorMessage", "TEXT"],
   ["readAt", "DATETIME"],
   ["senderType", "TEXT"]
 ]) {

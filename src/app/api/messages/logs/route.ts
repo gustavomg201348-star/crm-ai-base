@@ -58,7 +58,6 @@ export async function GET(request: NextRequest) {
           fileName: message.fileName,
           mimeType: message.mimeType,
           templateName: message.templateName,
-          errorMessage: message.errorMessage,
           providerMessageId: message.providerMessageId,
           createdAt: message.createdAt,
           readAt: message.readAt
