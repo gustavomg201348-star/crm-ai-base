@@ -15,7 +15,7 @@ ENV PORT=3000
 ENV DATABASE_URL=postgresql://crm:password@localhost:5432/crm?schema=public
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && apt-get install -y --no-install-recommends openssl ca-certificates ffmpeg \
   && rm -rf /var/lib/apt/lists/*
 
 COPY --from=deps /app/node_modules ./node_modules

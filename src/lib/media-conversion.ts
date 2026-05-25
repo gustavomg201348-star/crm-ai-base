@@ -3,9 +3,9 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import ffmpegPath from "ffmpeg-static";
 
 const execFileAsync = promisify(execFile);
+const ffmpegCommand = process.env.FFMPEG_PATH || "ffmpeg";
 
 export type ConvertedMedia = {
   bytes: Buffer;
@@ -20,10 +20,6 @@ export async function convertWebmAudioToOgg({
   bytes: Buffer;
   fileName: string;
 }): Promise<ConvertedMedia> {
-  if (!ffmpegPath) {
-    throw new Error("Conversor de audio nao disponivel no servidor.");
-  }
-
   const workdir = await mkdtemp(join(tmpdir(), "crm-audio-"));
   const inputPath = join(workdir, "input.webm");
   const outputPath = join(workdir, "output.ogg");
@@ -31,7 +27,7 @@ export async function convertWebmAudioToOgg({
   try {
     await writeFile(inputPath, bytes);
     await execFileAsync(
-      ffmpegPath,
+      ffmpegCommand,
       [
         "-y",
         "-i",
