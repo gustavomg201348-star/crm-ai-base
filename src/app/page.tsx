@@ -290,6 +290,50 @@ type MessageLogRow = {
   readAt?: string | null;
 };
 
+type CltBankRow = {
+  id: string;
+  name: string;
+  provider: string;
+  products: string[];
+  tags: string[];
+};
+
+type CltCustomerData = {
+  cpf: string;
+  name: string;
+  birthDate: string;
+  phone?: string;
+  gender: string;
+  registry: string;
+  employerDocument: string;
+  employerName: string;
+  admissionDate: string;
+  income: number;
+  availableMargin: number;
+  zipCode: string;
+  state: string;
+  city: string;
+  district: string;
+  address: string;
+  number: string;
+};
+
+type CltSimulationOffer = {
+  id: string;
+  bankId: string;
+  bankName: string;
+  product: string;
+  tableCode: string;
+  tableName: string;
+  installments: number;
+  monthlyRate: number;
+  installmentAmount: number;
+  financedAmount: number;
+  releasedAmount: number;
+  availableMargin: number;
+  includeInsurance: boolean;
+};
+
 type AiAnalysis = {
   summary: string;
   temperature: ContactRow["temperature"];
@@ -2395,6 +2439,16 @@ export default function Home() {
               onCompleteTask={handleCompleteTask}
               onUpdateContact={handleUpdateContact}
               onArchiveContact={handleArchiveContact}
+            />
+          )}
+          {active === "simulacao-clt" && (
+            <SimulacaoClt
+              contacts={contacts}
+              onProposalCreated={async () => {
+                await loadContacts(contactFilters);
+                await loadProposals(proposalFilters);
+                await loadDashboard(dashboardFilters);
+              }}
             />
           )}
           {active === "multicred" && (
@@ -5362,6 +5416,421 @@ function ContactDrawer({
     </aside>
   );
 }
+function SimulacaoClt({
+  contacts,
+  onProposalCreated
+}: {
+  contacts: ContactRow[];
+  onProposalCreated: () => Promise<void>;
+}) {
+  const [banks, setBanks] = useState<CltBankRow[]>([]);
+  const [loadingBanks, setLoadingBanks] = useState(true);
+  const [customerLoading, setCustomerLoading] = useState(false);
+  const [simulationLoading, setSimulationLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [selectedContactId, setSelectedContactId] = useState("");
+  const [customer, setCustomer] = useState<CltCustomerData | null>(null);
+  const [offers, setOffers] = useState<CltSimulationOffer[]>([]);
+  const [selectedOfferId, setSelectedOfferId] = useState("");
+  const [message, setMessage] = useState("");
+  const [form, setForm] = useState({
+    bankId: "",
+    cpf: "",
+    phone: "",
+    product: "",
+    income: "1621",
+    availableMargin: "372.76",
+    installmentAmount: "372.76",
+    installments: "48",
+    includeInsurance: true
+  });
+
+  const selectedBank = banks.find((bank) => bank.id === form.bankId);
+  const selectedOffer = offers.find((offer) => offer.id === selectedOfferId) ?? offers[0];
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadBanks() {
+      setLoadingBanks(true);
+      const response = await fetch("/api/clt/banks");
+      if (response.ok) {
+        const data = (await response.json()) as { banks: CltBankRow[] };
+        if (!active) return;
+        setBanks(data.banks);
+        setForm((current) => ({
+          ...current,
+          bankId: current.bankId || data.banks[0]?.id || "",
+          product: current.product || data.banks[0]?.products[0] || ""
+        }));
+      }
+      if (active) setLoadingBanks(false);
+    }
+
+    void loadBanks();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  function updateForm(field: keyof typeof form, value: string | boolean) {
+    setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function handleContactSelect(contactId: string) {
+    setSelectedContactId(contactId);
+    const contact = contacts.find((item) => item.id === contactId);
+    if (!contact) return;
+
+    setForm((current) => ({
+      ...current,
+      cpf: contact.cpf || current.cpf,
+      phone: contact.phone || current.phone
+    }));
+  }
+
+  async function handleCustomerLookup() {
+    setCustomerLoading(true);
+    setMessage("");
+
+    const response = await fetch("/api/clt/customer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cpf: form.cpf, phone: form.phone })
+    });
+    const data = (await response.json().catch(() => null)) as
+      | { customer?: CltCustomerData; error?: string }
+      | null;
+
+    if (response.ok && data?.customer) {
+      setCustomer(data.customer);
+      setForm((current) => ({
+        ...current,
+        cpf: data.customer!.cpf,
+        phone: data.customer!.phone || current.phone,
+        income: String(data.customer!.income),
+        availableMargin: String(data.customer!.availableMargin),
+        installmentAmount: String(data.customer!.availableMargin)
+      }));
+      setMessage("Dados do trabalhador carregados.");
+    } else {
+      setMessage(data?.error || "Nao foi possivel consultar o trabalhador.");
+    }
+
+    setCustomerLoading(false);
+  }
+
+  async function handleSimulation() {
+    setSimulationLoading(true);
+    setMessage("");
+
+    const response = await fetch("/api/clt/simulations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        bankId: form.bankId,
+        cpf: form.cpf,
+        phone: form.phone,
+        product: form.product || selectedBank?.products[0],
+        income: Number(form.income),
+        availableMargin: Number(form.availableMargin),
+        installmentAmount: Number(form.installmentAmount),
+        installments: Number(form.installments),
+        includeInsurance: form.includeInsurance
+      })
+    });
+    const data = (await response.json().catch(() => null)) as
+      | { offers?: CltSimulationOffer[]; error?: string }
+      | null;
+
+    if (response.ok && data?.offers?.length) {
+      setOffers(data.offers);
+      setSelectedOfferId(data.offers[0].id);
+      setMessage("Simulacao CLT gerada.");
+    } else {
+      setMessage(data?.error || "Nao foi possivel simular CLT.");
+    }
+
+    setSimulationLoading(false);
+  }
+
+  async function handleSaveProposal() {
+    if (!customer || !selectedOffer) return;
+    setSaving(true);
+    setMessage("");
+
+    const response = await fetch("/api/clt/proposals", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contactId: selectedContactId || undefined,
+        customer: { ...customer, phone: form.phone },
+        offer: selectedOffer
+      })
+    });
+    const data = (await response.json().catch(() => null)) as
+      | { error?: string }
+      | null;
+
+    if (response.ok) {
+      setMessage("Proposta CLT salva no CRM.");
+      await onProposalCreated();
+    } else {
+      setMessage(data?.error || "Nao foi possivel salvar proposta CLT.");
+    }
+
+    setSaving(false);
+  }
+
+  return (
+    <div className="grid gap-5">
+      <section className="rounded-[28px] border border-line bg-white p-6 shadow-soft">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="inline-flex rounded-full bg-blue-50 px-3 py-1 text-xs font-black uppercase text-primary">
+              Credito do Trabalhador
+            </p>
+            <h2 className="mt-3 text-2xl font-black text-slate-950">Simulacao CLT</h2>
+            <p className="mt-1 max-w-2xl text-sm text-slate-500">
+              Consulte dados, simule margem e salve a proposta vinculada ao atendimento do CRM.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-line bg-slate-50 px-4 py-3 text-sm text-slate-600">
+            Provider inicial: <span className="font-bold">manual/mock</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
+        <div className="rounded-[24px] border border-line bg-white p-5 shadow-soft">
+          <h3 className="text-lg font-black text-slate-950">Dados para consulta</h3>
+          <div className="mt-4 grid gap-3">
+            <label className="text-xs font-bold uppercase text-slate-500">
+              Vincular contato existente
+              <select
+                className="mt-2 h-11 w-full rounded-2xl border border-line bg-white px-3 text-sm font-semibold normal-case text-slate-700 outline-none focus:border-primary"
+                value={selectedContactId}
+                onChange={(event) => handleContactSelect(event.target.value)}
+              >
+                <option value="">Novo cliente ou sem vinculo</option>
+                {contacts.map((contact) => (
+                  <option key={contact.id} value={contact.id}>
+                    {contact.name} - {contact.phone}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="text-xs font-bold uppercase text-slate-500">
+                Banco
+                <select
+                  className="mt-2 h-11 w-full rounded-2xl border border-line bg-white px-3 text-sm font-semibold normal-case text-slate-700 outline-none focus:border-primary"
+                  disabled={loadingBanks}
+                  value={form.bankId}
+                  onChange={(event) => {
+                    const bank = banks.find((item) => item.id === event.target.value);
+                    setForm((current) => ({
+                      ...current,
+                      bankId: event.target.value,
+                      product: bank?.products[0] || current.product
+                    }));
+                  }}
+                >
+                  {banks.map((bank) => (
+                    <option key={bank.id} value={bank.id}>
+                      {bank.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="text-xs font-bold uppercase text-slate-500">
+                Produto
+                <select
+                  className="mt-2 h-11 w-full rounded-2xl border border-line bg-white px-3 text-sm font-semibold normal-case text-slate-700 outline-none focus:border-primary"
+                  value={form.product}
+                  onChange={(event) => updateForm("product", event.target.value)}
+                >
+                  {(selectedBank?.products || []).map((product) => (
+                    <option key={product} value={product}>
+                      {product}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <ContactInput
+                placeholder="CPF"
+                required
+                value={form.cpf}
+                onChange={(value) => updateForm("cpf", value)}
+              />
+              <ContactInput
+                placeholder="Celular"
+                required
+                value={form.phone}
+                onChange={(value) => updateForm("phone", value)}
+              />
+            </div>
+
+            <button
+              type="button"
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-primary px-4 text-sm font-bold text-white disabled:opacity-60"
+              disabled={customerLoading || !form.cpf}
+              onClick={() => void handleCustomerLookup()}
+            >
+              {customerLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+              Consultar dados
+            </button>
+          </div>
+        </div>
+
+        <div className="rounded-[24px] border border-line bg-white p-5 shadow-soft">
+          <h3 className="text-lg font-black text-slate-950">Dados do trabalhador</h3>
+          {customer ? (
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <InfoField label="Nome" value={customer.name} />
+              <InfoField label="Matricula" value={customer.registry} />
+              <InfoField label="Nascimento" value={customer.birthDate} />
+              <InfoField label="Empregador" value={customer.employerDocument} />
+              <InfoField label="Renda" value={formatCurrency(customer.income)} />
+              <InfoField label="Margem" value={formatCurrency(customer.availableMargin)} />
+              <InfoField label="Cidade/UF" value={`${customer.city}/${customer.state}`} />
+              <InfoField label="Endereco" value={`${customer.address}, ${customer.number}`} />
+            </div>
+          ) : (
+            <div className="mt-4 rounded-2xl border border-dashed border-line p-6 text-sm text-slate-500">
+              Informe CPF e telefone para buscar os dados do trabalhador.
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-[24px] border border-line bg-white p-5 shadow-soft">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h3 className="text-lg font-black text-slate-950">Simulador</h3>
+            <p className="text-sm text-slate-500">
+              Ajuste parcela, prazo e seguro antes de gerar a oferta.
+            </p>
+          </div>
+          <label className="inline-flex items-center gap-2 text-sm font-bold text-slate-600">
+            <input
+              type="checkbox"
+              checked={form.includeInsurance}
+              onChange={(event) => updateForm("includeInsurance", event.target.checked)}
+            />
+            Incluir seguro prestamista
+          </label>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-4">
+          <ContactInput
+            placeholder="Renda"
+            value={form.income}
+            onChange={(value) => updateForm("income", value)}
+          />
+          <ContactInput
+            placeholder="Margem disponivel"
+            value={form.availableMargin}
+            onChange={(value) => updateForm("availableMargin", value)}
+          />
+          <ContactInput
+            placeholder="Valor parcela"
+            value={form.installmentAmount}
+            onChange={(value) => updateForm("installmentAmount", value)}
+          />
+          <ContactInput
+            placeholder="Quantidade de parcelas"
+            value={form.installments}
+            onChange={(value) => updateForm("installments", value)}
+          />
+        </div>
+
+        <button
+          type="button"
+          className="mt-4 inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-brand px-5 text-sm font-bold text-white disabled:opacity-60"
+          disabled={simulationLoading || !customer}
+          onClick={() => void handleSimulation()}
+        >
+          {simulationLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+          Nova simulacao
+        </button>
+
+        <div className="mt-5 overflow-hidden rounded-2xl border border-line">
+          <div className="grid grid-cols-[0.7fr_1.4fr_0.7fr_0.8fr_0.9fr_0.9fr_0.8fr] gap-3 bg-slate-50 px-4 py-3 text-xs font-bold uppercase text-slate-500">
+            <span>Tabela</span>
+            <span>Nome</span>
+            <span>Prazo</span>
+            <span>Taxa</span>
+            <span>Parcela</span>
+            <span>Liberado</span>
+            <span className="text-right">Acao</span>
+          </div>
+          <div className="divide-y divide-line/70">
+            {offers.map((offer) => (
+              <div
+                key={offer.id}
+                className={clsx(
+                  "grid grid-cols-[0.7fr_1.4fr_0.7fr_0.8fr_0.9fr_0.9fr_0.8fr] gap-3 px-4 py-3 text-sm",
+                  selectedOfferId === offer.id && "bg-blue-50/60"
+                )}
+              >
+                <span className="font-bold text-slate-700">{offer.tableCode}</span>
+                <span className="text-slate-600">{offer.tableName}</span>
+                <span>{offer.installments}x</span>
+                <span>{offer.monthlyRate.toFixed(2)}% a.m.</span>
+                <span>{formatCurrency(offer.installmentAmount)}</span>
+                <span className="font-black text-emerald-700">
+                  {formatCurrency(offer.releasedAmount)}
+                </span>
+                <button
+                  type="button"
+                  className="justify-self-end rounded-full border border-primary/30 px-3 py-1 text-xs font-bold text-primary"
+                  onClick={() => setSelectedOfferId(offer.id)}
+                >
+                  Selecionar
+                </button>
+              </div>
+            ))}
+            {!offers.length && (
+              <div className="px-4 py-8 text-center text-sm text-slate-500">
+                Aguardando simulacao.
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm font-semibold text-slate-600">{message}</p>
+          <button
+            type="button"
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 text-sm font-bold text-white disabled:opacity-60"
+            disabled={saving || !selectedOffer || !customer}
+            onClick={() => void handleSaveProposal()}
+          >
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+            Salvar proposta no CRM
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function InfoField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-line bg-slate-50 px-3 py-2">
+      <p className="text-[11px] font-bold uppercase text-slate-400">{label}</p>
+      <p className="mt-1 truncate text-sm font-bold text-slate-800">{value || "-"}</p>
+    </div>
+  );
+}
+
 function Multicred({
   contacts,
   filters,

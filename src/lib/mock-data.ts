@@ -23,6 +23,7 @@ export const navItems = [
   { id: "kanban", label: "Kanban", icon: KanbanSquare },
   { id: "contatos", label: "Contatos", icon: ContactRound },
   { id: "tags", label: "Tags", icon: Tags },
+  { id: "simulacao-clt", label: "Simulacao CLT", icon: BriefcaseBusiness },
   { id: "multicred", label: "Multicred", icon: CircleDollarSign },
   { id: "canais", label: "Canais", icon: Webhook },
   { id: "disparos", label: "Disparos", icon: Megaphone },
