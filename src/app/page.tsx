@@ -17,6 +17,7 @@ import {
   Activity,
   Banknote,
   Bell,
+  BriefcaseBusiness,
   Check,
   ChevronDown,
   CircleDollarSign,
@@ -334,6 +335,13 @@ type CltSimulationOffer = {
   includeInsurance: boolean;
 };
 
+type CltSimulationDraft = {
+  contactId?: string;
+  cpf?: string | null;
+  phone?: string | null;
+  name?: string | null;
+};
+
 type AiAnalysis = {
   summary: string;
   temperature: ContactRow["temperature"];
@@ -574,6 +582,7 @@ export default function Home() {
   const [dashboard, setDashboard] = useState<DashboardData>(emptyDashboardData);
   const [selectedConversation, setSelectedConversation] =
     useState<ConversationRow | null>(null);
+  const [cltDraft, setCltDraft] = useState<CltSimulationDraft | null>(null);
   const selectedConversationRef = useRef<string | null>(null);
   const knownNotificationIdsRef = useRef<Set<string>>(new Set());
   const notificationsLoadedRef = useRef(false);
@@ -2022,6 +2031,16 @@ export default function Home() {
     await refreshOperationalViews();
   }
 
+  function openCltSimulationFromConversation(conversation: ConversationRow) {
+    setCltDraft({
+      contactId: conversation.contact.id,
+      cpf: conversation.contact.cpf,
+      phone: conversation.contact.phone,
+      name: conversation.contact.name
+    });
+    setActive("simulacao-clt");
+  }
+
   useEffect(() => {
     void loadSession();
   }, []);
@@ -2415,6 +2434,7 @@ export default function Home() {
               onAnalyzeConversation={handleAnalyzeConversation}
               onAddTags={handleAddConversationTags}
               onRemoveTag={handleRemoveConversationTag}
+              onOpenCltSimulation={openCltSimulationFromConversation}
             />
           )}
           {active === "kanban" && (
@@ -2444,6 +2464,7 @@ export default function Home() {
           {active === "simulacao-clt" && (
             <SimulacaoClt
               contacts={contacts}
+              initialDraft={cltDraft}
               onProposalCreated={async () => {
                 await loadContacts(contactFilters);
                 await loadProposals(proposalFilters);
@@ -3179,7 +3200,8 @@ function Atendimento({
   aiLoading,
   onAnalyzeConversation,
   onAddTags,
-  onRemoveTag
+  onRemoveTag,
+  onOpenCltSimulation
 }: {
   conversations: ConversationRow[];
   filters: { search: string; status: string; tagIds: string[] };
@@ -3204,6 +3226,7 @@ function Atendimento({
   onAnalyzeConversation: (conversationId: string) => Promise<void>;
   onAddTags: (conversationId: string, tagIds: string[]) => Promise<void>;
   onRemoveTag: (conversationId: string, tagId: string) => Promise<void>;
+  onOpenCltSimulation: (conversation: ConversationRow) => void;
 }) {
   const [message, setMessage] = useState("");
   const [composerError, setComposerError] = useState("");
@@ -3427,6 +3450,14 @@ function Atendimento({
           </div>
           {selectedConversation && (
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="hidden h-10 items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 text-sm font-bold text-primary hover:bg-blue-100 lg:inline-flex"
+                onClick={() => onOpenCltSimulation(selectedConversation)}
+              >
+                <BriefcaseBusiness className="h-4 w-4" />
+                Simular CLT
+              </button>
               <ConversationTagSelector
                 availableTags={availableTags}
                 selectedTags={selectedConversation.tags}
@@ -3703,6 +3734,19 @@ function Atendimento({
             Usar sugestao
           </button>
         )}
+        <button
+          type="button"
+          className="flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-blue-100 bg-blue-50 px-3 text-sm font-bold text-primary hover:bg-blue-100 disabled:opacity-50"
+          disabled={!selectedConversation}
+          onClick={() =>
+            selectedConversation
+              ? onOpenCltSimulation(selectedConversation)
+              : undefined
+          }
+        >
+          <BriefcaseBusiness className="h-4 w-4" />
+          Simular CLT deste lead
+        </button>
         <div className="rounded border border-line bg-white p-4 shadow-soft">
           <h3 className="font-bold">Ficha rapida</h3>
           <dl className="mt-4 space-y-3 text-sm">
@@ -5418,9 +5462,11 @@ function ContactDrawer({
 }
 function SimulacaoClt({
   contacts,
+  initialDraft,
   onProposalCreated
 }: {
   contacts: ContactRow[];
+  initialDraft: CltSimulationDraft | null;
   onProposalCreated: () => Promise<void>;
 }) {
   const [banks, setBanks] = useState<CltBankRow[]>([]);
@@ -5473,6 +5519,25 @@ function SimulacaoClt({
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!initialDraft) return;
+
+    setSelectedContactId(initialDraft.contactId || "");
+    setCustomer(null);
+    setOffers([]);
+    setSelectedOfferId("");
+    setMessage(
+      initialDraft.name
+        ? `Simulacao iniciada para ${initialDraft.name}.`
+        : "Simulacao iniciada a partir do atendimento."
+    );
+    setForm((current) => ({
+      ...current,
+      cpf: initialDraft.cpf || current.cpf,
+      phone: initialDraft.phone || current.phone
+    }));
+  }, [initialDraft]);
 
   function updateForm(field: keyof typeof form, value: string | boolean) {
     setForm((current) => ({ ...current, [field]: value }));
