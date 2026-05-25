@@ -34,6 +34,7 @@ import {
   MoreHorizontal,
   Paperclip,
   Plus,
+  RefreshCcw,
   RotateCcw,
   Search,
   Send,
@@ -234,6 +235,42 @@ type ChannelRow = {
   status: string;
   createdAt: string;
   updatedAt: string;
+};
+
+type ChannelStatusRow = {
+  id: string;
+  name: string;
+  provider: string;
+  status: string;
+  displayPhone?: string | null;
+  phoneNumberId?: string | null;
+  wabaId?: string | null;
+  webhookUrl: string;
+  ready: boolean;
+  checks: Record<string, boolean>;
+  meta: {
+    ok: boolean;
+    verifiedName?: string | null;
+    qualityRating?: string | null;
+    error?: string | null;
+  };
+  metrics: {
+    inboundCount: number;
+    outboundCount: number;
+    lastActivityAt?: string | null;
+    lastDirection?: string | null;
+    lastMessagePreview?: string | null;
+    lastMessageStatus?: string | null;
+    lastContactName?: string | null;
+    lastContactPhone?: string | null;
+  };
+  warnings: string[];
+};
+
+type ChannelStatusData = {
+  webhookUrl: string;
+  summary: { total: number; ready: number; withWarnings: number };
+  channels: ChannelStatusRow[];
 };
 
 type AiAnalysis = {
@@ -464,6 +501,7 @@ export default function Home() {
   const [kanbanStages, setKanbanStages] = useState<KanbanStage[]>([]);
   const [conversationList, setConversationList] = useState<ConversationRow[]>([]);
   const [channels, setChannels] = useState<ChannelRow[]>([]);
+  const [channelStatus, setChannelStatus] = useState<ChannelStatusData | null>(null);
   const [campaigns, setCampaigns] = useState<CampaignRow[]>([]);
   const [proposals, setProposals] = useState<ProposalRow[]>([]);
   const [dashboard, setDashboard] = useState<DashboardData>(emptyDashboardData);
@@ -532,6 +570,7 @@ export default function Home() {
   const [kanbanLoading, setKanbanLoading] = useState(false);
   const [conversationLoading, setConversationLoading] = useState(false);
   const [channelsLoading, setChannelsLoading] = useState(false);
+  const [channelStatusLoading, setChannelStatusLoading] = useState(false);
   const [campaignsLoading, setCampaignsLoading] = useState(false);
   const [proposalsLoading, setProposalsLoading] = useState(false);
   const [dashboardLoading, setDashboardLoading] = useState(false);
@@ -954,6 +993,21 @@ export default function Home() {
     setChannelsLoading(false);
   }
 
+  async function loadChannelStatus() {
+    setChannelStatusLoading(true);
+    setAppError("");
+
+    const response = await fetch("/api/channels/status");
+    if (response.ok) {
+      const data = (await response.json()) as ChannelStatusData;
+      setChannelStatus(data);
+    } else {
+      setAppError("Nao foi possivel carregar status dos canais.");
+    }
+
+    setChannelStatusLoading(false);
+  }
+
   async function loadCampaigns() {
     setCampaignsLoading(true);
     setAppError("");
@@ -1026,6 +1080,7 @@ export default function Home() {
     }
 
     await loadChannels();
+    await loadChannelStatus();
   }
 
   const loadProposals = useCallback(async (filters = proposalFilters) => {
@@ -1886,6 +1941,7 @@ export default function Home() {
     void loadReference();
     void loadKanban();
     void loadChannels();
+    void loadChannelStatus();
     void loadCampaigns();
     void loadConversations(conversationFilters);
     void loadNotifications({ silent: true });
@@ -2306,8 +2362,11 @@ export default function Home() {
           {active === "canais" && (
             <Canais
               channels={channels}
+              channelStatus={channelStatus}
               loading={channelsLoading}
+              statusLoading={channelStatusLoading}
               onCreateChannel={handleCreateChannel}
+              onRefreshStatus={loadChannelStatus}
               onSimulateInbound={handleSimulateInboundMessage}
             />
           )}
@@ -5672,12 +5731,17 @@ function Multicred({
 
 function Canais({
   channels,
+  channelStatus,
   loading,
+  statusLoading,
   onCreateChannel,
+  onRefreshStatus,
   onSimulateInbound
 }: {
   channels: ChannelRow[];
+  channelStatus: ChannelStatusData | null;
   loading: boolean;
+  statusLoading: boolean;
   onCreateChannel: (payload: {
     name: string;
     displayPhone: string;
@@ -5687,6 +5751,7 @@ function Canais({
     verifyToken: string;
     appSecret: string;
   }) => Promise<void>;
+  onRefreshStatus: () => Promise<void>;
   onSimulateInbound: (payload: {
     channelId: string;
     name: string;
@@ -5734,6 +5799,155 @@ function Canais({
   return (
     <div className="grid gap-4 xl:grid-cols-[1fr_420px]">
       <div className="space-y-4">
+        <section className="rounded border border-line bg-white p-5 shadow-soft">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <Activity className="h-5 w-5 text-brand" />
+                <h3 className="text-lg font-bold">Status WhatsApp/API</h3>
+              </div>
+              <p className="mt-1 text-sm text-slate-500">
+                Monitoramento rapido dos canais, webhook, token e ultima atividade.
+              </p>
+              <p className="mt-2 break-all rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                Webhook: {channelStatus?.webhookUrl ?? "Carregando..."}
+              </p>
+            </div>
+            <button
+              type="button"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-line px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+              disabled={statusLoading}
+              onClick={() => void onRefreshStatus()}
+            >
+              {statusLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCcw className="h-4 w-4" />
+              )}
+              Atualizar status
+            </button>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <StatusMetric
+              label="Canais"
+              value={channelStatus?.summary.total ?? channels.length}
+            />
+            <StatusMetric
+              label="Prontos"
+              value={channelStatus?.summary.ready ?? 0}
+              tone="success"
+            />
+            <StatusMetric
+              label="Alertas"
+              value={channelStatus?.summary.withWarnings ?? 0}
+              tone={channelStatus?.summary.withWarnings ? "danger" : "neutral"}
+            />
+          </div>
+
+          <div className="mt-5 grid gap-3">
+            {(channelStatus?.channels ?? []).map((item) => (
+              <div key={item.id} className="rounded-2xl border border-line bg-slate-50/70 p-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={clsx(
+                          "h-2.5 w-2.5 rounded-full",
+                          item.ready ? "bg-emerald-500" : "bg-rose-500"
+                        )}
+                      />
+                      <p className="font-bold text-slate-950">{item.name}</p>
+                      <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-bold text-slate-500">
+                        {item.provider === "meta" ? "Meta Cloud API" : item.provider}
+                      </span>
+                      <span
+                        className={clsx(
+                          "rounded-full px-2 py-0.5 text-[11px] font-bold",
+                          item.ready
+                            ? "bg-emerald-50 text-emerald-700"
+                            : "bg-rose-50 text-rose-700"
+                        )}
+                      >
+                        {item.ready ? "Operacional" : "Atenção"}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-sm text-slate-600">
+                      {item.displayPhone ?? "Telefone nao informado"} · Phone ID{" "}
+                      <span className="font-mono text-xs">
+                        {item.phoneNumberId ?? "nao informado"}
+                      </span>
+                    </p>
+                    {item.meta.verifiedName && (
+                      <p className="mt-1 text-xs text-slate-500">
+                        Nome verificado: {item.meta.verifiedName}
+                        {item.meta.qualityRating
+                          ? ` · Qualidade: ${item.meta.qualityRating}`
+                          : ""}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-right text-xs text-slate-500">
+                    <div className="rounded-xl bg-white px-3 py-2">
+                      <p className="font-bold text-slate-900">{item.metrics.inboundCount}</p>
+                      <p>recebidas</p>
+                    </div>
+                    <div className="rounded-xl bg-white px-3 py-2">
+                      <p className="font-bold text-slate-900">{item.metrics.outboundCount}</p>
+                      <p>enviadas</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {[
+                    ["Ativo", item.checks.active],
+                    ["Phone ID", item.checks.phoneNumberId],
+                    ["WABA", item.checks.wabaId],
+                    ["Token", item.checks.accessToken],
+                    ["Webhook", item.checks.verifyToken],
+                    ["Meta", item.checks.metaReachable]
+                  ].map(([label, ok]) => (
+                    <StatusPill key={String(label)} label={String(label)} ok={Boolean(ok)} />
+                  ))}
+                </div>
+
+                <div className="mt-3 rounded-xl bg-white px-3 py-2 text-xs text-slate-500">
+                  <p className="font-semibold text-slate-700">Última atividade</p>
+                  {item.metrics.lastActivityAt ? (
+                    <p className="mt-1">
+                      {formatRelativeDate(item.metrics.lastActivityAt)} ·{" "}
+                      {item.metrics.lastDirection === "inbound" ? "recebida" : "enviada"} ·{" "}
+                      {formatMessagePreview(item.metrics.lastMessagePreview)}
+                    </p>
+                  ) : (
+                    <p className="mt-1">Nenhuma mensagem registrada neste canal.</p>
+                  )}
+                </div>
+
+                {item.warnings.length > 0 && (
+                  <div className="mt-3 space-y-1 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                    {item.warnings.map((warning) => (
+                      <p key={warning}>{warning}</p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+            {!statusLoading && channelStatus?.channels.length === 0 && (
+              <div className="rounded-2xl border border-dashed border-line p-4 text-sm text-slate-500">
+                Nenhum canal para monitorar.
+              </div>
+            )}
+            {statusLoading && (
+              <div className="rounded-2xl border border-line p-4 text-sm text-slate-500">
+                Verificando canais...
+              </div>
+            )}
+          </div>
+        </section>
+
         <section className="rounded border border-line bg-white p-5 shadow-soft">
           <div className="flex items-center justify-between">
             <div>
@@ -5934,6 +6148,46 @@ function Canais({
         </div>
       </section>
     </div>
+  );
+}
+
+function StatusMetric({
+  label,
+  value,
+  tone = "neutral"
+}: {
+  label: string;
+  value: number;
+  tone?: "neutral" | "success" | "danger";
+}) {
+  return (
+    <div
+      className={clsx(
+        "rounded-2xl border px-4 py-3",
+        tone === "success"
+          ? "border-emerald-100 bg-emerald-50"
+          : tone === "danger"
+            ? "border-rose-100 bg-rose-50"
+            : "border-line bg-slate-50"
+      )}
+    >
+      <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</p>
+      <p className="mt-1 text-2xl font-black text-slate-950">{value}</p>
+    </div>
+  );
+}
+
+function StatusPill({ label, ok }: { label: string; ok: boolean }) {
+  return (
+    <span
+      className={clsx(
+        "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold",
+        ok ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"
+      )}
+    >
+      {ok ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+      {label}
+    </span>
   );
 }
 
