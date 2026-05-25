@@ -35,9 +35,6 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ logs: logs.map(mapCltLog) });
   } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel carregar logs CLT." },
-      { status: 500 }
-    );
+    return NextResponse.json({ logs: [], fallback: true });
   }
 }
