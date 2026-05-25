@@ -342,6 +342,38 @@ type CltSimulationDraft = {
   name?: string | null;
 };
 
+type CltIntegrationRow = {
+  id: string;
+  bankId: string;
+  bankName: string;
+  provider: string;
+  baseUrl?: string | null;
+  authType: string;
+  hasApiKey: boolean;
+  apiKeyPreview?: string | null;
+  username?: string | null;
+  hasPassword: boolean;
+  status: string;
+  lastTestAt?: string | null;
+  lastTestStatus?: string | null;
+  lastTestMessage?: string | null;
+  updatedAt: string;
+};
+
+type CltLogRow = {
+  id: string;
+  bankId?: string | null;
+  bankName?: string | null;
+  action: string;
+  cpf?: string | null;
+  phone?: string | null;
+  status: string;
+  message?: string | null;
+  createdAt: string;
+  userName?: string | null;
+  contact?: { id: string; name: string; phone: string } | null;
+};
+
 type AiAnalysis = {
   summary: string;
   temperature: ContactRow["temperature"];
@@ -5470,9 +5502,14 @@ function SimulacaoClt({
   onProposalCreated: () => Promise<void>;
 }) {
   const [banks, setBanks] = useState<CltBankRow[]>([]);
+  const [integrations, setIntegrations] = useState<CltIntegrationRow[]>([]);
+  const [logs, setLogs] = useState<CltLogRow[]>([]);
   const [loadingBanks, setLoadingBanks] = useState(true);
+  const [loadingIntegrations, setLoadingIntegrations] = useState(true);
+  const [loadingLogs, setLoadingLogs] = useState(true);
   const [customerLoading, setCustomerLoading] = useState(false);
   const [simulationLoading, setSimulationLoading] = useState(false);
+  const [testingBankId, setTestingBankId] = useState("");
   const [saving, setSaving] = useState(false);
   const [selectedContactId, setSelectedContactId] = useState("");
   const [customer, setCustomer] = useState<CltCustomerData | null>(null);
@@ -5490,8 +5527,21 @@ function SimulacaoClt({
     installments: "48",
     includeInsurance: true
   });
+  const [integrationForm, setIntegrationForm] = useState({
+    bankId: "",
+    provider: "manual",
+    baseUrl: "",
+    authType: "none",
+    apiKey: "",
+    username: "",
+    password: "",
+    status: "MANUAL"
+  });
 
   const selectedBank = banks.find((bank) => bank.id === form.bankId);
+  const selectedIntegration = integrations.find(
+    (integration) => integration.bankId === integrationForm.bankId
+  );
   const selectedOffer = offers.find((offer) => offer.id === selectedOfferId) ?? offers[0];
 
   useEffect(() => {
@@ -5518,6 +5568,44 @@ function SimulacaoClt({
     return () => {
       active = false;
     };
+  }, []);
+
+  async function loadCltIntegrations() {
+    setLoadingIntegrations(true);
+    const response = await fetch("/api/clt/integrations");
+    if (response.ok) {
+      const data = (await response.json()) as { integrations: CltIntegrationRow[] };
+      setIntegrations(data.integrations);
+      const first = data.integrations[0];
+      if (first) {
+        setIntegrationForm({
+          bankId: first.bankId,
+          provider: first.provider,
+          baseUrl: first.baseUrl || "",
+          authType: first.authType,
+          apiKey: "",
+          username: first.username || "",
+          password: "",
+          status: first.status
+        });
+      }
+    }
+    setLoadingIntegrations(false);
+  }
+
+  async function loadCltLogs() {
+    setLoadingLogs(true);
+    const response = await fetch("/api/clt/logs?take=50");
+    if (response.ok) {
+      const data = (await response.json()) as { logs: CltLogRow[] };
+      setLogs(data.logs);
+    }
+    setLoadingLogs(false);
+  }
+
+  useEffect(() => {
+    void loadCltIntegrations();
+    void loadCltLogs();
   }, []);
 
   useEffect(() => {
@@ -5579,6 +5667,7 @@ function SimulacaoClt({
         installmentAmount: String(data.customer!.availableMargin)
       }));
       setMessage("Dados do trabalhador carregados.");
+      void loadCltLogs();
     } else {
       setMessage(data?.error || "Nao foi possivel consultar o trabalhador.");
     }
@@ -5613,6 +5702,7 @@ function SimulacaoClt({
       setOffers(data.offers);
       setSelectedOfferId(data.offers[0].id);
       setMessage("Simulacao CLT gerada.");
+      void loadCltLogs();
     } else {
       setMessage(data?.error || "Nao foi possivel simular CLT.");
     }
@@ -5641,11 +5731,67 @@ function SimulacaoClt({
     if (response.ok) {
       setMessage("Proposta CLT salva no CRM.");
       await onProposalCreated();
+      void loadCltLogs();
     } else {
       setMessage(data?.error || "Nao foi possivel salvar proposta CLT.");
     }
 
     setSaving(false);
+  }
+
+  function selectIntegration(bankId: string) {
+    const integration = integrations.find((item) => item.bankId === bankId);
+    if (!integration) return;
+    setIntegrationForm({
+      bankId: integration.bankId,
+      provider: integration.provider,
+      baseUrl: integration.baseUrl || "",
+      authType: integration.authType,
+      apiKey: "",
+      username: integration.username || "",
+      password: "",
+      status: integration.status
+    });
+  }
+
+  async function saveIntegration() {
+    setMessage("");
+    const response = await fetch("/api/clt/integrations", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(integrationForm)
+    });
+    const data = (await response.json().catch(() => null)) as
+      | { error?: string }
+      | null;
+
+    if (response.ok) {
+      setMessage("Integracao CLT salva.");
+      await loadCltIntegrations();
+    } else {
+      setMessage(data?.error || "Nao foi possivel salvar integracao CLT.");
+    }
+  }
+
+  async function testIntegration(bankId: string) {
+    setTestingBankId(bankId);
+    setMessage("");
+    const response = await fetch("/api/clt/integrations/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bankId })
+    });
+    const data = (await response.json().catch(() => null)) as
+      | { error?: string }
+      | null;
+
+    if (response.ok) {
+      setMessage("Teste de integracao CLT concluido.");
+      await loadCltIntegrations();
+    } else {
+      setMessage(data?.error || "Nao foi possivel testar integracao CLT.");
+    }
+    setTestingBankId("");
   }
 
   return (
@@ -5663,6 +5809,209 @@ function SimulacaoClt({
           </div>
           <div className="rounded-2xl border border-line bg-slate-50 px-4 py-3 text-sm text-slate-600">
             Provider inicial: <span className="font-bold">manual/mock</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-5 xl:grid-cols-[1fr_1fr]">
+        <div className="rounded-[24px] border border-line bg-white p-5 shadow-soft">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-black text-slate-950">Integrações CLT</h3>
+              <p className="text-sm text-slate-500">
+                Configure o provider de cada banco antes da API real.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="rounded-full border border-line px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
+              onClick={() => void loadCltIntegrations()}
+            >
+              Atualizar
+            </button>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-[0.8fr_1.2fr]">
+            <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+              {integrations.map((integration) => (
+                <button
+                  key={integration.id}
+                  type="button"
+                  className={clsx(
+                    "w-full rounded-2xl border p-3 text-left",
+                    integrationForm.bankId === integration.bankId
+                      ? "border-primary bg-blue-50"
+                      : "border-line bg-white hover:bg-slate-50"
+                  )}
+                  onClick={() => selectIntegration(integration.bankId)}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-black text-slate-900">{integration.bankName}</p>
+                    <IntegrationStatusBadge status={integration.status} />
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {integration.provider} · {integration.authType}
+                  </p>
+                  {integration.lastTestMessage && (
+                    <p className="mt-2 line-clamp-2 text-xs text-slate-500">
+                      {integration.lastTestMessage}
+                    </p>
+                  )}
+                </button>
+              ))}
+              {!loadingIntegrations && !integrations.length && (
+                <p className="rounded-2xl border border-dashed border-line p-4 text-sm text-slate-500">
+                  Nenhuma integração CLT cadastrada.
+                </p>
+              )}
+            </div>
+
+            <div className="grid gap-3 rounded-2xl border border-line bg-slate-50 p-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="text-xs font-bold uppercase text-slate-500">
+                  Provider
+                  <select
+                    className="mt-2 h-10 w-full rounded-2xl border border-line bg-white px-3 text-sm font-semibold normal-case text-slate-700 outline-none focus:border-primary"
+                    value={integrationForm.provider}
+                    onChange={(event) =>
+                      setIntegrationForm((current) => ({
+                        ...current,
+                        provider: event.target.value,
+                        status: event.target.value === "manual" ? "MANUAL" : "PENDING"
+                      }))
+                    }
+                  >
+                    <option value="manual">Manual</option>
+                    <option value="newcorban">New Corban</option>
+                    <option value="bank-api">API do banco</option>
+                  </select>
+                </label>
+                <label className="text-xs font-bold uppercase text-slate-500">
+                  Autenticação
+                  <select
+                    className="mt-2 h-10 w-full rounded-2xl border border-line bg-white px-3 text-sm font-semibold normal-case text-slate-700 outline-none focus:border-primary"
+                    value={integrationForm.authType}
+                    onChange={(event) =>
+                      setIntegrationForm((current) => ({
+                        ...current,
+                        authType: event.target.value
+                      }))
+                    }
+                  >
+                    <option value="none">Sem autenticação</option>
+                    <option value="api-key">API Key</option>
+                    <option value="basic">Usuário e senha</option>
+                    <option value="oauth">OAuth/Token</option>
+                  </select>
+                </label>
+              </div>
+              <ContactInput
+                placeholder="URL base da API"
+                value={integrationForm.baseUrl}
+                onChange={(value) =>
+                  setIntegrationForm((current) => ({ ...current, baseUrl: value }))
+                }
+              />
+              <div className="grid gap-3 sm:grid-cols-3">
+                <ContactInput
+                  placeholder={
+                    selectedIntegration?.apiKeyPreview
+                      ? `Token (${selectedIntegration.apiKeyPreview})`
+                      : "Token/API key"
+                  }
+                  value={integrationForm.apiKey}
+                  onChange={(value) =>
+                    setIntegrationForm((current) => ({ ...current, apiKey: value }))
+                  }
+                />
+                <ContactInput
+                  placeholder="Usuário"
+                  value={integrationForm.username}
+                  onChange={(value) =>
+                    setIntegrationForm((current) => ({ ...current, username: value }))
+                  }
+                />
+                <ContactInput
+                  placeholder={selectedIntegration?.hasPassword ? "Senha cadastrada" : "Senha"}
+                  value={integrationForm.password}
+                  onChange={(value) =>
+                    setIntegrationForm((current) => ({ ...current, password: value }))
+                  }
+                />
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  className="h-10 flex-1 rounded-2xl bg-primary px-4 text-sm font-bold text-white"
+                  onClick={() => void saveIntegration()}
+                >
+                  Salvar integração
+                </button>
+                <button
+                  type="button"
+                  className="h-10 flex-1 rounded-2xl border border-line bg-white px-4 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+                  disabled={!integrationForm.bankId || testingBankId === integrationForm.bankId}
+                  onClick={() => void testIntegration(integrationForm.bankId)}
+                >
+                  {testingBankId === integrationForm.bankId ? "Testando..." : "Testar conexão"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-[24px] border border-line bg-white p-5 shadow-soft">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-black text-slate-950">Logs CLT</h3>
+              <p className="text-sm text-slate-500">
+                Auditoria de consulta, simulação e proposta.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="rounded-full border border-line px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
+              onClick={() => void loadCltLogs()}
+            >
+              Atualizar
+            </button>
+          </div>
+          <div className="mt-4 max-h-96 divide-y divide-line/70 overflow-y-auto rounded-2xl border border-line">
+            {logs.map((log) => (
+              <div key={log.id} className="grid gap-1 px-4 py-3 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="font-black text-slate-900">{cltActionLabel(log.action)}</p>
+                  <span
+                    className={clsx(
+                      "rounded-full px-2 py-1 text-xs font-bold",
+                      log.status === "ERROR"
+                        ? "bg-rose-50 text-rose-700"
+                        : "bg-emerald-50 text-emerald-700"
+                    )}
+                  >
+                    {log.status === "ERROR" ? "Erro" : "Sucesso"}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500">
+                  {log.bankName || "Sem banco"} · {log.userName || "Sistema"} ·{" "}
+                  {formatRelativeDate(log.createdAt)}
+                </p>
+                <p className="line-clamp-2 text-xs text-slate-600">{log.message || "-"}</p>
+                <p className="truncate font-mono text-[10px] text-slate-400">
+                  CPF {log.cpf || "-"} · Tel {log.phone || "-"}
+                </p>
+              </div>
+            ))}
+            {!loadingLogs && !logs.length && (
+              <div className="px-4 py-8 text-center text-sm text-slate-500">
+                Nenhum log CLT registrado ainda.
+              </div>
+            )}
+            {loadingLogs && (
+              <div className="px-4 py-8 text-center text-sm text-slate-500">
+                Carregando logs...
+              </div>
+            )}
           </div>
         </div>
       </section>
@@ -5894,6 +6243,45 @@ function InfoField({ label, value }: { label: string; value: string }) {
       <p className="mt-1 truncate text-sm font-bold text-slate-800">{value || "-"}</p>
     </div>
   );
+}
+
+function IntegrationStatusBadge({ status }: { status: string }) {
+  const normalized = status.toUpperCase();
+  const label =
+    normalized === "CONNECTED"
+      ? "Conectado"
+      : normalized === "PENDING"
+        ? "Pendente"
+        : normalized === "ERROR"
+          ? "Erro"
+          : "Manual";
+
+  return (
+    <span
+      className={clsx(
+        "rounded-full px-2 py-1 text-[11px] font-black",
+        normalized === "CONNECTED"
+          ? "bg-emerald-50 text-emerald-700"
+          : normalized === "ERROR"
+            ? "bg-rose-50 text-rose-700"
+            : normalized === "PENDING"
+              ? "bg-amber-50 text-amber-700"
+              : "bg-slate-100 text-slate-600"
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
+function cltActionLabel(action: string) {
+  const labels: Record<string, string> = {
+    CUSTOMER_LOOKUP: "Consulta de dados",
+    SIMULATION: "Simulação",
+    PROPOSAL_CREATED: "Proposta criada"
+  };
+
+  return labels[action] ?? action;
 }
 
 function Multicred({

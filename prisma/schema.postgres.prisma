@@ -25,6 +25,8 @@ model Company {
   origins       Origin[]
   proposals     Proposal[]
   tasks         Task[]
+  cltIntegrations CltIntegration[]
+  cltSimulationLogs CltSimulationLog[]
 }
 
 model Channel {
@@ -66,6 +68,7 @@ model User {
   notifications Notification[]
   tasks         Task[]
   createdConversationTags ConversationTag[]
+  cltSimulationLogs CltSimulationLog[]
 
   @@index([companyId])
 }
@@ -96,6 +99,7 @@ model Contact {
   activities         ContactActivity[]
   tasks              Task[]
   notifications      Notification[]
+  cltSimulationLogs  CltSimulationLog[]
 
   @@index([companyId])
   @@index([ownerId])
@@ -344,4 +348,54 @@ model Proposal {
   createdAt  DateTime @default(now())
   company    Company  @relation(fields: [companyId], references: [id])
   contact    Contact  @relation(fields: [contactId], references: [id])
+}
+
+model CltIntegration {
+  id             String   @id @default(cuid())
+  companyId      String
+  bankId         String
+  bankName       String
+  provider       String   @default("manual")
+  baseUrl        String?
+  authType       String   @default("none")
+  apiKey         String?
+  username       String?
+  password       String?
+  status         String   @default("MANUAL")
+  lastTestAt     DateTime?
+  lastTestStatus String?
+  lastTestMessage String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  company        Company  @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, bankId])
+  @@index([companyId])
+  @@index([status])
+}
+
+model CltSimulationLog {
+  id         String   @id @default(cuid())
+  companyId  String
+  userId     String?
+  contactId  String?
+  bankId     String?
+  bankName   String?
+  action     String
+  cpf        String?
+  phone      String?
+  status     String   @default("SUCCESS")
+  message    String?
+  inputJson  String?
+  outputJson String?
+  createdAt  DateTime @default(now())
+  company    Company  @relation(fields: [companyId], references: [id])
+  user       User?    @relation(fields: [userId], references: [id])
+  contact    Contact? @relation(fields: [contactId], references: [id])
+
+  @@index([companyId, createdAt])
+  @@index([userId])
+  @@index([contactId])
+  @@index([bankId])
+  @@index([status])
 }

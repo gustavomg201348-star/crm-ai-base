@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
+import { createCltLog } from "@/lib/clt-logs";
 import {
   getCltBank,
   isValidCpfShape,
@@ -26,10 +27,27 @@ export async function POST(request: NextRequest) {
     }
 
     const bank = getCltBank(body.bankId);
+    const offers = simulateClt(body);
+    await createCltLog({
+      companyId: session.companyId,
+      userId: session.id,
+      bankId: bank.id,
+      bankName: bank.name,
+      action: "SIMULATION",
+      cpf: body.cpf,
+      phone: body.phone,
+      message: `Simulacao CLT gerada com ${offers.length} oferta(s).`,
+      input: body,
+      output: offers.map((offer) => ({
+        tableCode: offer.tableCode,
+        releasedAmount: offer.releasedAmount,
+        installmentAmount: offer.installmentAmount
+      }))
+    });
 
     return NextResponse.json({
       provider: bank.provider,
-      offers: simulateClt(body)
+      offers
     });
   } catch {
     return NextResponse.json(

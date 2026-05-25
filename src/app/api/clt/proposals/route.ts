@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createActivity } from "@/lib/activities";
 import { getSessionFromRequest } from "@/lib/auth";
+import { createCltLog } from "@/lib/clt-logs";
 import { onlyDigits, type CltCustomerData, type CltSimulationOffer } from "@/lib/clt-integration";
 import { prisma } from "@/lib/db";
 import { mapProposal, proposalInclude } from "@/lib/proposals";
@@ -105,6 +106,20 @@ export async function POST(request: NextRequest) {
       });
 
       return created;
+    });
+
+    await createCltLog({
+      companyId: session.companyId,
+      userId: session.id,
+      contactId: proposal.contactId,
+      bankId: offer.bankId,
+      bankName: offer.bankName,
+      action: "PROPOSAL_CREATED",
+      cpf,
+      phone,
+      message: `Proposta CLT criada no ${offer.bankName}.`,
+      input: { customer, offer },
+      output: { proposalId: proposal.id, amount: offer.releasedAmount }
     });
 
     return NextResponse.json({ proposal: mapProposal(proposal) }, { status: 201 });

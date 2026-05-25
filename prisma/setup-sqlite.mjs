@@ -260,6 +260,56 @@ CREATE TABLE IF NOT EXISTS Proposal (
   CONSTRAINT Proposal_companyId_fkey FOREIGN KEY (companyId) REFERENCES Company (id) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT Proposal_contactId_fkey FOREIGN KEY (contactId) REFERENCES Contact (id) ON DELETE RESTRICT ON UPDATE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS CltIntegration (
+  id TEXT PRIMARY KEY NOT NULL,
+  companyId TEXT NOT NULL,
+  bankId TEXT NOT NULL,
+  bankName TEXT NOT NULL,
+  provider TEXT NOT NULL DEFAULT 'manual',
+  baseUrl TEXT,
+  authType TEXT NOT NULL DEFAULT 'none',
+  apiKey TEXT,
+  username TEXT,
+  password TEXT,
+  status TEXT NOT NULL DEFAULT 'MANUAL',
+  lastTestAt DATETIME,
+  lastTestStatus TEXT,
+  lastTestMessage TEXT,
+  createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT CltIntegration_companyId_fkey FOREIGN KEY (companyId) REFERENCES Company (id) ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS CltIntegration_companyId_bankId_key ON CltIntegration(companyId, bankId);
+CREATE INDEX IF NOT EXISTS CltIntegration_companyId_idx ON CltIntegration(companyId);
+CREATE INDEX IF NOT EXISTS CltIntegration_status_idx ON CltIntegration(status);
+
+CREATE TABLE IF NOT EXISTS CltSimulationLog (
+  id TEXT PRIMARY KEY NOT NULL,
+  companyId TEXT NOT NULL,
+  userId TEXT,
+  contactId TEXT,
+  bankId TEXT,
+  bankName TEXT,
+  action TEXT NOT NULL,
+  cpf TEXT,
+  phone TEXT,
+  status TEXT NOT NULL DEFAULT 'SUCCESS',
+  message TEXT,
+  inputJson TEXT,
+  outputJson TEXT,
+  createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT CltSimulationLog_companyId_fkey FOREIGN KEY (companyId) REFERENCES Company (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT CltSimulationLog_userId_fkey FOREIGN KEY (userId) REFERENCES User (id) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT CltSimulationLog_contactId_fkey FOREIGN KEY (contactId) REFERENCES Contact (id) ON DELETE SET NULL ON UPDATE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS CltSimulationLog_companyId_createdAt_idx ON CltSimulationLog(companyId, createdAt);
+CREATE INDEX IF NOT EXISTS CltSimulationLog_userId_idx ON CltSimulationLog(userId);
+CREATE INDEX IF NOT EXISTS CltSimulationLog_contactId_idx ON CltSimulationLog(contactId);
+CREATE INDEX IF NOT EXISTS CltSimulationLog_bankId_idx ON CltSimulationLog(bankId);
+CREATE INDEX IF NOT EXISTS CltSimulationLog_status_idx ON CltSimulationLog(status);
 `);
 
 const contactColumns = db
