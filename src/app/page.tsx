@@ -6034,7 +6034,7 @@ function Canais({
               <span>Status</span>
               <span className="text-right">Hora</span>
             </div>
-            <div className="divide-y divide-line/70">
+            <div className="scrollbar-thin max-h-[360px] divide-y divide-line/70 overflow-y-auto overscroll-contain [scrollbar-color:#CBD5E1_transparent]">
               {messageLogs.map((log) => (
                 <div
                   key={log.id}
