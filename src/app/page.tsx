@@ -1224,6 +1224,26 @@ export default function Home() {
     void loadAttendants();
   }
 
+  async function handleTransferConversation(conversationId: string, userId: string) {
+    const response = await fetch(`/api/conversations/${conversationId}/transfer`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId })
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as { error?: string } | null;
+      const message = data?.error ?? "Nao foi possivel transferir atendimento.";
+      setAppError(message);
+      throw new Error(message);
+    }
+
+    const data = (await response.json()) as { conversation: ConversationRow };
+    mergeConversation(data.conversation);
+    setSelectedConversation(data.conversation);
+    void loadAttendants();
+  }
+
   async function handleStartNewConversation() {
     const selectedContact = contacts.find(
       (contact) => contact.id === newConversationForm.contactId
@@ -2679,6 +2699,7 @@ export default function Home() {
               onSelectConversation={(conversation) => void handleSelectConversation(conversation)}
               onAssignConversation={handleAssignConversation}
               onUnassignConversation={handleUnassignConversation}
+              onTransferConversation={handleTransferConversation}
               onSendMessage={handleSendMessage}
               onSendMedia={handleSendMedia}
               onLoadTemplates={handleLoadTemplates}
@@ -2984,6 +3005,141 @@ function NewConversationModal({
           >
             {saving && <Loader2 className="h-4 w-4 animate-spin" />}
             Iniciar conversa
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TransferConversationModal({
+  conversation,
+  attendants,
+  error,
+  saving,
+  onClose,
+  onSubmit
+}: {
+  conversation: ConversationRow;
+  attendants: AttendantRow[];
+  error: string;
+  saving: boolean;
+  onClose: () => void;
+  onSubmit: (userId: string) => void;
+}) {
+  const [selectedUserId, setSelectedUserId] = useState(
+    attendants.find((attendant) => attendant.id !== conversation.agent?.id)?.id ?? ""
+  );
+
+  useEffect(() => {
+    setSelectedUserId(
+      attendants.find((attendant) => attendant.id !== conversation.agent?.id)?.id ?? ""
+    );
+  }, [attendants, conversation.agent?.id, conversation.id]);
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/30 px-4 backdrop-blur-sm">
+      <div className="w-full max-w-lg overflow-hidden rounded-[1.5rem] border border-line bg-white shadow-soft">
+        <div className="flex items-start justify-between gap-4 border-b border-line/70 p-5">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-brand">
+              Transferencia
+            </p>
+            <h3 className="mt-1 text-xl font-bold text-slate-950">
+              Transferir atendimento
+            </h3>
+            <p className="mt-1 text-sm text-slate-500">
+              Escolha quem sera responsavel por {conversation.contact.name}.
+            </p>
+          </div>
+          <button
+            className="grid h-9 w-9 place-items-center rounded-full border border-line bg-white text-slate-500 hover:bg-slate-50"
+            onClick={onClose}
+            type="button"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-3 p-5">
+          {error && (
+            <div className="rounded-2xl border border-rose-100 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
+              {error}
+            </div>
+          )}
+
+          <div className="rounded-2xl border border-line bg-slate-50 p-3 text-sm">
+            <p className="font-bold text-slate-900">{conversation.contact.name}</p>
+            <p className="text-slate-500">{conversation.contact.phone}</p>
+            <p className="mt-2 text-xs font-semibold text-slate-500">
+              Atual: {conversation.agent?.name ?? "Sem responsavel"}
+            </p>
+          </div>
+
+          <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+            {attendants.length === 0 && (
+              <p className="rounded-2xl border border-line bg-white p-4 text-sm text-slate-500">
+                Nenhum atendente disponivel para transferir.
+              </p>
+            )}
+            {attendants.map((attendant) => {
+              const current = attendant.id === conversation.agent?.id;
+              const selected = attendant.id === selectedUserId;
+              return (
+                <button
+                  key={attendant.id}
+                  className={clsx(
+                    "flex w-full items-center justify-between gap-3 rounded-2xl border p-3 text-left transition-colors",
+                    selected
+                      ? "border-blue-200 bg-blue-50"
+                      : "border-line bg-white hover:bg-slate-50",
+                    current && "cursor-not-allowed opacity-55"
+                  )}
+                  disabled={current}
+                  onClick={() => setSelectedUserId(attendant.id)}
+                  type="button"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-bold text-slate-950">{attendant.name}</p>
+                    <p className="truncate text-xs text-slate-500">{attendant.email}</p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span
+                      className={clsx(
+                        "rounded-full px-2 py-0.5 text-[11px] font-bold",
+                        attendant.availabilityStatus === "ONLINE"
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-slate-100 text-slate-500"
+                      )}
+                    >
+                      {attendant.availabilityStatus}
+                    </span>
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+                      {attendant.openConversations}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-line/70 p-5">
+          <button
+            className="h-10 rounded-full border border-line bg-white px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+            onClick={onClose}
+            type="button"
+          >
+            Cancelar
+          </button>
+          <button
+            className="inline-flex h-10 items-center gap-2 rounded-full bg-brand px-4 text-sm font-bold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={!selectedUserId || saving}
+            onClick={() => onSubmit(selectedUserId)}
+            type="button"
+          >
+            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            Transferir
           </button>
         </div>
       </div>
@@ -3487,6 +3643,7 @@ function Atendimento({
   onSelectConversation,
   onAssignConversation,
   onUnassignConversation,
+  onTransferConversation,
   onSendMessage,
   onSendMedia,
   onLoadTemplates,
@@ -3511,6 +3668,7 @@ function Atendimento({
   onSelectConversation: (conversation: ConversationRow) => void;
   onAssignConversation: (conversationId: string, userId?: string) => Promise<void>;
   onUnassignConversation: (conversationId: string) => Promise<void>;
+  onTransferConversation: (conversationId: string, userId: string) => Promise<void>;
   onSendMessage: (conversationId: string, body: string) => Promise<void>;
   onSendMedia: (conversationId: string, file: File, caption?: string) => Promise<void>;
   onLoadTemplates: (conversationId: string) => Promise<WhatsAppTemplateRow[]>;
@@ -3540,6 +3698,9 @@ function Atendimento({
   const [templateValues, setTemplateValues] = useState<string[]>([]);
   const [filePreview, setFilePreview] = useState<{ file: File; url?: string } | null>(null);
   const [audioPreview, setAudioPreview] = useState<{ file: File; url: string } | null>(null);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferSaving, setTransferSaving] = useState(false);
+  const [transferError, setTransferError] = useState("");
   const [recording, setRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
@@ -3721,8 +3882,35 @@ function Atendimento({
     }
   }
 
+  async function submitTransfer(userId: string) {
+    if (!selectedConversation) return;
+    setTransferSaving(true);
+    setTransferError("");
+    try {
+      await onTransferConversation(selectedConversation.id, userId);
+      setTransferOpen(false);
+    } catch (error) {
+      setTransferError(error instanceof Error ? error.message : "Falha ao transferir atendimento.");
+    } finally {
+      setTransferSaving(false);
+    }
+  }
+
   return (
     <div className="grid h-[calc(100vh-8.5rem)] min-h-0 gap-4 overflow-hidden xl:grid-cols-[340px_minmax(0,1fr)_320px]">
+      {transferOpen && selectedConversation && (
+        <TransferConversationModal
+          attendants={attendants}
+          conversation={selectedConversation}
+          error={transferError}
+          saving={transferSaving}
+          onClose={() => {
+            setTransferOpen(false);
+            setTransferError("");
+          }}
+          onSubmit={(userId) => void submitTransfer(userId)}
+        />
+      )}
       <ConversationList
         conversations={conversations}
         filters={filters}
@@ -3780,22 +3968,14 @@ function Atendimento({
                 </button>
               )}
               {isAdmin && (
-                <select
-                  className="hidden h-10 rounded-full border border-line bg-slate-50 px-3 text-sm font-medium text-slate-700 outline-none hover:bg-white focus:border-blue-200 focus:bg-white lg:block"
-                  value={selectedConversation.agent?.id ?? ""}
-                  onChange={(event) =>
-                    event.target.value
-                      ? void onAssignConversation(selectedConversation.id, event.target.value)
-                      : void onUnassignConversation(selectedConversation.id)
-                  }
+                <button
+                  type="button"
+                  className="inline-flex h-10 items-center gap-2 rounded-full border border-line bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                  onClick={() => setTransferOpen(true)}
                 >
-                  <option value="">Sem responsavel</option>
-                  {attendants.map((attendant) => (
-                    <option key={attendant.id} value={attendant.id}>
-                      {attendant.name}
-                    </option>
-                  ))}
-                </select>
+                  <ArrowRight className="h-4 w-4" />
+                  Transferir
+                </button>
               )}
               <button
                 type="button"
