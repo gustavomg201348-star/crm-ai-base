@@ -4220,6 +4220,20 @@ function ConversationList({
   onSelectConversation: (conversation: ConversationRow) => void;
 }) {
   const activeTags = availableTags.filter((tag) => tag.isActive !== false);
+  const [tagFilterOpen, setTagFilterOpen] = useState(false);
+  const selectedTagNames = activeTags
+    .filter((tag) => filters.tagIds.includes(tag.id))
+    .map((tag) => tag.name);
+  const queueLabel =
+    filters.assignedTo === "me"
+      ? "Meus"
+      : filters.assignedTo === "unassigned"
+        ? "Sem responsavel"
+        : filters.assignedTo && !["default", "me", "unassigned"].includes(filters.assignedTo)
+          ? attendants.find((attendant) => attendant.id === filters.assignedTo)?.name ?? "Atendente"
+          : isAdmin
+            ? "Todos"
+            : "Minha fila";
 
   return (
     <section className="flex min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-line/80 bg-white shadow-soft">
@@ -4229,11 +4243,71 @@ function ConversationList({
             <h3 className="font-bold text-slate-950">Conversas</h3>
             <p className="text-sm text-slate-500">{conversations.length} atendimentos</p>
           </div>
-          <button className="grid h-9 w-9 place-items-center rounded-full border border-line bg-slate-50 text-slate-500 hover:bg-white">
-            <SlidersHorizontal className="h-4 w-4" />
-          </button>
+          <div className="relative">
+            <button
+              className={clsx(
+                "inline-flex h-9 items-center gap-2 rounded-full border px-3 text-xs font-bold transition-colors",
+                filters.tagIds.length
+                  ? "border-blue-200 bg-blue-50 text-brand"
+                  : "border-line bg-slate-50 text-slate-500 hover:bg-white"
+              )}
+              onClick={() => setTagFilterOpen((current) => !current)}
+              type="button"
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              Tags{filters.tagIds.length ? `: ${filters.tagIds.length}` : ""}
+            </button>
+            {tagFilterOpen && (
+              <div className="absolute right-0 top-11 z-20 w-72 rounded-2xl border border-line bg-white p-3 shadow-soft">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
+                    Filtrar por tag
+                  </p>
+                  {filters.tagIds.length > 0 && (
+                    <button
+                      className="text-xs font-bold text-brand"
+                      onClick={() => onFiltersChange({ ...filters, tagIds: [] })}
+                      type="button"
+                    >
+                      Limpar
+                    </button>
+                  )}
+                </div>
+                <div className="mt-3 flex max-h-56 flex-wrap gap-2 overflow-y-auto pr-1">
+                  {activeTags.map((tag) => {
+                    const selected = filters.tagIds.includes(tag.id);
+                    return (
+                      <button
+                        key={tag.id}
+                        className={clsx(
+                          "rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors",
+                          selected
+                            ? "border-blue-200 bg-blue-50 text-brand"
+                            : "border-line bg-white text-slate-600 hover:bg-slate-50"
+                        )}
+                        onClick={() =>
+                          onFiltersChange({
+                            ...filters,
+                            tagIds: selected
+                              ? filters.tagIds.filter((tagId) => tagId !== tag.id)
+                              : [...filters.tagIds, tag.id]
+                          })
+                        }
+                        type="button"
+                      >
+                        {tag.name}
+                      </button>
+                    );
+                  })}
+                  {activeTags.length === 0 && (
+                    <p className="text-sm text-slate-500">Nenhuma tag ativa.</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
-        <div className="mt-4 flex items-center gap-2 rounded-2xl border border-line bg-slate-50 px-3 py-2 focus-within:border-blue-200 focus-within:bg-white">
+        <div className="mt-4 flex h-10 items-center gap-2 rounded-2xl border border-line bg-slate-50 px-3 focus-within:border-blue-200 focus-within:bg-white">
           <Search className="h-4 w-4 text-slate-400" />
           <input
             className="w-full bg-transparent text-sm outline-none"
@@ -4244,7 +4318,7 @@ function ConversationList({
             }
           />
         </div>
-        <div className="mt-3 grid grid-cols-4 gap-1.5 text-xs">
+        <div className="mt-3 flex rounded-2xl bg-slate-50 p-1 text-xs ring-1 ring-line/80">
           {[
             ["OPEN", "Aberto"],
             ["PENDING", "Pend."],
@@ -4254,10 +4328,10 @@ function ConversationList({
             <button
               key={value}
               className={clsx(
-                "rounded-full border px-2 py-2 font-semibold",
+                "h-8 flex-1 rounded-xl px-2 font-semibold transition-colors",
                 filters.status === value
-                  ? "border-blue-200 bg-blue-50 text-brand"
-                  : "border-line bg-white text-slate-500 hover:bg-slate-50"
+                  ? "bg-white text-brand shadow-sm"
+                  : "text-slate-500 hover:text-slate-800"
               )}
               onClick={() => onFiltersChange({ ...filters, status: value })}
             >
@@ -4265,34 +4339,11 @@ function ConversationList({
             </button>
           ))}
         </div>
-        <div className="mt-3 grid grid-cols-2 gap-1.5 text-xs">
-          {[
-            ["default", isAdmin ? "Todos" : "Minha fila"],
-            ["me", "Meus"],
-            ["unassigned", "Sem resp."]
-          ].map(([value, label]) => (
-            <button
-              key={value}
-              className={clsx(
-                "rounded-full border px-2 py-2 font-semibold",
-                filters.assignedTo === value
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                  : "border-line bg-white text-slate-500 hover:bg-slate-50"
-              )}
-              onClick={() => onFiltersChange({ ...filters, assignedTo: value })}
-            >
-              {label}
-            </button>
-          ))}
-          {isAdmin && (
+        <div className="mt-3 grid gap-2 text-xs">
+          <div className="flex items-center gap-2">
             <select
-              className="col-span-2 h-9 rounded-full border border-line bg-white px-3 text-xs font-semibold text-slate-600 outline-none"
-              value={
-                filters.assignedTo &&
-                !["default", "me", "unassigned"].includes(filters.assignedTo)
-                  ? filters.assignedTo
-                  : ""
-              }
+              className="h-9 min-w-0 flex-1 rounded-full border border-line bg-white px-3 text-xs font-semibold text-slate-600 outline-none"
+              value={filters.assignedTo}
               onChange={(event) =>
                 onFiltersChange({
                   ...filters,
@@ -4300,58 +4351,47 @@ function ConversationList({
                 })
               }
             >
-              <option value="">Filtrar por atendente</option>
-              {attendants.map((attendant) => (
-                <option key={attendant.id} value={attendant.id}>
-                  {attendant.name}
-                </option>
-              ))}
+              <option value="default">{isAdmin ? "Fila: Todos" : "Fila: Minha fila"}</option>
+              <option value="me">Meus atendimentos</option>
+              <option value="unassigned">Sem responsavel</option>
+              {isAdmin &&
+                attendants.map((attendant) => (
+                  <option key={attendant.id} value={attendant.id}>
+                    {attendant.name}
+                  </option>
+                ))}
             </select>
-          )}
-        </div>
-        {activeTags.length > 0 && (
-          <div className="mt-3">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-xs font-semibold text-slate-500">Filtrar por tag</p>
-              {filters.tagIds.length > 0 && (
-                <button
-                  className="text-xs font-semibold text-brand"
-                  onClick={() => onFiltersChange({ ...filters, tagIds: [] })}
-                  type="button"
+            {filters.tagIds.length > 0 && (
+              <button
+                className="h-9 rounded-full border border-line bg-white px-3 text-xs font-bold text-slate-500 hover:bg-slate-50"
+                onClick={() => onFiltersChange({ ...filters, tagIds: [] })}
+                type="button"
+              >
+                Limpar
+              </button>
+            )}
+          </div>
+          {(filters.assignedTo !== "default" || selectedTagNames.length > 0) && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                {queueLabel}
+              </span>
+              {selectedTagNames.slice(0, 2).map((name) => (
+                <span
+                  key={name}
+                  className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-brand"
                 >
-                  Limpar
-                </button>
+                  {name}
+                </span>
+              ))}
+              {selectedTagNames.length > 2 && (
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+                  +{selectedTagNames.length - 2}
+                </span>
               )}
             </div>
-            <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
-              {activeTags.map((tag) => {
-                const selected = filters.tagIds.includes(tag.id);
-                return (
-                  <button
-                    key={tag.id}
-                    className={clsx(
-                      "shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors",
-                      selected
-                        ? "border-blue-200 bg-blue-50 text-brand"
-                        : "border-line bg-white text-slate-600 hover:bg-slate-50"
-                    )}
-                    onClick={() =>
-                      onFiltersChange({
-                        ...filters,
-                        tagIds: selected
-                          ? filters.tagIds.filter((tagId) => tagId !== tag.id)
-                          : [...filters.tagIds, tag.id]
-                      })
-                    }
-                    type="button"
-                  >
-                    {tag.name}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
       <div className="min-h-0 flex-1 divide-y divide-line/70 overflow-y-auto overscroll-contain">
         {conversations.map((item) => {
@@ -4411,7 +4451,7 @@ function ConversationList({
                       </span>
                     )}
                   </div>
-                  <div className="mt-3 flex items-center gap-2">
+                  <div className="mt-3 flex flex-wrap items-center gap-1.5">
                     <span
                       className={clsx(
                         "rounded-full px-2 py-0.5 text-[11px] font-semibold",
@@ -4422,22 +4462,12 @@ function ConversationList({
                     >
                       {item.agent?.name ?? "Sem resp."}
                     </span>
-                    {item.tags.slice(0, 3).map((tag) => (
+                    {item.tags.slice(0, 2).map((tag) => (
                       <TagBadge key={tag.id} tag={tag} compact />
                     ))}
-                    {item.tags.length > 3 && (
+                    {item.tags.length > 2 && (
                       <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
-                        +{item.tags.length - 3}
-                      </span>
-                    )}
-                    {item.tags.length === 0 && (
-                      <span
-                        className={clsx(
-                          "rounded-full px-2 py-0.5 text-[11px] font-semibold",
-                          hasUnread ? "bg-white text-brand" : "bg-blue-50 text-brand"
-                        )}
-                      >
-                        {item.contact.origin}
+                        +{item.tags.length - 2}
                       </span>
                     )}
                     <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
