@@ -13,6 +13,35 @@ export const defaultLeadAssignmentSettings = {
   redistributeWhenOffline: false
 };
 
+const globalForLeadAssignment = globalThis as typeof globalThis & {
+  crmLeadAssignmentSettings?: Map<string, LeadAssignmentSettings>;
+  crmUserAvailability?: Map<string, {
+    userId: string;
+    companyId: string;
+    status: AvailabilityStatus;
+    lastSeenAt: Date;
+    updatedAt: Date;
+  }>;
+};
+
+const memorySettings =
+  globalForLeadAssignment.crmLeadAssignmentSettings ??
+  new Map<string, LeadAssignmentSettings>();
+const memoryAvailability =
+  globalForLeadAssignment.crmUserAvailability ??
+  new Map<string, {
+    userId: string;
+    companyId: string;
+    status: AvailabilityStatus;
+    lastSeenAt: Date;
+    updatedAt: Date;
+  }>();
+
+globalForLeadAssignment.crmLeadAssignmentSettings = memorySettings;
+globalForLeadAssignment.crmUserAvailability = memoryAvailability;
+
+type LeadAssignmentSettings = typeof defaultLeadAssignmentSettings;
+
 export function normalizeAvailabilityStatus(value?: string | null): AvailabilityStatus {
   return value === "ONLINE" || value === "BUSY" || value === "PAUSED" || value === "OFFLINE"
     ? value
@@ -45,7 +74,10 @@ export async function getLeadAssignmentSettings(companyId: string) {
       fallback: false
     };
   } catch {
-    return { ...defaultLeadAssignmentSettings, fallback: true };
+    return {
+      ...(memorySettings.get(companyId) ?? defaultLeadAssignmentSettings),
+      fallback: true
+    };
   }
 }
 
@@ -56,43 +88,61 @@ export async function updateLeadAssignmentSettings({
   companyId: string;
   data: Partial<typeof defaultLeadAssignmentSettings>;
 }) {
-  const setting = await prisma.leadAssignmentSetting.upsert({
-    where: { companyId },
-    update: {
-      ...(data.mode ? { mode: normalizeAssignmentMode(data.mode) } : {}),
-      ...(data.onlineOnly !== undefined ? { onlineOnly: data.onlineOnly } : {}),
-      ...(data.maxOpenPerAttendant !== undefined
-        ? { maxOpenPerAttendant: data.maxOpenPerAttendant }
-        : {}),
-      ...(data.allowAttendantClaim !== undefined
-        ? { allowAttendantClaim: data.allowAttendantClaim }
-        : {}),
-      ...(data.redistributeWhenOffline !== undefined
-        ? { redistributeWhenOffline: data.redistributeWhenOffline }
-        : {})
-    },
-    create: {
-      companyId,
-      mode: normalizeAssignmentMode(data.mode),
-      onlineOnly: data.onlineOnly ?? defaultLeadAssignmentSettings.onlineOnly,
-      maxOpenPerAttendant:
-        data.maxOpenPerAttendant ?? defaultLeadAssignmentSettings.maxOpenPerAttendant,
-      allowAttendantClaim:
-        data.allowAttendantClaim ?? defaultLeadAssignmentSettings.allowAttendantClaim,
-      redistributeWhenOffline:
-        data.redistributeWhenOffline ??
-        defaultLeadAssignmentSettings.redistributeWhenOffline
-    }
-  });
+  try {
+    const setting = await prisma.leadAssignmentSetting.upsert({
+      where: { companyId },
+      update: {
+        ...(data.mode ? { mode: normalizeAssignmentMode(data.mode) } : {}),
+        ...(data.onlineOnly !== undefined ? { onlineOnly: data.onlineOnly } : {}),
+        ...(data.maxOpenPerAttendant !== undefined
+          ? { maxOpenPerAttendant: data.maxOpenPerAttendant }
+          : {}),
+        ...(data.allowAttendantClaim !== undefined
+          ? { allowAttendantClaim: data.allowAttendantClaim }
+          : {}),
+        ...(data.redistributeWhenOffline !== undefined
+          ? { redistributeWhenOffline: data.redistributeWhenOffline }
+          : {})
+      },
+      create: {
+        companyId,
+        mode: normalizeAssignmentMode(data.mode),
+        onlineOnly: data.onlineOnly ?? defaultLeadAssignmentSettings.onlineOnly,
+        maxOpenPerAttendant:
+          data.maxOpenPerAttendant ?? defaultLeadAssignmentSettings.maxOpenPerAttendant,
+        allowAttendantClaim:
+          data.allowAttendantClaim ?? defaultLeadAssignmentSettings.allowAttendantClaim,
+        redistributeWhenOffline:
+          data.redistributeWhenOffline ??
+          defaultLeadAssignmentSettings.redistributeWhenOffline
+      }
+    });
 
-  return {
-    mode: normalizeAssignmentMode(setting.mode),
-    onlineOnly: setting.onlineOnly,
-    maxOpenPerAttendant: setting.maxOpenPerAttendant,
-    allowAttendantClaim: setting.allowAttendantClaim,
-    redistributeWhenOffline: setting.redistributeWhenOffline,
-    fallback: false
-  };
+    return {
+      mode: normalizeAssignmentMode(setting.mode),
+      onlineOnly: setting.onlineOnly,
+      maxOpenPerAttendant: setting.maxOpenPerAttendant,
+      allowAttendantClaim: setting.allowAttendantClaim,
+      redistributeWhenOffline: setting.redistributeWhenOffline,
+      fallback: false
+    };
+  } catch {
+    const current = memorySettings.get(companyId) ?? defaultLeadAssignmentSettings;
+    const next = {
+      mode: normalizeAssignmentMode(data.mode ?? current.mode),
+      onlineOnly: data.onlineOnly ?? current.onlineOnly,
+      maxOpenPerAttendant:
+        data.maxOpenPerAttendant === undefined
+          ? current.maxOpenPerAttendant
+          : data.maxOpenPerAttendant,
+      allowAttendantClaim:
+        data.allowAttendantClaim ?? current.allowAttendantClaim,
+      redistributeWhenOffline:
+        data.redistributeWhenOffline ?? current.redistributeWhenOffline
+    };
+    memorySettings.set(companyId, next);
+    return { ...next, fallback: true };
+  }
 }
 
 async function getAvailabilityMap(companyId: string) {
@@ -100,7 +150,11 @@ async function getAvailabilityMap(companyId: string) {
     const rows = await prisma.userAvailability.findMany({ where: { companyId } });
     return new Map(rows.map((row) => [row.userId, row]));
   } catch {
-    return new Map<string, UserAvailability>();
+    return new Map(
+      Array.from(memoryAvailability.values())
+        .filter((row) => row.companyId === companyId)
+        .map((row) => [row.userId, row as unknown as UserAvailability])
+    );
   }
 }
 
@@ -164,10 +218,19 @@ export async function setAttendantStatus({
       fallback: false
     };
   } catch {
+    const now = new Date();
+    memoryAvailability.set(userId, {
+      userId,
+      companyId,
+      status: normalized,
+      lastSeenAt: now,
+      updatedAt: now
+    });
+
     return {
       userId,
       availabilityStatus: normalized,
-      lastSeenAt: new Date(),
+      lastSeenAt: now,
       fallback: true
     };
   }
