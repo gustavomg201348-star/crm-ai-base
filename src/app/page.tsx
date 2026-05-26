@@ -3153,6 +3153,65 @@ function TransferConversationModal({
   );
 }
 
+function ConfirmUnassignModal({
+  conversation,
+  saving,
+  onClose,
+  onConfirm
+}: {
+  conversation: ConversationRow;
+  saving: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/30 px-4 backdrop-blur-sm">
+      <div className="w-full max-w-md overflow-hidden rounded-[1.5rem] border border-line bg-white shadow-soft">
+        <div className="flex items-start justify-between gap-4 border-b border-line/70 p-5">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-amber-600">
+              Devolver para fila
+            </p>
+            <h3 className="mt-1 text-xl font-bold text-slate-950">
+              Remover responsavel?
+            </h3>
+            <p className="mt-1 text-sm text-slate-500">
+              {conversation.contact.name} voltara para a fila sem responsavel.
+            </p>
+          </div>
+          <button
+            className="grid h-9 w-9 place-items-center rounded-full border border-line bg-white text-slate-500 hover:bg-slate-50"
+            onClick={onClose}
+            type="button"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 p-5">
+          <button
+            className="h-10 rounded-full border border-line bg-white px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+            disabled={saving}
+            onClick={onClose}
+            type="button"
+          >
+            Cancelar
+          </button>
+          <button
+            className="inline-flex h-10 items-center gap-2 rounded-full bg-amber-500 px-4 text-sm font-bold text-white shadow-sm hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={saving}
+            onClick={onConfirm}
+            type="button"
+          >
+            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            Confirmar devolucao
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AttendantStatusToggle({
   value,
   onChange
@@ -3708,6 +3767,8 @@ function Atendimento({
   const [transferSaving, setTransferSaving] = useState(false);
   const [transferError, setTransferError] = useState("");
   const [assigningConversationId, setAssigningConversationId] = useState<string | null>(null);
+  const [unassignOpen, setUnassignOpen] = useState(false);
+  const [unassignSaving, setUnassignSaving] = useState(false);
   const [recording, setRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
@@ -3912,6 +3973,17 @@ function Atendimento({
     }
   }
 
+  async function submitUnassign() {
+    if (!selectedConversation) return;
+    setUnassignSaving(true);
+    try {
+      await onUnassignConversation(selectedConversation.id);
+      setUnassignOpen(false);
+    } finally {
+      setUnassignSaving(false);
+    }
+  }
+
   return (
     <div className="grid h-[calc(100vh-8.5rem)] min-h-0 gap-4 overflow-hidden xl:grid-cols-[340px_minmax(0,1fr)_320px]">
       {transferOpen && selectedConversation && (
@@ -3925,6 +3997,14 @@ function Atendimento({
             setTransferError("");
           }}
           onSubmit={(userId) => void submitTransfer(userId)}
+        />
+      )}
+      {unassignOpen && selectedConversation && (
+        <ConfirmUnassignModal
+          conversation={selectedConversation}
+          saving={unassignSaving}
+          onClose={() => setUnassignOpen(false)}
+          onConfirm={() => void submitUnassign()}
         />
       )}
       <ConversationList
@@ -3982,7 +4062,7 @@ function Atendimento({
                 <button
                   type="button"
                   className="hidden h-10 rounded-full border border-line bg-white px-3 text-sm font-semibold text-slate-600 hover:bg-slate-50 lg:inline-flex"
-                  onClick={() => void onUnassignConversation(selectedConversation.id)}
+                  onClick={() => setUnassignOpen(true)}
                 >
                   Devolver
                 </button>
