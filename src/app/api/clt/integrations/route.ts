@@ -12,6 +12,10 @@ type IntegrationPayload = {
   apiKey?: string;
   username?: string;
   password?: string;
+  newcorbanIdentifier?: string;
+  digitadorCode?: string;
+  certifiedAgentCpf?: string;
+  actingUf?: string;
   status?: string;
 };
 
@@ -27,6 +31,12 @@ function fallbackIntegrations() {
     apiKeyPreview: null,
     username: null,
     hasPassword: false,
+    newcorbanIdentifier: null,
+    digitadorCode: null,
+    certifiedAgentCpf: null,
+    actingUf: null,
+    smsStatus: null,
+    smsRequestedAt: null,
     status:
       bank.provider === "manual" ? "MANUAL" : bank.provider === "newcorban" ? "ASSISTED" : "PENDING",
     lastTestAt: null,
@@ -92,6 +102,18 @@ export async function PATCH(request: NextRequest) {
         apiKey: body.apiKey === undefined ? current.apiKey : body.apiKey.trim() || null,
         username: body.username === undefined ? current.username : body.username.trim() || null,
         password: body.password === undefined ? current.password : body.password || null,
+        newcorbanIdentifier:
+          body.newcorbanIdentifier === undefined
+            ? current.newcorbanIdentifier
+            : body.newcorbanIdentifier.trim() || null,
+        digitadorCode:
+          body.digitadorCode === undefined ? current.digitadorCode : body.digitadorCode.trim() || null,
+        certifiedAgentCpf:
+          body.certifiedAgentCpf === undefined
+            ? current.certifiedAgentCpf
+            : body.certifiedAgentCpf.trim() || null,
+        actingUf:
+          body.actingUf === undefined ? current.actingUf : body.actingUf.trim().toUpperCase() || null,
         status: body.status || (body.provider === "newcorban" ? "ASSISTED" : current.status)
       }
     });
@@ -120,6 +142,12 @@ export async function PATCH(request: NextRequest) {
         apiKeyPreview: fallbackBody?.apiKey ? "****" : null,
         username: fallbackBody?.username || null,
         hasPassword: Boolean(fallbackBody?.password),
+        newcorbanIdentifier: fallbackBody?.newcorbanIdentifier || null,
+        digitadorCode: fallbackBody?.digitadorCode || null,
+        certifiedAgentCpf: fallbackBody?.certifiedAgentCpf || null,
+        actingUf: fallbackBody?.actingUf || null,
+        smsStatus: null,
+        smsRequestedAt: null,
         status:
           fallbackBody?.status ||
           (fallbackBody?.provider === "newcorban" || bank.provider === "newcorban"

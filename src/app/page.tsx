@@ -375,6 +375,12 @@ type CltIntegrationRow = {
   apiKeyPreview?: string | null;
   username?: string | null;
   hasPassword: boolean;
+  newcorbanIdentifier?: string | null;
+  digitadorCode?: string | null;
+  certifiedAgentCpf?: string | null;
+  actingUf?: string | null;
+  smsStatus?: string | null;
+  smsRequestedAt?: string | null;
   status: string;
   lastTestAt?: string | null;
   lastTestStatus?: string | null;
@@ -6226,6 +6232,8 @@ function SimulacaoClt({
   const [customerLoading, setCustomerLoading] = useState(false);
   const [simulationLoading, setSimulationLoading] = useState(false);
   const [testingBankId, setTestingBankId] = useState("");
+  const [authenticatingBankId, setAuthenticatingBankId] = useState("");
+  const [verifyingSmsBankId, setVerifyingSmsBankId] = useState("");
   const [saving, setSaving] = useState(false);
   const [selectedContactId, setSelectedContactId] = useState("");
   const [customer, setCustomer] = useState<CltCustomerData | null>(null);
@@ -6251,6 +6259,11 @@ function SimulacaoClt({
     apiKey: "",
     username: "",
     password: "",
+    newcorbanIdentifier: "",
+    smsCode: "",
+    digitadorCode: "",
+    certifiedAgentCpf: "",
+    actingUf: "",
     status: "MANUAL"
   });
 
@@ -6302,6 +6315,11 @@ function SimulacaoClt({
           apiKey: "",
           username: first.username || "",
           password: "",
+          newcorbanIdentifier: first.newcorbanIdentifier || "",
+          smsCode: "",
+          digitadorCode: first.digitadorCode || "",
+          certifiedAgentCpf: first.certifiedAgentCpf || "",
+          actingUf: first.actingUf || "",
           status: first.status
         });
       }
@@ -6470,6 +6488,11 @@ function SimulacaoClt({
       apiKey: "",
       username: integration.username || "",
       password: "",
+      newcorbanIdentifier: integration.newcorbanIdentifier || "",
+      smsCode: "",
+      digitadorCode: integration.digitadorCode || "",
+      certifiedAgentCpf: integration.certifiedAgentCpf || "",
+      actingUf: integration.actingUf || "",
       status: integration.status
     });
   }
@@ -6491,6 +6514,76 @@ function SimulacaoClt({
     } else {
       setMessage(data?.error || "Nao foi possivel salvar integracao CLT.");
     }
+  }
+
+  async function authenticateNewcorban() {
+    if (!integrationForm.bankId) return;
+    setAuthenticatingBankId(integrationForm.bankId);
+    setMessage("");
+    const response = await fetch("/api/clt/integrations/authenticate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        bankId: integrationForm.bankId,
+        username: integrationForm.username,
+        password: integrationForm.password
+      })
+    });
+    const data = (await response.json().catch(() => null)) as
+      | { error?: string; message?: string; integration?: CltIntegrationRow }
+      | null;
+
+    if (response.ok) {
+      setMessage(data?.message || "SMS solicitado.");
+      if (data?.integration) {
+        setIntegrations((current) =>
+          current.map((item) => (item.bankId === data.integration!.bankId ? data.integration! : item))
+        );
+      }
+      await loadCltIntegrations();
+    } else {
+      setMessage(data?.error || "Nao foi possivel autenticar Newcorban.");
+    }
+    setAuthenticatingBankId("");
+  }
+
+  async function verifyNewcorbanSms() {
+    if (!integrationForm.bankId) return;
+    setVerifyingSmsBankId(integrationForm.bankId);
+    setMessage("");
+    const response = await fetch("/api/clt/integrations/verify-sms", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        bankId: integrationForm.bankId,
+        smsCode: integrationForm.smsCode,
+        newcorbanIdentifier: integrationForm.newcorbanIdentifier,
+        digitadorCode: integrationForm.digitadorCode,
+        certifiedAgentCpf: integrationForm.certifiedAgentCpf,
+        actingUf: integrationForm.actingUf
+      })
+    });
+    const data = (await response.json().catch(() => null)) as
+      | { error?: string; message?: string; integration?: CltIntegrationRow }
+      | null;
+
+    if (response.ok) {
+      setMessage(data?.message || "Credenciais salvas.");
+      if (data?.integration) {
+        setIntegrations((current) =>
+          current.map((item) => (item.bankId === data.integration!.bankId ? data.integration! : item))
+        );
+        setIntegrationForm((current) => ({
+          ...current,
+          smsCode: "",
+          status: data.integration!.status
+        }));
+      }
+      await loadCltIntegrations();
+    } else {
+      setMessage(data?.error || "Nao foi possivel validar SMS.");
+    }
+    setVerifyingSmsBankId("");
   }
 
   async function testIntegration(bankId: string) {
@@ -6660,6 +6753,87 @@ function SimulacaoClt({
                   }
                 />
               </div>
+              {integrationForm.provider === "newcorban" && (
+                <div className="grid gap-3 rounded-2xl border border-blue-100 bg-blue-50 p-3">
+                  <div>
+                    <p className="text-sm font-black text-primary">Credenciais Mercantil/Newcorban</p>
+                    <p className="mt-1 text-xs text-slate-600">
+                      Use login e senha para solicitar o SMS. Depois informe o codigo recebido,
+                      codigo digitador, CPF agente certificado e UF.
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <button
+                      type="button"
+                      className="h-10 flex-1 rounded-2xl bg-primary px-4 text-sm font-bold text-white disabled:opacity-60"
+                      disabled={
+                        !integrationForm.bankId ||
+                        !integrationForm.username ||
+                        !integrationForm.password ||
+                        authenticatingBankId === integrationForm.bankId
+                      }
+                      onClick={() => void authenticateNewcorban()}
+                    >
+                      {authenticatingBankId === integrationForm.bankId ? "Autenticando..." : "Autenticar e solicitar SMS"}
+                    </button>
+                    <span className="flex items-center rounded-2xl bg-white px-3 text-xs font-bold text-slate-500">
+                      SMS: {selectedIntegration?.smsStatus || "nao solicitado"}
+                    </span>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <ContactInput
+                      placeholder="Codigo SMS"
+                      value={integrationForm.smsCode}
+                      onChange={(value) =>
+                        setIntegrationForm((current) => ({ ...current, smsCode: value }))
+                      }
+                    />
+                    <ContactInput
+                      placeholder="Identificador (opcional)"
+                      value={integrationForm.newcorbanIdentifier}
+                      onChange={(value) =>
+                        setIntegrationForm((current) => ({ ...current, newcorbanIdentifier: value }))
+                      }
+                    />
+                    <ContactInput
+                      placeholder="Cod. Usuario Digitador"
+                      value={integrationForm.digitadorCode}
+                      onChange={(value) =>
+                        setIntegrationForm((current) => ({ ...current, digitadorCode: value }))
+                      }
+                    />
+                    <ContactInput
+                      placeholder="CPF Agente Certificado"
+                      value={integrationForm.certifiedAgentCpf}
+                      onChange={(value) =>
+                        setIntegrationForm((current) => ({ ...current, certifiedAgentCpf: value }))
+                      }
+                    />
+                    <ContactInput
+                      placeholder="UF Atuacao"
+                      value={integrationForm.actingUf}
+                      onChange={(value) =>
+                        setIntegrationForm((current) => ({ ...current, actingUf: value.toUpperCase() }))
+                      }
+                    />
+                    <button
+                      type="button"
+                      className="h-10 rounded-2xl bg-emerald-600 px-4 text-sm font-bold text-white disabled:opacity-60"
+                      disabled={
+                        !integrationForm.bankId ||
+                        !integrationForm.smsCode ||
+                        !integrationForm.digitadorCode ||
+                        !integrationForm.certifiedAgentCpf ||
+                        !integrationForm.actingUf ||
+                        verifyingSmsBankId === integrationForm.bankId
+                      }
+                      onClick={() => void verifyNewcorbanSms()}
+                    >
+                      {verifyingSmsBankId === integrationForm.bankId ? "Validando..." : "Validar SMS e salvar"}
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="flex flex-col gap-2 sm:flex-row">
                 <button
                   type="button"

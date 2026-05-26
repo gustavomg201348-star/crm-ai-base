@@ -68,6 +68,12 @@ export function mapCltIntegration(integration: {
   apiKey?: string | null;
   username?: string | null;
   password?: string | null;
+  newcorbanIdentifier?: string | null;
+  digitadorCode?: string | null;
+  certifiedAgentCpf?: string | null;
+  actingUf?: string | null;
+  smsStatus?: string | null;
+  smsRequestedAt?: Date | null;
   status: string;
   lastTestAt?: Date | null;
   lastTestStatus?: string | null;
@@ -85,6 +91,12 @@ export function mapCltIntegration(integration: {
     apiKeyPreview: maskSecret(integration.apiKey),
     username: integration.username,
     hasPassword: Boolean(integration.password),
+    newcorbanIdentifier: integration.newcorbanIdentifier,
+    digitadorCode: integration.digitadorCode,
+    certifiedAgentCpf: integration.certifiedAgentCpf,
+    actingUf: integration.actingUf,
+    smsStatus: integration.smsStatus,
+    smsRequestedAt: integration.smsRequestedAt,
     status: integration.status,
     lastTestAt: integration.lastTestAt,
     lastTestStatus: integration.lastTestStatus,

@@ -416,6 +416,12 @@ model CltIntegration {
   apiKey         String?
   username       String?
   password       String?
+  newcorbanIdentifier String?
+  digitadorCode  String?
+  certifiedAgentCpf String?
+  actingUf       String?
+  smsStatus      String?
+  smsRequestedAt DateTime?
   status         String   @default("MANUAL")
   lastTestAt     DateTime?
   lastTestStatus String?
