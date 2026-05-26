@@ -118,6 +118,9 @@ export async function saveOutboundMessage({
     return tx.conversation.update({
       where: { id: conversationId },
       data: {
+        ...(userId && !conversation.agentId
+          ? { agent: { connect: { id: userId } } }
+          : {}),
         status: conversation.status === "PENDING" ? "OPEN" : conversation.status,
         unreadCount: 0,
         lastReadAt: sentAt,

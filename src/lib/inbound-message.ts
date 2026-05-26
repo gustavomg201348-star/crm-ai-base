@@ -1,5 +1,6 @@
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
+import { maybeAutoAssignConversation } from "@/lib/lead-assignment";
 import { publishInboundNotification } from "@/lib/notification-stream";
 import { createInboundMessageNotification, mapNotification } from "@/lib/notifications";
 
@@ -100,6 +101,11 @@ export async function processInboundMessage({
         status: "PENDING",
         channel: channelId ? `whatsapp:${channelId}` : "whatsapp"
       }
+    });
+
+    await maybeAutoAssignConversation({
+      companyId,
+      conversationId: conversation.id
     });
   }
 

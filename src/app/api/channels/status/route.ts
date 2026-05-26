@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/permissions";
 
 type MetaPhoneStatus = {
   ok: boolean;
@@ -60,6 +61,8 @@ export async function GET(request: NextRequest) {
     if (!session) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
+    const blocked = requireAdmin(session);
+    if (blocked) return blocked;
 
     const channels = await prisma.channel.findMany({
       where: { companyId: session.companyId, type: "whatsapp" },

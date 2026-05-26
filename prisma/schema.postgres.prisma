@@ -27,6 +27,9 @@ model Company {
   tasks         Task[]
   cltIntegrations CltIntegration[]
   cltSimulationLogs CltSimulationLog[]
+  userAvailabilities UserAvailability[]
+  leadAssignmentSettings LeadAssignmentSetting[]
+  leadAssignmentHistory LeadAssignmentHistory[]
 }
 
 model Channel {
@@ -69,8 +72,59 @@ model User {
   tasks         Task[]
   createdConversationTags ConversationTag[]
   cltSimulationLogs CltSimulationLog[]
+  availability  UserAvailability?
+  assignedLeadHistory LeadAssignmentHistory[] @relation("AssignedLeadHistory")
+  createdLeadAssignments LeadAssignmentHistory[] @relation("CreatedLeadAssignments")
 
   @@index([companyId])
+}
+
+model UserAvailability {
+  userId     String   @id
+  companyId  String
+  status     String   @default("OFFLINE")
+  lastSeenAt DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  company    Company  @relation(fields: [companyId], references: [id])
+  user       User     @relation(fields: [userId], references: [id])
+
+  @@index([companyId])
+  @@index([status])
+}
+
+model LeadAssignmentSetting {
+  id                         String   @id @default(cuid())
+  companyId                  String
+  mode                       String   @default("CLAIM_FIRST")
+  onlineOnly                 Boolean  @default(true)
+  maxOpenPerAttendant        Int?
+  allowAttendantClaim        Boolean  @default(true)
+  redistributeWhenOffline    Boolean  @default(false)
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+  company                    Company  @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId])
+}
+
+model LeadAssignmentHistory {
+  id               String       @id @default(cuid())
+  companyId        String
+  conversationId   String
+  assignedToUserId String?
+  assignedByUserId String?
+  mode             String
+  action           String       @default("ASSIGNED")
+  createdAt        DateTime     @default(now())
+  company          Company      @relation(fields: [companyId], references: [id])
+  conversation     Conversation @relation(fields: [conversationId], references: [id])
+  assignedTo       User?        @relation("AssignedLeadHistory", fields: [assignedToUserId], references: [id])
+  assignedBy       User?        @relation("CreatedLeadAssignments", fields: [assignedByUserId], references: [id])
+
+  @@index([companyId])
+  @@index([conversationId])
+  @@index([assignedToUserId])
+  @@index([assignedByUserId])
 }
 
 model Contact {
@@ -211,6 +265,7 @@ model Conversation {
   messages      Message[]
   notifications Notification[]
   tags          ConversationTag[]
+  assignmentHistory LeadAssignmentHistory[]
 }
 
 model ConversationTag {

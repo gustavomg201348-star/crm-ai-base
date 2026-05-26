@@ -3,6 +3,7 @@ import { getSessionFromRequest } from "@/lib/auth";
 import { createActivity } from "@/lib/activities";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
+import { canAccessConversation, isAgent } from "@/lib/permissions";
 
 type RouteContext = {
   params: { id: string };
@@ -41,6 +42,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Conversa nao encontrada." }, { status: 404 });
     }
 
+    if (!canAccessConversation({ session, agentId: conversation.agentId })) {
+      return NextResponse.json({ error: "Conversa atribuida a outro atendente." }, { status: 403 });
+    }
+
     const updated = await prisma.$transaction(async (tx) => {
       const direction = body?.direction ?? "outbound";
       const now = new Date();
@@ -68,6 +73,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return tx.conversation.update({
         where: { id: conversation.id },
         data: {
+          ...(direction === "outbound" && isAgent(session) && !conversation.agentId
+            ? { agent: { connect: { id: session.id } } }
+            : {}),
           status:
             direction === "outbound" && conversation.status === "PENDING"
               ? "OPEN"

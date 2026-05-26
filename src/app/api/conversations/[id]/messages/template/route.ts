@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
+import { prisma } from "@/lib/db";
 import { saveFailedOutboundMessage } from "@/lib/message-delivery";
+import { canAccessConversation } from "@/lib/permissions";
 import { sendConversationTemplate } from "@/lib/whatsapp-template.service";
 
 type RouteContext = {
@@ -27,6 +29,19 @@ export async function POST(request: NextRequest, context: RouteContext) {
         { error: "Template e idioma sao obrigatorios." },
         { status: 400 }
       );
+    }
+
+    const current = await prisma.conversation.findFirst({
+      where: { id: context.params.id, contact: { companyId: session.companyId } },
+      select: { agentId: true }
+    });
+
+    if (!current) {
+      return NextResponse.json({ error: "Conversa nao encontrada." }, { status: 404 });
+    }
+
+    if (!canAccessConversation({ session, agentId: current.agentId })) {
+      return NextResponse.json({ error: "Conversa atribuida a outro atendente." }, { status: 403 });
     }
 
     const conversation = await sendConversationTemplate({

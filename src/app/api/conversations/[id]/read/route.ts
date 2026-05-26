@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
+import { canAccessConversation } from "@/lib/permissions";
 
 type RouteContext = {
   params: { id: string };
@@ -20,11 +21,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
         id: context.params.id,
         contact: { companyId: session.companyId }
       },
-      select: { id: true }
+      select: { id: true, agentId: true }
     });
 
     if (!conversation) {
       return NextResponse.json({ error: "Conversa nao encontrada." }, { status: 404 });
+    }
+
+    if (!canAccessConversation({ session, agentId: conversation.agentId })) {
+      return NextResponse.json({ error: "Conversa atribuida a outro atendente." }, { status: 403 });
     }
 
     const readAt = new Date();

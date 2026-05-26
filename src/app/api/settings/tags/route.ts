@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/permissions";
 
 export async function GET(request: NextRequest) {
   try {
@@ -9,7 +10,6 @@ export async function GET(request: NextRequest) {
     if (!session) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
-
     const tags = await prisma.tag.findMany({
       where: { companyId: session.companyId },
       orderBy: [{ isActive: "desc" }, { name: "asc" }],
@@ -48,6 +48,8 @@ export async function POST(request: NextRequest) {
     if (!session) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
+    const blocked = requireAdmin(session);
+    if (blocked) return blocked;
 
     const body = (await request.json().catch(() => null)) as
       | {

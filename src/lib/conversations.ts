@@ -44,9 +44,11 @@ export function mapConversation(conversation: ConversationWithRelations) {
       ? {
           id: conversation.agent.id,
           name: conversation.agent.name,
-          email: conversation.agent.email
+          email: conversation.agent.email,
+          role: conversation.agent.role
         }
       : null,
+    assignmentStatus: conversation.agentId ? "ASSIGNED" : "UNASSIGNED",
     contact: {
       id: conversation.contact.id,
       name: conversation.contact.name,

@@ -56,7 +56,7 @@ type Session = {
     id: string;
     name: string;
     email: string;
-    role: string;
+    role: UserRole;
   };
   company: {
     id: string;
@@ -136,6 +136,27 @@ type SettingsTagRow = {
 
 type UserRole = "ADMIN" | "SUPERVISOR" | "AGENT";
 
+type AvailabilityStatus = "ONLINE" | "BUSY" | "OFFLINE" | "PAUSED";
+
+type AttendantRow = {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  availabilityStatus: AvailabilityStatus;
+  lastSeenAt?: string | null;
+  openConversations: number;
+};
+
+type LeadAssignmentSettings = {
+  mode: "CLAIM_FIRST" | "ROUND_ROBIN" | "ADMIN_MANUAL";
+  onlineOnly: boolean;
+  maxOpenPerAttendant: number | null;
+  allowAttendantClaim: boolean;
+  redistributeWhenOffline: boolean;
+  fallback?: boolean;
+};
+
 type KanbanStage = {
   id: string;
   name: string;
@@ -156,7 +177,8 @@ type ConversationRow = {
   lastReadAt?: string | null;
   createdAt: string;
   updatedAt: string;
-  agent: { id: string; name: string; email: string } | null;
+  agent: { id: string; name: string; email: string; role?: string } | null;
+  assignmentStatus: "ASSIGNED" | "UNASSIGNED";
   contact: {
     id: string;
     name: string;
@@ -571,6 +593,27 @@ function formatCurrency(value: number | string) {
   });
 }
 
+function userIsAdmin(session?: Session | null) {
+  return session?.user.role === "ADMIN" || session?.user.role === "SUPERVISOR";
+}
+
+function availabilityLabel(status: AvailabilityStatus) {
+  return {
+    ONLINE: "Disponivel",
+    BUSY: "Ocupado",
+    OFFLINE: "Indisponivel",
+    PAUSED: "Pausado"
+  }[status];
+}
+
+function assignmentModeLabel(mode: LeadAssignmentSettings["mode"]) {
+  return {
+    CLAIM_FIRST: "Quem clicar primeiro pega",
+    ROUND_ROBIN: "Automatico igualitario",
+    ADMIN_MANUAL: "Manual pelo administrador"
+  }[mode];
+}
+
 function emptyDashboardData(): DashboardData {
   return {
     metrics: {
@@ -601,6 +644,16 @@ export default function Home() {
   const [contacts, setContacts] = useState<ContactRow[]>([]);
   const [kanbanStages, setKanbanStages] = useState<KanbanStage[]>([]);
   const [conversationList, setConversationList] = useState<ConversationRow[]>([]);
+  const [attendants, setAttendants] = useState<AttendantRow[]>([]);
+  const [leadAssignmentSettings, setLeadAssignmentSettings] =
+    useState<LeadAssignmentSettings>({
+      mode: "CLAIM_FIRST",
+      onlineOnly: true,
+      maxOpenPerAttendant: null,
+      allowAttendantClaim: true,
+      redistributeWhenOffline: false
+    });
+  const [myAvailability, setMyAvailability] = useState<AvailabilityStatus>("OFFLINE");
   const [channels, setChannels] = useState<ChannelRow[]>([]);
   const [channelStatus, setChannelStatus] = useState<ChannelStatusData | null>(null);
   const [messageLogs, setMessageLogs] = useState<MessageLogRow[]>([]);
@@ -636,7 +689,8 @@ export default function Home() {
   const [conversationFilters, setConversationFilters] = useState({
     search: "",
     status: "OPEN",
-    tagIds: [] as string[]
+    tagIds: [] as string[],
+    assignedTo: "default"
   });
   const [aiAnalysis, setAiAnalysis] = useState<AiAnalysis | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -693,6 +747,13 @@ export default function Home() {
     return navItems.find((item) => item.id === active)?.label ?? "Dashboard";
   }, [active]);
 
+  const visibleNavItems = useMemo(() => {
+    if (userIsAdmin(session)) return navItems;
+    return navItems.filter((item) =>
+      ["atendimento", "contatos", "kanban", "simulacao-clt"].includes(item.id)
+    );
+  }, [session]);
+
   const atendimentoUnread = useMemo(
     () =>
       conversationList.reduce(
@@ -739,6 +800,58 @@ export default function Home() {
     const response = await fetch("/api/reference");
     if (response.ok) {
       setReference((await response.json()) as ReferenceData);
+    }
+  }
+
+  async function loadAttendants() {
+    const response = await fetch("/api/users/attendants");
+    if (!response.ok) return;
+
+    const data = (await response.json()) as { attendants: AttendantRow[] };
+    setAttendants(data.attendants);
+    const mine = data.attendants.find((attendant) => attendant.id === session?.user.id);
+    if (mine) setMyAvailability(mine.availabilityStatus);
+  }
+
+  async function loadLeadAssignmentSettings() {
+    if (!userIsAdmin(session)) return;
+
+    const response = await fetch("/api/settings/lead-assignment");
+    if (!response.ok) return;
+
+    const data = (await response.json()) as { settings: LeadAssignmentSettings };
+    setLeadAssignmentSettings(data.settings);
+  }
+
+  async function updateMyAvailability(status: AvailabilityStatus) {
+    setMyAvailability(status);
+    await fetch("/api/users/me/status", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status })
+    });
+    void loadAttendants();
+  }
+
+  async function updateAttendantStatus(userId: string, status: AvailabilityStatus) {
+    await fetch(`/api/users/${userId}/status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status })
+    });
+    void loadAttendants();
+  }
+
+  async function saveLeadAssignmentSettings(settings: LeadAssignmentSettings) {
+    const response = await fetch("/api/settings/lead-assignment", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(settings)
+    });
+
+    if (response.ok) {
+      const data = (await response.json()) as { settings: LeadAssignmentSettings };
+      setLeadAssignmentSettings(data.settings);
     }
   }
 
@@ -799,6 +912,7 @@ export default function Home() {
           return;
         }
 
+        if (key === "assignedTo" && value === "default") return;
         if (value) params.set(key, value);
       });
 
@@ -1027,6 +1141,42 @@ export default function Home() {
     await markNotificationsRead({ conversationId: conversation.id });
   }
 
+  async function handleAssignConversation(conversationId: string, userId?: string) {
+    const response = await fetch(`/api/conversations/${conversationId}/assign`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(userId ? { userId } : {})
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as { error?: string } | null;
+      setAppError(data?.error ?? "Nao foi possivel assumir atendimento.");
+      return;
+    }
+
+    const data = (await response.json()) as { conversation: ConversationRow };
+    mergeConversation(data.conversation);
+    setSelectedConversation(data.conversation);
+    void loadAttendants();
+  }
+
+  async function handleUnassignConversation(conversationId: string) {
+    const response = await fetch(`/api/conversations/${conversationId}/unassign`, {
+      method: "PATCH"
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as { error?: string } | null;
+      setAppError(data?.error ?? "Nao foi possivel devolver atendimento.");
+      return;
+    }
+
+    const data = (await response.json()) as { conversation: ConversationRow };
+    mergeConversation(data.conversation);
+    setSelectedConversation(data.conversation);
+    void loadAttendants();
+  }
+
   async function handleStartNewConversation() {
     const selectedContact = contacts.find(
       (contact) => contact.id === newConversationForm.contactId
@@ -1064,7 +1214,7 @@ export default function Home() {
 
     const data = (await response.json()) as { conversation: ConversationRow };
     setActive("atendimento");
-    setConversationFilters({ search: "", status: "OPEN", tagIds: [] });
+    setConversationFilters({ search: "", status: "OPEN", tagIds: [], assignedTo: "default" });
     setSelectedConversation(data.conversation);
     mergeConversation(data.conversation);
     setNewConversationOpen(false);
@@ -1742,8 +1892,8 @@ export default function Home() {
 
     const data = (await response.json()) as { conversation: ConversationRow };
     setSelectedConversation(data.conversation);
-    setConversationFilters({ search: "", status: "OPEN", tagIds: [] });
-    await loadConversations({ search: "", status: "OPEN", tagIds: [] });
+    setConversationFilters({ search: "", status: "OPEN", tagIds: [], assignedTo: "default" });
+    await loadConversations({ search: "", status: "OPEN", tagIds: [], assignedTo: "default" });
     void loadContacts(contactFilters);
   }
 
@@ -2078,19 +2228,32 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (!session || userIsAdmin(session)) return;
+    if (!visibleNavItems.some((item) => item.id === active)) {
+      setActive("atendimento");
+    }
+  }, [active, session, visibleNavItems]);
+
+  useEffect(() => {
     if (!session) return;
 
     void loadContacts(contactFilters);
     void loadSettingsTags();
     void loadReference();
-    void loadKanban();
-    void loadChannels();
-    void loadChannelStatus();
-    void loadMessageLogs({ channelId: "", status: "ALL", type: "ALL" });
-    void loadCampaigns();
+    void loadAttendants();
+    if (userIsAdmin(session)) {
+      void loadKanban();
+      void loadChannels();
+      void loadChannelStatus();
+      void loadMessageLogs({ channelId: "", status: "ALL", type: "ALL" });
+      void loadCampaigns();
+      void loadLeadAssignmentSettings();
+    }
     void loadConversations(conversationFilters);
     void loadNotifications({ silent: true });
-    void loadProposals(proposalFilters);
+    if (userIsAdmin(session)) {
+      void loadProposals(proposalFilters);
+    }
   }, [
     contactFilters,
     conversationFilters,
@@ -2112,7 +2275,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!session) return;
+    if (!session || !userIsAdmin(session)) return;
 
     void loadDashboard(dashboardFilters);
   }, [dashboardFilters, loadDashboard, session]);
@@ -2215,7 +2378,7 @@ export default function Home() {
           <p className="px-3 pb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">
             Navegacao
           </p>
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const Icon = item.icon;
             const itemCount =
               item.id === "atendimento"
@@ -2256,19 +2419,21 @@ export default function Home() {
         </nav>
 
         <div className="shrink-0 space-y-3 border-t border-line/70 p-4">
-          <button
-            className={clsx(
-              "flex h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-semibold transition-colors",
-              active === "tags"
-                ? "bg-blue-50 text-brand shadow-[inset_0_0_0_1px_rgba(37,99,235,0.10)]"
-                : "bg-white text-slate-600 ring-1 ring-line hover:bg-slate-50 hover:text-slate-950"
-            )}
-            onClick={() => setActive("tags")}
-            type="button"
-          >
-            <Tags className={clsx("h-4 w-4", active === "tags" ? "text-brand" : "text-slate-400")} />
-            Gerenciar tags
-          </button>
+          {userIsAdmin(session) && (
+            <button
+              className={clsx(
+                "flex h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-semibold transition-colors",
+                active === "tags"
+                  ? "bg-blue-50 text-brand shadow-[inset_0_0_0_1px_rgba(37,99,235,0.10)]"
+                  : "bg-white text-slate-600 ring-1 ring-line hover:bg-slate-50 hover:text-slate-950"
+              )}
+              onClick={() => setActive("tags")}
+              type="button"
+            >
+              <Tags className={clsx("h-4 w-4", active === "tags" ? "text-brand" : "text-slate-400")} />
+              Gerenciar tags
+            </button>
+          )}
           <div className="rounded-2xl bg-gradient-to-br from-blue-50 to-white p-3 ring-1 ring-blue-100">
             <div className="flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-brand" />
@@ -2312,6 +2477,10 @@ export default function Home() {
             </div>
           </div>
           <div className="flex items-center gap-2 md:gap-3">
+            <AttendantStatusToggle
+              value={myAvailability}
+              onChange={(status) => void updateMyAvailability(status)}
+            />
             <div className="hidden h-10 w-[min(26vw,360px)] items-center gap-2 rounded-full border border-line bg-slate-50 px-3 text-sm text-slate-500 ring-0 focus-within:border-blue-200 focus-within:bg-white focus-within:shadow-soft lg:flex">
               <Search className="h-4 w-4 text-slate-400" />
               <input
@@ -2452,10 +2621,15 @@ export default function Home() {
               conversations={conversationList}
               filters={conversationFilters}
               availableTags={reference.tags}
+              attendants={attendants}
+              currentUserId={session.user.id}
+              isAdmin={userIsAdmin(session)}
               loading={conversationLoading}
               selectedConversation={selectedConversation}
               onFiltersChange={setConversationFilters}
               onSelectConversation={(conversation) => void handleSelectConversation(conversation)}
+              onAssignConversation={handleAssignConversation}
+              onUnassignConversation={handleUnassignConversation}
               onSendMessage={handleSendMessage}
               onSendMedia={handleSendMedia}
               onLoadTemplates={handleLoadTemplates}
@@ -2558,6 +2732,10 @@ export default function Home() {
           {active === "config" && (
             <Configuracoes
               reference={reference}
+              attendants={attendants}
+              leadAssignmentSettings={leadAssignmentSettings}
+              onSaveLeadAssignmentSettings={saveLeadAssignmentSettings}
+              onUpdateAttendantStatus={updateAttendantStatus}
               onCreateOrigin={handleCreateOrigin}
               onCreateStage={handleCreateStage}
               onCreateTag={handleCreateTag}
@@ -2761,6 +2939,38 @@ function NewConversationModal({
         </div>
       </div>
     </div>
+  );
+}
+
+function AttendantStatusToggle({
+  value,
+  onChange
+}: {
+  value: AvailabilityStatus;
+  onChange: (status: AvailabilityStatus) => void;
+}) {
+  const colors: Record<AvailabilityStatus, string> = {
+    ONLINE: "bg-emerald-500",
+    BUSY: "bg-amber-500",
+    OFFLINE: "bg-slate-400",
+    PAUSED: "bg-rose-500"
+  };
+
+  return (
+    <label className="hidden h-10 items-center gap-2 rounded-full border border-line bg-white px-3 text-xs font-semibold text-slate-600 shadow-sm md:flex">
+      <span className={clsx("h-2 w-2 rounded-full", colors[value])} />
+      <select
+        className="bg-transparent outline-none"
+        value={value}
+        onChange={(event) => onChange(event.target.value as AvailabilityStatus)}
+        title="Disponibilidade"
+      >
+        <option value="ONLINE">Disponivel</option>
+        <option value="BUSY">Ocupado</option>
+        <option value="PAUSED">Pausado</option>
+        <option value="OFFLINE">Indisponivel</option>
+      </select>
+    </label>
   );
 }
 
@@ -3219,10 +3429,15 @@ function Atendimento({
   conversations,
   filters,
   availableTags,
+  attendants,
+  currentUserId,
+  isAdmin,
   loading,
   selectedConversation,
   onFiltersChange,
   onSelectConversation,
+  onAssignConversation,
+  onUnassignConversation,
   onSendMessage,
   onSendMedia,
   onLoadTemplates,
@@ -3236,12 +3451,17 @@ function Atendimento({
   onOpenCltSimulation
 }: {
   conversations: ConversationRow[];
-  filters: { search: string; status: string; tagIds: string[] };
+  filters: { search: string; status: string; tagIds: string[]; assignedTo: string };
   availableTags: ReferenceData["tags"];
+  attendants: AttendantRow[];
+  currentUserId: string;
+  isAdmin: boolean;
   loading: boolean;
   selectedConversation: ConversationRow | null;
-  onFiltersChange: (filters: { search: string; status: string; tagIds: string[] }) => void;
+  onFiltersChange: (filters: { search: string; status: string; tagIds: string[]; assignedTo: string }) => void;
   onSelectConversation: (conversation: ConversationRow) => void;
+  onAssignConversation: (conversationId: string, userId?: string) => Promise<void>;
+  onUnassignConversation: (conversationId: string) => Promise<void>;
   onSendMessage: (conversationId: string, body: string) => Promise<void>;
   onSendMedia: (conversationId: string, file: File, caption?: string) => Promise<void>;
   onLoadTemplates: (conversationId: string) => Promise<WhatsAppTemplateRow[]>;
@@ -3458,6 +3678,8 @@ function Atendimento({
         conversations={conversations}
         filters={filters}
         availableTags={availableTags}
+        attendants={attendants}
+        isAdmin={isAdmin}
         loading={loading}
         selectedConversation={selectedConversation}
         onFiltersChange={onFiltersChange}
@@ -3478,10 +3700,54 @@ function Atendimento({
               <p className="truncate text-sm text-slate-500">
                 {selectedConversation?.contact.phone ?? "Inbox interno"}
               </p>
+              {selectedConversation && (
+                <p className="truncate text-xs font-semibold text-slate-500">
+                  Responsavel:{" "}
+                  <span className={selectedConversation.agent ? "text-slate-700" : "text-amber-600"}>
+                    {selectedConversation.agent?.name ?? "Sem responsavel"}
+                  </span>
+                </p>
+              )}
             </div>
           </div>
           {selectedConversation && (
             <div className="flex items-center gap-2">
+              {!selectedConversation.agent && (
+                <button
+                  type="button"
+                  className="h-10 rounded-full bg-emerald-600 px-3 text-sm font-bold text-white shadow-sm hover:bg-emerald-700"
+                  onClick={() => void onAssignConversation(selectedConversation.id)}
+                >
+                  Assumir
+                </button>
+              )}
+              {isAdmin && selectedConversation.agent && (
+                <button
+                  type="button"
+                  className="hidden h-10 rounded-full border border-line bg-white px-3 text-sm font-semibold text-slate-600 hover:bg-slate-50 lg:inline-flex"
+                  onClick={() => void onUnassignConversation(selectedConversation.id)}
+                >
+                  Devolver
+                </button>
+              )}
+              {isAdmin && (
+                <select
+                  className="hidden h-10 rounded-full border border-line bg-slate-50 px-3 text-sm font-medium text-slate-700 outline-none hover:bg-white focus:border-blue-200 focus:bg-white lg:block"
+                  value={selectedConversation.agent?.id ?? ""}
+                  onChange={(event) =>
+                    event.target.value
+                      ? void onAssignConversation(selectedConversation.id, event.target.value)
+                      : void onUnassignConversation(selectedConversation.id)
+                  }
+                >
+                  <option value="">Sem responsavel</option>
+                  {attendants.map((attendant) => (
+                    <option key={attendant.id} value={attendant.id}>
+                      {attendant.name}
+                    </option>
+                  ))}
+                </select>
+              )}
               <button
                 type="button"
                 className="hidden h-10 items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 text-sm font-bold text-primary hover:bg-blue-100 lg:inline-flex"
@@ -3934,17 +4200,21 @@ function ConversationList({
   conversations,
   filters,
   availableTags,
+  attendants,
+  isAdmin,
   loading,
   selectedConversation,
   onFiltersChange,
   onSelectConversation
 }: {
   conversations: ConversationRow[];
-  filters: { search: string; status: string; tagIds: string[] };
+  filters: { search: string; status: string; tagIds: string[]; assignedTo: string };
   availableTags: ReferenceData["tags"];
+  attendants: AttendantRow[];
+  isAdmin: boolean;
   loading: boolean;
   selectedConversation: ConversationRow | null;
-  onFiltersChange: (filters: { search: string; status: string; tagIds: string[] }) => void;
+  onFiltersChange: (filters: { search: string; status: string; tagIds: string[]; assignedTo: string }) => void;
   onSelectConversation: (conversation: ConversationRow) => void;
 }) {
   const activeTags = availableTags.filter((tag) => tag.isActive !== false);
@@ -3992,6 +4262,50 @@ function ConversationList({
               {label}
             </button>
           ))}
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-1.5 text-xs">
+          {[
+            ["default", isAdmin ? "Todos" : "Minha fila"],
+            ["me", "Meus"],
+            ["unassigned", "Sem resp."]
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              className={clsx(
+                "rounded-full border px-2 py-2 font-semibold",
+                filters.assignedTo === value
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : "border-line bg-white text-slate-500 hover:bg-slate-50"
+              )}
+              onClick={() => onFiltersChange({ ...filters, assignedTo: value })}
+            >
+              {label}
+            </button>
+          ))}
+          {isAdmin && (
+            <select
+              className="col-span-2 h-9 rounded-full border border-line bg-white px-3 text-xs font-semibold text-slate-600 outline-none"
+              value={
+                filters.assignedTo &&
+                !["default", "me", "unassigned"].includes(filters.assignedTo)
+                  ? filters.assignedTo
+                  : ""
+              }
+              onChange={(event) =>
+                onFiltersChange({
+                  ...filters,
+                  assignedTo: event.target.value || "default"
+                })
+              }
+            >
+              <option value="">Filtrar por atendente</option>
+              {attendants.map((attendant) => (
+                <option key={attendant.id} value={attendant.id}>
+                  {attendant.name}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
         {activeTags.length > 0 && (
           <div className="mt-3">
@@ -4096,6 +4410,16 @@ function ConversationList({
                     )}
                   </div>
                   <div className="mt-3 flex items-center gap-2">
+                    <span
+                      className={clsx(
+                        "rounded-full px-2 py-0.5 text-[11px] font-semibold",
+                        item.agent
+                          ? "bg-slate-100 text-slate-500"
+                          : "bg-amber-50 text-amber-700"
+                      )}
+                    >
+                      {item.agent?.name ?? "Sem resp."}
+                    </span>
                     {item.tags.slice(0, 3).map((tag) => (
                       <TagBadge key={tag.id} tag={tag} compact />
                     ))}
@@ -8274,6 +8598,10 @@ function TagEditorModal({
 
 function Configuracoes({
   reference,
+  attendants,
+  leadAssignmentSettings,
+  onSaveLeadAssignmentSettings,
+  onUpdateAttendantStatus,
   onCreateOrigin,
   onCreateStage,
   onCreateTag,
@@ -8288,6 +8616,10 @@ function Configuracoes({
   onUpdateUser
 }: {
   reference: ReferenceData;
+  attendants: AttendantRow[];
+  leadAssignmentSettings: LeadAssignmentSettings;
+  onSaveLeadAssignmentSettings: (settings: LeadAssignmentSettings) => Promise<void>;
+  onUpdateAttendantStatus: (userId: string, status: AvailabilityStatus) => Promise<void>;
   onCreateOrigin: (name: string) => Promise<void>;
   onCreateStage: (payload: {
     name: string;
@@ -8354,6 +8686,12 @@ function Configuracoes({
     password: string;
     role: UserRole;
   } | null>(null);
+  const [assignmentForm, setAssignmentForm] =
+    useState<LeadAssignmentSettings>(leadAssignmentSettings);
+
+  useEffect(() => {
+    setAssignmentForm(leadAssignmentSettings);
+  }, [leadAssignmentSettings]);
 
   useEffect(() => {
     setStageForm((current) => ({
@@ -8399,7 +8737,142 @@ function Configuracoes({
   }
 
   return (
-    <div className="grid gap-6 xl:grid-cols-3">
+    <div className="space-y-6">
+      <section className="rounded-[1.5rem] border border-line bg-white p-5 shadow-soft">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-brand">
+              Atendimento
+            </p>
+            <h3 className="mt-1 text-xl font-bold text-slate-950">
+              Distribuicao de leads
+            </h3>
+            <p className="mt-1 max-w-2xl text-sm text-slate-500">
+              Defina se novos leads ficam em fila para o primeiro atendente assumir
+              ou se o sistema distribui automaticamente entre vendedores disponiveis.
+            </p>
+          </div>
+          <button
+            className="h-10 rounded-full bg-brand px-4 text-sm font-semibold text-white shadow-soft"
+            onClick={() => void onSaveLeadAssignmentSettings(assignmentForm)}
+            type="button"
+          >
+            Salvar distribuicao
+          </button>
+        </div>
+
+        <div className="mt-5 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="text-sm font-semibold text-slate-800">
+              Modo de distribuicao
+              <select
+                className="mt-2 h-11 w-full rounded-2xl border border-line bg-white px-3 text-sm outline-none"
+                value={assignmentForm.mode}
+                onChange={(event) =>
+                  setAssignmentForm((current) => ({
+                    ...current,
+                    mode: event.target.value as LeadAssignmentSettings["mode"]
+                  }))
+                }
+              >
+                <option value="CLAIM_FIRST">Quem clicar primeiro pega</option>
+                <option value="ROUND_ROBIN">Automatico igualitario</option>
+                <option value="ADMIN_MANUAL">Manual pelo administrador</option>
+              </select>
+            </label>
+            <label className="text-sm font-semibold text-slate-800">
+              Maximo aberto por atendente
+              <input
+                className="mt-2 h-11 w-full rounded-2xl border border-line bg-white px-3 text-sm outline-none"
+                min={0}
+                placeholder="Sem limite"
+                type="number"
+                value={assignmentForm.maxOpenPerAttendant ?? ""}
+                onChange={(event) =>
+                  setAssignmentForm((current) => ({
+                    ...current,
+                    maxOpenPerAttendant: event.target.value
+                      ? Number(event.target.value)
+                      : null
+                  }))
+                }
+              />
+            </label>
+            {[
+              ["onlineOnly", "Distribuir apenas para online"],
+              ["allowAttendantClaim", "Permitir atendente assumir sem responsavel"],
+              ["redistributeWhenOffline", "Redistribuir quando ficar offline"]
+            ].map(([key, label]) => (
+              <label
+                key={key}
+                className="flex items-center justify-between rounded-2xl border border-line px-3 py-3 text-sm font-semibold text-slate-700"
+              >
+                {label}
+                <input
+                  checked={Boolean(
+                    assignmentForm[key as keyof LeadAssignmentSettings]
+                  )}
+                  type="checkbox"
+                  onChange={(event) =>
+                    setAssignmentForm((current) => ({
+                      ...current,
+                      [key]: event.target.checked
+                    }))
+                  }
+                />
+              </label>
+            ))}
+          </div>
+
+          <div className="rounded-2xl border border-line bg-slate-50 p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-bold text-slate-950">Atendentes</p>
+                <p className="text-xs text-slate-500">
+                  {assignmentModeLabel(assignmentForm.mode)}
+                </p>
+              </div>
+              <span className="rounded-full bg-white px-2.5 py-1 text-xs font-bold text-slate-500 ring-1 ring-line">
+                {attendants.length} usuario(s)
+              </span>
+            </div>
+            <div className="mt-3 max-h-64 space-y-2 overflow-y-auto pr-1">
+              {attendants.map((attendant) => (
+                <div
+                  key={attendant.id}
+                  className="flex items-center justify-between gap-3 rounded-2xl bg-white p-3 ring-1 ring-line/70"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-bold text-slate-900">
+                      {attendant.name}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      {attendant.openConversations} atendimento(s) aberto(s)
+                    </p>
+                  </div>
+                  <select
+                    className="h-9 rounded-full border border-line bg-slate-50 px-2 text-xs font-semibold text-slate-600"
+                    value={attendant.availabilityStatus}
+                    onChange={(event) =>
+                      void onUpdateAttendantStatus(
+                        attendant.id,
+                        event.target.value as AvailabilityStatus
+                      )
+                    }
+                  >
+                    <option value="ONLINE">Disponivel</option>
+                    <option value="BUSY">Ocupado</option>
+                    <option value="PAUSED">Pausado</option>
+                    <option value="OFFLINE">Indisponivel</option>
+                  </select>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div className="grid gap-6 xl:grid-cols-3">
       <section className="rounded border border-line bg-white p-5 shadow-soft">
         <div className="flex items-center justify-between">
           <div>
@@ -8923,6 +9396,7 @@ function Configuracoes({
           ))}
         </div>
       </section>
+      </div>
     </div>
   );
 }

@@ -6,6 +6,7 @@ import {
   type ConversationStatus
 } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
+import { canAccessConversation } from "@/lib/permissions";
 
 type RouteContext = {
   params: { id: string };
@@ -38,6 +39,10 @@ export async function GET(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Conversa nao encontrada." }, { status: 404 });
     }
 
+    if (!canAccessConversation({ session, agentId: conversation.agentId })) {
+      return NextResponse.json({ error: "Conversa atribuida a outro atendente." }, { status: 403 });
+    }
+
     return NextResponse.json({ conversation: mapConversation(conversation) });
   } catch {
     return NextResponse.json(
@@ -59,6 +64,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
     if (!existing) {
       return NextResponse.json({ error: "Conversa nao encontrada." }, { status: 404 });
+    }
+
+    if (!canAccessConversation({ session, agentId: existing.agentId })) {
+      return NextResponse.json({ error: "Conversa atribuida a outro atendente." }, { status: 403 });
     }
 
     const body = (await request.json().catch(() => null)) as

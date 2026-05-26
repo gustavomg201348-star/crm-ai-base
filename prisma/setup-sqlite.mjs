@@ -36,6 +36,19 @@ CREATE TABLE IF NOT EXISTS User (
 
 CREATE INDEX IF NOT EXISTS User_companyId_idx ON User(companyId);
 
+CREATE TABLE IF NOT EXISTS UserAvailability (
+  userId TEXT PRIMARY KEY NOT NULL,
+  companyId TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'OFFLINE',
+  lastSeenAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT UserAvailability_companyId_fkey FOREIGN KEY (companyId) REFERENCES Company (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT UserAvailability_userId_fkey FOREIGN KEY (userId) REFERENCES User (id) ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS UserAvailability_companyId_idx ON UserAvailability(companyId);
+CREATE INDEX IF NOT EXISTS UserAvailability_status_idx ON UserAvailability(status);
+
 CREATE TABLE IF NOT EXISTS Channel (
   id TEXT PRIMARY KEY NOT NULL,
   companyId TEXT NOT NULL,
@@ -164,6 +177,39 @@ CREATE TABLE IF NOT EXISTS Message (
   createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT Message_conversationId_fkey FOREIGN KEY (conversationId) REFERENCES Conversation (id) ON DELETE RESTRICT ON UPDATE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS LeadAssignmentSetting (
+  id TEXT PRIMARY KEY NOT NULL,
+  companyId TEXT NOT NULL UNIQUE,
+  mode TEXT NOT NULL DEFAULT 'CLAIM_FIRST',
+  onlineOnly BOOLEAN NOT NULL DEFAULT true,
+  maxOpenPerAttendant INTEGER,
+  allowAttendantClaim BOOLEAN NOT NULL DEFAULT true,
+  redistributeWhenOffline BOOLEAN NOT NULL DEFAULT false,
+  createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT LeadAssignmentSetting_companyId_fkey FOREIGN KEY (companyId) REFERENCES Company (id) ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS LeadAssignmentHistory (
+  id TEXT PRIMARY KEY NOT NULL,
+  companyId TEXT NOT NULL,
+  conversationId TEXT NOT NULL,
+  assignedToUserId TEXT,
+  assignedByUserId TEXT,
+  mode TEXT NOT NULL,
+  action TEXT NOT NULL DEFAULT 'ASSIGNED',
+  createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT LeadAssignmentHistory_companyId_fkey FOREIGN KEY (companyId) REFERENCES Company (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT LeadAssignmentHistory_conversationId_fkey FOREIGN KEY (conversationId) REFERENCES Conversation (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT LeadAssignmentHistory_assignedToUserId_fkey FOREIGN KEY (assignedToUserId) REFERENCES User (id) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT LeadAssignmentHistory_assignedByUserId_fkey FOREIGN KEY (assignedByUserId) REFERENCES User (id) ON DELETE SET NULL ON UPDATE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS LeadAssignmentHistory_companyId_idx ON LeadAssignmentHistory(companyId);
+CREATE INDEX IF NOT EXISTS LeadAssignmentHistory_conversationId_idx ON LeadAssignmentHistory(conversationId);
+CREATE INDEX IF NOT EXISTS LeadAssignmentHistory_assignedToUserId_idx ON LeadAssignmentHistory(assignedToUserId);
+CREATE INDEX IF NOT EXISTS LeadAssignmentHistory_assignedByUserId_idx ON LeadAssignmentHistory(assignedByUserId);
 
 CREATE TABLE IF NOT EXISTS Notification (
   id TEXT PRIMARY KEY NOT NULL,

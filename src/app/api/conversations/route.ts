@@ -6,6 +6,8 @@ import {
   type ConversationStatus
 } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
+import { maybeAutoAssignConversation } from "@/lib/lead-assignment";
+import { conversationVisibilityWhere, isAdmin } from "@/lib/permissions";
 
 function normalizePhone(phone: string) {
   return phone.replace(/\D/g, "");
@@ -21,14 +23,25 @@ export async function GET(request: NextRequest) {
 
     const search = request.nextUrl.searchParams.get("search")?.trim();
     const status = request.nextUrl.searchParams.get("status") ?? "OPEN";
+    const assignedTo = request.nextUrl.searchParams.get("assignedTo")?.trim();
     const tagIds = request.nextUrl.searchParams
       .getAll("tagId")
       .concat(request.nextUrl.searchParams.get("tagIds")?.split(",") ?? [])
       .map((tagId) => tagId.trim())
       .filter(Boolean);
 
+    const assignmentWhere =
+      assignedTo === "me"
+        ? { agentId: session.id }
+        : assignedTo === "unassigned"
+          ? { agentId: null }
+          : assignedTo && isAdmin(session)
+            ? { agentId: assignedTo }
+            : conversationVisibilityWhere(session);
+
     const conversations = await prisma.conversation.findMany({
       where: {
+        ...assignmentWhere,
         contact: {
           companyId: session.companyId,
           archivedAt: null,
@@ -173,8 +186,18 @@ export async function POST(request: NextRequest) {
       include: conversationInclude
     });
 
+    await maybeAutoAssignConversation({
+      companyId: session.companyId,
+      conversationId: conversation.id
+    });
+
+    const finalConversation = await prisma.conversation.findUnique({
+      where: { id: conversation.id },
+      include: conversationInclude
+    });
+
     return NextResponse.json(
-      { conversation: mapConversation(conversation) },
+      { conversation: mapConversation(finalConversation ?? conversation) },
       { status: 201 }
     );
   } catch {

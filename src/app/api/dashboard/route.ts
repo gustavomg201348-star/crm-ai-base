@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/permissions";
 
 const periodDays = {
   "7d": 7,
@@ -33,6 +34,8 @@ export async function GET(request: NextRequest) {
     if (!session) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
+    const blocked = requireAdmin(session);
+    if (blocked) return blocked;
 
     const period = request.nextUrl.searchParams.get("period") ?? "30d";
     const originId = request.nextUrl.searchParams.get("originId") ?? "";
