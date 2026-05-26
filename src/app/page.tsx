@@ -803,7 +803,7 @@ export default function Home() {
     }
   }
 
-  async function loadAttendants() {
+  const loadAttendants = useCallback(async () => {
     const response = await fetch("/api/users/attendants");
     if (!response.ok) return;
 
@@ -811,9 +811,9 @@ export default function Home() {
     setAttendants(data.attendants);
     const mine = data.attendants.find((attendant) => attendant.id === session?.user.id);
     if (mine) setMyAvailability(mine.availabilityStatus);
-  }
+  }, [session?.user.id]);
 
-  async function loadLeadAssignmentSettings() {
+  const loadLeadAssignmentSettings = useCallback(async () => {
     if (!userIsAdmin(session)) return;
 
     const response = await fetch("/api/settings/lead-assignment");
@@ -821,7 +821,7 @@ export default function Home() {
 
     const data = (await response.json()) as { settings: LeadAssignmentSettings };
     setLeadAssignmentSettings(data.settings);
-  }
+  }, [session]);
 
   async function updateMyAvailability(status: AvailabilityStatus) {
     setMyAvailability(status);
@@ -2260,6 +2260,8 @@ export default function Home() {
     loadContacts,
     loadSettingsTags,
     loadConversations,
+    loadAttendants,
+    loadLeadAssignmentSettings,
     loadMessageLogs,
     loadNotifications,
     loadProposals,
