@@ -971,7 +971,7 @@ export default function Home() {
         setConversationList(data.conversations);
         setSelectedConversation((current) => {
           if (!current) return null;
-          return data.conversations.find((conversation) => conversation.id === current.id) ?? null;
+          return data.conversations.find((conversation) => conversation.id === current.id) ?? current;
         });
       } else {
         if (!options.silent) {
@@ -1204,6 +1204,12 @@ export default function Home() {
     const data = (await response.json()) as { conversation: ConversationRow };
     mergeConversation(data.conversation);
     setSelectedConversation(data.conversation);
+    if (conversationFilters.assignedTo === "unassigned") {
+      setConversationFilters((current) => ({
+        ...current,
+        assignedTo: userId ? "default" : "me"
+      }));
+    }
     void loadAttendants();
   }
 
@@ -3701,6 +3707,7 @@ function Atendimento({
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferSaving, setTransferSaving] = useState(false);
   const [transferError, setTransferError] = useState("");
+  const [assigningConversationId, setAssigningConversationId] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
@@ -3896,6 +3903,15 @@ function Atendimento({
     }
   }
 
+  async function submitAssign(conversationId: string, userId?: string) {
+    setAssigningConversationId(conversationId);
+    try {
+      await onAssignConversation(conversationId, userId);
+    } finally {
+      setAssigningConversationId(null);
+    }
+  }
+
   return (
     <div className="grid h-[calc(100vh-8.5rem)] min-h-0 gap-4 overflow-hidden xl:grid-cols-[340px_minmax(0,1fr)_320px]">
       {transferOpen && selectedConversation && (
@@ -3952,10 +3968,14 @@ function Atendimento({
               {!selectedConversation.agent && (
                 <button
                   type="button"
-                  className="h-10 rounded-full bg-emerald-600 px-3 text-sm font-bold text-white shadow-sm hover:bg-emerald-700"
-                  onClick={() => void onAssignConversation(selectedConversation.id)}
+                  className="inline-flex h-10 items-center gap-2 rounded-full bg-emerald-600 px-3 text-sm font-bold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
+                  disabled={assigningConversationId === selectedConversation.id}
+                  onClick={() => void submitAssign(selectedConversation.id)}
                 >
-                  Assumir
+                  {assigningConversationId === selectedConversation.id && (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  )}
+                  {assigningConversationId === selectedConversation.id ? "Assumindo..." : "Assumir"}
                 </button>
               )}
               {isAdmin && selectedConversation.agent && (
