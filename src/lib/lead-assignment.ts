@@ -1,4 +1,4 @@
-import type { Prisma, UserAvailability } from "@prisma/client";
+import type { UserAvailability } from "@prisma/client";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
 
@@ -237,7 +237,6 @@ export async function setAttendantStatus({
 }
 
 async function createAssignmentHistory(
-  tx: Prisma.TransactionClient,
   data: {
     companyId: string;
     conversationId: string;
@@ -248,7 +247,7 @@ async function createAssignmentHistory(
   }
 ) {
   try {
-    await tx.leadAssignmentHistory.create({
+    await prisma.leadAssignmentHistory.create({
       data: {
         companyId: data.companyId,
         conversationId: data.conversationId,
@@ -278,7 +277,7 @@ export async function assignConversationToUser({
   mode?: string;
   force?: boolean;
 }) {
-  return prisma.$transaction(async (tx) => {
+  const updated = await prisma.$transaction(async (tx) => {
     const conversation = await tx.conversation.findFirst({
       where: { id: conversationId, contact: { companyId } },
       select: { id: true, agentId: true }
@@ -298,17 +297,19 @@ export async function assignConversationToUser({
       include: conversationInclude
     });
 
-    await createAssignmentHistory(tx, {
-      companyId,
-      conversationId,
-      assignedToUserId,
-      assignedByUserId,
-      mode,
-      action: "ASSIGNED"
-    });
-
     return mapConversation(updated);
   });
+
+  await createAssignmentHistory({
+    companyId,
+    conversationId,
+    assignedToUserId,
+    assignedByUserId,
+    mode,
+    action: "ASSIGNED"
+  });
+
+  return updated;
 }
 
 export async function unassignConversation({
@@ -320,7 +321,7 @@ export async function unassignConversation({
   conversationId: string;
   assignedByUserId?: string | null;
 }) {
-  return prisma.$transaction(async (tx) => {
+  const updated = await prisma.$transaction(async (tx) => {
     const conversation = await tx.conversation.findFirst({
       where: { id: conversationId, contact: { companyId } },
       select: { id: true }
@@ -336,17 +337,19 @@ export async function unassignConversation({
       include: conversationInclude
     });
 
-    await createAssignmentHistory(tx, {
-      companyId,
-      conversationId,
-      assignedToUserId: null,
-      assignedByUserId,
-      mode: "UNASSIGN",
-      action: "UNASSIGNED"
-    });
-
     return mapConversation(updated);
   });
+
+  await createAssignmentHistory({
+    companyId,
+    conversationId,
+    assignedToUserId: null,
+    assignedByUserId,
+    mode: "UNASSIGN",
+    action: "UNASSIGNED"
+  });
+
+  return updated;
 }
 
 export async function maybeAutoAssignConversation({
