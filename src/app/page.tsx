@@ -582,6 +582,53 @@ function formatRelativeDate(value: string) {
   return `ha ${Math.floor(hours / 24)} dia(s)`;
 }
 
+function minutesSince(value?: string | null) {
+  if (!value) return null;
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) return null;
+  return Math.max(0, Math.floor((Date.now() - timestamp) / 60000));
+}
+
+function getConversationAttention(item: ConversationRow) {
+  const lastInboundAge = minutesSince(item.lastInboundMessageAt);
+  const lastInboundAt = item.lastInboundMessageAt ? new Date(item.lastInboundMessageAt).getTime() : 0;
+  const lastReadAt = item.lastReadAt ? new Date(item.lastReadAt).getTime() : 0;
+  const hasUnread = (item.unreadCount ?? 0) > 0;
+  const waitingCustomer =
+    item.lastMessage?.direction === "inbound" ||
+    Boolean(lastInboundAt && (!lastReadAt || lastInboundAt > lastReadAt));
+
+  if (hasUnread) {
+    return {
+      label: "Nova mensagem",
+      tone: "green" as const,
+      pulse: true
+    };
+  }
+
+  if (!item.agent) {
+    return {
+      label: "Sem responsavel",
+      tone: "amber" as const,
+      pulse: false
+    };
+  }
+
+  if (waitingCustomer && lastInboundAge !== null && lastInboundAge >= 30) {
+    return {
+      label: lastInboundAge >= 120 ? "Resposta atrasada" : "Aguardando resposta",
+      tone: lastInboundAge >= 120 ? ("rose" as const) : ("amber" as const),
+      pulse: false
+    };
+  }
+
+  return {
+    label: "Em dia",
+    tone: "slate" as const,
+    pulse: false
+  };
+}
+
 function formatMessagePreview(value?: string | null) {
   return value?.replace(/\s+/g, " ").trim() || "Sem mensagens.";
 }
@@ -4402,20 +4449,44 @@ function ConversationList({
             item.lastMessagePreview ?? item.lastMessage?.body ?? item.summary
           );
           const messageTime = item.lastMessageAt ?? item.lastMessage?.createdAt;
+          const attention = getConversationAttention(item);
           return (
             <button
               key={item.id}
               className={clsx(
-                "group block w-full p-4 text-left transition-colors hover:bg-slate-50",
-                hasUnread && "bg-emerald-50/45",
+                "group relative block w-full p-4 text-left transition-colors hover:bg-slate-50",
+                attention.tone === "green" && "bg-emerald-50/45",
+                attention.tone === "amber" && !selected && "bg-amber-50/30",
+                attention.tone === "rose" && !selected && "bg-rose-50/30",
                 selected && "bg-blue-50/70"
               )}
               onClick={() => onSelectConversation(item)}
             >
+              <span
+                className={clsx(
+                  "absolute left-0 top-4 h-10 w-1 rounded-r-full",
+                  attention.tone === "green" && "bg-emerald-500",
+                  attention.tone === "amber" && "bg-amber-400",
+                  attention.tone === "rose" && "bg-rose-500",
+                  attention.tone === "slate" && "bg-transparent"
+                )}
+              />
               <div className="flex items-start gap-3">
                 <div className="relative grid h-10 w-10 shrink-0 place-items-center rounded-full bg-slate-100 text-xs font-bold text-slate-700">
                   {item.contact.name.slice(0, 2).toUpperCase()}
-                  <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-emerald-500" />
+                  <span
+                    className={clsx(
+                      "absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white",
+                      attention.pulse && "animate-pulse",
+                      attention.tone === "green"
+                        ? "bg-emerald-500"
+                        : attention.tone === "amber"
+                          ? "bg-amber-400"
+                          : attention.tone === "rose"
+                            ? "bg-rose-500"
+                            : "bg-emerald-500"
+                    )}
+                  />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
@@ -4436,6 +4507,20 @@ function ConversationList({
                       {messageTime ? formatRelativeDate(messageTime) : item.status}
                     </span>
                   </div>
+                  {attention.tone !== "slate" && (
+                    <div className="mt-1">
+                      <span
+                        className={clsx(
+                          "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+                          attention.tone === "green" && "bg-emerald-100 text-emerald-700",
+                          attention.tone === "amber" && "bg-amber-100 text-amber-700",
+                          attention.tone === "rose" && "bg-rose-100 text-rose-700"
+                        )}
+                      >
+                        {attention.label}
+                      </span>
+                    </div>
+                  )}
                   <div className="mt-1 flex items-start justify-between gap-3">
                     <p
                       className={clsx(
@@ -4452,16 +4537,11 @@ function ConversationList({
                     )}
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                    <span
-                      className={clsx(
-                        "rounded-full px-2 py-0.5 text-[11px] font-semibold",
-                        item.agent
-                          ? "bg-slate-100 text-slate-500"
-                          : "bg-amber-50 text-amber-700"
-                      )}
-                    >
-                      {item.agent?.name ?? "Sem resp."}
-                    </span>
+                    {item.agent && (
+                      <span className="max-w-[7rem] truncate rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+                        {item.agent.name}
+                      </span>
+                    )}
                     {item.tags.slice(0, 2).map((tag) => (
                       <TagBadge key={tag.id} tag={tag} compact />
                     ))}
