@@ -21,13 +21,14 @@ function fallbackIntegrations() {
     bankId: bank.id,
     bankName: bank.name,
     provider: bank.provider,
-    baseUrl: null,
-    authType: "none",
+    baseUrl: bank.provider === "newcorban" ? "https://viva.newcorban.com.br" : null,
+    authType: bank.provider === "newcorban" ? "login-sms" : "none",
     hasApiKey: false,
     apiKeyPreview: null,
     username: null,
     hasPassword: false,
-    status: bank.provider === "manual" ? "MANUAL" : "PENDING",
+    status:
+      bank.provider === "manual" ? "MANUAL" : bank.provider === "newcorban" ? "ASSISTED" : "PENDING",
     lastTestAt: null,
     lastTestStatus: null,
     lastTestMessage: "Tabela de integrações aguardando provisionamento.",
@@ -82,12 +83,16 @@ export async function PATCH(request: NextRequest) {
       where: { id: current.id },
       data: {
         provider: body.provider || current.provider,
-        baseUrl: body.baseUrl?.trim() || null,
+        baseUrl:
+          body.baseUrl?.trim() ||
+          (body.provider === "newcorban" || current.provider === "newcorban"
+            ? "https://viva.newcorban.com.br"
+            : null),
         authType: body.authType || current.authType,
         apiKey: body.apiKey === undefined ? current.apiKey : body.apiKey.trim() || null,
         username: body.username === undefined ? current.username : body.username.trim() || null,
         password: body.password === undefined ? current.password : body.password || null,
-        status: body.status || current.status
+        status: body.status || (body.provider === "newcorban" ? "ASSISTED" : current.status)
       }
     });
 
@@ -101,13 +106,25 @@ export async function PATCH(request: NextRequest) {
         bankId: bank.id,
         bankName: bank.name,
         provider: fallbackBody?.provider || bank.provider,
-        baseUrl: fallbackBody?.baseUrl || null,
-        authType: fallbackBody?.authType || "none",
+        baseUrl:
+          fallbackBody?.baseUrl ||
+          (fallbackBody?.provider === "newcorban" || bank.provider === "newcorban"
+            ? "https://viva.newcorban.com.br"
+            : null),
+        authType:
+          fallbackBody?.authType ||
+          (fallbackBody?.provider === "newcorban" || bank.provider === "newcorban"
+            ? "login-sms"
+            : "none"),
         hasApiKey: Boolean(fallbackBody?.apiKey),
         apiKeyPreview: fallbackBody?.apiKey ? "****" : null,
         username: fallbackBody?.username || null,
         hasPassword: Boolean(fallbackBody?.password),
-        status: fallbackBody?.status || "MANUAL",
+        status:
+          fallbackBody?.status ||
+          (fallbackBody?.provider === "newcorban" || bank.provider === "newcorban"
+            ? "ASSISTED"
+            : "MANUAL"),
         lastTestAt: null,
         lastTestStatus: null,
         lastTestMessage: "Configuração recebida em modo temporário.",

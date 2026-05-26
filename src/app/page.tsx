@@ -6411,13 +6411,17 @@ function SimulacaoClt({
       })
     });
     const data = (await response.json().catch(() => null)) as
-      | { offers?: CltSimulationOffer[]; error?: string }
+      | { offers?: CltSimulationOffer[]; provider?: string; mode?: string; nextStep?: string; error?: string }
       | null;
 
     if (response.ok && data?.offers?.length) {
       setOffers(data.offers);
       setSelectedOfferId(data.offers[0].id);
-      setMessage("Simulacao CLT gerada.");
+      setMessage(
+        data.mode === "NEWCORBAN_ASSISTED"
+          ? data.nextStep || "Simulacao pronta para conferencia no Newcorban."
+          : "Simulacao CLT gerada."
+      );
       void loadCltLogs();
     } else {
       setMessage(data?.error || "Nao foi possivel simular CLT.");
@@ -6615,6 +6619,7 @@ function SimulacaoClt({
                     }
                   >
                     <option value="none">Sem autenticação</option>
+                    <option value="login-sms">Login + SMS</option>
                     <option value="api-key">API Key</option>
                     <option value="basic">Usuário e senha</option>
                     <option value="oauth">OAuth/Token</option>
@@ -6792,6 +6797,17 @@ function SimulacaoClt({
               </label>
             </div>
 
+            {selectedBank?.provider === "newcorban" && (
+              <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-slate-700">
+                <p className="font-black text-primary">Fluxo Newcorban assistido</p>
+                <p className="mt-1">
+                  Para este banco, o CRM prepara CPF, telefone e oferta. A validacao de margem
+                  deve ser conferida no Newcorban com login e codigo SMS ate ativarmos a
+                  automacao completa.
+                </p>
+              </div>
+            )}
+
             <div className="grid gap-3 sm:grid-cols-2">
               <ContactInput
                 placeholder="CPF"
@@ -6966,6 +6982,8 @@ function IntegrationStatusBadge({ status }: { status: string }) {
   const label =
     normalized === "CONNECTED"
       ? "Conectado"
+      : normalized === "ASSISTED"
+        ? "Assistido"
       : normalized === "PENDING"
         ? "Pendente"
         : normalized === "ERROR"
@@ -6978,6 +6996,8 @@ function IntegrationStatusBadge({ status }: { status: string }) {
         "rounded-full px-2 py-1 text-[11px] font-black",
         normalized === "CONNECTED"
           ? "bg-emerald-50 text-emerald-700"
+          : normalized === "ASSISTED"
+            ? "bg-blue-50 text-primary"
           : normalized === "ERROR"
             ? "bg-rose-50 text-rose-700"
             : normalized === "PENDING"

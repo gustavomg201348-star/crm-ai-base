@@ -47,6 +47,11 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       provider: bank.provider,
+      mode: bank.provider === "newcorban" ? "NEWCORBAN_ASSISTED" : "LOCAL",
+      nextStep:
+        bank.provider === "newcorban"
+          ? "Validar a margem no Newcorban com login/SMS e salvar a proposta no CRM."
+          : "Oferta gerada pelo simulador local.",
       offers
     });
   } catch {

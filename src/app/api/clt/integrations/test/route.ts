@@ -29,18 +29,23 @@ export async function POST(request: NextRequest) {
     }
 
     const isManual = current.provider === "manual";
+    const isNewcorban = current.provider === "newcorban";
     const hasMinimumConfig =
-      isManual || Boolean(current.baseUrl && (current.authType === "none" || current.apiKey || current.username));
+      isManual ||
+      isNewcorban ||
+      Boolean(current.baseUrl && (current.authType === "none" || current.apiKey || current.username));
     const updated = await prisma.cltIntegration.update({
       where: { id: current.id },
       data: {
-        status: hasMinimumConfig ? (isManual ? "MANUAL" : "CONNECTED") : "PENDING",
+        status: hasMinimumConfig ? (isManual ? "MANUAL" : isNewcorban ? "ASSISTED" : "CONNECTED") : "PENDING",
         lastTestAt: new Date(),
         lastTestStatus: hasMinimumConfig ? "SUCCESS" : "ERROR",
         lastTestMessage: hasMinimumConfig
           ? isManual
             ? "Provider manual pronto para uso operacional."
-            : "Configuracao minima encontrada. Teste real da API sera ativado na homologacao."
+            : isNewcorban
+              ? "Newcorban assistido pronto: operador faz login, informa SMS e replica a simulacao no CRM."
+              : "Configuracao minima encontrada. Teste real da API sera ativado na homologacao."
           : "Informe URL base e credenciais antes de conectar."
       }
     });
@@ -61,7 +66,7 @@ export async function POST(request: NextRequest) {
         apiKeyPreview: null,
         username: null,
         hasPassword: false,
-        status: "MANUAL",
+        status: bank.provider === "newcorban" ? "ASSISTED" : "MANUAL",
         lastTestAt: new Date(),
         lastTestStatus: "SUCCESS",
         lastTestMessage: "Provider manual pronto; persistência será ativada quando a tabela CLT estiver disponível.",

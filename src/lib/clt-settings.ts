@@ -19,12 +19,32 @@ export async function ensureCltIntegrations(companyId: string) {
             bankId: bank.id,
             bankName: bank.name,
             provider: bank.provider,
-            status: bank.provider === "manual" ? "MANUAL" : "PENDING"
+            baseUrl: bank.provider === "newcorban" ? "https://viva.newcorban.com.br" : null,
+            authType: bank.provider === "newcorban" ? "login-sms" : "none",
+            status:
+              bank.provider === "manual" ? "MANUAL" : bank.provider === "newcorban" ? "ASSISTED" : "PENDING"
           }
         })
       )
     );
   }
+
+  await Promise.all(
+    cltBanks
+      .filter((bank) => bank.provider === "newcorban")
+      .map((bank) =>
+        prisma.cltIntegration.updateMany({
+          where: { companyId, bankId: bank.id, provider: { not: "newcorban" } },
+          data: {
+            provider: "newcorban",
+            baseUrl: "https://viva.newcorban.com.br",
+            authType: "login-sms",
+            status: "ASSISTED",
+            lastTestMessage: "Fluxo assistido: login no Newcorban com validacao por SMS."
+          }
+        })
+      )
+  );
 
   return prisma.cltIntegration.findMany({
     where: { companyId },

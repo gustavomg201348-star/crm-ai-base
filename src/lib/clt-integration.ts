@@ -58,7 +58,7 @@ export const cltBanks: CltBank[] = [
   {
     id: "mercantil",
     name: "Mercantil",
-    provider: "manual",
+    provider: "newcorban",
     products: ["NOVO - DIGITAL CONSIGNADO PRIVADO CORBAN"],
     tags: ["CLT", "Credito do Trabalhador"]
   },
@@ -145,6 +145,8 @@ export function simulateClt(input: CltSimulationInput): CltSimulationOffer[] {
   const financedAmount = installmentAmount * installments * 0.333;
   const releasedAmount = financedAmount * 0.965 * insuranceFactor;
 
+  const mercantilByNewcorban = bank.id === "mercantil" && bank.provider === "newcorban";
+
   return [
     {
       id: `${bank.id}-padrao-${installments}`,
@@ -152,7 +154,9 @@ export function simulateClt(input: CltSimulationInput): CltSimulationOffer[] {
       bankName: bank.name,
       product: input.product || bank.products[0],
       tableCode: bank.id === "mercantil" ? "6714" : "CLT-001",
-      tableName: "Tabela Normal/Padrao",
+      tableName: mercantilByNewcorban
+        ? "Tabela Normal/Padrao - Newcorban assistido"
+        : "Tabela Normal/Padrao",
       installments,
       monthlyRate: 4.98,
       installmentAmount: Number(installmentAmount.toFixed(2)),
