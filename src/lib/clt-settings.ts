@@ -1,7 +1,101 @@
 import { cltBanks } from "@/lib/clt-integration";
 import { prisma } from "@/lib/db";
 
+async function ensureCltSchema() {
+  if ((process.env.DATABASE_URL || "").startsWith("file:")) {
+    return;
+  }
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "CltIntegration" (
+      "id" TEXT NOT NULL,
+      "companyId" TEXT NOT NULL,
+      "bankId" TEXT NOT NULL,
+      "bankName" TEXT NOT NULL,
+      "provider" TEXT NOT NULL DEFAULT 'manual',
+      "baseUrl" TEXT,
+      "authType" TEXT NOT NULL DEFAULT 'none',
+      "apiKey" TEXT,
+      "username" TEXT,
+      "password" TEXT,
+      "newcorbanIdentifier" TEXT,
+      "digitadorCode" TEXT,
+      "certifiedAgentCpf" TEXT,
+      "actingUf" TEXT,
+      "smsStatus" TEXT,
+      "smsRequestedAt" TIMESTAMP(3),
+      "status" TEXT NOT NULL DEFAULT 'MANUAL',
+      "lastTestAt" TIMESTAMP(3),
+      "lastTestStatus" TEXT,
+      "lastTestMessage" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "CltIntegration_pkey" PRIMARY KEY ("id")
+    );
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "CltIntegration"
+      ADD COLUMN IF NOT EXISTS "newcorbanIdentifier" TEXT,
+      ADD COLUMN IF NOT EXISTS "digitadorCode" TEXT,
+      ADD COLUMN IF NOT EXISTS "certifiedAgentCpf" TEXT,
+      ADD COLUMN IF NOT EXISTS "actingUf" TEXT,
+      ADD COLUMN IF NOT EXISTS "smsStatus" TEXT,
+      ADD COLUMN IF NOT EXISTS "smsRequestedAt" TIMESTAMP(3);
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "CltIntegration_companyId_bankId_key"
+      ON "CltIntegration" ("companyId", "bankId");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "CltIntegration_companyId_idx" ON "CltIntegration" ("companyId");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "CltIntegration_status_idx" ON "CltIntegration" ("status");
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "CltSimulationLog" (
+      "id" TEXT NOT NULL,
+      "companyId" TEXT NOT NULL,
+      "userId" TEXT,
+      "contactId" TEXT,
+      "bankId" TEXT,
+      "bankName" TEXT,
+      "action" TEXT NOT NULL,
+      "cpf" TEXT,
+      "phone" TEXT,
+      "status" TEXT NOT NULL DEFAULT 'SUCCESS',
+      "message" TEXT,
+      "inputJson" TEXT,
+      "outputJson" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "CltSimulationLog_pkey" PRIMARY KEY ("id")
+    );
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "CltSimulationLog_companyId_createdAt_idx"
+      ON "CltSimulationLog" ("companyId", "createdAt");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "CltSimulationLog_userId_idx" ON "CltSimulationLog" ("userId");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "CltSimulationLog_contactId_idx" ON "CltSimulationLog" ("contactId");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "CltSimulationLog_bankId_idx" ON "CltSimulationLog" ("bankId");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "CltSimulationLog_status_idx" ON "CltSimulationLog" ("status");
+  `);
+}
+
 export async function ensureCltIntegrations(companyId: string) {
+  await ensureCltSchema();
+
   const existing = await prisma.cltIntegration.findMany({
     where: { companyId }
   });
