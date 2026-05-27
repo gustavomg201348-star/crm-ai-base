@@ -57,13 +57,14 @@ export async function POST(request: NextRequest) {
         lastTestAt: new Date(),
         lastTestStatus: "PENDING",
         lastTestMessage:
-          "SMS solicitado no fluxo assistido. Informe o codigo recebido para liberar as credenciais."
+          "Autenticacao assistida preparada. Solicite o SMS no Newcorban e informe o codigo recebido."
       }
     });
 
     return NextResponse.json({
       integration: mapCltIntegration(updated),
-      message: "SMS solicitado. Informe o codigo recebido para concluir a autenticacao."
+      message:
+        "Fluxo assistido preparado. O envio real do SMS ainda precisa ser solicitado no Newcorban."
     });
   } catch {
     return NextResponse.json(

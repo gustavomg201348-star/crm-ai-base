@@ -6524,31 +6524,38 @@ function SimulacaoClt({
     }
     setAuthenticatingBankId(integrationForm.bankId);
     setMessage("");
-    const response = await fetch("/api/clt/integrations/authenticate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        bankId: integrationForm.bankId,
-        username: integrationForm.username,
-        password: integrationForm.password
-      })
-    });
-    const data = (await response.json().catch(() => null)) as
-      | { error?: string; message?: string; integration?: CltIntegrationRow }
-      | null;
+    try {
+      const response = await fetch("/api/clt/integrations/authenticate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bankId: integrationForm.bankId,
+          username: integrationForm.username,
+          password: integrationForm.password
+        })
+      });
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string; message?: string; integration?: CltIntegrationRow }
+        | null;
 
-    if (response.ok) {
-      setMessage(data?.message || "SMS solicitado.");
-      if (data?.integration) {
-        setIntegrations((current) =>
-          current.map((item) => (item.bankId === data.integration!.bankId ? data.integration! : item))
-        );
+      if (response.ok) {
+        setMessage(data?.message || "Fluxo assistido preparado.");
+        if (data?.integration) {
+          setIntegrations((current) =>
+            current.map((item) =>
+              item.bankId === data.integration!.bankId ? data.integration! : item
+            )
+          );
+        }
+        await loadCltIntegrations();
+      } else {
+        setMessage(data?.error || "Nao foi possivel autenticar Newcorban.");
       }
-      await loadCltIntegrations();
-    } else {
-      setMessage(data?.error || "Nao foi possivel autenticar Newcorban.");
+    } catch {
+      setMessage("Falha de conexao ao preparar autenticacao Newcorban. Tente novamente.");
+    } finally {
+      setAuthenticatingBankId("");
     }
-    setAuthenticatingBankId("");
   }
 
   async function verifyNewcorbanSms() {
@@ -6762,9 +6769,9 @@ function SimulacaoClt({
                   <div>
                     <p className="text-sm font-black text-primary">Credenciais Mercantil/Newcorban</p>
                     <p className="mt-1 text-xs text-slate-600">
-                      Primeiro salve ou confirme o login e a senha. Depois entre no perfil para
-                      solicitar o SMS, informe o codigo recebido e conclua com digitador, CPF
-                      certificado e UF.
+                      Primeiro salve ou confirme o login e a senha. Nesta etapa o CRM apenas prepara
+                      a autenticacao assistida; o SMS real ainda precisa ser solicitado no Newcorban
+                      ate conectarmos a automacao/API do banco.
                     </p>
                   </div>
                   <div className="flex flex-col gap-2 sm:flex-row">
@@ -6779,7 +6786,7 @@ function SimulacaoClt({
                       }
                       onClick={() => void authenticateNewcorban()}
                     >
-                      {authenticatingBankId === integrationForm.bankId ? "Entrando..." : "Entrar no perfil e solicitar SMS"}
+                      {authenticatingBankId === integrationForm.bankId ? "Preparando..." : "Preparar autenticacao assistida"}
                     </button>
                     <span className="flex items-center rounded-2xl bg-white px-3 text-xs font-bold text-slate-500">
                       SMS: {selectedIntegration?.smsStatus || "nao solicitado"}
