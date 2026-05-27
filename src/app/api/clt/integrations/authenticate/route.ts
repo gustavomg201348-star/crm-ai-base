@@ -18,13 +18,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Banco obrigatorio." }, { status: 400 });
     }
 
-    if (!body.username?.trim() || !body.password) {
-      return NextResponse.json(
-        { error: "Informe usuario e senha para autenticar." },
-        { status: 400 }
-      );
-    }
-
     await ensureCltIntegrations(session.companyId);
 
     const current = await prisma.cltIntegration.findUnique({
@@ -42,11 +35,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const username = body.username?.trim() || current.username?.trim();
+    const password = body.password || current.password;
+
+    if (!username || !password) {
+      return NextResponse.json(
+        { error: "Informe usuario e senha para entrar no perfil." },
+        { status: 400 }
+      );
+    }
+
     const updated = await prisma.cltIntegration.update({
       where: { id: current.id },
       data: {
-        username: body.username.trim(),
-        password: body.password,
+        username,
+        password,
         authType: "login-sms",
         status: "SMS_PENDING",
         smsStatus: "SMS_SENT",

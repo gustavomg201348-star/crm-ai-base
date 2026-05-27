@@ -6518,6 +6518,10 @@ function SimulacaoClt({
 
   async function authenticateNewcorban() {
     if (!integrationForm.bankId) return;
+    if (!integrationForm.password && !selectedIntegration?.hasPassword) {
+      setMessage("Informe a senha do banco ou salve a integracao com a senha antes de entrar no perfil.");
+      return;
+    }
     setAuthenticatingBankId(integrationForm.bankId);
     setMessage("");
     const response = await fetch("/api/clt/integrations/authenticate", {
@@ -6758,23 +6762,24 @@ function SimulacaoClt({
                   <div>
                     <p className="text-sm font-black text-primary">Credenciais Mercantil/Newcorban</p>
                     <p className="mt-1 text-xs text-slate-600">
-                      Use login e senha para solicitar o SMS. Depois informe o codigo recebido,
-                      codigo digitador, CPF agente certificado e UF.
+                      Primeiro salve ou confirme o login e a senha. Depois entre no perfil para
+                      solicitar o SMS, informe o codigo recebido e conclua com digitador, CPF
+                      certificado e UF.
                     </p>
                   </div>
                   <div className="flex flex-col gap-2 sm:flex-row">
                     <button
                       type="button"
-                      className="h-10 flex-1 rounded-2xl bg-primary px-4 text-sm font-bold text-white disabled:opacity-60"
+                      className="h-10 flex-1 rounded-2xl bg-primary px-4 text-sm font-bold text-white shadow-soft disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
                       disabled={
                         !integrationForm.bankId ||
                         !integrationForm.username ||
-                        !integrationForm.password ||
+                        (!integrationForm.password && !selectedIntegration?.hasPassword) ||
                         authenticatingBankId === integrationForm.bankId
                       }
                       onClick={() => void authenticateNewcorban()}
                     >
-                      {authenticatingBankId === integrationForm.bankId ? "Autenticando..." : "Autenticar e solicitar SMS"}
+                      {authenticatingBankId === integrationForm.bankId ? "Entrando..." : "Entrar no perfil e solicitar SMS"}
                     </button>
                     <span className="flex items-center rounded-2xl bg-white px-3 text-xs font-bold text-slate-500">
                       SMS: {selectedIntegration?.smsStatus || "nao solicitado"}
@@ -6837,10 +6842,10 @@ function SimulacaoClt({
               <div className="flex flex-col gap-2 sm:flex-row">
                 <button
                   type="button"
-                  className="h-10 flex-1 rounded-2xl bg-primary px-4 text-sm font-bold text-white"
+                  className="h-10 flex-1 rounded-2xl bg-primary px-4 text-sm font-bold text-white shadow-soft hover:bg-blue-700"
                   onClick={() => void saveIntegration()}
                 >
-                  Salvar integração
+                  Salvar login e senha
                 </button>
                 <button
                   type="button"
