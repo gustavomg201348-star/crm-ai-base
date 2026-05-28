@@ -2852,6 +2852,7 @@ export default function Home() {
               contacts={contacts}
               loading={campaignsLoading}
               onCreateCampaign={handleCreateCampaign}
+              onRefreshCampaigns={loadCampaigns}
             />
           )}
           {active === "chatbot" && <Chatbot />}
@@ -8394,7 +8395,8 @@ function Disparos({
   channels,
   contacts,
   loading,
-  onCreateCampaign
+  onCreateCampaign,
+  onRefreshCampaigns
 }: {
   campaigns: CampaignRow[];
   channels: ChannelRow[];
@@ -8410,6 +8412,7 @@ function Disparos({
     templateLanguage?: string;
     templateVariables?: string[];
   }) => Promise<CampaignRow | null>;
+  onRefreshCampaigns: () => Promise<void>;
 }) {
   const metaChannels = channels.filter(
     (channel) =>
@@ -8433,6 +8436,10 @@ function Disparos({
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
   const [lastCampaign, setLastCampaign] = useState<CampaignRow | null>(null);
+  const [selectedCampaignId, setSelectedCampaignId] = useState("");
+  const [campaignStatusFilter, setCampaignStatusFilter] = useState("ALL");
+  const [recipientStatusFilter, setRecipientStatusFilter] = useState("ALL");
+  const [campaignActionLoading, setCampaignActionLoading] = useState("");
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importPreview, setImportPreview] =
     useState<SpreadsheetImportPreview | null>(null);
@@ -8446,6 +8453,25 @@ function Disparos({
       setChannelId(metaChannels[0].id);
     }
   }, [channelId, metaChannels]);
+
+  useEffect(() => {
+    if (!selectedCampaignId && campaigns[0]?.id) {
+      setSelectedCampaignId(campaigns[0].id);
+    }
+  }, [campaigns, selectedCampaignId]);
+
+  useEffect(() => {
+    const hasRunningCampaign = campaigns.some((campaign) =>
+      ["SENDING", "PENDING", "DRAFT"].includes(campaign.status)
+    );
+    if (!hasRunningCampaign) return;
+
+    const interval = window.setInterval(() => {
+      void onRefreshCampaigns();
+    }, 10000);
+
+    return () => window.clearInterval(interval);
+  }, [campaigns, onRefreshCampaigns]);
 
   useEffect(() => {
     if (!image) {
@@ -8495,6 +8521,23 @@ function Disparos({
   const selectedContacts = contacts.filter((contact) =>
     selectedIds.includes(contact.id)
   );
+  const filteredCampaigns = campaigns.filter((campaign) =>
+    campaignStatusFilter === "ALL" ? true : campaign.status === campaignStatusFilter
+  );
+  const selectedCampaign =
+    campaigns.find((campaign) => campaign.id === selectedCampaignId) ??
+    filteredCampaigns[0] ??
+    campaigns[0] ??
+    null;
+  const selectedCampaignRecipients =
+    selectedCampaign?.recipients.filter((recipient) =>
+      recipientStatusFilter === "ALL"
+        ? true
+        : recipient.status === recipientStatusFilter
+    ) ?? [];
+  const selectedCampaignPending =
+    selectedCampaign?.recipients.filter((recipient) => recipient.status === "PENDING")
+      .length ?? 0;
   const importedContactsPreview =
     importPreview?.rows.filter((row) => row.status === "VALID").slice(0, 4) ?? [];
   const previewContact =
@@ -8665,6 +8708,105 @@ function Disparos({
     const link = document.createElement("a");
     link.href = url;
     link.download = "modelo-importacao-contatos.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function campaignStatusLabel(status: string) {
+    const labels: Record<string, string> = {
+      DRAFT: "Rascunho",
+      PENDING: "Pendente",
+      SENDING: "Enviando",
+      PAUSED: "Pausada",
+      CANCELED: "Cancelada",
+      COMPLETED: "Concluida",
+      PARTIAL: "Parcial",
+      FAILED: "Falhou"
+    };
+
+    return labels[status] ?? status;
+  }
+
+  function campaignStatusClass(status: string) {
+    if (["COMPLETED"].includes(status)) return "bg-emerald-50 text-emerald-700";
+    if (["SENDING", "PENDING", "DRAFT"].includes(status)) {
+      return "bg-blue-50 text-blue-700";
+    }
+    if (status === "PAUSED") return "bg-amber-50 text-amber-700";
+    if (["FAILED", "CANCELED"].includes(status)) return "bg-rose-50 text-rose-700";
+    return "bg-slate-100 text-slate-600";
+  }
+
+  async function runCampaignAction(campaignId: string, action: string) {
+    const actionLabel: Record<string, string> = {
+      start: "iniciar",
+      resume: "retomar",
+      pause: "pausar",
+      cancel: "cancelar"
+    };
+    const confirmed =
+      action === "cancel"
+        ? window.confirm("Cancelar esta campanha? Os pendentes serao marcados como cancelados.")
+        : true;
+    if (!confirmed) return;
+
+    setError("");
+    setCampaignActionLoading(`${campaignId}:${action}`);
+    const response = await fetch(`/api/campaigns/${campaignId}/${action}`, {
+      method: "PATCH"
+    });
+    setCampaignActionLoading("");
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setError(data?.error ?? `Nao foi possivel ${actionLabel[action] ?? "alterar"} campanha.`);
+      return;
+    }
+
+    await onRefreshCampaigns();
+  }
+
+  function downloadCampaignReport(campaign: CampaignRow) {
+    const rows = [
+      [
+        "campanha",
+        "contato",
+        "telefone",
+        "status",
+        "erro",
+        "enviado_em",
+        "entregue_em"
+      ],
+      ...campaign.recipients.map((recipient) => [
+        campaign.name,
+        recipient.contactName,
+        recipient.phone,
+        recipient.status,
+        recipient.errorMessage ?? "",
+        recipient.sentAt ?? "",
+        recipient.deliveredAt ?? ""
+      ])
+    ];
+    const csv = rows
+      .map((row) =>
+        row
+          .map((value) => `"${String(value).replace(/"/g, "\"\"")}"`)
+          .join(";")
+      )
+      .join("\n");
+    const url = URL.createObjectURL(
+      new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" })
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `relatorio-${campaign.name
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-zA-Z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .toLowerCase()}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   }
@@ -9240,15 +9382,48 @@ function Disparos({
         </div>
 
         <div className="rounded border border-line bg-white p-4 shadow-soft">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="font-bold">Historico de disparos</h3>
-            <span className="text-xs text-slate-500">
-              {loading ? "Carregando..." : `${campaigns.length} campanhas`}
-            </span>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="font-bold">Historico de disparos</h3>
+              <p className="text-xs text-slate-500">
+                {loading ? "Carregando..." : `${campaigns.length} campanhas`}
+              </p>
+            </div>
+            <button
+              className="inline-flex h-8 items-center gap-1 rounded-full border border-line px-3 text-xs font-semibold text-slate-600"
+              type="button"
+              onClick={() => void onRefreshCampaigns()}
+            >
+              <RefreshCcw className="h-3.5 w-3.5" />
+              Atualizar
+            </button>
           </div>
-          <div className="space-y-3">
-            {campaigns.slice(0, 8).map((campaign) => (
-              <div key={campaign.id} className="rounded border border-line p-3 text-sm">
+          <select
+            className="mb-3 h-9 w-full rounded border border-line bg-white px-3 text-xs font-semibold outline-none focus:border-brand"
+            value={campaignStatusFilter}
+            onChange={(event) => setCampaignStatusFilter(event.target.value)}
+          >
+            <option value="ALL">Todos os status</option>
+            <option value="SENDING">Enviando</option>
+            <option value="PAUSED">Pausadas</option>
+            <option value="COMPLETED">Concluidas</option>
+            <option value="PARTIAL">Parciais</option>
+            <option value="FAILED">Falhas</option>
+            <option value="CANCELED">Canceladas</option>
+          </select>
+          <div className="max-h-96 space-y-3 overflow-auto pr-1">
+            {filteredCampaigns.slice(0, 12).map((campaign) => (
+              <button
+                key={campaign.id}
+                className={clsx(
+                  "w-full rounded border p-3 text-left text-sm transition hover:bg-slate-50",
+                  selectedCampaign?.id === campaign.id
+                    ? "border-brand bg-blue-50/40"
+                    : "border-line bg-white"
+                )}
+                type="button"
+                onClick={() => setSelectedCampaignId(campaign.id)}
+              >
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="font-semibold">{campaign.name}</p>
@@ -9256,8 +9431,13 @@ function Disparos({
                       {formatRelativeDate(campaign.createdAt)}
                     </p>
                   </div>
-                  <span className="rounded bg-slate-100 px-2 py-1 text-xs font-semibold">
-                    {campaign.status}
+                  <span
+                    className={clsx(
+                      "rounded-full px-2 py-1 text-xs font-semibold",
+                      campaignStatusClass(campaign.status)
+                    )}
+                  >
+                    {campaignStatusLabel(campaign.status)}
                   </span>
                 </div>
                 <div className="mt-3 grid grid-cols-4 gap-2 text-center text-xs">
@@ -9278,15 +9458,187 @@ function Disparos({
                       ?.errorMessage}
                   </p>
                 )}
-              </div>
+              </button>
             ))}
-            {!campaigns.length && (
+            {!filteredCampaigns.length && (
               <p className="rounded border border-dashed border-line p-4 text-center text-sm text-slate-500">
                 Nenhum disparo registrado ainda.
               </p>
             )}
           </div>
         </div>
+
+        {selectedCampaign && (
+          <div className="rounded border border-line bg-white p-4 shadow-soft">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="font-bold">Acompanhamento</h3>
+                <p className="mt-1 text-xs text-slate-500">
+                  {selectedCampaign.channel.name}
+                  {selectedCampaign.channel.displayPhone
+                    ? ` - ${selectedCampaign.channel.displayPhone}`
+                    : ""}
+                </p>
+              </div>
+              <span
+                className={clsx(
+                  "rounded-full px-2 py-1 text-xs font-semibold",
+                  campaignStatusClass(selectedCampaign.status)
+                )}
+              >
+                {campaignStatusLabel(selectedCampaign.status)}
+              </span>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-2 text-center text-xs">
+              <span className="rounded-xl bg-slate-50 p-3">
+                <b className="block text-lg text-slate-950">{selectedCampaign.total}</b>
+                Total
+              </span>
+              <span className="rounded-xl bg-blue-50 p-3">
+                <b className="block text-lg text-blue-700">{selectedCampaignPending}</b>
+                Pendentes
+              </span>
+              <span className="rounded-xl bg-emerald-50 p-3">
+                <b className="block text-lg text-emerald-700">{selectedCampaign.sent}</b>
+                Enviados
+              </span>
+              <span className="rounded-xl bg-rose-50 p-3">
+                <b className="block text-lg text-rose-700">{selectedCampaign.failed}</b>
+                Erros
+              </span>
+            </div>
+
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full rounded-full bg-brand transition-all"
+                style={{
+                  width: `${Math.min(
+                    100,
+                    Math.round(
+                      ((selectedCampaign.sent + selectedCampaign.failed) /
+                        Math.max(selectedCampaign.total, 1)) *
+                        100
+                    )
+                  )}%`
+                }}
+              />
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              {["DRAFT", "PENDING", "PAUSED"].includes(selectedCampaign.status) && (
+                <button
+                  className="inline-flex h-9 items-center gap-2 rounded-full bg-brand px-3 text-xs font-semibold text-white disabled:opacity-60"
+                  disabled={Boolean(campaignActionLoading)}
+                  type="button"
+                  onClick={() =>
+                    void runCampaignAction(
+                      selectedCampaign.id,
+                      selectedCampaign.status === "PAUSED" ? "resume" : "start"
+                    )
+                  }
+                >
+                  <Send className="h-3.5 w-3.5" />
+                  {campaignActionLoading.includes(selectedCampaign.id)
+                    ? "Processando..."
+                    : selectedCampaign.status === "PAUSED"
+                      ? "Retomar"
+                      : "Iniciar"}
+                </button>
+              )}
+              {selectedCampaign.status === "SENDING" && (
+                <button
+                  className="inline-flex h-9 items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 text-xs font-semibold text-amber-700 disabled:opacity-60"
+                  disabled={Boolean(campaignActionLoading)}
+                  type="button"
+                  onClick={() => void runCampaignAction(selectedCampaign.id, "pause")}
+                >
+                  <Clock3 className="h-3.5 w-3.5" />
+                  Pausar
+                </button>
+              )}
+              {!["COMPLETED", "FAILED", "CANCELED"].includes(selectedCampaign.status) && (
+                <button
+                  className="inline-flex h-9 items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-3 text-xs font-semibold text-rose-700 disabled:opacity-60"
+                  disabled={Boolean(campaignActionLoading)}
+                  type="button"
+                  onClick={() => void runCampaignAction(selectedCampaign.id, "cancel")}
+                >
+                  <Square className="h-3.5 w-3.5" />
+                  Cancelar
+                </button>
+              )}
+              <button
+                className="inline-flex h-9 items-center gap-2 rounded-full border border-line px-3 text-xs font-semibold text-slate-600"
+                type="button"
+                onClick={() => downloadCampaignReport(selectedCampaign)}
+              >
+                <Download className="h-3.5 w-3.5" />
+                Exportar
+              </button>
+            </div>
+
+            <div className="mt-4">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold">Destinatarios</p>
+                <select
+                  className="h-8 rounded border border-line bg-white px-2 text-xs font-semibold outline-none"
+                  value={recipientStatusFilter}
+                  onChange={(event) => setRecipientStatusFilter(event.target.value)}
+                >
+                  <option value="ALL">Todos</option>
+                  <option value="PENDING">Pendentes</option>
+                  <option value="SENT">Enviados</option>
+                  <option value="DELIVERED">Entregues</option>
+                  <option value="FAILED">Erros</option>
+                  <option value="CANCELED">Cancelados</option>
+                </select>
+              </div>
+              <div className="max-h-72 space-y-2 overflow-auto pr-1">
+                {selectedCampaignRecipients.slice(0, 120).map((recipient) => (
+                  <div
+                    key={recipient.id}
+                    className="rounded-xl border border-line bg-slate-50 p-3 text-xs"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold text-slate-900">
+                          {recipient.contactName}
+                        </p>
+                        <p className="text-slate-500">{recipient.phone}</p>
+                      </div>
+                      <span
+                        className={clsx(
+                          "shrink-0 rounded-full px-2 py-1 font-semibold",
+                          recipient.status === "FAILED"
+                            ? "bg-rose-50 text-rose-700"
+                            : recipient.status === "DELIVERED" ||
+                                recipient.status === "SENT"
+                              ? "bg-emerald-50 text-emerald-700"
+                              : recipient.status === "CANCELED"
+                                ? "bg-slate-100 text-slate-500"
+                                : "bg-blue-50 text-blue-700"
+                        )}
+                      >
+                        {recipient.status}
+                      </span>
+                    </div>
+                    {recipient.errorMessage && (
+                      <p className="mt-2 rounded-lg bg-rose-50 p-2 text-rose-700">
+                        {recipient.errorMessage}
+                      </p>
+                    )}
+                  </div>
+                ))}
+                {!selectedCampaignRecipients.length && (
+                  <p className="rounded border border-dashed border-line p-4 text-center text-sm text-slate-500">
+                    Nenhum destinatario neste filtro.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </aside>
     </div>
   );
