@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { createActivity } from "@/lib/activities";
+import { renderCampaignMessage } from "@/lib/contact-import.service";
 import { prisma } from "@/lib/db";
 import {
   readMetaMessageId,
@@ -75,6 +76,12 @@ function normalizePhone(phone: string) {
   return phone.replace(/\D/g, "");
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 async function findOrCreateCampaignConversation({
   db,
   companyId,
@@ -119,8 +126,20 @@ async function refreshCampaignCounters(campaignId: string) {
     prisma.campaignRecipient.count({ where: { campaignId } })
   ]);
 
+  const campaign = await prisma.campaign.findUnique({
+    where: { id: campaignId },
+    select: { status: true }
+  });
+  if (campaign?.status === "PAUSED" || campaign?.status === "CANCELED") return;
+
   const completed = sent + failed >= total;
-  const status = completed ? (failed === total ? "FAILED" : failed ? "PARTIAL" : "COMPLETED") : "SENDING";
+  const status = completed
+    ? failed === total
+      ? "FAILED"
+      : failed
+        ? "PARTIAL"
+        : "COMPLETED"
+    : "SENDING";
 
   await prisma.campaign.update({
     where: { id: campaignId },
@@ -176,26 +195,48 @@ export async function processCampaign(campaignId: string) {
   }
 
   for (const recipient of campaign.recipients) {
+    const currentCampaign = await prisma.campaign.findUnique({
+      where: { id: campaign.id },
+      select: { status: true }
+    });
+    if (currentCampaign?.status === "PAUSED") break;
+    if (currentCampaign?.status === "CANCELED") {
+      await prisma.campaignRecipient.updateMany({
+        where: { campaignId: campaign.id, status: "PENDING" },
+        data: {
+          status: "CANCELED",
+          failedAt: new Date(),
+          errorMessage: "Campanha cancelada antes do envio."
+        }
+      });
+      break;
+    }
+
     try {
       const to = normalizePhone(recipient.phone);
+      const personalizedMessage = renderCampaignMessage(campaign.message, {
+        name: recipient.contact.name,
+        cpf: recipient.contact.cpf,
+        phone: recipient.contact.phone
+      });
       const metaResponse = mediaId
         ? await sendMetaImageMessage({
             phoneNumberId: campaign.channel.phoneNumberId,
             accessToken: campaign.channel.accessToken,
             to,
             mediaId,
-            caption: campaign.message
+            caption: personalizedMessage
           })
         : await sendMetaTextMessage({
             phoneNumberId: campaign.channel.phoneNumberId,
             accessToken: campaign.channel.accessToken,
             to,
-            body: campaign.message
+            body: personalizedMessage
           });
       const providerMessageId = readMetaMessageId(metaResponse);
       const historyBody = campaign.imageName
-        ? `[Imagem: ${campaign.imageName}] ${campaign.message}`.trim()
-        : campaign.message;
+        ? `[Imagem: ${campaign.imageName}] ${personalizedMessage}`.trim()
+        : personalizedMessage;
 
       await prisma.$transaction(async (tx) => {
         const conversation = await findOrCreateCampaignConversation({
@@ -259,6 +300,11 @@ export async function processCampaign(campaignId: string) {
           detail: error instanceof Error ? error.message : campaign.name
         });
       });
+    }
+
+    const delaySeconds = Number(process.env.CAMPAIGN_DISPATCH_INTERVAL_SECONDS ?? "1");
+    if (delaySeconds > 0) {
+      await sleep(Math.min(delaySeconds, 30) * 1000);
     }
   }
 

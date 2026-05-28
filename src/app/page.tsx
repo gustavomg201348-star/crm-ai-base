@@ -551,6 +551,43 @@ type ImportResult = {
   errors: Array<{ row: number; reason: string }>;
 };
 
+type SpreadsheetImportRow = {
+  rowNumber: number;
+  name: string;
+  cpf: string;
+  phone: string;
+  whatsapp: string;
+  status: "VALID" | "INVALID";
+  errors: string[];
+  duplicateCpf: boolean;
+  duplicatePhone: boolean;
+  existingContactId?: string | null;
+};
+
+type SpreadsheetImportPreview = {
+  rows: SpreadsheetImportRow[];
+  summary: {
+    totalRows: number;
+    validRows: number;
+    invalidRows: number;
+    duplicateCpfs: number;
+    duplicatePhones: number;
+    existingContacts: number;
+  };
+};
+
+type SpreadsheetImportConfirm = {
+  summary: {
+    totalRows: number;
+    imported: number;
+    created: number;
+    updated: number;
+    invalid: number;
+  };
+  contactIds: string[];
+  errors: Array<{ rowNumber: number; reason: string }>;
+};
+
 type ContactActivityRow = {
   id: string;
   contactId: string;
@@ -8370,6 +8407,13 @@ function Disparos({
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
   const [lastCampaign, setLastCampaign] = useState<CampaignRow | null>(null);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPreview, setImportPreview] =
+    useState<SpreadsheetImportPreview | null>(null);
+  const [importConfirm, setImportConfirm] =
+    useState<SpreadsheetImportConfirm | null>(null);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   useEffect(() => {
     if (!channelId && metaChannels[0]?.id) {
@@ -8404,6 +8448,27 @@ function Disparos({
   const selectedContacts = contacts.filter((contact) =>
     selectedIds.includes(contact.id)
   );
+  const importedContactsPreview =
+    importPreview?.rows.filter((row) => row.status === "VALID").slice(0, 4) ?? [];
+  const previewContact =
+    selectedContacts[0] ??
+    (importedContactsPreview[0]
+      ? {
+          name: importedContactsPreview[0].name,
+          cpf: importedContactsPreview[0].cpf,
+          phone: importedContactsPreview[0].whatsapp
+        }
+      : null);
+
+  function renderMessagePreview() {
+    const template = message || "Sua mensagem aparecera aqui.";
+    if (!previewContact) return template;
+
+    return template
+      .replace(/\{\{\s*nome\s*\}\}/gi, previewContact.name)
+      .replace(/\{\{\s*cpf\s*\}\}/gi, previewContact.cpf ?? "")
+      .replace(/\{\{\s*telefone\s*\}\}/gi, previewContact.phone);
+  }
 
   function toggleContact(id: string) {
     setSelectedIds((current) =>
@@ -8431,6 +8496,107 @@ function Disparos({
     }
 
     setImage(file);
+  }
+
+  async function handleSpreadsheetPreview() {
+    setError("");
+    setImportPreview(null);
+    setImportConfirm(null);
+
+    if (!importFile) {
+      setError("Selecione uma planilha CSV ou Excel .xlsx.");
+      return;
+    }
+
+    const extension = importFile.name.split(".").pop()?.toLowerCase();
+    if (!["csv", "xlsx"].includes(extension ?? "")) {
+      setError("Arquivo deve ser CSV ou Excel .xlsx.");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.set("file", importFile);
+
+    setImportLoading(true);
+    const response = await fetch("/api/imports/contacts/preview", {
+      method: "POST",
+      body: formData
+    });
+    setImportLoading(false);
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setError(data?.error ?? "Nao foi possivel validar a planilha.");
+      return;
+    }
+
+    setImportPreview((await response.json()) as SpreadsheetImportPreview);
+  }
+
+  async function handleConfirmSpreadsheetImport() {
+    setError("");
+
+    if (!importPreview) {
+      setError("Valide a planilha antes de importar.");
+      return;
+    }
+
+    const validRows = importPreview.rows.filter((row) => row.status === "VALID");
+    if (!validRows.length) {
+      setError("A planilha nao possui contatos validos para importar.");
+      return;
+    }
+
+    setImporting(true);
+    const response = await fetch("/api/imports/contacts/confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rows: importPreview.rows })
+    });
+    setImporting(false);
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setError(data?.error ?? "Nao foi possivel confirmar a importacao.");
+      return;
+    }
+
+    const data = (await response.json()) as SpreadsheetImportConfirm;
+    setImportConfirm(data);
+    setSelectedIds(data.contactIds);
+  }
+
+  function downloadImportErrors() {
+    if (!importPreview) return;
+
+    const invalidRows = importPreview.rows.filter((row) => row.status === "INVALID");
+    if (!invalidRows.length) return;
+
+    const csv = [
+      ["linha", "nome", "cpf", "telefone", "motivo"].join(";"),
+      ...invalidRows.map((row) =>
+        [
+          row.rowNumber,
+          row.name,
+          row.cpf,
+          row.phone,
+          row.errors.join(" | ")
+        ]
+          .map((value) => `"${String(value).replace(/"/g, "\"\"")}"`)
+          .join(";")
+      )
+    ].join("\n");
+
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "erros-importacao-contatos.csv";
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -8493,6 +8659,171 @@ function Disparos({
             <Send className="h-4 w-4" />
             {sending ? "Enviando..." : "Enviar disparo"}
           </button>
+        </div>
+
+        <div className="mt-4 rounded-2xl border border-dashed border-blue-200 bg-blue-50/60 p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="flex items-center gap-2 text-sm font-bold text-slate-900">
+                <FileText className="h-4 w-4 text-brand" />
+                Importar planilha para disparo
+              </p>
+              <p className="mt-1 text-xs text-slate-600">
+                Aceita CSV ou Excel .xlsx com CPF, Nome e Telefone. Variaveis:
+                {" {{nome}}"}, {"{{cpf}}"} e {"{{telefone}}"}.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-full border border-blue-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm">
+                <Upload className="h-4 w-4" />
+                {importFile ? importFile.name : "Escolher planilha"}
+                <input
+                  accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  className="hidden"
+                  type="file"
+                  onChange={(event) => {
+                    setImportFile(event.target.files?.[0] ?? null);
+                    setImportPreview(null);
+                    setImportConfirm(null);
+                  }}
+                />
+              </label>
+              <button
+                className="inline-flex h-10 items-center gap-2 rounded-full bg-white px-3 text-sm font-semibold text-brand shadow-sm ring-1 ring-blue-200 disabled:opacity-60"
+                disabled={importLoading || !importFile}
+                type="button"
+                onClick={handleSpreadsheetPreview}
+              >
+                {importLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Search className="h-4 w-4" />
+                )}
+                Validar
+              </button>
+            </div>
+          </div>
+
+          {importPreview && (
+            <div className="mt-4 grid gap-3 xl:grid-cols-[280px_minmax(0,1fr)]">
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <span className="rounded-xl bg-white p-3 shadow-sm">
+                  <b className="block text-lg text-slate-950">
+                    {importPreview.summary.totalRows}
+                  </b>
+                  linhas
+                </span>
+                <span className="rounded-xl bg-white p-3 shadow-sm">
+                  <b className="block text-lg text-emerald-600">
+                    {importPreview.summary.validRows}
+                  </b>
+                  validas
+                </span>
+                <span className="rounded-xl bg-white p-3 shadow-sm">
+                  <b className="block text-lg text-rose-600">
+                    {importPreview.summary.invalidRows}
+                  </b>
+                  invalidas
+                </span>
+                <span className="rounded-xl bg-white p-3 shadow-sm">
+                  <b className="block text-lg text-amber-600">
+                    {importPreview.summary.existingContacts}
+                  </b>
+                  atualizacoes
+                </span>
+                <span className="rounded-xl bg-white p-3 shadow-sm">
+                  <b className="block text-lg text-slate-800">
+                    {importPreview.summary.duplicateCpfs}
+                  </b>
+                  CPFs repetidos
+                </span>
+                <span className="rounded-xl bg-white p-3 shadow-sm">
+                  <b className="block text-lg text-slate-800">
+                    {importPreview.summary.duplicatePhones}
+                  </b>
+                  telefones repetidos
+                </span>
+              </div>
+
+              <div className="min-w-0 rounded-xl border border-blue-100 bg-white shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-3 py-2">
+                  <p className="text-sm font-semibold">Previa da importacao</p>
+                  <div className="flex gap-2">
+                    {importPreview.summary.invalidRows > 0 && (
+                      <button
+                        className="inline-flex h-8 items-center gap-1 rounded-full border border-line px-3 text-xs font-semibold text-slate-600"
+                        type="button"
+                        onClick={downloadImportErrors}
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        Baixar erros
+                      </button>
+                    )}
+                    <button
+                      className="inline-flex h-8 items-center gap-1 rounded-full bg-brand px-3 text-xs font-semibold text-white disabled:opacity-60"
+                      disabled={importing || importPreview.summary.validRows === 0}
+                      type="button"
+                      onClick={handleConfirmSpreadsheetImport}
+                    >
+                      {importing ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Check className="h-3.5 w-3.5" />
+                      )}
+                      Confirmar importacao
+                    </button>
+                  </div>
+                </div>
+                <div className="max-h-64 overflow-auto">
+                  <table className="w-full min-w-[640px] text-left text-xs">
+                    <thead className="sticky top-0 bg-slate-50 text-slate-500">
+                      <tr>
+                        <th className="px-3 py-2">Linha</th>
+                        <th className="px-3 py-2">Nome</th>
+                        <th className="px-3 py-2">CPF</th>
+                        <th className="px-3 py-2">WhatsApp</th>
+                        <th className="px-3 py-2">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-line">
+                      {importPreview.rows.slice(0, 80).map((row) => (
+                        <tr key={`${row.rowNumber}-${row.cpf}-${row.whatsapp}`}>
+                          <td className="px-3 py-2">{row.rowNumber}</td>
+                          <td className="max-w-[180px] truncate px-3 py-2 font-semibold">
+                            {row.name || "-"}
+                          </td>
+                          <td className="px-3 py-2">{row.cpf || "-"}</td>
+                          <td className="px-3 py-2">{row.whatsapp || "-"}</td>
+                          <td className="px-3 py-2">
+                            {row.status === "VALID" ? (
+                              <span className="rounded-full bg-emerald-50 px-2 py-1 font-semibold text-emerald-700">
+                                {row.existingContactId ? "Atualizar" : "Criar"}
+                              </span>
+                            ) : (
+                              <span
+                                className="inline-block max-w-[220px] truncate rounded-full bg-rose-50 px-2 py-1 font-semibold text-rose-700"
+                                title={row.errors.join(" ")}
+                              >
+                                {row.errors[0]}
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {importConfirm && (
+            <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+              Importacao concluida: {importConfirm.summary.created} criado(s),{" "}
+              {importConfirm.summary.updated} atualizado(s). A base importada ja foi
+              selecionada para o disparo.
+            </div>
+          )}
         </div>
 
         <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
@@ -8667,14 +8998,17 @@ function Disparos({
               </div>
             )}
             <p className="whitespace-pre-wrap">
-              {message || "Sua mensagem aparecera aqui."}
+              {renderMessagePreview()}
             </p>
           </div>
           <div className="mt-3 rounded border border-line p-3 text-xs text-slate-500">
             {selectedContacts.slice(0, 3).map((contact) => contact.name).join(", ") ||
-              "Selecione contatos para ver destinatarios."}
+              importedContactsPreview.map((contact) => contact.name).join(", ") ||
+              "Selecione contatos ou importe uma planilha para ver destinatarios."}
             {selectedContacts.length > 3
               ? ` e mais ${selectedContacts.length - 3}`
+              : importedContactsPreview.length > 3
+                ? ` e mais ${importedContactsPreview.length - 3}`
               : ""}
           </div>
         </div>
