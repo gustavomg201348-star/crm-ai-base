@@ -8,10 +8,16 @@ export function isAdmin(session: SessionUser) {
 }
 
 export function isPlatformAdmin(session: SessionUser) {
-  return (
-    session.role === "ADMIN" &&
-    session.companyId === (process.env.PLATFORM_COMPANY_ID || "seed-company")
-  );
+  if (session.role !== "ADMIN") return false;
+
+  const companyId = process.env.PLATFORM_COMPANY_ID;
+  const emails = (process.env.PLATFORM_ADMIN_EMAILS || "admin@crm.local")
+    .split(",")
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
+
+  if (companyId) return session.companyId === companyId;
+  return emails.includes(session.email.toLowerCase());
 }
 
 export function isAgent(session: SessionUser) {

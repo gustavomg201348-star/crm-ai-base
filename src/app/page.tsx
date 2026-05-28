@@ -708,7 +708,7 @@ function userIsAdmin(session?: Session | null) {
 }
 
 function userIsPlatformAdmin(session?: Session | null) {
-  return session?.user.role === "ADMIN" && session.company.id === "seed-company";
+  return session?.user.role === "ADMIN" && session.user.email === "admin@crm.local";
 }
 
 function availabilityLabel(status: AvailabilityStatus) {
