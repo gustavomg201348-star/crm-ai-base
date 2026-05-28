@@ -65,6 +65,22 @@ type Session = {
   };
 };
 
+type CompanyTenantRow = {
+  id: string;
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  segment?: string | null;
+  createdAt: string;
+  admins: Array<{ id: string; name: string; email: string; role: string }>;
+  counts: {
+    users: number;
+    contacts: number;
+    channels: number;
+    campaigns: number;
+  };
+};
+
 type ContactRow = {
   id: string;
   name: string;
@@ -691,6 +707,10 @@ function userIsAdmin(session?: Session | null) {
   return session?.user.role === "ADMIN" || session?.user.role === "SUPERVISOR";
 }
 
+function userIsPlatformAdmin(session?: Session | null) {
+  return session?.user.role === "ADMIN" && session.company.id === "seed-company";
+}
+
 function availabilityLabel(status: AvailabilityStatus) {
   return {
     ONLINE: "Disponivel",
@@ -821,7 +841,9 @@ export default function Home() {
     users: []
   });
   const [settingsTags, setSettingsTags] = useState<SettingsTagRow[]>([]);
+  const [companies, setCompanies] = useState<CompanyTenantRow[]>([]);
   const [tagsLoading, setTagsLoading] = useState(false);
+  const [companiesLoading, setCompaniesLoading] = useState(false);
   const [contactsLoading, setContactsLoading] = useState(false);
   const [kanbanLoading, setKanbanLoading] = useState(false);
   const [conversationLoading, setConversationLoading] = useState(false);
@@ -842,7 +864,11 @@ export default function Home() {
   }, [active]);
 
   const visibleNavItems = useMemo(() => {
-    if (userIsAdmin(session)) return navItems;
+    if (userIsAdmin(session)) {
+      return navItems.filter((item) =>
+        item.id === "empresas" ? userIsPlatformAdmin(session) : true
+      );
+    }
     return navItems.filter((item) =>
       ["atendimento", "contatos", "kanban", "simulacao-clt"].includes(item.id)
     );
@@ -1424,6 +1450,53 @@ export default function Home() {
     }
 
     setCampaignsLoading(false);
+  }
+
+  const loadCompanies = useCallback(async () => {
+    if (!userIsPlatformAdmin(session)) return;
+    setCompaniesLoading(true);
+    setAppError("");
+
+    const response = await fetch("/api/admin/companies");
+    if (response.ok) {
+      const data = (await response.json()) as { companies: CompanyTenantRow[] };
+      setCompanies(data.companies);
+    } else {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel carregar empresas.");
+    }
+
+    setCompaniesLoading(false);
+  }, [session]);
+
+  async function handleCreateCompanyTenant(payload: {
+    companyName: string;
+    companyEmail: string;
+    companyPhone: string;
+    segment: string;
+    adminName: string;
+    adminEmail: string;
+    adminPassword: string;
+  }) {
+    const response = await fetch("/api/admin/companies", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel criar empresa.");
+      return null;
+    }
+
+    const data = (await response.json()) as { company: CompanyTenantRow };
+    setCompanies((current) => [data.company, ...current]);
+    return data.company;
   }
 
   async function handleCreateCampaign(payload: {
@@ -2381,6 +2454,9 @@ export default function Home() {
       void loadCampaigns();
       void loadLeadAssignmentSettings();
     }
+    if (userIsPlatformAdmin(session)) {
+      void loadCompanies();
+    }
     void loadConversations(conversationFilters);
     void loadNotifications({ silent: true });
     if (userIsAdmin(session)) {
@@ -2397,6 +2473,7 @@ export default function Home() {
     loadMessageLogs,
     loadNotifications,
     loadProposals,
+    loadCompanies,
     proposalFilters,
     session
   ]);
@@ -2853,6 +2930,14 @@ export default function Home() {
               loading={campaignsLoading}
               onCreateCampaign={handleCreateCampaign}
               onRefreshCampaigns={loadCampaigns}
+            />
+          )}
+          {active === "empresas" && userIsPlatformAdmin(session) && (
+            <EmpresasPage
+              companies={companies}
+              loading={companiesLoading}
+              onCreateCompany={handleCreateCompanyTenant}
+              onRefresh={loadCompanies}
             />
           )}
           {active === "chatbot" && <Chatbot />}
@@ -9663,6 +9748,299 @@ function Chatbot() {
             <p className="mt-2 text-sm text-slate-600">Blocos preparados para a proxima etapa.</p>
           </div>
         ))}
+      </div>
+    </section>
+  );
+}
+
+function EmpresasPage({
+  companies,
+  loading,
+  onCreateCompany,
+  onRefresh
+}: {
+  companies: CompanyTenantRow[];
+  loading: boolean;
+  onCreateCompany: (payload: {
+    companyName: string;
+    companyEmail: string;
+    companyPhone: string;
+    segment: string;
+    adminName: string;
+    adminEmail: string;
+    adminPassword: string;
+  }) => Promise<CompanyTenantRow | null>;
+  onRefresh: () => Promise<void>;
+}) {
+  const [form, setForm] = useState({
+    companyName: "",
+    companyEmail: "",
+    companyPhone: "",
+    segment: "Correspondente bancario com foco em credito consignado",
+    adminName: "",
+    adminEmail: "",
+    adminPassword: ""
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [createdCompany, setCreatedCompany] = useState<CompanyTenantRow | null>(null);
+  const [localError, setLocalError] = useState("");
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLocalError("");
+
+    if (
+      !form.companyName.trim() ||
+      !form.adminName.trim() ||
+      !form.adminEmail.trim() ||
+      !form.adminPassword
+    ) {
+      setLocalError("Preencha empresa, nome do admin, email e senha.");
+      return;
+    }
+
+    setSubmitting(true);
+    const company = await onCreateCompany(form);
+    setSubmitting(false);
+
+    if (!company) return;
+
+    setCreatedCompany(company);
+    setForm({
+      companyName: "",
+      companyEmail: "",
+      companyPhone: "",
+      segment: "Correspondente bancario com foco em credito consignado",
+      adminName: "",
+      adminEmail: "",
+      adminPassword: ""
+    });
+  }
+
+  return (
+    <section className="grid gap-5 xl:grid-cols-[420px_minmax(0,1fr)]">
+      <form
+        className="rounded-[1.5rem] border border-line/80 bg-white p-5 shadow-soft"
+        onSubmit={submit}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-brand">
+              Multiempresa
+            </p>
+            <h3 className="mt-1 text-xl font-bold text-slate-950">
+              Nova empresa
+            </h3>
+            <p className="mt-1 text-sm text-slate-500">
+              Cria um tenant separado com admin proprio e base isolada.
+            </p>
+          </div>
+          <button
+            className="grid h-10 w-10 place-items-center rounded-full border border-line text-slate-500 hover:bg-slate-50"
+            type="button"
+            onClick={() => void onRefresh()}
+            title="Atualizar"
+          >
+            <RefreshCcw className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="mt-5 space-y-3">
+          <label className="block text-sm font-semibold">
+            Nome da empresa
+            <input
+              className="mt-2 h-11 w-full rounded-xl border border-line px-3 font-normal outline-none focus:border-brand"
+              value={form.companyName}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, companyName: event.target.value }))
+              }
+              placeholder="Ex: Viva Consultoria"
+            />
+          </label>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-1">
+            <label className="block text-sm font-semibold">
+              Email da empresa
+              <input
+                className="mt-2 h-11 w-full rounded-xl border border-line px-3 font-normal outline-none focus:border-brand"
+                value={form.companyEmail}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    companyEmail: event.target.value
+                  }))
+                }
+                placeholder="contato@empresa.com"
+              />
+            </label>
+            <label className="block text-sm font-semibold">
+              Telefone
+              <input
+                className="mt-2 h-11 w-full rounded-xl border border-line px-3 font-normal outline-none focus:border-brand"
+                value={form.companyPhone}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    companyPhone: event.target.value
+                  }))
+                }
+                placeholder="+55 33 99999-9999"
+              />
+            </label>
+          </div>
+          <label className="block text-sm font-semibold">
+            Segmento/contexto da IA
+            <textarea
+              className="mt-2 min-h-20 w-full rounded-xl border border-line px-3 py-3 font-normal outline-none focus:border-brand"
+              value={form.segment}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, segment: event.target.value }))
+              }
+            />
+          </label>
+        </div>
+
+        <div className="mt-5 rounded-2xl bg-slate-50 p-3">
+          <p className="text-sm font-bold text-slate-900">Admin da empresa</p>
+          <div className="mt-3 space-y-3">
+            <input
+              className="h-11 w-full rounded-xl border border-line px-3 text-sm outline-none focus:border-brand"
+              value={form.adminName}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, adminName: event.target.value }))
+              }
+              placeholder="Nome do administrador"
+            />
+            <input
+              className="h-11 w-full rounded-xl border border-line px-3 text-sm outline-none focus:border-brand"
+              type="email"
+              value={form.adminEmail}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, adminEmail: event.target.value }))
+              }
+              placeholder="email@empresa.com"
+            />
+            <input
+              className="h-11 w-full rounded-xl border border-line px-3 text-sm outline-none focus:border-brand"
+              type="password"
+              value={form.adminPassword}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  adminPassword: event.target.value
+                }))
+              }
+              placeholder="Senha inicial"
+            />
+          </div>
+        </div>
+
+        {localError && (
+          <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-800">
+            {localError}
+          </p>
+        )}
+        {createdCompany && (
+          <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+            <p className="font-bold">Empresa criada: {createdCompany.name}</p>
+            <p className="mt-1">
+              Admin: {createdCompany.admins[0]?.email}. Ela ja pode acessar o mesmo
+              link do CRM com esses dados.
+            </p>
+          </div>
+        )}
+
+        <button
+          className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-brand px-4 text-sm font-semibold text-white shadow-soft disabled:opacity-60"
+          disabled={submitting}
+          type="submit"
+        >
+          {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+          Criar empresa e admin
+        </button>
+      </form>
+
+      <div className="rounded-[1.5rem] border border-line/80 bg-white p-5 shadow-soft">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-xl font-bold text-slate-950">Empresas cadastradas</h3>
+            <p className="text-sm text-slate-500">
+              Cada empresa possui contatos, canais Meta, campanhas e usuarios isolados.
+            </p>
+          </div>
+          <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-brand">
+            {loading ? "Carregando..." : `${companies.length} empresa(s)`}
+          </span>
+        </div>
+
+        <div className="mt-5 space-y-3">
+          {loading &&
+            [0, 1, 2].map((item) => (
+              <div key={item} className="h-24 animate-pulse rounded-2xl bg-slate-100" />
+            ))}
+          {!loading &&
+            companies.map((company) => (
+              <div
+                key={company.id}
+                className="rounded-2xl border border-line bg-slate-50/70 p-4"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-base font-bold text-slate-950">{company.name}</p>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {company.segment || "Credito consignado"}
+                    </p>
+                    <p className="mt-2 text-xs text-slate-400">
+                      Criada {formatRelativeDate(company.createdAt)}
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600 ring-1 ring-line">
+                    {company.id === "seed-company" ? "Master" : "Tenant"}
+                  </span>
+                </div>
+                <div className="mt-4 grid grid-cols-4 gap-2 text-center text-xs">
+                  <span className="rounded-xl bg-white p-2">
+                    <b className="block text-base text-slate-950">
+                      {company.counts.users}
+                    </b>
+                    usuarios
+                  </span>
+                  <span className="rounded-xl bg-white p-2">
+                    <b className="block text-base text-slate-950">
+                      {company.counts.contacts}
+                    </b>
+                    contatos
+                  </span>
+                  <span className="rounded-xl bg-white p-2">
+                    <b className="block text-base text-slate-950">
+                      {company.counts.channels}
+                    </b>
+                    canais
+                  </span>
+                  <span className="rounded-xl bg-white p-2">
+                    <b className="block text-base text-slate-950">
+                      {company.counts.campaigns}
+                    </b>
+                    disparos
+                  </span>
+                </div>
+                <div className="mt-4 rounded-xl bg-white p-3 text-sm">
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
+                    Admins
+                  </p>
+                  {company.admins.map((admin) => (
+                    <p key={admin.id} className="mt-1 font-semibold text-slate-700">
+                      {admin.name} - {admin.email}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            ))}
+          {!loading && companies.length === 0 && (
+            <p className="rounded border border-dashed border-line p-6 text-center text-sm text-slate-500">
+              Nenhuma empresa cadastrada.
+            </p>
+          )}
+        </div>
       </div>
     </section>
   );

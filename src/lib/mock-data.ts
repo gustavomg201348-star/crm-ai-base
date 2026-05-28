@@ -2,6 +2,7 @@ import {
   BadgeCheck,
   BarChart3,
   Bot,
+  Building2,
   BriefcaseBusiness,
   CircleDollarSign,
   ContactRound,
@@ -27,6 +28,7 @@ export const navItems = [
   { id: "multicred", label: "Multicred", icon: CircleDollarSign },
   { id: "canais", label: "Canais", icon: Webhook },
   { id: "disparos", label: "Disparos", icon: Megaphone },
+  { id: "empresas", label: "Empresas", icon: Building2 },
   { id: "chatbot", label: "Chatbot", icon: Bot },
   { id: "config", label: "Configurações", icon: Settings }
 ] as const;

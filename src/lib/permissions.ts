@@ -7,6 +7,13 @@ export function isAdmin(session: SessionUser) {
   return session.role === "ADMIN" || session.role === "SUPERVISOR";
 }
 
+export function isPlatformAdmin(session: SessionUser) {
+  return (
+    session.role === "ADMIN" &&
+    session.companyId === (process.env.PLATFORM_COMPANY_ID || "seed-company")
+  );
+}
+
 export function isAgent(session: SessionUser) {
   return session.role === "AGENT";
 }
@@ -30,6 +37,12 @@ export function forbidden(message = "Voce nao tem permissao para acessar este re
 
 export function requireAdmin(session: SessionUser) {
   return isAdmin(session) ? null : forbidden();
+}
+
+export function requirePlatformAdmin(session: SessionUser) {
+  return isPlatformAdmin(session)
+    ? null
+    : forbidden("Apenas o administrador master pode gerenciar empresas.");
 }
 
 export function canAccessConversation({
