@@ -450,6 +450,10 @@ type CampaignRow = {
   id: string;
   name: string;
   message: string;
+  messageType?: string;
+  templateName?: string | null;
+  templateLanguage?: string | null;
+  templateVariables?: string | null;
   status: string;
   total: number;
   sent: number;
@@ -1427,11 +1431,23 @@ export default function Home() {
     contactIds: string[];
     message: string;
     image?: File | null;
+    messageType?: string;
+    templateName?: string;
+    templateLanguage?: string;
+    templateVariables?: string[];
   }) {
     const formData = new FormData();
     formData.set("channelId", payload.channelId);
     formData.set("message", payload.message);
     formData.set("contactIds", JSON.stringify(payload.contactIds));
+    formData.set("messageType", payload.messageType ?? "TEXT");
+    if (payload.templateName) formData.set("templateName", payload.templateName);
+    if (payload.templateLanguage) {
+      formData.set("templateLanguage", payload.templateLanguage);
+    }
+    if (payload.templateVariables) {
+      formData.set("templateVariables", JSON.stringify(payload.templateVariables));
+    }
     if (payload.image) formData.set("image", payload.image);
 
     const response = await fetch("/api/campaigns", {
@@ -8389,6 +8405,10 @@ function Disparos({
     contactIds: string[];
     message: string;
     image?: File | null;
+    messageType?: string;
+    templateName?: string;
+    templateLanguage?: string;
+    templateVariables?: string[];
   }) => Promise<CampaignRow | null>;
 }) {
   const metaChannels = channels.filter(
@@ -8402,6 +8422,12 @@ function Disparos({
   const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [message, setMessage] = useState("");
+  const [messageMode, setMessageMode] = useState<"TEXT" | "TEMPLATE">("TEMPLATE");
+  const [campaignTemplates, setCampaignTemplates] = useState<WhatsAppTemplateRow[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [selectedCampaignTemplate, setSelectedCampaignTemplate] =
+    useState<WhatsAppTemplateRow | null>(null);
+  const [campaignTemplateValues, setCampaignTemplateValues] = useState<string[]>([]);
   const [image, setImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState("");
   const [error, setError] = useState("");
@@ -8433,6 +8459,27 @@ function Disparos({
     return () => URL.revokeObjectURL(url);
   }, [image]);
 
+  useEffect(() => {
+    setCampaignTemplates([]);
+    setSelectedCampaignTemplate(null);
+    setCampaignTemplateValues([]);
+
+    if (!channelId) return;
+
+    async function loadChannelTemplates() {
+      setTemplatesLoading(true);
+      const response = await fetch(`/api/whatsapp/templates?channelId=${channelId}`);
+      setTemplatesLoading(false);
+
+      if (!response.ok) return;
+
+      const data = (await response.json()) as { templates: WhatsAppTemplateRow[] };
+      setCampaignTemplates(data.templates);
+    }
+
+    void loadChannelTemplates();
+  }, [channelId]);
+
   const filteredContacts = contacts.filter((contact) => {
     const needle = search.trim().toLowerCase();
     if (!needle) return !contact.archivedAt;
@@ -8461,7 +8508,13 @@ function Disparos({
       : null);
 
   function renderMessagePreview() {
-    const template = message || "Sua mensagem aparecera aqui.";
+    const template =
+      messageMode === "TEMPLATE" && selectedCampaignTemplate
+        ? selectedCampaignTemplate.preview.replace(/\{\{(\d+)\}\}/g, (_, index) => {
+            const value = campaignTemplateValues[Number(index) - 1] ?? "";
+            return value || `{{${index}}}`;
+          })
+        : message || "Sua mensagem aparecera aqui.";
     if (!previewContact) return template;
 
     return template
@@ -8628,9 +8681,22 @@ function Disparos({
       setError("Selecione pelo menos um contato.");
       return;
     }
-    if (!message.trim()) {
+    if (messageMode !== "TEMPLATE" && !message.trim()) {
       setError("Escreva a mensagem do disparo.");
       return;
+    }
+    if (messageMode === "TEMPLATE") {
+      if (!selectedCampaignTemplate) {
+        setError("Selecione um template aprovado da Meta.");
+        return;
+      }
+      if (
+        campaignTemplateValues.length < selectedCampaignTemplate.variableCount ||
+        campaignTemplateValues.some((value) => !value.trim())
+      ) {
+        setError("Preencha todas as variaveis obrigatorias do template.");
+        return;
+      }
     }
 
     const confirmed = window.confirm(
@@ -8642,8 +8708,12 @@ function Disparos({
     const campaign = await onCreateCampaign({
       channelId,
       contactIds: selectedIds,
-      message,
-      image
+      message: messageMode === "TEMPLATE" ? renderMessagePreview() : message,
+      image: messageMode === "TEMPLATE" ? null : image,
+      messageType: messageMode,
+      templateName: selectedCampaignTemplate?.name,
+      templateLanguage: selectedCampaignTemplate?.language,
+      templateVariables: campaignTemplateValues
     });
     setSending(false);
 
@@ -8652,6 +8722,8 @@ function Disparos({
       setSelectedIds([]);
       setMessage("");
       setImage(null);
+      setSelectedCampaignTemplate(null);
+      setCampaignTemplateValues([]);
     }
   }
 
@@ -8869,17 +8941,145 @@ function Disparos({
               </select>
             </label>
 
-            <label className="block text-sm font-semibold">
-              Mensagem do disparo
-              <textarea
-                className="mt-2 min-h-36 w-full rounded border border-line px-3 py-3 font-normal outline-none focus:border-brand"
-                placeholder="Digite a mensagem que sera enviada para os contatos selecionados."
-                value={message}
-                onChange={(event) => setMessage(event.target.value)}
-              />
-            </label>
+            <div className="rounded border border-line bg-white p-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold">Tipo de mensagem</p>
+                  <p className="text-xs text-slate-500">
+                    Use template aprovado para clientes fora da janela de 24h.
+                  </p>
+                </div>
+                <div className="flex rounded-full bg-slate-100 p-1 text-xs font-semibold">
+                  <button
+                    className={clsx(
+                      "rounded-full px-3 py-1.5",
+                      messageMode === "TEMPLATE"
+                        ? "bg-white text-brand shadow-sm"
+                        : "text-slate-500"
+                    )}
+                    type="button"
+                    onClick={() => setMessageMode("TEMPLATE")}
+                  >
+                    Template Meta
+                  </button>
+                  <button
+                    className={clsx(
+                      "rounded-full px-3 py-1.5",
+                      messageMode === "TEXT"
+                        ? "bg-white text-brand shadow-sm"
+                        : "text-slate-500"
+                    )}
+                    type="button"
+                    onClick={() => setMessageMode("TEXT")}
+                  >
+                    Mensagem livre
+                  </button>
+                </div>
+              </div>
 
-            <div className="rounded border border-line bg-slate-50 p-3">
+              {messageMode === "TEMPLATE" ? (
+                <div className="mt-3 space-y-3">
+                  <label className="block text-sm font-semibold">
+                    Template aprovado
+                    <select
+                      className="mt-2 h-11 w-full rounded border border-line bg-white px-3 font-normal outline-none focus:border-brand"
+                      value={
+                        selectedCampaignTemplate
+                          ? `${selectedCampaignTemplate.name}::${selectedCampaignTemplate.language}`
+                          : ""
+                      }
+                      onChange={(event) => {
+                        const template = campaignTemplates.find(
+                          (item) =>
+                            `${item.name}::${item.language}` === event.target.value
+                        );
+                        setSelectedCampaignTemplate(template ?? null);
+                        setCampaignTemplateValues(
+                          template
+                            ? Array.from({ length: template.variableCount }, () => "")
+                            : []
+                        );
+                      }}
+                    >
+                      <option value="">
+                        {templatesLoading
+                          ? "Buscando templates..."
+                          : "Selecione um template aprovado"}
+                      </option>
+                      {campaignTemplates.map((template) => (
+                        <option
+                          key={`${template.name}-${template.language}`}
+                          value={`${template.name}::${template.language}`}
+                        >
+                          {template.name} - {template.language} - {template.category}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  {selectedCampaignTemplate && (
+                    <div className="rounded-xl bg-slate-50 p-3 text-sm">
+                      <div className="flex flex-wrap gap-2 text-xs">
+                        <span className="rounded-full bg-emerald-50 px-2 py-1 font-semibold text-emerald-700">
+                          {selectedCampaignTemplate.status}
+                        </span>
+                        <span className="rounded-full bg-blue-50 px-2 py-1 font-semibold text-blue-700">
+                          {selectedCampaignTemplate.language}
+                        </span>
+                      </div>
+                      <p className="mt-3 whitespace-pre-wrap text-slate-700">
+                        {selectedCampaignTemplate.preview}
+                      </p>
+                      {campaignTemplateValues.length > 0 && (
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                          {campaignTemplateValues.map((value, index) => (
+                            <input
+                              key={index}
+                              className="h-10 rounded border border-line px-3 text-sm outline-none focus:border-brand"
+                              placeholder={`Variavel {{${index + 1}}} - ex: {{nome}}`}
+                              value={value}
+                              onChange={(event) =>
+                                setCampaignTemplateValues((current) =>
+                                  current.map((item, itemIndex) =>
+                                    itemIndex === index ? event.target.value : item
+                                  )
+                                )
+                              }
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {!templatesLoading && channelId && campaignTemplates.length === 0 && (
+                    <p className="rounded border border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-800">
+                      Nenhum template aprovado encontrado para este canal. Confira os
+                      modelos na Meta.
+                    </p>
+                  )}
+                </div>
+              ) : null}
+            </div>
+
+            {messageMode === "TEXT" && (
+              <label className="block text-sm font-semibold">
+                Mensagem do disparo
+                <textarea
+                  className="mt-2 min-h-36 w-full rounded border border-line px-3 py-3 font-normal outline-none focus:border-brand"
+                  placeholder="Digite a mensagem que sera enviada para contatos dentro da janela de 24h."
+                  value={message}
+                  onChange={(event) => setMessage(event.target.value)}
+                />
+              </label>
+            )}
+
+            <div
+              className={clsx(
+                "rounded border border-line bg-slate-50 p-3",
+                messageMode === "TEMPLATE" && "opacity-50"
+              )}
+            >
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold">Adicionar imagem</p>
@@ -8893,6 +9093,7 @@ function Disparos({
                   <input
                     accept="image/jpeg,image/png"
                     className="hidden"
+                    disabled={messageMode === "TEMPLATE"}
                     type="file"
                     onChange={(event) =>
                       handleImageChange(event.target.files?.[0] ?? null)

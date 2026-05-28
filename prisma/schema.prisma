@@ -342,6 +342,10 @@ model Campaign {
   createdById String?
   name        String
   message     String
+  messageType String              @default("TEXT")
+  templateName String?
+  templateLanguage String?
+  templateVariables String?
   imagePath   String?
   imageName   String?
   imageMime   String?

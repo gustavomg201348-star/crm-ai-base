@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import {
   readMetaMessageId,
   sendMetaImageMessage,
+  sendMetaTemplateMessage,
   sendMetaTextMessage,
   uploadMetaMedia
 } from "@/lib/meta-whatsapp";
@@ -39,6 +40,10 @@ export function mapCampaign(campaign: CampaignWithRelations) {
     id: campaign.id,
     name: campaign.name,
     message: campaign.message,
+    messageType: campaign.messageType,
+    templateName: campaign.templateName,
+    templateLanguage: campaign.templateLanguage,
+    templateVariables: campaign.templateVariables,
     status: campaign.status,
     total: campaign.total,
     sent: campaign.sent,
@@ -80,6 +85,18 @@ function sleep(ms: number) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function readTemplateVariables(value?: string | null) {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string")
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 async function findOrCreateCampaignConversation({
@@ -219,20 +236,41 @@ export async function processCampaign(campaignId: string) {
         cpf: recipient.contact.cpf,
         phone: recipient.contact.phone
       });
-      const metaResponse = mediaId
-        ? await sendMetaImageMessage({
-            phoneNumberId: campaign.channel.phoneNumberId,
-            accessToken: campaign.channel.accessToken,
-            to,
-            mediaId,
-            caption: personalizedMessage
-          })
-        : await sendMetaTextMessage({
-            phoneNumberId: campaign.channel.phoneNumberId,
-            accessToken: campaign.channel.accessToken,
-            to,
-            body: personalizedMessage
-          });
+      const templateVariables = readTemplateVariables(
+        campaign.templateVariables
+      ).map((value) =>
+        renderCampaignMessage(value, {
+          name: recipient.contact.name,
+          cpf: recipient.contact.cpf,
+          phone: recipient.contact.phone
+        })
+      );
+      const metaResponse =
+        campaign.messageType === "TEMPLATE" &&
+        campaign.templateName &&
+        campaign.templateLanguage
+          ? await sendMetaTemplateMessage({
+              phoneNumberId: campaign.channel.phoneNumberId,
+              accessToken: campaign.channel.accessToken,
+              to,
+              name: campaign.templateName,
+              language: campaign.templateLanguage,
+              variables: templateVariables
+            })
+          : mediaId
+            ? await sendMetaImageMessage({
+                phoneNumberId: campaign.channel.phoneNumberId,
+                accessToken: campaign.channel.accessToken,
+                to,
+                mediaId,
+                caption: personalizedMessage
+              })
+            : await sendMetaTextMessage({
+                phoneNumberId: campaign.channel.phoneNumberId,
+                accessToken: campaign.channel.accessToken,
+                to,
+                body: personalizedMessage
+              });
       const providerMessageId = readMetaMessageId(metaResponse);
       const historyBody = campaign.imageName
         ? `[Imagem: ${campaign.imageName}] ${personalizedMessage}`.trim()
@@ -251,7 +289,12 @@ export async function processCampaign(campaignId: string) {
           data: {
             conversationId: conversation.id,
             direction: "outbound",
-            body: historyBody
+            body: historyBody,
+            type: campaign.messageType === "TEMPLATE" ? "template" : "text",
+            templateName: campaign.templateName,
+            templateLanguage: campaign.templateLanguage,
+            templateVariables: campaign.templateVariables,
+            providerMessageId
           }
         });
 

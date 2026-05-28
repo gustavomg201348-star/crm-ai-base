@@ -20,6 +20,10 @@ export async function POST(request: NextRequest) {
           contactIds?: string[];
           message?: string;
           name?: string;
+          messageType?: string;
+          templateName?: string;
+          templateLanguage?: string;
+          templateVariables?: string[];
         }
       | null;
 
@@ -34,6 +38,15 @@ export async function POST(request: NextRequest) {
     }
     if (!message) {
       return NextResponse.json({ error: "Mensagem obrigatoria." }, { status: 400 });
+    }
+    if (
+      body?.messageType === "TEMPLATE" &&
+      (!body.templateName?.trim() || !body.templateLanguage?.trim())
+    ) {
+      return NextResponse.json(
+        { error: "Selecione um template aprovado da Meta." },
+        { status: 400 }
+      );
     }
     if (!contactIds.length) {
       return NextResponse.json(
@@ -82,6 +95,14 @@ export async function POST(request: NextRequest) {
         createdById: session.id,
         name: body?.name?.trim() || `Disparo planilha ${new Date().toLocaleString("pt-BR")}`,
         message,
+        messageType: body?.messageType === "TEMPLATE" ? "TEMPLATE" : "TEXT",
+        templateName: body?.messageType === "TEMPLATE" ? body.templateName?.trim() : null,
+        templateLanguage:
+          body?.messageType === "TEMPLATE" ? body.templateLanguage?.trim() : null,
+        templateVariables:
+          body?.messageType === "TEMPLATE"
+            ? JSON.stringify(body.templateVariables ?? [])
+            : null,
         status: "DRAFT",
         total: contacts.length,
         recipients: {

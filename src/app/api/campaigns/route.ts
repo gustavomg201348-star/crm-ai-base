@@ -77,11 +77,21 @@ export async function POST(request: NextRequest) {
     const message = String(formData.get("message") ?? "").trim();
     const contactIds = parseContactIds(formData.get("contactIds"));
     const image = formData.get("image");
+    const messageType = String(formData.get("messageType") ?? "TEXT").trim();
+    const templateName = String(formData.get("templateName") ?? "").trim();
+    const templateLanguage = String(formData.get("templateLanguage") ?? "").trim();
+    const templateVariables = String(formData.get("templateVariables") ?? "").trim();
 
     if (!channelId) {
       return NextResponse.json({ error: "Canal obrigatorio." }, { status: 400 });
     }
-    if (!message) {
+    if (messageType === "TEMPLATE" && (!templateName || !templateLanguage)) {
+      return NextResponse.json(
+        { error: "Selecione um template aprovado da Meta." },
+        { status: 400 }
+      );
+    }
+    if (!message && messageType !== "TEMPLATE") {
       return NextResponse.json({ error: "Mensagem obrigatoria." }, { status: 400 });
     }
     if (!contactIds.length) {
@@ -161,7 +171,11 @@ export async function POST(request: NextRequest) {
         channelId: channel.id,
         createdById: session.id,
         name: `Disparo ${new Date().toLocaleString("pt-BR")}`,
-        message,
+        message: message || `[Template: ${templateName}]`,
+        messageType: messageType === "TEMPLATE" ? "TEMPLATE" : "TEXT",
+        templateName: messageType === "TEMPLATE" ? templateName : null,
+        templateLanguage: messageType === "TEMPLATE" ? templateLanguage : null,
+        templateVariables: messageType === "TEMPLATE" ? templateVariables || "[]" : null,
         imageName,
         imageMime,
         imageSize,

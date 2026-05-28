@@ -8,12 +8,13 @@ import {
   getConversationIntegration,
   saveOutboundMessage
 } from "@/lib/conversation-message.service";
+import { prisma } from "@/lib/db";
 
-function extractBodyText(template: MetaTemplate) {
+export function extractBodyText(template: MetaTemplate) {
   return template.components?.find((component) => component.type === "BODY")?.text ?? "";
 }
 
-function extractVariableCount(text: string) {
+export function extractVariableCount(text: string) {
   const matches = text.match(/\{\{\d+\}\}/g) ?? [];
   return new Set(matches).size;
 }
@@ -45,6 +46,35 @@ export async function getApprovedTemplatesForConversation({
   const templates = await getMetaApprovedTemplates({
     wabaId: channel.wabaId,
     accessToken: channel.accessToken!
+  });
+
+  return templates.map(mapApprovedTemplate);
+}
+
+export async function getApprovedTemplatesForChannel({
+  channelId,
+  companyId
+}: {
+  channelId: string;
+  companyId: string;
+}) {
+  const channel = await prisma.channel.findFirst({
+    where: {
+      id: channelId,
+      companyId,
+      type: "whatsapp",
+      provider: "meta",
+      status: { in: ["ACTIVE", "CONNECTED"] }
+    }
+  });
+
+  if (!channel) throw new Error("Canal Meta nao encontrado.");
+  if (!channel.wabaId) throw new Error("Canal Meta sem WABA ID.");
+  if (!channel.accessToken) throw new Error("Canal Meta sem token.");
+
+  const templates = await getMetaApprovedTemplates({
+    wabaId: channel.wabaId,
+    accessToken: channel.accessToken
   });
 
   return templates.map(mapApprovedTemplate);
