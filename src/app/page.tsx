@@ -717,6 +717,10 @@ function formatCurrency(value: number | string) {
 }
 
 function userIsAdmin(session?: Session | null) {
+  return session?.user.role === "ADMIN";
+}
+
+function userCanManageOperation(session?: Session | null) {
   return session?.user.role === "ADMIN" || session?.user.role === "SUPERVISOR";
 }
 
@@ -895,6 +899,21 @@ export default function Home() {
         item.id === "empresas" ? userIsPlatformAdmin(session) : true
       );
     }
+
+    if (session?.user.role === "SUPERVISOR") {
+      return navItems.filter((item) =>
+        [
+          "dashboard",
+          "atendimento",
+          "kanban",
+          "contatos",
+          "tags",
+          "simulacao-clt",
+          "multicred"
+        ].includes(item.id)
+      );
+    }
+
     return navItems.filter((item) =>
       ["atendimento", "contatos", "kanban", "simulacao-clt"].includes(item.id)
     );
@@ -2504,7 +2523,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!session || userIsAdmin(session)) return;
+    if (!session) return;
     if (!visibleNavItems.some((item) => item.id === active)) {
       setActive("atendimento");
     }
@@ -2518,8 +2537,11 @@ export default function Home() {
     void loadAiSettings();
     void loadReference();
     void loadAttendants();
-    if (userIsAdmin(session)) {
+    if (userCanManageOperation(session)) {
       void loadKanban();
+      void loadProposals(proposalFilters);
+    }
+    if (userIsAdmin(session)) {
       void loadChannels();
       void loadChannelStatus();
       void loadMessageLogs({ channelId: "", status: "ALL", type: "ALL" });
@@ -2531,9 +2553,6 @@ export default function Home() {
     }
     void loadConversations(conversationFilters);
     void loadNotifications({ silent: true });
-    if (userIsAdmin(session)) {
-      void loadProposals(proposalFilters);
-    }
   }, [
     contactFilters,
     conversationFilters,
@@ -2559,7 +2578,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!session || !userIsAdmin(session)) return;
+    if (!session || !userCanManageOperation(session)) return;
 
     void loadDashboard(dashboardFilters);
   }, [dashboardFilters, loadDashboard, session]);
@@ -2703,7 +2722,7 @@ export default function Home() {
         </nav>
 
         <div className="shrink-0 space-y-3 border-t border-line/70 p-4">
-          {userIsAdmin(session) && (
+          {userCanManageOperation(session) && (
             <button
               className={clsx(
                 "flex h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-semibold transition-colors",
@@ -2907,7 +2926,7 @@ export default function Home() {
               availableTags={reference.tags}
               attendants={attendants}
               currentUserId={session.user.id}
-              isAdmin={userIsAdmin(session)}
+              isAdmin={userCanManageOperation(session)}
               loading={conversationLoading}
               selectedConversation={selectedConversation}
               onFiltersChange={setConversationFilters}
@@ -2978,7 +2997,7 @@ export default function Home() {
               onUpdateProposal={handleUpdateProposal}
             />
           )}
-          {active === "canais" && (
+          {active === "canais" && userIsAdmin(session) && (
             <Canais
               channels={channels}
               channelStatus={channelStatus}
@@ -2997,7 +3016,7 @@ export default function Home() {
               onSimulateInbound={handleSimulateInboundMessage}
             />
           )}
-          {active === "disparos" && (
+          {active === "disparos" && userIsAdmin(session) && (
             <Disparos
               campaigns={campaigns}
               channels={channels}
@@ -3015,7 +3034,7 @@ export default function Home() {
               onRefresh={loadCompanies}
             />
           )}
-          {active === "chatbot" && <Chatbot />}
+          {active === "chatbot" && userIsAdmin(session) && <Chatbot />}
           {active === "tags" && (
             <TagsSettingsPage
               tags={settingsTags}
@@ -3025,7 +3044,7 @@ export default function Home() {
               onDeleteTag={handleDeleteTag}
             />
           )}
-          {active === "config" && (
+          {active === "config" && userIsAdmin(session) && (
             <Configuracoes
               reference={reference}
               attendants={attendants}

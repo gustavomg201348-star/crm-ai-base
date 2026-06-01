@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { normalizeAiMode } from "@/lib/ai-attendant.service";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { requireAdmin } from "@/lib/permissions";
+import { requireCompanyAdmin } from "@/lib/permissions";
 
 export async function GET(request: NextRequest) {
   try {
@@ -39,7 +39,7 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
 
-    const denied = requireAdmin(session);
+    const denied = requireCompanyAdmin(session);
     if (denied) return denied;
 
     const body = (await request.json().catch(() => null)) as

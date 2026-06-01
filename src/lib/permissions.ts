@@ -7,6 +7,10 @@ export function isAdmin(session: SessionUser) {
   return session.role === "ADMIN" || session.role === "SUPERVISOR";
 }
 
+export function isCompanyAdmin(session: SessionUser) {
+  return session.role === "ADMIN";
+}
+
 export function isPlatformAdmin(session: SessionUser) {
   if (session.role !== "ADMIN") return false;
 
@@ -43,6 +47,10 @@ export function forbidden(message = "Voce nao tem permissao para acessar este re
 
 export function requireAdmin(session: SessionUser) {
   return isAdmin(session) ? null : forbidden();
+}
+
+export function requireCompanyAdmin(session: SessionUser) {
+  return isCompanyAdmin(session) ? null : forbidden();
 }
 
 export function requirePlatformAdmin(session: SessionUser) {

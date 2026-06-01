@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest, hashPassword } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { requireAdmin } from "@/lib/permissions";
+import { requireCompanyAdmin } from "@/lib/permissions";
 
 const roles = ["ADMIN", "SUPERVISOR", "AGENT"] as const;
 
@@ -19,7 +19,7 @@ export async function PATCH(
     if (!session) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
-    const blocked = requireAdmin(session);
+    const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
 
     const { id } = await params;
@@ -91,7 +91,7 @@ export async function DELETE(
     if (!session) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
-    const blocked = requireAdmin(session);
+    const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
 
     const { id } = await params;

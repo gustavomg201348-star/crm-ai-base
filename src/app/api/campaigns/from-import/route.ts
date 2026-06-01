@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { campaignInclude, mapCampaign } from "@/lib/campaigns";
 import { prisma } from "@/lib/db";
-import { getSessionOrUnauthorized, requireAdmin } from "@/lib/permissions";
+import { getSessionOrUnauthorized, requireCompanyAdmin } from "@/lib/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,7 +11,7 @@ export async function POST(request: NextRequest) {
     const { session, response } = getSessionOrUnauthorized(request);
     if (response) return response;
 
-    const blocked = requireAdmin(session);
+    const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
 
     const body = (await request.json().catch(() => null)) as

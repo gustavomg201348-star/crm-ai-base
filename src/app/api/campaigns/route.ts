@@ -10,7 +10,7 @@ import {
   processCampaign
 } from "@/lib/campaigns";
 import { prisma } from "@/lib/db";
-import { requireAdmin } from "@/lib/permissions";
+import { requireCompanyAdmin } from "@/lib/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
     if (!session) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
-    const blocked = requireAdmin(session);
+    const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
 
     const campaigns = await prisma.campaign.findMany({
@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
     if (!session) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
-    const blocked = requireAdmin(session);
+    const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
 
     const formData = await request.formData();

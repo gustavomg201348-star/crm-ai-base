@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
-import { getSessionOrUnauthorized, requireAdmin } from "@/lib/permissions";
+import { getSessionOrUnauthorized, requireCompanyAdmin } from "@/lib/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,7 +13,7 @@ export async function GET(
     const { session, response } = getSessionOrUnauthorized(request);
     if (response) return response;
 
-    const blocked = requireAdmin(session);
+    const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
 
     const campaign = await prisma.campaign.findFirst({

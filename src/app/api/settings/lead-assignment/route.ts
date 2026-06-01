@@ -4,14 +4,14 @@ import {
   normalizeAssignmentMode,
   updateLeadAssignmentSettings
 } from "@/lib/lead-assignment";
-import { getSessionOrUnauthorized, requireAdmin } from "@/lib/permissions";
+import { getSessionOrUnauthorized, requireCompanyAdmin } from "@/lib/permissions";
 
 export async function GET(request: NextRequest) {
   try {
     const { session, response } = getSessionOrUnauthorized(request);
     if (!session) return response;
 
-    const blocked = requireAdmin(session);
+    const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
 
     const settings = await getLeadAssignmentSettings(session.companyId);
@@ -29,7 +29,7 @@ export async function PATCH(request: NextRequest) {
     const { session, response } = getSessionOrUnauthorized(request);
     if (!session) return response;
 
-    const blocked = requireAdmin(session);
+    const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
 
     const body = (await request.json().catch(() => null)) as
