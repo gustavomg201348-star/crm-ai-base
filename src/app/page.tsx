@@ -173,6 +173,13 @@ type LeadAssignmentSettings = {
   fallback?: boolean;
 };
 
+type AiMode = "OFF" | "COPILOT" | "AUTO" | "HYBRID";
+
+type AiSettings = {
+  mode: AiMode;
+  instructions: string;
+};
+
 type KanbanStage = {
   id: string;
   name: string;
@@ -186,6 +193,9 @@ type ConversationRow = {
   status: "OPEN" | "PENDING" | "BOT" | "SOLD" | "RESOLVED";
   channel: string;
   summary?: string | null;
+  aiMode?: AiMode | null;
+  aiPaused?: boolean;
+  aiLastSuggestion?: string | null;
   unreadCount: number;
   lastMessageAt?: string | null;
   lastMessagePreview?: string | null;
@@ -424,6 +434,9 @@ type AiAnalysis = {
   nextAction: string;
   suggestedReply: string;
   confidence: number;
+  tags?: string[];
+  shouldTransferToHuman?: boolean;
+  source?: "openai" | "fallback";
 };
 
 type ProposalStatus = "DRAFT" | "FORMALIZING" | "PAID" | "CANCELED" | "REWORK";
@@ -728,6 +741,15 @@ function assignmentModeLabel(mode: LeadAssignmentSettings["mode"]) {
   }[mode];
 }
 
+function aiModeLabel(mode: AiMode) {
+  return {
+    OFF: "Desligada",
+    COPILOT: "Copiloto",
+    AUTO: "Automatica",
+    HYBRID: "Hibrida"
+  }[mode];
+}
+
 function emptyDashboardData(): DashboardData {
   return {
     metrics: {
@@ -767,6 +789,10 @@ export default function Home() {
       allowAttendantClaim: true,
       redistributeWhenOffline: false
     });
+  const [aiSettings, setAiSettings] = useState<AiSettings>({
+    mode: "COPILOT",
+    instructions: ""
+  });
   const [myAvailability, setMyAvailability] = useState<AvailabilityStatus>("OFFLINE");
   const [channels, setChannels] = useState<ChannelRow[]>([]);
   const [channelStatus, setChannelStatus] = useState<ChannelStatusData | null>(null);
@@ -943,6 +969,16 @@ export default function Home() {
     setLeadAssignmentSettings(data.settings);
   }, [session]);
 
+  const loadAiSettings = useCallback(async () => {
+    if (!session) return;
+
+    const response = await fetch("/api/settings/ai");
+    if (!response.ok) return;
+
+    const data = (await response.json()) as { settings: AiSettings };
+    setAiSettings(data.settings);
+  }, [session]);
+
   async function updateMyAvailability(status: AvailabilityStatus) {
     setMyAvailability(status);
     await fetch("/api/users/me/status", {
@@ -973,6 +1009,22 @@ export default function Home() {
       const data = (await response.json()) as { settings: LeadAssignmentSettings };
       setLeadAssignmentSettings(data.settings);
     }
+  }
+
+  async function saveAiSettings(settings: AiSettings) {
+    const response = await fetch("/api/settings/ai", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(settings)
+    });
+
+    if (!response.ok) {
+      setAppError("Nao foi possivel salvar configuracoes da IA.");
+      return;
+    }
+
+    const data = (await response.json()) as { settings: AiSettings };
+    setAiSettings(data.settings);
   }
 
   const loadSettingsTags = useCallback(async () => {
@@ -2075,6 +2127,25 @@ export default function Home() {
     setAiLoading(false);
   }
 
+  async function handleConversationAiMode(
+    conversationId: string,
+    payload: { mode?: AiMode | null; paused?: boolean }
+  ) {
+    const response = await fetch(`/api/conversations/${conversationId}/ai-mode`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      setAppError("Nao foi possivel atualizar o modo da IA.");
+      return;
+    }
+
+    const data = (await response.json()) as { conversation: ConversationRow };
+    mergeConversation(data.conversation);
+  }
+
   async function handleSimulateInboundMessage(payload: {
     channelId: string;
     name: string;
@@ -2444,6 +2515,7 @@ export default function Home() {
 
     void loadContacts(contactFilters);
     void loadSettingsTags();
+    void loadAiSettings();
     void loadReference();
     void loadAttendants();
     if (userIsAdmin(session)) {
@@ -2466,6 +2538,7 @@ export default function Home() {
     contactFilters,
     conversationFilters,
     loadContacts,
+    loadAiSettings,
     loadSettingsTags,
     loadConversations,
     loadAttendants,
@@ -2849,7 +2922,9 @@ export default function Home() {
               onUpdateStatus={handleConversationStatus}
               aiAnalysis={aiAnalysis}
               aiLoading={aiLoading}
+              aiSettings={aiSettings}
               onAnalyzeConversation={handleAnalyzeConversation}
+              onUpdateConversationAiMode={handleConversationAiMode}
               onAddTags={handleAddConversationTags}
               onRemoveTag={handleRemoveConversationTag}
               onOpenCltSimulation={openCltSimulationFromConversation}
@@ -2954,7 +3029,9 @@ export default function Home() {
             <Configuracoes
               reference={reference}
               attendants={attendants}
+              aiSettings={aiSettings}
               leadAssignmentSettings={leadAssignmentSettings}
+              onSaveAiSettings={saveAiSettings}
               onSaveLeadAssignmentSettings={saveLeadAssignmentSettings}
               onUpdateAttendantStatus={updateAttendantStatus}
               onCreateOrigin={handleCreateOrigin}
@@ -3861,7 +3938,9 @@ function Atendimento({
   onUpdateStatus,
   aiAnalysis,
   aiLoading,
+  aiSettings,
   onAnalyzeConversation,
+  onUpdateConversationAiMode,
   onAddTags,
   onRemoveTag,
   onOpenCltSimulation
@@ -3892,7 +3971,12 @@ function Atendimento({
   ) => Promise<void>;
   aiAnalysis: AiAnalysis | null;
   aiLoading: boolean;
+  aiSettings: AiSettings;
   onAnalyzeConversation: (conversationId: string) => Promise<void>;
+  onUpdateConversationAiMode: (
+    conversationId: string,
+    payload: { mode?: AiMode | null; paused?: boolean }
+  ) => Promise<void>;
   onAddTags: (conversationId: string, tagIds: string[]) => Promise<void>;
   onRemoveTag: (conversationId: string, tagId: string) => Promise<void>;
   onOpenCltSimulation: (conversation: ConversationRow) => void;
@@ -4488,11 +4572,23 @@ function Atendimento({
         <AiPanel
           compact
           analysis={aiAnalysis}
+          companyMode={aiSettings.mode}
+          conversation={selectedConversation}
           loading={aiLoading}
           disabled={!selectedConversation}
           onAnalyze={() =>
             selectedConversation
               ? void onAnalyzeConversation(selectedConversation.id)
+              : undefined
+          }
+          onModeChange={(mode) =>
+            selectedConversation
+              ? void onUpdateConversationAiMode(selectedConversation.id, { mode })
+              : undefined
+          }
+          onPauseChange={(paused) =>
+            selectedConversation
+              ? void onUpdateConversationAiMode(selectedConversation.id, { paused })
               : undefined
           }
         />
@@ -10487,7 +10583,9 @@ function TagEditorModal({
 function Configuracoes({
   reference,
   attendants,
+  aiSettings,
   leadAssignmentSettings,
+  onSaveAiSettings,
   onSaveLeadAssignmentSettings,
   onUpdateAttendantStatus,
   onCreateOrigin,
@@ -10505,7 +10603,9 @@ function Configuracoes({
 }: {
   reference: ReferenceData;
   attendants: AttendantRow[];
+  aiSettings: AiSettings;
   leadAssignmentSettings: LeadAssignmentSettings;
+  onSaveAiSettings: (settings: AiSettings) => Promise<void>;
   onSaveLeadAssignmentSettings: (settings: LeadAssignmentSettings) => Promise<void>;
   onUpdateAttendantStatus: (userId: string, status: AvailabilityStatus) => Promise<void>;
   onCreateOrigin: (name: string) => Promise<void>;
@@ -10576,10 +10676,15 @@ function Configuracoes({
   } | null>(null);
   const [assignmentForm, setAssignmentForm] =
     useState<LeadAssignmentSettings>(leadAssignmentSettings);
+  const [aiForm, setAiForm] = useState<AiSettings>(aiSettings);
 
   useEffect(() => {
     setAssignmentForm(leadAssignmentSettings);
   }, [leadAssignmentSettings]);
+
+  useEffect(() => {
+    setAiForm(aiSettings);
+  }, [aiSettings]);
 
   useEffect(() => {
     setStageForm((current) => ({
@@ -10626,6 +10731,67 @@ function Configuracoes({
 
   return (
     <div className="space-y-6">
+      <section className="rounded-[1.5rem] border border-line bg-white p-5 shadow-soft">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-brand">
+              Inteligencia artificial
+            </p>
+            <h3 className="mt-1 text-xl font-bold text-slate-950">
+              Modo de atendimento da IA
+            </h3>
+            <p className="mt-1 max-w-2xl text-sm text-slate-500">
+              Defina se a IA fica desligada, apenas sugerindo respostas ou respondendo
+              automaticamente quando novas mensagens chegarem.
+            </p>
+          </div>
+          <button
+            className="h-10 rounded-full bg-brand px-4 text-sm font-semibold text-white shadow-soft"
+            onClick={() => void onSaveAiSettings(aiForm)}
+            type="button"
+          >
+            Salvar IA
+          </button>
+        </div>
+        <div className="mt-5 grid gap-4 lg:grid-cols-[0.7fr_1.3fr]">
+          <label className="text-sm font-semibold text-slate-800">
+            Modo padrao da empresa
+            <select
+              className="mt-2 h-11 w-full rounded-2xl border border-line bg-white px-3 text-sm outline-none"
+              value={aiForm.mode}
+              onChange={(event) =>
+                setAiForm((current) => ({
+                  ...current,
+                  mode: event.target.value as AiMode
+                }))
+              }
+            >
+              <option value="OFF">Desligada</option>
+              <option value="COPILOT">Copiloto: sugerir resposta</option>
+              <option value="AUTO">Automatica: responder sozinha</option>
+              <option value="HYBRID">Hibrida: automatica sem responsavel</option>
+            </select>
+            <p className="mt-2 text-xs text-slate-500">
+              O modo da conversa pode sobrescrever essa configuracao no Atendimento.
+            </p>
+          </label>
+          <label className="text-sm font-semibold text-slate-800">
+            Instrucoes internas da IA
+            <textarea
+              className="mt-2 min-h-28 w-full rounded-2xl border border-line bg-white px-3 py-2 text-sm outline-none"
+              placeholder="Ex: priorizar credito CLT, pedir CPF somente quando necessario, transferir para humano ao falar de contrato."
+              value={aiForm.instructions}
+              onChange={(event) =>
+                setAiForm((current) => ({
+                  ...current,
+                  instructions: event.target.value
+                }))
+              }
+            />
+          </label>
+        </div>
+      </section>
+
       <section className="rounded-[1.5rem] border border-line bg-white p-5 shadow-soft">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
@@ -11292,16 +11458,26 @@ function Configuracoes({
 function AiPanel({
   compact = false,
   analysis,
+  companyMode = "COPILOT",
+  conversation,
   loading = false,
   disabled = false,
-  onAnalyze
+  onAnalyze,
+  onModeChange,
+  onPauseChange
 }: {
   compact?: boolean;
   analysis?: AiAnalysis | null;
+  companyMode?: AiMode;
+  conversation?: ConversationRow | null;
   loading?: boolean;
   disabled?: boolean;
   onAnalyze?: () => void;
+  onModeChange?: (mode: AiMode | null) => void;
+  onPauseChange?: (paused: boolean) => void;
 }) {
+  const effectiveMode = conversation?.aiMode ?? companyMode;
+
   return (
     <aside className="rounded border border-line bg-white p-5 shadow-soft">
       <div className="flex items-center gap-2">
@@ -11313,13 +11489,49 @@ function AiPanel({
           ? "Sugestao para a conversa atual."
           : "Analise do funil e proximas acoes recomendadas."}
       </p>
+      {conversation && (
+        <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50/60 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.12em] text-brand">
+                Modo atual
+              </p>
+              <p className="text-sm font-semibold text-slate-800">
+                {aiModeLabel(effectiveMode)}
+                {conversation.aiMode ? "" : " (empresa)"}
+              </p>
+            </div>
+            <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+              Pausar
+              <input
+                checked={Boolean(conversation.aiPaused)}
+                type="checkbox"
+                onChange={(event) => onPauseChange?.(event.target.checked)}
+              />
+            </label>
+          </div>
+          <select
+            className="mt-3 h-9 w-full rounded-xl border border-blue-100 bg-white px-3 text-xs font-semibold text-slate-700 outline-none"
+            value={conversation.aiMode ?? ""}
+            onChange={(event) =>
+              onModeChange?.(event.target.value ? (event.target.value as AiMode) : null)
+            }
+          >
+            <option value="">Usar padrao da empresa</option>
+            <option value="OFF">Desligada nesta conversa</option>
+            <option value="COPILOT">Copiloto nesta conversa</option>
+            <option value="AUTO">Automatica nesta conversa</option>
+            <option value="HYBRID">Hibrida nesta conversa</option>
+          </select>
+        </div>
+      )}
       {onAnalyze && (
         <button
           className="mt-4 h-10 w-full rounded bg-saffron px-3 text-sm font-semibold text-white disabled:opacity-50"
           disabled={disabled || loading}
           onClick={onAnalyze}
         >
-          {loading ? "Analisando..." : "Gerar analise IA"}
+          {loading ? "Gerando..." : "Gerar resposta IA"}
         </button>
       )}
       {analysis && (
@@ -11332,6 +11544,12 @@ function AiPanel({
               {analysis.confidence}% confianca
             </span>
           </div>
+          {analysis.source === "fallback" && (
+            <p className="rounded bg-white/70 p-2 text-xs font-semibold text-amber-900">
+              Conecte OPENAI_API_KEY para sugestoes inteligentes. Esta resposta usa o
+              modo seguro local.
+            </p>
+          )}
           <p className="text-sm text-amber-950">{analysis.summary}</p>
           <p className="text-sm font-semibold text-amber-950">
             {analysis.nextAction}
@@ -11339,6 +11557,11 @@ function AiPanel({
           <p className="rounded bg-white p-2 text-sm text-slate-700">
             {analysis.suggestedReply}
           </p>
+          {analysis.shouldTransferToHuman && (
+            <p className="rounded bg-rose-50 p-2 text-xs font-semibold text-rose-700">
+              A IA recomenda transferencia humana antes de responder.
+            </p>
+          )}
         </div>
       )}
       <div className="mt-4 space-y-3">

@@ -1,5 +1,6 @@
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
+import { maybeSendAutomaticAiReply } from "@/lib/ai-attendant.service";
 import { maybeAutoAssignConversation } from "@/lib/lead-assignment";
 import { publishInboundNotification } from "@/lib/notification-stream";
 import { createInboundMessageNotification, mapNotification } from "@/lib/notifications";
@@ -155,6 +156,13 @@ export async function processInboundMessage({
     companyId,
     userId: updated.agent?.id ?? null,
     notification: mapNotification(notification)
+  });
+
+  void maybeSendAutomaticAiReply({
+    companyId,
+    conversationId: updated.id
+  }).catch((error) => {
+    console.error("Falha ao enviar resposta automatica IA", error);
   });
 
   return mapConversation(updated);

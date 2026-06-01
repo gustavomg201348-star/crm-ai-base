@@ -65,7 +65,8 @@ export async function saveOutboundMessage({
   templateLanguage,
   templateVariables,
   providerMessageId,
-  status = "sent"
+  status = "sent",
+  senderType = "agent"
 }: {
   conversationId: string;
   userId?: string;
@@ -79,6 +80,7 @@ export async function saveOutboundMessage({
   templateVariables?: string | null;
   providerMessageId?: string | null;
   status?: string;
+  senderType?: string;
 }) {
   const updated = await prisma.$transaction(async (tx) => {
     const conversation = await tx.conversation.findUniqueOrThrow({
@@ -90,7 +92,7 @@ export async function saveOutboundMessage({
       data: {
         conversationId,
         direction: "outbound",
-        senderType: "agent",
+        senderType,
         body,
         type,
         mediaId,
