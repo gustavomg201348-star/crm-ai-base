@@ -1,6 +1,19 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { createSessionToken, sessionCookie, verifyPassword } from "@/lib/auth";
+import { createSessionToken, hashPassword, sessionCookie, verifyPassword } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+
+function isSeedPasswordResetAllowed(email: string, password: string) {
+  const allowedEmails = (process.env.PLATFORM_ADMIN_EMAILS || "admin@crm.local")
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+
+  return (
+    Boolean(process.env.SEED_ADMIN_PASSWORD) &&
+    process.env.SEED_ADMIN_PASSWORD === password &&
+    allowedEmails.includes(email.toLowerCase())
+  );
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -12,10 +25,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Informe email e senha." }, { status: 400 });
     }
 
-    const user = await prisma.user.findUnique({
+    let user = await prisma.user.findUnique({
       where: { email: body.email.toLowerCase().trim() },
       include: { company: true }
     });
+
+    if (
+      user &&
+      user.role === "ADMIN" &&
+      !verifyPassword(body.password, user.passwordHash) &&
+      isSeedPasswordResetAllowed(user.email, body.password)
+    ) {
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: { passwordHash: hashPassword(body.password) },
+        include: { company: true }
+      });
+    }
 
     if (!user || !verifyPassword(body.password, user.passwordHash)) {
       return NextResponse.json({ error: "Credenciais invalidas." }, { status: 401 });
