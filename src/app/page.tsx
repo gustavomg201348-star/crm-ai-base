@@ -3474,7 +3474,7 @@ function LoginScreen({
   onLogin: (email: string, password: string) => Promise<void>;
 }) {
   const [email, setEmail] = useState("admin@crm.local");
-  const [password, setPassword] = useState("admin123");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -3517,7 +3517,7 @@ function LoginScreen({
               className="mt-2 h-11 w-full rounded border border-line px-3 font-normal outline-none focus:border-brand"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              placeholder="admin123"
+              placeholder="Digite sua senha"
               type="password"
             />
           </label>
@@ -3538,8 +3538,7 @@ function LoginScreen({
         </button>
 
         <p className="mt-4 text-sm text-slate-500">
-          Rode `npm run prisma:push` e `npm run prisma:seed` para criar o usuario
-          inicial.
+          Use o usuario administrador criado para sua empresa.
         </p>
       </form>
     </main>

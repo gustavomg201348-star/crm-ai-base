@@ -22,14 +22,25 @@ async function main() {
     }
   });
 
-  const adminPasswordHash = hashPassword(process.env.SEED_ADMIN_PASSWORD || "admin123");
+  const seedAdminPassword = process.env.SEED_ADMIN_PASSWORD;
+  const existingAdmin = await prisma.user.findUnique({
+    where: { email: "admin@crm.local" }
+  });
+
+  if (process.env.NODE_ENV === "production" && !seedAdminPassword && !existingAdmin) {
+    throw new Error("Defina SEED_ADMIN_PASSWORD em producao antes de criar o admin inicial.");
+  }
+
+  const adminPasswordHash = seedAdminPassword
+    ? hashPassword(seedAdminPassword)
+    : existingAdmin?.passwordHash ?? hashPassword("admin123");
 
   const admin = await prisma.user.upsert({
     where: { email: "admin@crm.local" },
     update: {
       companyId: company.id,
       name: "Administrador",
-      passwordHash: adminPasswordHash,
+      ...(seedAdminPassword ? { passwordHash: adminPasswordHash } : {}),
       role: "ADMIN"
     },
     create: {

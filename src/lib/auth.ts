@@ -12,7 +12,13 @@ export type SessionUser = {
 const cookieName = "crm_session";
 
 function getSecret() {
-  return process.env.AUTH_SECRET || "dev-secret-change-me";
+  if (process.env.AUTH_SECRET) return process.env.AUTH_SECRET;
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("AUTH_SECRET precisa estar configurado em producao.");
+  }
+
+  return "dev-secret-change-me";
 }
 
 function sign(payload: string) {
