@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { requireCompanyAdmin } from "@/lib/permissions";
 import { isProposalStatus, mapProposal, proposalInclude } from "@/lib/proposals";
 
 function toMoney(value: unknown) {
@@ -24,6 +25,8 @@ export async function PATCH(
     if (!session) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
+    const blocked = requireCompanyAdmin(session);
+    if (blocked) return blocked;
 
     const { id } = await params;
     const current = await prisma.proposal.findFirst({
@@ -106,6 +109,8 @@ export async function DELETE(
     if (!session) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
+    const blocked = requireCompanyAdmin(session);
+    if (blocked) return blocked;
 
     const { id } = await params;
     const current = await prisma.proposal.findFirst({

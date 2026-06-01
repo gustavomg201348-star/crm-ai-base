@@ -908,8 +908,7 @@ export default function Home() {
           "kanban",
           "contatos",
           "tags",
-          "simulacao-clt",
-          "multicred"
+          "simulacao-clt"
         ].includes(item.id)
       );
     }
@@ -2539,7 +2538,6 @@ export default function Home() {
     void loadAttendants();
     if (userCanManageOperation(session)) {
       void loadKanban();
-      void loadProposals(proposalFilters);
     }
     if (userIsAdmin(session)) {
       void loadChannels();
@@ -2547,6 +2545,7 @@ export default function Home() {
       void loadMessageLogs({ channelId: "", status: "ALL", type: "ALL" });
       void loadCampaigns();
       void loadLeadAssignmentSettings();
+      void loadProposals(proposalFilters);
     }
     if (userIsPlatformAdmin(session)) {
       void loadCompanies();
@@ -2984,7 +2983,7 @@ export default function Home() {
               }}
             />
           )}
-          {active === "multicred" && (
+          {active === "multicred" && userIsAdmin(session) && (
             <Multicred
               contacts={contacts}
               filters={proposalFilters}

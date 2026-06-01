@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { getSessionFromRequest } from "@/lib/auth";
 import { createActivity } from "@/lib/activities";
 import { prisma } from "@/lib/db";
+import { requireCompanyAdmin } from "@/lib/permissions";
 import {
   isProposalStatus,
   mapProposal,
@@ -84,6 +85,8 @@ export async function GET(request: NextRequest) {
     if (!session) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
+    const blocked = requireCompanyAdmin(session);
+    if (blocked) return blocked;
 
     const where = buildProposalWhere(session.companyId, request.nextUrl.searchParams);
     const proposals = await prisma.proposal.findMany({
@@ -117,6 +120,8 @@ export async function POST(request: NextRequest) {
     if (!session) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
+    const blocked = requireCompanyAdmin(session);
+    if (blocked) return blocked;
 
     const body = (await request.json().catch(() => null)) as
       | {
