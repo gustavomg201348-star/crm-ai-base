@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { requireCompanyAdmin } from "@/lib/permissions";
+import { validateMetaWhatsAppCredentials } from "@/lib/meta-whatsapp-diagnostics";
 
 function mapChannel(channel: {
   id: string;
@@ -16,6 +17,8 @@ function mapChannel(channel: {
   verifyToken: string | null;
   appSecret: string | null;
   status: string;
+  lastWebhookSubscribedAt: Date | null;
+  lastWebhookReceivedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }) {
@@ -32,6 +35,8 @@ function mapChannel(channel: {
     hasVerifyToken: Boolean(channel.verifyToken),
     hasAppSecret: Boolean(channel.appSecret),
     status: channel.status,
+    lastWebhookSubscribedAt: channel.lastWebhookSubscribedAt,
+    lastWebhookReceivedAt: channel.lastWebhookReceivedAt,
     createdAt: channel.createdAt,
     updatedAt: channel.updatedAt
   };
@@ -87,6 +92,25 @@ export async function POST(request: NextRequest) {
 
     if (!body?.name?.trim()) {
       return NextResponse.json({ error: "Nome obrigatorio." }, { status: 400 });
+    }
+
+    if ((body.provider?.trim() || "sandbox") === "meta") {
+      const diagnostics = await validateMetaWhatsAppCredentials({
+        accessToken: body.accessToken,
+        wabaId: body.wabaId,
+        phoneNumberId: body.phoneNumberId
+      });
+
+      if (!diagnostics.ok) {
+        const reason =
+          diagnostics.token.error ||
+          diagnostics.waba.error ||
+          diagnostics.phone.error ||
+          (diagnostics.permissions.missing.length
+            ? `Permissoes ausentes: ${diagnostics.permissions.missing.join(", ")}.`
+            : "Validacao Meta incompleta.");
+        return NextResponse.json({ error: reason, diagnostics }, { status: 400 });
+      }
     }
 
     const channel = await prisma.channel.create({

@@ -282,6 +282,8 @@ type ChannelRow = {
   hasVerifyToken?: boolean;
   hasAppSecret?: boolean;
   status: string;
+  lastWebhookSubscribedAt?: string | null;
+  lastWebhookReceivedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -295,6 +297,8 @@ type ChannelStatusRow = {
   phoneNumberId?: string | null;
   wabaId?: string | null;
   webhookUrl: string;
+  lastWebhookSubscribedAt?: string | null;
+  lastWebhookReceivedAt?: string | null;
   ready: boolean;
   checks: Record<string, boolean>;
   meta: {
@@ -320,6 +324,51 @@ type ChannelStatusData = {
   webhookUrl: string;
   summary: { total: number; ready: number; withWarnings: number };
   channels: ChannelStatusRow[];
+};
+
+type MetaChannelDiagnostics = {
+  ok: boolean;
+  tokenPreview?: string | null;
+  token: {
+    ok: boolean;
+    id?: string | null;
+    name?: string | null;
+    appId?: string | null;
+    tokenType?: string | null;
+    expiresAt?: number | null;
+    error?: string | null;
+  };
+  permissions: {
+    ok: boolean;
+    detected: string[];
+    required: string[];
+    missing: string[];
+    optionalMissing: string[];
+    error?: string | null;
+  };
+  waba: {
+    ok: boolean;
+    id?: string | null;
+    name?: string | null;
+    error?: string | null;
+  };
+  phone: {
+    ok: boolean;
+    id?: string | null;
+    displayPhone?: string | null;
+    verifiedName?: string | null;
+    qualityRating?: string | null;
+    wabaId?: string | null;
+    belongsToWaba?: boolean;
+    error?: string | null;
+  };
+  checklist: {
+    tokenValid: boolean;
+    permissionsChecked: boolean;
+    wabaAccessible: boolean;
+    phoneFound: boolean;
+    phoneBelongsToWaba: boolean;
+  };
 };
 
 type MessageLogRow = {
@@ -1676,6 +1725,26 @@ export default function Home() {
     await loadChannelStatus();
     await loadMessageLogs(messageLogFilters);
     return true;
+  }
+
+  async function handleSubscribeChannelWebhook(id: string) {
+    const response = await fetch(`/api/channels/${id}/subscribe-webhook`, {
+      method: "POST"
+    });
+    const data = (await response.json().catch(() => null)) as
+      | { message?: string; error?: string }
+      | null;
+
+    if (!response.ok) {
+      setAppError(data?.error ?? "Nao foi possivel assinar o webhook.");
+      return null;
+    }
+
+    setAppError("");
+    await loadChannels();
+    await loadChannelStatus();
+    await loadMessageLogs(messageLogFilters);
+    return data?.message ?? "Webhook assinado com sucesso.";
   }
 
   const loadProposals = useCallback(async (filters = proposalFilters) => {
@@ -3043,6 +3112,7 @@ export default function Home() {
               logsLoading={messageLogsLoading}
               onCreateChannel={handleCreateChannel}
               onUpdateChannel={handleUpdateChannel}
+              onSubscribeChannelWebhook={handleSubscribeChannelWebhook}
               onRefreshStatus={loadChannelStatus}
               onMessageLogFiltersChange={(filters) => {
                 setMessageLogFilters(filters);
@@ -7943,6 +8013,7 @@ function Canais({
   logsLoading,
   onCreateChannel,
   onUpdateChannel,
+  onSubscribeChannelWebhook,
   onRefreshStatus,
   onMessageLogFiltersChange,
   onRefreshLogs,
@@ -7979,6 +8050,7 @@ function Canais({
       status: string;
     }
   ) => Promise<boolean>;
+  onSubscribeChannelWebhook: (id: string) => Promise<string | null>;
   onRefreshStatus: () => Promise<void>;
   onMessageLogFiltersChange: (filters: { channelId: string; status: string; type: string }) => void;
   onRefreshLogs: () => Promise<void>;
@@ -8007,6 +8079,11 @@ function Canais({
   const [editingChannel, setEditingChannel] = useState<ChannelRow | null>(null);
   const [channelFeedback, setChannelFeedback] = useState("");
   const [channelSaving, setChannelSaving] = useState(false);
+  const [channelDiagnostics, setChannelDiagnostics] =
+    useState<MetaChannelDiagnostics | null>(null);
+  const [channelValidationFeedback, setChannelValidationFeedback] = useState("");
+  const [channelValidating, setChannelValidating] = useState(false);
+  const [subscribingChannelId, setSubscribingChannelId] = useState("");
 
   const selectedChannelId = form.channelId || channels[0]?.id || "";
 
@@ -8021,6 +8098,12 @@ function Canais({
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!channelDiagnostics?.ok) {
+      setChannelValidationFeedback(
+        "Valide token, WABA e Phone Number ID antes de cadastrar o canal como ativo."
+      );
+      return;
+    }
     await onCreateChannel(channelForm);
     setChannelForm({
       name: "",
@@ -8031,11 +8114,64 @@ function Canais({
       verifyToken: "",
       appSecret: ""
     });
+    setChannelDiagnostics(null);
+    setChannelValidationFeedback("");
+  }
+
+  function updateChannelForm(key: keyof typeof channelForm, value: string) {
+    setChannelForm((current) => ({ ...current, [key]: value }));
+    setChannelDiagnostics(null);
+    setChannelValidationFeedback("");
+  }
+
+  async function handleValidateChannel() {
+    setChannelValidating(true);
+    setChannelValidationFeedback("");
+
+    const response = await fetch("/api/channels/meta/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        accessToken: channelForm.accessToken,
+        wabaId: channelForm.wabaId,
+        phoneNumberId: channelForm.phoneNumberId
+      })
+    });
+    const data = (await response.json().catch(() => null)) as
+      | { diagnostics?: MetaChannelDiagnostics; error?: string }
+      | null;
+
+    setChannelValidating(false);
+
+    if (!response.ok || !data?.diagnostics) {
+      setChannelValidationFeedback(data?.error ?? "Nao foi possivel validar a integracao.");
+      return;
+    }
+
+    setChannelDiagnostics(data.diagnostics);
+    setChannelValidationFeedback(
+      data.diagnostics.ok
+        ? "Integracao validada. Agora cadastre o canal e assine o webhook."
+        : "Encontramos pontos pendentes. Confira o checklist antes de cadastrar."
+    );
+  }
+
+  async function handleSubscribeWebhook(channelId: string) {
+    setSubscribingChannelId(channelId);
+    setChannelFeedback("");
+    const message = await onSubscribeChannelWebhook(channelId);
+    setSubscribingChannelId("");
+    setChannelFeedback(message ?? "Nao foi possivel assinar o webhook.");
   }
 
   return (
     <div className="grid gap-4 xl:grid-cols-[1fr_420px]">
       <div className="space-y-4">
+        {channelFeedback && !editingChannel && (
+          <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
+            {channelFeedback}
+          </div>
+        )}
         <section className="rounded border border-line bg-white p-5 shadow-soft">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
@@ -8144,6 +8280,21 @@ function Canais({
                       <Edit3 className="h-3.5 w-3.5" />
                       Editar
                     </button>
+                    {item.provider === "meta" && (
+                      <button
+                        className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl bg-brand px-3 text-xs font-bold text-white hover:bg-brand-strong disabled:opacity-60"
+                        disabled={subscribingChannelId === item.id}
+                        onClick={() => void handleSubscribeWebhook(item.id)}
+                        type="button"
+                      >
+                        {subscribingChannelId === item.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Activity className="h-3.5 w-3.5" />
+                        )}
+                        Assinar webhook
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -8153,7 +8304,9 @@ function Canais({
                     ["Phone ID", item.checks.phoneNumberId],
                     ["WABA", item.checks.wabaId],
                     ["Token", item.checks.accessToken],
-                    ["Webhook", item.checks.verifyToken],
+                    ["Verify token", item.checks.verifyToken],
+                    ["Webhook assinado", item.checks.webhookSubscribed],
+                    ["Mensagem real recebida", item.checks.webhookReceived],
                     ["Meta", item.checks.metaReachable]
                   ].map(([label, ok]) => (
                     <StatusPill key={String(label)} label={String(label)} ok={Boolean(ok)} />
@@ -8171,6 +8324,35 @@ function Canais({
                   ) : (
                     <p className="mt-1">Nenhuma mensagem registrada neste canal.</p>
                   )}
+                </div>
+
+                <div className="mt-3 grid gap-2 rounded-xl bg-white px-3 py-2 text-xs text-slate-500 md:grid-cols-3">
+                  <div>
+                    <p className="font-semibold text-slate-700">Webhook assinado</p>
+                    <p className="mt-1">
+                      {item.lastWebhookSubscribedAt
+                        ? formatRelativeDate(item.lastWebhookSubscribedAt)
+                        : "Sem registro pelo CRM."}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-slate-700">Webhook recebido</p>
+                    <p className="mt-1">
+                      {item.lastWebhookReceivedAt
+                        ? formatRelativeDate(item.lastWebhookReceivedAt)
+                        : "Nenhum recebimento real."}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-slate-700">Ultima mensagem no canal</p>
+                    <p className="mt-1">
+                      {item.metrics.lastActivityAt
+                        ? `${item.metrics.lastContactName ?? "Contato"} - ${
+                            item.metrics.lastContactPhone ?? "sem telefone"
+                          }`
+                        : "Nenhuma mensagem registrada."}
+                    </p>
+                  </div>
                 </div>
 
                 {item.warnings.length > 0 && (
@@ -8363,9 +8545,9 @@ function Canais({
         <section className="rounded border border-line bg-white p-5 shadow-soft">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-lg font-bold">Adicionar WhatsApp Meta</h3>
+              <h3 className="text-lg font-bold">Conectar WhatsApp Meta</h3>
               <p className="text-sm text-slate-500">
-                Cadastre um numero da Cloud API por canal. O roteamento usa o Phone Number ID.
+                Valide token, WABA e numero antes de ativar uma BM no CRM.
               </p>
             </div>
             <Plus className="h-5 w-5 text-slate-400" />
@@ -8376,58 +8558,184 @@ function Canais({
               placeholder="Nome do canal"
               required
               value={channelForm.name}
-              onChange={(value) =>
-                setChannelForm((current) => ({ ...current, name: value }))
-              }
+              onChange={(value) => updateChannelForm("name", value)}
             />
             <ContactInput
               placeholder="Telefone exibido"
               value={channelForm.displayPhone}
-              onChange={(value) =>
-                setChannelForm((current) => ({ ...current, displayPhone: value }))
-              }
+              onChange={(value) => updateChannelForm("displayPhone", value)}
             />
             <ContactInput
               placeholder="Phone Number ID"
               required
               value={channelForm.phoneNumberId}
-              onChange={(value) =>
-                setChannelForm((current) => ({ ...current, phoneNumberId: value }))
-              }
+              onChange={(value) => updateChannelForm("phoneNumberId", value)}
             />
             <ContactInput
               placeholder="WABA ID"
+              required
               value={channelForm.wabaId}
-              onChange={(value) =>
-                setChannelForm((current) => ({ ...current, wabaId: value }))
-              }
+              onChange={(value) => updateChannelForm("wabaId", value)}
             />
             <ContactInput
               placeholder="Access token"
               required
               value={channelForm.accessToken}
-              onChange={(value) =>
-                setChannelForm((current) => ({ ...current, accessToken: value }))
-              }
+              onChange={(value) => updateChannelForm("accessToken", value)}
             />
             <ContactInput
               placeholder="Verify token"
               required
               value={channelForm.verifyToken}
-              onChange={(value) =>
-                setChannelForm((current) => ({ ...current, verifyToken: value }))
-              }
+              onChange={(value) => updateChannelForm("verifyToken", value)}
             />
             <ContactInput
               placeholder="App secret"
               value={channelForm.appSecret}
-              onChange={(value) =>
-                setChannelForm((current) => ({ ...current, appSecret: value }))
-              }
+              onChange={(value) => updateChannelForm("appSecret", value)}
             />
-            <button className="h-10 rounded bg-brand px-4 text-sm font-semibold text-white">
-              Cadastrar canal Meta
-            </button>
+            <div className="flex gap-2">
+              <button
+                className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded border border-line px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                disabled={
+                  channelValidating ||
+                  !channelForm.accessToken ||
+                  !channelForm.wabaId ||
+                  !channelForm.phoneNumberId
+                }
+                onClick={() => void handleValidateChannel()}
+                type="button"
+              >
+                {channelValidating ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <ShieldCheck className="h-4 w-4" />
+                )}
+                Validar integracao
+              </button>
+              <button
+                className="h-10 flex-1 rounded bg-brand px-4 text-sm font-semibold text-white disabled:opacity-50"
+                disabled={!channelDiagnostics?.ok}
+              >
+                Cadastrar canal
+              </button>
+            </div>
+
+            <div className="lg:col-span-2 rounded-2xl border border-line bg-slate-50 p-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-bold text-slate-900">
+                    Checklist de validacao Meta
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    O CRM nunca mostra o token completo.{" "}
+                    {channelDiagnostics?.tokenPreview
+                      ? `Token: ${channelDiagnostics.tokenPreview}`
+                      : "Valide para ver o diagnostico."}
+                  </p>
+                </div>
+                <span
+                  className={clsx(
+                    "rounded-full px-3 py-1 text-xs font-bold",
+                    channelDiagnostics?.ok
+                      ? "bg-emerald-50 text-emerald-700"
+                      : "bg-amber-50 text-amber-700"
+                  )}
+                >
+                  {channelDiagnostics?.ok ? "Pronto para cadastrar" : "Aguardando validacao"}
+                </span>
+              </div>
+
+              <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                <StatusPill
+                  label="Token valido"
+                  ok={Boolean(channelDiagnostics?.checklist.tokenValid)}
+                />
+                <StatusPill
+                  label="Permissoes conferidas"
+                  ok={Boolean(channelDiagnostics?.checklist.permissionsChecked)}
+                />
+                <StatusPill
+                  label="WABA acessivel"
+                  ok={Boolean(channelDiagnostics?.checklist.wabaAccessible)}
+                />
+                <StatusPill
+                  label="Numero encontrado"
+                  ok={Boolean(channelDiagnostics?.checklist.phoneFound)}
+                />
+                <StatusPill
+                  label="Numero pertence a WABA"
+                  ok={Boolean(channelDiagnostics?.checklist.phoneBelongsToWaba)}
+                />
+              </div>
+
+              {channelDiagnostics && (
+                <div className="mt-3 grid gap-3 text-xs text-slate-600 md:grid-cols-3">
+                  <div className="rounded-xl bg-white p-3">
+                    <p className="font-bold text-slate-900">Permissoes</p>
+                    <p className="mt-1">
+                      Detectadas:{" "}
+                      {channelDiagnostics.permissions.detected.length
+                        ? channelDiagnostics.permissions.detected.join(", ")
+                        : "nao lidas"}
+                    </p>
+                    {channelDiagnostics.permissions.missing.length > 0 && (
+                      <p className="mt-1 font-semibold text-rose-700">
+                        Faltando: {channelDiagnostics.permissions.missing.join(", ")}
+                      </p>
+                    )}
+                    {channelDiagnostics.permissions.optionalMissing.length > 0 && (
+                      <p className="mt-1 text-amber-700">
+                        Recomendada para webhook:{" "}
+                        {channelDiagnostics.permissions.optionalMissing.join(", ")}
+                      </p>
+                    )}
+                  </div>
+                  <div className="rounded-xl bg-white p-3">
+                    <p className="font-bold text-slate-900">WABA</p>
+                    <p className="mt-1 break-all">
+                      {channelDiagnostics.waba.name ?? channelDiagnostics.waba.id ?? "-"}
+                    </p>
+                    {channelDiagnostics.waba.error && (
+                      <p className="mt-1 font-semibold text-rose-700">
+                        {channelDiagnostics.waba.error}
+                      </p>
+                    )}
+                  </div>
+                  <div className="rounded-xl bg-white p-3">
+                    <p className="font-bold text-slate-900">Numero</p>
+                    <p className="mt-1">
+                      {channelDiagnostics.phone.displayPhone ??
+                        channelDiagnostics.phone.id ??
+                        "-"}
+                    </p>
+                    {channelDiagnostics.phone.verifiedName && (
+                      <p className="mt-1">
+                        Nome: {channelDiagnostics.phone.verifiedName}
+                      </p>
+                    )}
+                    {channelDiagnostics.phone.error && (
+                      <p className="mt-1 font-semibold text-rose-700">
+                        {channelDiagnostics.phone.error}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {channelValidationFeedback && (
+                <p
+                  className={clsx(
+                    "mt-3 rounded-xl px-3 py-2 text-xs font-semibold",
+                    channelDiagnostics?.ok
+                      ? "bg-emerald-50 text-emerald-700"
+                      : "bg-amber-50 text-amber-800"
+                  )}
+                >
+                  {channelValidationFeedback}
+                </p>
+              )}
+            </div>
           </form>
         </section>
 
@@ -8489,7 +8797,8 @@ function Canais({
                 {[
                   ["Token", channel.hasAccessToken],
                   ["Verify", channel.hasVerifyToken],
-                  ["Assinatura", channel.hasAppSecret]
+                  ["App secret", channel.hasAppSecret],
+                  ["Webhook", channel.lastWebhookSubscribedAt]
                 ].map(([label, enabled]) => (
                   <span
                     key={String(label)}
@@ -8504,6 +8813,31 @@ function Canais({
                   </span>
                 ))}
               </div>
+              {channel.lastWebhookSubscribedAt && (
+                <p className="mt-2 text-xs text-slate-500">
+                  Webhook assinado: {formatRelativeDate(channel.lastWebhookSubscribedAt)}
+                </p>
+              )}
+              {channel.lastWebhookReceivedAt && (
+                <p className="mt-1 text-xs text-slate-500">
+                  Ultimo webhook recebido: {formatRelativeDate(channel.lastWebhookReceivedAt)}
+                </p>
+              )}
+              {channel.provider === "meta" && (
+                <button
+                  className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl bg-brand px-3 text-xs font-bold text-white hover:bg-brand-strong disabled:opacity-60"
+                  disabled={subscribingChannelId === channel.id}
+                  onClick={() => void handleSubscribeWebhook(channel.id)}
+                  type="button"
+                >
+                  {subscribingChannelId === channel.id ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Activity className="h-3.5 w-3.5" />
+                  )}
+                  Assinar webhook
+                </button>
+              )}
             </div>
           ))}
           {!loading && channels.length === 0 && (

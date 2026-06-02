@@ -87,6 +87,11 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: "Assinatura invalida." }, { status: 403 });
         }
 
+        await prisma.channel.update({
+          where: { id: channel.id },
+          data: { lastWebhookReceivedAt: new Date() }
+        });
+
         const conversation = await processInboundMessage({
           companyId: channel.companyId,
           channelId: channel.id,
@@ -107,6 +112,25 @@ export async function POST(request: NextRequest) {
       const results = [];
 
       for (const status of metaStatuses) {
+        const channel = await prisma.channel.findFirst({
+          where: {
+            type: "whatsapp",
+            provider: "meta",
+            OR: [
+              { phoneNumberId: status.phoneNumberId },
+              { externalId: status.phoneNumberId }
+            ]
+          },
+          select: { id: true }
+        });
+
+        if (channel) {
+          await prisma.channel.update({
+            where: { id: channel.id },
+            data: { lastWebhookReceivedAt: new Date() }
+          });
+        }
+
         const [campaignUpdated, messageUpdated] = await Promise.all([
           updateCampaignDeliveryStatus({
             providerMessageId: status.messageId,

@@ -123,6 +123,8 @@ export async function GET(request: NextRequest) {
           accessToken: Boolean(channel.accessToken),
           verifyToken: Boolean(channel.verifyToken || process.env.META_VERIFY_TOKEN),
           appSecret: Boolean(channel.appSecret || process.env.META_APP_SECRET),
+          webhookSubscribed: Boolean(channel.lastWebhookSubscribedAt),
+          webhookReceived: Boolean(channel.lastWebhookReceivedAt),
           metaReachable: meta.ok
         };
         const ready =
@@ -144,6 +146,9 @@ export async function GET(request: NextRequest) {
           channel.provider === "meta" && !checks.verifyToken
             ? "Verify token ausente."
             : null,
+          channel.provider === "meta" && !checks.webhookSubscribed
+            ? "Webhook sem assinatura registrada pelo CRM. Use Assinar webhook."
+            : null,
           channel.provider === "meta" && !checks.appSecret
             ? "App secret ausente. Assinatura do webhook nao esta validando."
             : null,
@@ -159,6 +164,9 @@ export async function GET(request: NextRequest) {
           phoneNumberId: channel.phoneNumberId,
           wabaId: channel.wabaId,
           webhookUrl,
+          lastWebhookSubscribedAt:
+            channel.lastWebhookSubscribedAt?.toISOString() ?? null,
+          lastWebhookReceivedAt: channel.lastWebhookReceivedAt?.toISOString() ?? null,
           ready,
           checks,
           meta: {

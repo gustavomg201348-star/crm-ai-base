@@ -16,6 +16,8 @@ function mapChannel(channel: {
   verifyToken: string | null;
   appSecret: string | null;
   status: string;
+  lastWebhookSubscribedAt: Date | null;
+  lastWebhookReceivedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }) {
@@ -32,6 +34,8 @@ function mapChannel(channel: {
     hasVerifyToken: Boolean(channel.verifyToken),
     hasAppSecret: Boolean(channel.appSecret),
     status: channel.status,
+    lastWebhookSubscribedAt: channel.lastWebhookSubscribedAt,
+    lastWebhookReceivedAt: channel.lastWebhookReceivedAt,
     createdAt: channel.createdAt,
     updatedAt: channel.updatedAt
   };
