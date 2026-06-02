@@ -1642,6 +1642,42 @@ export default function Home() {
     await loadMessageLogs(messageLogFilters);
   }
 
+  async function handleUpdateChannel(
+    id: string,
+    payload: {
+      name: string;
+      type: string;
+      provider: string;
+      displayPhone: string;
+      phoneNumberId: string;
+      wabaId: string;
+      accessToken: string;
+      verifyToken: string;
+      appSecret: string;
+      status: string;
+    }
+  ) {
+    const response = await fetch(`/api/channels/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel atualizar canal.");
+      return false;
+    }
+
+    setAppError("");
+    await loadChannels();
+    await loadChannelStatus();
+    await loadMessageLogs(messageLogFilters);
+    return true;
+  }
+
   const loadProposals = useCallback(async (filters = proposalFilters) => {
     setProposalsLoading(true);
     setAppError("");
@@ -3006,6 +3042,7 @@ export default function Home() {
               statusLoading={channelStatusLoading}
               logsLoading={messageLogsLoading}
               onCreateChannel={handleCreateChannel}
+              onUpdateChannel={handleUpdateChannel}
               onRefreshStatus={loadChannelStatus}
               onMessageLogFiltersChange={(filters) => {
                 setMessageLogFilters(filters);
@@ -7905,6 +7942,7 @@ function Canais({
   statusLoading,
   logsLoading,
   onCreateChannel,
+  onUpdateChannel,
   onRefreshStatus,
   onMessageLogFiltersChange,
   onRefreshLogs,
@@ -7926,6 +7964,21 @@ function Canais({
     verifyToken: string;
     appSecret: string;
   }) => Promise<void>;
+  onUpdateChannel: (
+    id: string,
+    payload: {
+      name: string;
+      type: string;
+      provider: string;
+      displayPhone: string;
+      phoneNumberId: string;
+      wabaId: string;
+      accessToken: string;
+      verifyToken: string;
+      appSecret: string;
+      status: string;
+    }
+  ) => Promise<boolean>;
   onRefreshStatus: () => Promise<void>;
   onMessageLogFiltersChange: (filters: { channelId: string; status: string; type: string }) => void;
   onRefreshLogs: () => Promise<void>;
@@ -7951,8 +8004,15 @@ function Canais({
     verifyToken: "",
     appSecret: ""
   });
+  const [editingChannel, setEditingChannel] = useState<ChannelRow | null>(null);
+  const [channelFeedback, setChannelFeedback] = useState("");
+  const [channelSaving, setChannelSaving] = useState(false);
 
   const selectedChannelId = form.channelId || channels[0]?.id || "";
+
+  function findChannel(id: string) {
+    return channels.find((channel) => channel.id === id) ?? null;
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -8065,15 +8125,25 @@ function Canais({
                     )}
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 text-right text-xs text-slate-500">
-                    <div className="rounded-xl bg-white px-3 py-2">
-                      <p className="font-bold text-slate-900">{item.metrics.inboundCount}</p>
-                      <p>recebidas</p>
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-2 gap-2 text-right text-xs text-slate-500">
+                      <div className="rounded-xl bg-white px-3 py-2">
+                        <p className="font-bold text-slate-900">{item.metrics.inboundCount}</p>
+                        <p>recebidas</p>
+                      </div>
+                      <div className="rounded-xl bg-white px-3 py-2">
+                        <p className="font-bold text-slate-900">{item.metrics.outboundCount}</p>
+                        <p>enviadas</p>
+                      </div>
                     </div>
-                    <div className="rounded-xl bg-white px-3 py-2">
-                      <p className="font-bold text-slate-900">{item.metrics.outboundCount}</p>
-                      <p>enviadas</p>
-                    </div>
+                    <button
+                      className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl border border-line bg-white px-3 text-xs font-bold text-slate-600 hover:bg-slate-50"
+                      onClick={() => setEditingChannel(findChannel(item.id))}
+                      type="button"
+                    >
+                      <Edit3 className="h-3.5 w-3.5" />
+                      Editar
+                    </button>
                   </div>
                 </div>
 
@@ -8378,16 +8448,27 @@ function Canais({
             <div key={channel.id} className="rounded border border-line p-4">
               <div className="flex items-center justify-between gap-3">
                 <p className="font-semibold">{channel.name}</p>
-                <span
-                  className={clsx(
-                    "rounded px-2 py-1 text-xs font-semibold",
-                    channel.status === "ACTIVE"
-                      ? "bg-emerald-50 text-emerald-700"
-                      : "bg-slate-100 text-slate-600"
-                  )}
-                >
-                  {channel.status === "ACTIVE" ? "Ativo" : channel.status}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span
+                    className={clsx(
+                      "rounded px-2 py-1 text-xs font-semibold",
+                      channel.status === "ACTIVE"
+                        ? "bg-emerald-50 text-emerald-700"
+                        : "bg-slate-100 text-slate-600"
+                    )}
+                  >
+                    {channel.status === "ACTIVE" ? "Ativo" : channel.status}
+                  </span>
+                  <button
+                    className="inline-flex h-8 items-center gap-1.5 rounded border border-line px-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
+                    onClick={() => setEditingChannel(channel)}
+                    title="Editar canal"
+                    type="button"
+                  >
+                    <Edit3 className="h-3.5 w-3.5" />
+                    Editar
+                  </button>
+                </div>
               </div>
               <p className="mt-2 text-sm text-slate-600">
                 {channel.provider === "meta" ? "Meta Cloud API" : channel.provider} -{" "}
@@ -8489,6 +8570,254 @@ function Canais({
           Webhook local: <span className="font-semibold">/api/webhooks/whatsapp</span>
         </div>
       </section>
+      {editingChannel && (
+        <ChannelEditModal
+          channel={editingChannel}
+          feedback={channelFeedback}
+          saving={channelSaving}
+          onClose={() => {
+            if (!channelSaving) {
+              setEditingChannel(null);
+              setChannelFeedback("");
+            }
+          }}
+          onSubmit={async (payload) => {
+            setChannelSaving(true);
+            setChannelFeedback("");
+            const ok = await onUpdateChannel(editingChannel.id, payload);
+            setChannelSaving(false);
+            if (ok) {
+              setChannelFeedback("Canal atualizado com sucesso.");
+              setEditingChannel(null);
+            } else {
+              setChannelFeedback("Nao foi possivel atualizar o canal.");
+            }
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ChannelEditModal({
+  channel,
+  feedback,
+  saving,
+  onClose,
+  onSubmit
+}: {
+  channel: ChannelRow;
+  feedback: string;
+  saving: boolean;
+  onClose: () => void;
+  onSubmit: (payload: {
+    name: string;
+    type: string;
+    provider: string;
+    displayPhone: string;
+    phoneNumberId: string;
+    wabaId: string;
+    accessToken: string;
+    verifyToken: string;
+    appSecret: string;
+    status: string;
+  }) => Promise<void>;
+}) {
+  const [form, setForm] = useState({
+    name: channel.name,
+    type: channel.type,
+    provider: channel.provider,
+    displayPhone: channel.displayPhone ?? "",
+    phoneNumberId: channel.phoneNumberId ?? channel.externalId ?? "",
+    wabaId: channel.wabaId ?? "",
+    accessToken: "",
+    verifyToken: "",
+    appSecret: "",
+    status: channel.status
+  });
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await onSubmit(form);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4">
+      <div className="w-full max-w-2xl rounded-3xl bg-white p-5 shadow-2xl">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-brand">
+              Canal WhatsApp
+            </p>
+            <h3 className="mt-1 text-xl font-black text-slate-950">Editar canal</h3>
+            <p className="mt-1 text-sm text-slate-500">
+              Campos sensiveis em branco mantem o valor atual cadastrado.
+            </p>
+          </div>
+          <button
+            className="grid h-9 w-9 place-items-center rounded-full border border-line text-slate-500 hover:bg-slate-50"
+            onClick={onClose}
+            type="button"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <form className="mt-5 grid gap-3 md:grid-cols-2" onSubmit={handleSubmit}>
+          <label className="text-xs font-bold uppercase text-slate-500">
+            Nome do canal
+            <input
+              className="mt-2 h-11 w-full rounded-2xl border border-line px-3 text-sm font-semibold normal-case text-slate-900 outline-none focus:border-primary"
+              required
+              value={form.name}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, name: event.target.value }))
+              }
+            />
+          </label>
+
+          <label className="text-xs font-bold uppercase text-slate-500">
+            Numero de telefone
+            <input
+              className="mt-2 h-11 w-full rounded-2xl border border-line px-3 text-sm font-semibold normal-case text-slate-900 outline-none focus:border-primary"
+              value={form.displayPhone}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, displayPhone: event.target.value }))
+              }
+            />
+          </label>
+
+          <label className="text-xs font-bold uppercase text-slate-500">
+            Phone Number ID
+            <input
+              className="mt-2 h-11 w-full rounded-2xl border border-line px-3 text-sm font-semibold normal-case text-slate-900 outline-none focus:border-primary"
+              value={form.phoneNumberId}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, phoneNumberId: event.target.value }))
+              }
+            />
+          </label>
+
+          <label className="text-xs font-bold uppercase text-slate-500">
+            WABA ID
+            <input
+              className="mt-2 h-11 w-full rounded-2xl border border-line px-3 text-sm font-semibold normal-case text-slate-900 outline-none focus:border-primary"
+              value={form.wabaId}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, wabaId: event.target.value }))
+              }
+            />
+          </label>
+
+          <label className="text-xs font-bold uppercase text-slate-500">
+            Tipo
+            <select
+              className="mt-2 h-11 w-full rounded-2xl border border-line bg-white px-3 text-sm font-semibold normal-case text-slate-900 outline-none focus:border-primary"
+              value={form.type}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, type: event.target.value }))
+              }
+            >
+              <option value="whatsapp">WhatsApp</option>
+            </select>
+          </label>
+
+          <label className="text-xs font-bold uppercase text-slate-500">
+            Status
+            <select
+              className="mt-2 h-11 w-full rounded-2xl border border-line bg-white px-3 text-sm font-semibold normal-case text-slate-900 outline-none focus:border-primary"
+              value={form.status}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, status: event.target.value }))
+              }
+            >
+              <option value="ACTIVE">Ativo</option>
+              <option value="INACTIVE">Inativo</option>
+            </select>
+          </label>
+
+          <label className="text-xs font-bold uppercase text-slate-500">
+            Provider
+            <select
+              className="mt-2 h-11 w-full rounded-2xl border border-line bg-white px-3 text-sm font-semibold normal-case text-slate-900 outline-none focus:border-primary"
+              value={form.provider}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, provider: event.target.value }))
+              }
+            >
+              <option value="meta">Meta Cloud API</option>
+              <option value="sandbox">Sandbox</option>
+            </select>
+          </label>
+
+          <div className="rounded-2xl border border-line bg-slate-50 p-3 text-xs text-slate-500">
+            <p className="font-bold uppercase text-slate-600">Credenciais atuais</p>
+            <p className="mt-2">Access token: {channel.hasAccessToken ? "cadastrado" : "vazio"}</p>
+            <p>Verify token: {channel.hasVerifyToken ? "cadastrado" : "vazio"}</p>
+            <p>App secret: {channel.hasAppSecret ? "cadastrado" : "vazio"}</p>
+          </div>
+
+          <label className="text-xs font-bold uppercase text-slate-500">
+            Novo access token
+            <input
+              className="mt-2 h-11 w-full rounded-2xl border border-line px-3 text-sm font-semibold normal-case text-slate-900 outline-none focus:border-primary"
+              placeholder="Deixe em branco para manter"
+              value={form.accessToken}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, accessToken: event.target.value }))
+              }
+            />
+          </label>
+
+          <label className="text-xs font-bold uppercase text-slate-500">
+            Novo verify token
+            <input
+              className="mt-2 h-11 w-full rounded-2xl border border-line px-3 text-sm font-semibold normal-case text-slate-900 outline-none focus:border-primary"
+              placeholder="Deixe em branco para manter"
+              value={form.verifyToken}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, verifyToken: event.target.value }))
+              }
+            />
+          </label>
+
+          <label className="text-xs font-bold uppercase text-slate-500">
+            Novo app secret
+            <input
+              className="mt-2 h-11 w-full rounded-2xl border border-line px-3 text-sm font-semibold normal-case text-slate-900 outline-none focus:border-primary"
+              placeholder="Deixe em branco para manter"
+              value={form.appSecret}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, appSecret: event.target.value }))
+              }
+            />
+          </label>
+
+          {feedback && (
+            <div className="md:col-span-2 rounded-2xl border border-amber-100 bg-amber-50 p-3 text-sm font-semibold text-amber-800">
+              {feedback}
+            </div>
+          )}
+
+          <div className="md:col-span-2 flex justify-end gap-2 pt-2">
+            <button
+              className="h-10 rounded-full border border-line px-4 text-sm font-bold text-slate-600 hover:bg-slate-50"
+              disabled={saving}
+              onClick={onClose}
+              type="button"
+            >
+              Cancelar
+            </button>
+            <button
+              className="inline-flex h-10 items-center gap-2 rounded-full bg-brand px-5 text-sm font-bold text-white disabled:opacity-60"
+              disabled={saving}
+            >
+              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+              Salvar alteracoes
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
