@@ -33,6 +33,8 @@ import {
   MessageCircle,
   Mic,
   MoreHorizontal,
+  PanelRightClose,
+  PanelRightOpen,
   Paperclip,
   Plus,
   RefreshCcw,
@@ -4124,6 +4126,7 @@ function Atendimento({
   const [unassignSaving, setUnassignSaving] = useState(false);
   const [recording, setRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [aiSidebarCollapsed, setAiSidebarCollapsed] = useState(false);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -4134,6 +4137,21 @@ function Atendimento({
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ block: "end" });
   }, [selectedConversation?.id, selectedConversation?.messages.length]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem("crm.aiSidebarCollapsed");
+    if (stored === "true" || stored === "false") {
+      setAiSidebarCollapsed(stored === "true");
+      return;
+    }
+    setAiSidebarCollapsed(window.innerWidth < 1280);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("crm.aiSidebarCollapsed", String(aiSidebarCollapsed));
+  }, [aiSidebarCollapsed]);
 
   useEffect(() => {
     return () => {
@@ -4338,7 +4356,14 @@ function Atendimento({
   }
 
   return (
-    <div className="grid h-[calc(100vh-8.5rem)] min-h-0 gap-4 overflow-hidden xl:grid-cols-[340px_minmax(0,1fr)_320px]">
+    <div
+      className={clsx(
+        "grid h-[calc(100vh-8.5rem)] min-h-0 gap-4 overflow-hidden transition-[grid-template-columns] duration-300 ease-out",
+        aiSidebarCollapsed
+          ? "xl:grid-cols-[340px_minmax(0,1fr)_64px]"
+          : "xl:grid-cols-[340px_minmax(0,1fr)_320px]"
+      )}
+    >
       {transferOpen && selectedConversation && (
         <TransferConversationModal
           attendants={attendants}
@@ -4692,79 +4717,103 @@ function Atendimento({
         </form>
       </section>
 
-      <section className="min-h-0 space-y-4 overflow-y-auto overscroll-contain pr-1">
-        <AiPanel
-          compact
-          analysis={aiAnalysis}
-          companyMode={aiSettings.mode}
-          conversation={selectedConversation}
-          loading={aiLoading}
-          disabled={!selectedConversation}
-          onAnalyze={() =>
-            selectedConversation
-              ? void onAnalyzeConversation(selectedConversation.id)
-              : undefined
-          }
-          onModeChange={(mode) =>
-            selectedConversation
-              ? void onUpdateConversationAiMode(selectedConversation.id, { mode })
-              : undefined
-          }
-          onPauseChange={(paused) =>
-            selectedConversation
-              ? void onUpdateConversationAiMode(selectedConversation.id, { paused })
-              : undefined
-          }
-        />
-        {aiAnalysis && (
-          <button
-            className="flex h-10 w-full items-center justify-center gap-2 rounded bg-brand px-3 text-sm font-semibold text-white"
-            disabled={!selectedConversation}
-            onClick={() => setMessage(aiAnalysis.suggestedReply)}
-          >
-            <Send className="h-4 w-4" />
-            Usar sugestao
-          </button>
+      <section
+        className={clsx(
+          "min-h-0 overflow-hidden transition-all duration-300 ease-out",
+          aiSidebarCollapsed
+            ? "rounded-[1.5rem] border border-line/80 bg-white p-2 shadow-soft"
+            : "space-y-4 overflow-y-auto overscroll-contain pr-1"
         )}
-        <button
-          type="button"
-          className="flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-blue-100 bg-blue-50 px-3 text-sm font-bold text-primary hover:bg-blue-100 disabled:opacity-50"
-          disabled={!selectedConversation}
-          onClick={() =>
-            selectedConversation
-              ? onOpenCltSimulation(selectedConversation)
-              : undefined
-          }
-        >
-          <BriefcaseBusiness className="h-4 w-4" />
-          Simular CLT deste lead
-        </button>
-        <div className="rounded border border-line bg-white p-4 shadow-soft">
-          <h3 className="font-bold">Ficha rapida</h3>
-          <dl className="mt-4 space-y-3 text-sm">
-            <Info label="Origem" value={selectedConversation?.contact.origin ?? "-"} />
-            <Info label="Etapa" value={selectedConversation?.contact.stage ?? "-"} />
-            <Info label="Responsavel" value={selectedConversation?.contact.owner ?? "-"} />
-            <Info
-              label="Temperatura"
-              value={
-                selectedConversation?.contact.temperature
-                  ? temperatureLabels[
-                      selectedConversation.contact
-                        .temperature as keyof typeof temperatureLabels
-                    ]
-                  : "-"
+      >
+        {aiSidebarCollapsed ? (
+          <CollapsedAiSidebar
+            hasAnalysis={Boolean(aiAnalysis)}
+            onExpand={() => setAiSidebarCollapsed(false)}
+            onAnalyze={() =>
+              selectedConversation
+                ? void onAnalyzeConversation(selectedConversation.id)
+                : undefined
+            }
+            disabled={!selectedConversation || aiLoading}
+            loading={aiLoading}
+          />
+        ) : (
+          <>
+            <AiPanel
+              compact
+              analysis={aiAnalysis}
+              companyMode={aiSettings.mode}
+              conversation={selectedConversation}
+              loading={aiLoading}
+              disabled={!selectedConversation}
+              onAnalyze={() =>
+                selectedConversation
+                  ? void onAnalyzeConversation(selectedConversation.id)
+                  : undefined
               }
+              onModeChange={(mode) =>
+                selectedConversation
+                  ? void onUpdateConversationAiMode(selectedConversation.id, { mode })
+                  : undefined
+              }
+              onPauseChange={(paused) =>
+                selectedConversation
+                  ? void onUpdateConversationAiMode(selectedConversation.id, { paused })
+                  : undefined
+              }
+              onCollapse={() => setAiSidebarCollapsed(true)}
             />
-          </dl>
-        </div>
-        {selectedConversation?.summary && (
-          <div className="rounded border border-line bg-white p-4 shadow-soft">
-            <h3 className="font-bold">Resumo salvo</h3>
-            <p className="mt-2 whitespace-pre-line text-sm text-slate-600">
-              {selectedConversation.summary}
-            </p>
-          </div>
+            {aiAnalysis && (
+              <button
+                className="flex h-10 w-full items-center justify-center gap-2 rounded bg-brand px-3 text-sm font-semibold text-white"
+                disabled={!selectedConversation}
+                onClick={() => setMessage(aiAnalysis.suggestedReply)}
+              >
+                <Send className="h-4 w-4" />
+                Usar sugestao
+              </button>
+            )}
+            <button
+              type="button"
+              className="flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-blue-100 bg-blue-50 px-3 text-sm font-bold text-primary hover:bg-blue-100 disabled:opacity-50"
+              disabled={!selectedConversation}
+              onClick={() =>
+                selectedConversation
+                  ? onOpenCltSimulation(selectedConversation)
+                  : undefined
+              }
+            >
+              <BriefcaseBusiness className="h-4 w-4" />
+              Simular CLT deste lead
+            </button>
+            <div className="rounded border border-line bg-white p-4 shadow-soft">
+              <h3 className="font-bold">Ficha rapida</h3>
+              <dl className="mt-4 space-y-3 text-sm">
+                <Info label="Origem" value={selectedConversation?.contact.origin ?? "-"} />
+                <Info label="Etapa" value={selectedConversation?.contact.stage ?? "-"} />
+                <Info label="Responsavel" value={selectedConversation?.contact.owner ?? "-"} />
+                <Info
+                  label="Temperatura"
+                  value={
+                    selectedConversation?.contact.temperature
+                      ? temperatureLabels[
+                          selectedConversation.contact
+                            .temperature as keyof typeof temperatureLabels
+                        ]
+                      : "-"
+                  }
+                />
+              </dl>
+            </div>
+            {selectedConversation?.summary && (
+              <div className="rounded border border-line bg-white p-4 shadow-soft">
+                <h3 className="font-bold">Resumo salvo</h3>
+                <p className="mt-2 whitespace-pre-line text-sm text-slate-600">
+                  {selectedConversation.summary}
+                </p>
+              </div>
+            )}
+          </>
         )}
       </section>
     </div>
@@ -12144,7 +12193,8 @@ function AiPanel({
   disabled = false,
   onAnalyze,
   onModeChange,
-  onPauseChange
+  onPauseChange,
+  onCollapse
 }: {
   compact?: boolean;
   analysis?: AiAnalysis | null;
@@ -12155,14 +12205,27 @@ function AiPanel({
   onAnalyze?: () => void;
   onModeChange?: (mode: AiMode | null) => void;
   onPauseChange?: (paused: boolean) => void;
+  onCollapse?: () => void;
 }) {
   const effectiveMode = conversation?.aiMode ?? companyMode;
 
   return (
     <aside className="rounded border border-line bg-white p-5 shadow-soft">
-      <div className="flex items-center gap-2">
-        <Sparkles className="h-5 w-5 text-saffron" />
-        <h3 className="font-bold">Copiloto IA</h3>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Sparkles className="h-5 w-5 text-saffron" />
+          <h3 className="font-bold">Copiloto IA</h3>
+        </div>
+        {onCollapse && (
+          <button
+            type="button"
+            className="grid h-8 w-8 place-items-center rounded-full border border-line text-slate-500 transition hover:bg-slate-50 hover:text-slate-800"
+            title="Recolher Copiloto IA"
+            onClick={onCollapse}
+          >
+            <PanelRightClose className="h-4 w-4" />
+          </button>
+        )}
       </div>
       <p className="mt-2 text-sm text-slate-600">
         {compact
@@ -12267,6 +12330,90 @@ function Metric({ icon, label }: { icon: React.ReactNode; label: string }) {
       {icon}
       {label}
     </div>
+  );
+}
+
+function CollapsedAiSidebar({
+  hasAnalysis,
+  disabled,
+  loading,
+  onExpand,
+  onAnalyze
+}: {
+  hasAnalysis: boolean;
+  disabled: boolean;
+  loading: boolean;
+  onExpand: () => void;
+  onAnalyze: () => void;
+}) {
+  return (
+    <div className="flex h-full min-h-0 flex-col items-center justify-between gap-3">
+      <div className="flex w-full flex-col items-center gap-2">
+        <button
+          type="button"
+          className="grid h-11 w-11 place-items-center rounded-2xl bg-amber-50 text-saffron ring-1 ring-amber-100 transition hover:bg-amber-100"
+          title="Expandir Copiloto IA"
+          onClick={onExpand}
+        >
+          <Sparkles className="h-5 w-5" />
+        </button>
+        <button
+          type="button"
+          className="grid h-10 w-10 place-items-center rounded-2xl border border-line text-slate-500 transition hover:bg-slate-50 hover:text-slate-800"
+          title="Gerar resposta IA"
+          disabled={disabled}
+          onClick={onAnalyze}
+        >
+          {loading ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <MessageSquareText className="h-4 w-4" />
+          )}
+        </button>
+        <CollapsedAiIcon active={hasAnalysis} title="Resumo">
+          <FileText className="h-4 w-4" />
+        </CollapsedAiIcon>
+        <CollapsedAiIcon title="Tags">
+          <Tags className="h-4 w-4" />
+        </CollapsedAiIcon>
+        <CollapsedAiIcon title="Risco">
+          <ShieldCheck className="h-4 w-4" />
+        </CollapsedAiIcon>
+      </div>
+      <button
+        type="button"
+        className="grid h-10 w-10 place-items-center rounded-2xl border border-line text-slate-500 transition hover:bg-slate-50 hover:text-slate-800"
+        title="Expandir painel"
+        onClick={onExpand}
+      >
+        <PanelRightOpen className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
+function CollapsedAiIcon({
+  active,
+  title,
+  children
+}: {
+  active?: boolean;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className={clsx(
+        "grid h-10 w-10 place-items-center rounded-2xl border transition",
+        active
+          ? "border-blue-100 bg-blue-50 text-brand"
+          : "border-line text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+      )}
+      title={title}
+    >
+      {children}
+    </button>
   );
 }
 
