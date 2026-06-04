@@ -33,6 +33,8 @@ import {
   MessageCircle,
   Mic,
   MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
   Paperclip,
@@ -935,10 +937,27 @@ export default function Home() {
   const [proposalsLoading, setProposalsLoading] = useState(false);
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [appError, setAppError] = useState("");
+  const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false);
 
   useEffect(() => {
     selectedConversationRef.current = selectedConversation?.id ?? null;
   }, [selectedConversation?.id]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem("crm.leftSidebarCollapsed");
+    if (stored === "true" || stored === "false") {
+      setLeftSidebarCollapsed(stored === "true");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(
+      "crm.leftSidebarCollapsed",
+      String(leftSidebarCollapsed)
+    );
+  }, [leftSidebarCollapsed]);
 
   const pageTitle = useMemo(() => {
     return navItems.find((item) => item.id === active)?.label ?? "Dashboard";
@@ -2751,42 +2770,84 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-paper text-ink">
-      <aside className="fixed left-0 top-0 hidden h-screen w-[264px] flex-col border-r border-line/80 bg-white/95 backdrop-blur xl:flex">
-        <div className="flex h-20 shrink-0 items-center gap-3 px-5">
+      <aside
+        className={clsx(
+          "fixed left-0 top-0 hidden h-screen flex-col border-r border-line/80 bg-white/95 backdrop-blur transition-[width] duration-300 ease-out xl:flex",
+          leftSidebarCollapsed ? "w-[72px]" : "w-[264px]"
+        )}
+      >
+        <div
+          className={clsx(
+            "flex h-20 shrink-0 items-center gap-3 px-5",
+            leftSidebarCollapsed && "justify-center px-3"
+          )}
+        >
           <div className="grid h-10 w-10 place-items-center rounded-2xl bg-brand text-sm font-bold text-white shadow-soft">
             AI
           </div>
-          <div className="min-w-0">
-            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-brand">
-              CRM
+          {!leftSidebarCollapsed && (
+            <>
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-brand">
+                  CRM
+                </p>
+                <h1 className="truncate text-[15px] font-bold text-slate-950">
+                  Operacao Inteligente
+                </h1>
+              </div>
+              <button
+                type="button"
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-line text-slate-500 transition hover:bg-slate-50 hover:text-slate-800"
+                title="Recolher menu lateral"
+                onClick={() => setLeftSidebarCollapsed(true)}
+              >
+                <PanelLeftClose className="h-4 w-4" />
+              </button>
+            </>
+          )}
+        </div>
+
+        {leftSidebarCollapsed ? (
+          <div className="shrink-0 px-3">
+            <button
+              type="button"
+              className="grid h-10 w-full place-items-center rounded-2xl border border-line bg-slate-50 text-slate-500 transition hover:bg-blue-50 hover:text-brand"
+              title="Expandir menu lateral"
+              onClick={() => setLeftSidebarCollapsed(false)}
+            >
+              <PanelLeftOpen className="h-4 w-4" />
+            </button>
+          </div>
+        ) : (
+          <div className="mx-4 shrink-0 rounded-2xl border border-line/80 bg-slate-50/80 p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              Workspace
             </p>
-            <h1 className="truncate text-[15px] font-bold text-slate-950">
-              Operacao Inteligente
-            </h1>
-          </div>
-        </div>
-
-        <div className="mx-4 shrink-0 rounded-2xl border border-line/80 bg-slate-50/80 p-3">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-            Workspace
-          </p>
-          <div className="mt-2 flex items-center justify-between gap-2">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-slate-900">
-                {session.company.name}
-              </p>
-              <p className="truncate text-xs text-slate-500">
-                {session.company.segment ?? "Credito consignado"}
-              </p>
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-slate-900">
+                  {session.company.name}
+                </p>
+                <p className="truncate text-xs text-slate-500">
+                  {session.company.segment ?? "Credito consignado"}
+                </p>
+              </div>
+              <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
             </div>
-            <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
           </div>
-        </div>
+        )}
 
-        <nav className="mt-5 min-h-0 flex-1 space-y-1 overflow-y-scroll px-3 pb-4 pr-2 [scrollbar-color:#CBD5E1_transparent] [scrollbar-width:thin]">
-          <p className="px-3 pb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">
-            Navegacao
-          </p>
+        <nav
+          className={clsx(
+            "min-h-0 flex-1 space-y-1 overflow-y-scroll pb-4 [scrollbar-color:#CBD5E1_transparent] [scrollbar-width:thin]",
+            leftSidebarCollapsed ? "mt-4 px-3" : "mt-5 px-3 pr-2"
+          )}
+        >
+          {!leftSidebarCollapsed && (
+            <p className="px-3 pb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">
+              Navegacao
+            </p>
+          )}
           {visibleNavItems.map((item) => {
             const Icon = item.icon;
             const itemCount =
@@ -2799,14 +2860,23 @@ export default function Home() {
               <button
                 key={item.id}
                 className={clsx(
-                  "group flex h-10 w-full items-center justify-between rounded-xl px-3 text-left text-sm font-medium",
+                  "group relative flex h-10 w-full items-center rounded-xl text-left text-sm font-medium transition-colors",
+                  leftSidebarCollapsed
+                    ? "justify-center px-0"
+                    : "justify-between px-3",
                   active === item.id
                     ? "bg-blue-50 text-brand shadow-[inset_0_0_0_1px_rgba(37,99,235,0.10)]"
                     : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"
                 )}
                 onClick={() => setActive(item.id)}
+                title={leftSidebarCollapsed ? item.label : undefined}
               >
-                <span className="flex items-center gap-3">
+                <span
+                  className={clsx(
+                    "flex items-center",
+                    leftSidebarCollapsed ? "justify-center" : "gap-3"
+                  )}
+                >
                   <Icon
                     className={clsx(
                       "h-4 w-4",
@@ -2815,10 +2885,17 @@ export default function Home() {
                         : "text-slate-400 group-hover:text-slate-600"
                     )}
                   />
-                  {item.label}
+                  {!leftSidebarCollapsed && item.label}
                 </span>
                 {itemCount > 0 && (
-                  <span className="rounded-full bg-rose-500 px-2 py-0.5 text-[11px] font-bold text-white">
+                  <span
+                    className={clsx(
+                      "rounded-full bg-rose-500 text-[11px] font-bold text-white",
+                      leftSidebarCollapsed
+                        ? "absolute ml-7 mt-[-1.6rem] min-w-4 px-1 text-[9px]"
+                        : "px-2 py-0.5"
+                    )}
+                  >
                     {itemCount > 99 ? "99+" : itemCount}
                   </span>
                 )}
@@ -2827,48 +2904,80 @@ export default function Home() {
           })}
         </nav>
 
-        <div className="shrink-0 space-y-3 border-t border-line/70 p-4">
+        <div
+          className={clsx(
+            "shrink-0 border-t border-line/70",
+            leftSidebarCollapsed ? "space-y-2 p-3" : "space-y-3 p-4"
+          )}
+        >
           {userCanManageOperation(session) && (
             <button
               className={clsx(
-                "flex h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-semibold transition-colors",
+                "flex h-10 w-full items-center rounded-xl text-left text-sm font-semibold transition-colors",
+                leftSidebarCollapsed
+                  ? "justify-center px-0"
+                  : "gap-3 px-3",
                 active === "tags"
                   ? "bg-blue-50 text-brand shadow-[inset_0_0_0_1px_rgba(37,99,235,0.10)]"
                   : "bg-white text-slate-600 ring-1 ring-line hover:bg-slate-50 hover:text-slate-950"
               )}
               onClick={() => setActive("tags")}
               type="button"
+              title={leftSidebarCollapsed ? "Gerenciar tags" : undefined}
             >
               <Tags className={clsx("h-4 w-4", active === "tags" ? "text-brand" : "text-slate-400")} />
-              Gerenciar tags
+              {!leftSidebarCollapsed && "Gerenciar tags"}
             </button>
           )}
-          <div className="rounded-2xl bg-gradient-to-br from-blue-50 to-white p-3 ring-1 ring-blue-100">
-            <div className="flex items-center gap-2">
+          <div
+            className={clsx(
+              "rounded-2xl bg-gradient-to-br from-blue-50 to-white ring-1 ring-blue-100",
+              leftSidebarCollapsed ? "grid h-10 place-items-center p-0" : "p-3"
+            )}
+            title={leftSidebarCollapsed ? "IA ativa" : undefined}
+          >
+            <div className={clsx("flex items-center", leftSidebarCollapsed ? "justify-center" : "gap-2")}>
               <Sparkles className="h-4 w-4 text-brand" />
-              <p className="text-xs font-bold uppercase tracking-wide text-brand">
-                IA ativa
-              </p>
+              {!leftSidebarCollapsed && (
+                <p className="text-xs font-bold uppercase tracking-wide text-brand">
+                  IA ativa
+                </p>
+              )}
             </div>
-            <p className="mt-2 text-sm leading-5 text-slate-600">
-              Correspondente bancario com foco em FGTS, CLT e INSS.
-            </p>
+            {!leftSidebarCollapsed && (
+              <p className="mt-2 text-sm leading-5 text-slate-600">
+                Correspondente bancario com foco em FGTS, CLT e INSS.
+              </p>
+            )}
           </div>
-          <div className="flex items-center gap-3 rounded-2xl p-2 hover:bg-slate-50">
+          <div
+            className={clsx(
+              "flex items-center rounded-2xl hover:bg-slate-50",
+              leftSidebarCollapsed ? "justify-center p-0" : "gap-3 p-2"
+            )}
+            title={leftSidebarCollapsed ? `${session.user.name} - ${session.user.role}` : undefined}
+          >
             <div className="grid h-9 w-9 place-items-center rounded-full bg-slate-900 text-xs font-bold text-white">
               {session.user.name.slice(0, 1).toUpperCase()}
             </div>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-slate-900">
-                {session.user.name}
-              </p>
-              <p className="truncate text-xs text-slate-500">{session.user.role}</p>
-            </div>
+            {!leftSidebarCollapsed && (
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-slate-900">
+                  {session.user.name}
+                </p>
+                <p className="truncate text-xs text-slate-500">{session.user.role}</p>
+              </div>
+            )}
           </div>
         </div>
       </aside>
 
-      <section className="xl:pl-[264px]">
+      <section
+        className={clsx(
+          "transition-[padding-left] duration-300 ease-out",
+          leftSidebarCollapsed ? "xl:pl-[72px]" : "xl:pl-[264px]"
+        )}
+      >
         <header className="sticky top-0 z-10 flex min-h-20 items-center justify-between border-b border-line/70 bg-white/90 px-4 backdrop-blur-xl md:px-8">
           <div className="flex min-w-0 items-center gap-4">
             <button className="grid h-10 w-10 place-items-center rounded-xl border border-line bg-white text-slate-600 shadow-sm xl:hidden">
