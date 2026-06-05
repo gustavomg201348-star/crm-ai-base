@@ -131,6 +131,56 @@ CREATE INDEX IF NOT EXISTS Contact_ownerId_idx ON Contact(ownerId);
 CREATE INDEX IF NOT EXISTS Contact_stageId_idx ON Contact(stageId);
 CREATE INDEX IF NOT EXISTS Contact_originId_idx ON Contact(originId);
 
+CREATE TABLE IF NOT EXISTS RetirementLead (
+  id TEXT PRIMARY KEY NOT NULL,
+  companyId TEXT NOT NULL,
+  contactId TEXT NOT NULL,
+  grantDate DATETIME,
+  estimatedUnlockDate DATETIME,
+  daysToUnlock INTEGER,
+  benefitType TEXT,
+  benefitNumber TEXT,
+  state TEXT,
+  city TEXT,
+  desiredAmount DECIMAL,
+  interestLevel TEXT NOT NULL DEFAULT 'NONE',
+  hasCorrespondent BOOLEAN NOT NULL DEFAULT false,
+  score INTEGER NOT NULL DEFAULT 0,
+  journeyStatus TEXT NOT NULL DEFAULT 'IMPORTED',
+  nextContactDate DATETIME,
+  lastContactDate DATETIME,
+  notes TEXT,
+  createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT RetirementLead_companyId_fkey FOREIGN KEY (companyId) REFERENCES Company (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT RetirementLead_contactId_fkey FOREIGN KEY (contactId) REFERENCES Contact (id) ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS RetirementLead_companyId_contactId_key ON RetirementLead(companyId, contactId);
+CREATE INDEX IF NOT EXISTS RetirementLead_companyId_idx ON RetirementLead(companyId);
+CREATE INDEX IF NOT EXISTS RetirementLead_contactId_idx ON RetirementLead(contactId);
+CREATE INDEX IF NOT EXISTS RetirementLead_estimatedUnlockDate_idx ON RetirementLead(estimatedUnlockDate);
+CREATE INDEX IF NOT EXISTS RetirementLead_daysToUnlock_idx ON RetirementLead(daysToUnlock);
+CREATE INDEX IF NOT EXISTS RetirementLead_score_idx ON RetirementLead(score);
+CREATE INDEX IF NOT EXISTS RetirementLead_journeyStatus_idx ON RetirementLead(journeyStatus);
+CREATE INDEX IF NOT EXISTS RetirementLead_nextContactDate_idx ON RetirementLead(nextContactDate);
+
+CREATE TABLE IF NOT EXISTS RetirementLeadEvent (
+  id TEXT PRIMARY KEY NOT NULL,
+  retirementLeadId TEXT NOT NULL,
+  eventType TEXT NOT NULL,
+  description TEXT,
+  createdByUserId TEXT,
+  createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT RetirementLeadEvent_retirementLeadId_fkey FOREIGN KEY (retirementLeadId) REFERENCES RetirementLead (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT RetirementLeadEvent_createdByUserId_fkey FOREIGN KEY (createdByUserId) REFERENCES User (id) ON DELETE SET NULL ON UPDATE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS RetirementLeadEvent_retirementLeadId_idx ON RetirementLeadEvent(retirementLeadId);
+CREATE INDEX IF NOT EXISTS RetirementLeadEvent_eventType_idx ON RetirementLeadEvent(eventType);
+CREATE INDEX IF NOT EXISTS RetirementLeadEvent_createdByUserId_idx ON RetirementLeadEvent(createdByUserId);
+CREATE INDEX IF NOT EXISTS RetirementLeadEvent_createdAt_idx ON RetirementLeadEvent(createdAt);
+
 CREATE TABLE IF NOT EXISTS ContactTag (
   contactId TEXT NOT NULL,
   tagId TEXT NOT NULL,

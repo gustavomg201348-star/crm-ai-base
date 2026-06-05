@@ -1,13 +1,18 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { createActivity } from "@/lib/activities";
 import { prisma } from "@/lib/db";
+import { upsertRetirementLeadForContact } from "@/lib/retirement-leads";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
 const HEADER_ALIASES = {
   cpf: ["cpf", "documento", "doc", "documento cpf", "cpf cliente"],
   name: ["nome", "cliente", "nome cliente", "nome completo"],
-  phone: ["telefone", "celular", "whatsapp", "fone", "numero", "número"]
+  phone: ["telefone", "celular", "whatsapp", "fone", "numero", "número"],
+  grantDate: ["data concessao", "data de concessao", "concessao", "grant date"],
+  benefitType: ["beneficio", "tipo beneficio", "tipo de beneficio", "benefit type"],
+  city: ["cidade", "municipio"],
+  state: ["estado", "uf"]
 } as const;
 
 export type ImportPreviewRow = {
@@ -21,6 +26,12 @@ export type ImportPreviewRow = {
   duplicateCpf: boolean;
   duplicatePhone: boolean;
   existingContactId?: string | null;
+  retirementLead?: {
+    grantDate?: string | null;
+    benefitType?: string | null;
+    city?: string | null;
+    state?: string | null;
+  };
 };
 
 export type ContactImportPreview = {
@@ -144,6 +155,23 @@ function validatePhone(whatsapp: string) {
   return /^55\d{10,11}$/.test(whatsapp);
 }
 
+function parseImportDate(value: string) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+
+  const brazilian = raw.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/);
+  if (brazilian) {
+    const day = brazilian[1].padStart(2, "0");
+    const month = brazilian[2].padStart(2, "0");
+    const year = brazilian[3].length === 2 ? `20${brazilian[3]}` : brazilian[3];
+    return `${year}-${month}-${day}`;
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return raw;
+  return parsed.toISOString().slice(0, 10);
+}
+
 export function renderCampaignMessage(
   template: string,
   contact: { name: string; cpf?: string | null; phone: string }
@@ -195,7 +223,11 @@ export async function buildContactImportPreview({
   const indexes = {
     cpf: findHeaderIndex(headers, HEADER_ALIASES.cpf),
     name: findHeaderIndex(headers, HEADER_ALIASES.name),
-    phone: findHeaderIndex(headers, HEADER_ALIASES.phone)
+    phone: findHeaderIndex(headers, HEADER_ALIASES.phone),
+    grantDate: findHeaderIndex(headers, HEADER_ALIASES.grantDate),
+    benefitType: findHeaderIndex(headers, HEADER_ALIASES.benefitType),
+    city: findHeaderIndex(headers, HEADER_ALIASES.city),
+    state: findHeaderIndex(headers, HEADER_ALIASES.state)
   };
 
   const missing = Object.entries(indexes)
@@ -214,12 +246,21 @@ export async function buildContactImportPreview({
     const cpf = onlyDigits(String(line[indexes.cpf] ?? ""));
     const phone = onlyDigits(String(line[indexes.phone] ?? ""));
     const whatsapp = normalizePhone(phone);
+    const grantDate =
+      indexes.grantDate >= 0 ? parseImportDate(String(line[indexes.grantDate] ?? "")) : "";
+    const benefitType =
+      indexes.benefitType >= 0 ? String(line[indexes.benefitType] ?? "").trim() : "";
+    const city = indexes.city >= 0 ? String(line[indexes.city] ?? "").trim() : "";
+    const state = indexes.state >= 0 ? String(line[indexes.state] ?? "").trim() : "";
     const errors: string[] = [];
 
     if (!name) errors.push("Nome obrigatorio.");
     if (!/^\d{11}$/.test(cpf)) errors.push("CPF deve conter 11 digitos.");
     if (!validatePhone(whatsapp)) {
       errors.push("Telefone deve conter DDD e numero valido para WhatsApp.");
+    }
+    if (grantDate && Number.isNaN(new Date(grantDate).getTime())) {
+      errors.push("Data Concessao invalida.");
     }
 
     if (cpf) cpfCounts.set(cpf, (cpfCounts.get(cpf) ?? 0) + 1);
@@ -235,7 +276,11 @@ export async function buildContactImportPreview({
       errors,
       duplicateCpf: false,
       duplicatePhone: false,
-      existingContactId: null
+      existingContactId: null,
+      retirementLead:
+        grantDate || benefitType || city || state
+          ? { grantDate: grantDate || null, benefitType, city, state }
+          : undefined
     };
   });
 
@@ -323,6 +368,17 @@ export async function confirmContactImport({
           title: "Contato atualizado por planilha",
           detail: `Linha ${row.rowNumber}: ${row.name}`
         });
+
+        if (row.retirementLead?.grantDate) {
+          await upsertRetirementLeadForContact({
+            db: tx,
+            companyId,
+            contactId: contact.id,
+            userId,
+            data: row.retirementLead,
+            eventDescription: `Linha ${row.rowNumber}: importado por planilha.`
+          });
+        }
       } else {
         const contact = await tx.contact.create({
           data: {
@@ -345,6 +401,17 @@ export async function confirmContactImport({
           title: "Contato criado por planilha",
           detail: `Linha ${row.rowNumber}: ${row.name}`
         });
+
+        if (row.retirementLead?.grantDate) {
+          await upsertRetirementLeadForContact({
+            db: tx,
+            companyId,
+            contactId: contact.id,
+            userId,
+            data: row.retirementLead,
+            eventDescription: `Linha ${row.rowNumber}: importado por planilha.`
+          });
+        }
       }
     }
 

@@ -8,6 +8,7 @@ import {
   ContactRound,
   Gauge,
   Headphones,
+  Hourglass,
   KanbanSquare,
   Megaphone,
   MessageSquareText,
@@ -28,6 +29,7 @@ export const navItems = [
   { id: "multicred", label: "Multicred", icon: CircleDollarSign },
   { id: "canais", label: "Canais", icon: Webhook },
   { id: "disparos", label: "Disparos", icon: Megaphone },
+  { id: "recem-aposentados", label: "Recem-Aposentados", icon: Hourglass },
   { id: "empresas", label: "Empresas", icon: Building2 },
   { id: "chatbot", label: "Chatbot", icon: Bot },
   { id: "config", label: "Configurações", icon: Settings }

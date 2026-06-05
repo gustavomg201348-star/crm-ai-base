@@ -674,6 +674,76 @@ type SpreadsheetImportConfirm = {
   errors: Array<{ rowNumber: number; reason: string }>;
 };
 
+type RetirementLeadRow = {
+  id: string;
+  contactId: string;
+  grantDate?: string | null;
+  estimatedUnlockDate?: string | null;
+  daysToUnlock?: number | null;
+  benefitType?: string | null;
+  benefitNumber?: string | null;
+  state?: string | null;
+  city?: string | null;
+  desiredAmount?: string | null;
+  interestLevel: "NONE" | "LOW" | "MEDIUM" | "HIGH";
+  hasCorrespondent: boolean;
+  score: number;
+  journeyStatus:
+    | "IMPORTED"
+    | "FIRST_CONTACT"
+    | "RESPONDED"
+    | "INTERESTED"
+    | "NURTURING"
+    | "PRE_UNLOCK"
+    | "READY_TO_CONVERT"
+    | "CONVERTED"
+    | "LOST";
+  nextContactDate?: string | null;
+  lastContactDate?: string | null;
+  notes?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  contact: {
+    id: string;
+    name: string;
+    phone: string;
+    cpf?: string | null;
+    owner: string;
+    tags: Array<{ id: string; name: string; color: string; textColor?: string | null }>;
+  };
+  events: Array<{
+    id: string;
+    eventType: string;
+    description?: string | null;
+    createdAt: string;
+    createdBy: { id: string; name: string; email: string } | null;
+  }>;
+};
+
+type RetirementLeadDashboard = {
+  totalImported: number;
+  until90: number;
+  until60: number;
+  until30: number;
+  until15: number;
+  readyToConvert: number;
+  hotLeads: number;
+  coldLeads: number;
+};
+
+type RetirementLeadFilters = {
+  search: string;
+  state: string;
+  city: string;
+  maxDaysToUnlock: string;
+  minScore: string;
+  interestLevel: string;
+  journeyStatus: string;
+  hasCorrespondent: string;
+  nextAction: string;
+  page: number;
+};
+
 type ContactActivityRow = {
   id: string;
   contactId: string;
@@ -909,6 +979,38 @@ export default function Home() {
     originId: "",
     ownerId: ""
   });
+  const [retirementLeads, setRetirementLeads] = useState<RetirementLeadRow[]>([]);
+  const [selectedRetirementLead, setSelectedRetirementLead] =
+    useState<RetirementLeadRow | null>(null);
+  const [retirementDashboard, setRetirementDashboard] =
+    useState<RetirementLeadDashboard>({
+      totalImported: 0,
+      until90: 0,
+      until60: 0,
+      until30: 0,
+      until15: 0,
+      readyToConvert: 0,
+      hotLeads: 0,
+      coldLeads: 0
+    });
+  const [retirementPagination, setRetirementPagination] = useState({
+    page: 1,
+    pageSize: 25,
+    total: 0,
+    totalPages: 1
+  });
+  const [retirementFilters, setRetirementFilters] = useState<RetirementLeadFilters>({
+    search: "",
+    state: "",
+    city: "",
+    maxDaysToUnlock: "",
+    minScore: "",
+    interestLevel: "",
+    journeyStatus: "",
+    hasCorrespondent: "",
+    nextAction: "",
+    page: 1
+  });
   const [proposalMetrics, setProposalMetrics] = useState<ProposalMetrics>({
     count: 0,
     totalAmount: 0,
@@ -936,6 +1038,7 @@ export default function Home() {
   const [campaignsLoading, setCampaignsLoading] = useState(false);
   const [proposalsLoading, setProposalsLoading] = useState(false);
   const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [retirementLoading, setRetirementLoading] = useState(false);
   const [appError, setAppError] = useState("");
   const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false);
 
@@ -978,7 +1081,8 @@ export default function Home() {
           "kanban",
           "contatos",
           "tags",
-          "simulacao-clt"
+          "simulacao-clt",
+          "recem-aposentados"
         ].includes(item.id)
       );
     }
@@ -1066,6 +1170,88 @@ export default function Home() {
     const data = (await response.json()) as { settings: AiSettings };
     setAiSettings(data.settings);
   }, [session]);
+
+  const loadRetirementLeads = useCallback(async (filters = retirementFilters) => {
+    setRetirementLoading(true);
+    setAppError("");
+
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) params.set(key, String(value));
+    });
+
+    const response = await fetch(`/api/retirement-leads?${params.toString()}`);
+    if (response.ok) {
+      const data = (await response.json()) as {
+        leads: RetirementLeadRow[];
+        pagination: {
+          page: number;
+          pageSize: number;
+          total: number;
+          totalPages: number;
+        };
+        dashboard: RetirementLeadDashboard;
+      };
+      setRetirementLeads(data.leads);
+      setRetirementPagination(data.pagination);
+      setRetirementDashboard(data.dashboard);
+      setSelectedRetirementLead((current) => {
+        if (!current) return data.leads[0] ?? null;
+        return data.leads.find((lead) => lead.id === current.id) ?? current;
+      });
+    } else {
+      setAppError("Nao foi possivel carregar recem-aposentados.");
+    }
+
+    setRetirementLoading(false);
+  }, [retirementFilters]);
+
+  async function updateRetirementLead(
+    id: string,
+    payload: Partial<RetirementLeadRow>
+  ) {
+    const response = await fetch(`/api/retirement-leads/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel atualizar o lead.");
+      return;
+    }
+
+    const data = (await response.json()) as { lead: RetirementLeadRow };
+    setSelectedRetirementLead(data.lead);
+    await loadRetirementLeads(retirementFilters);
+  }
+
+  async function createRetirementLeadEvent(
+    retirementLeadId: string,
+    description: string
+  ) {
+    if (!description.trim()) return;
+
+    const response = await fetch(`/api/retirement-leads/${retirementLeadId}/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ eventType: "NOTE", description })
+    });
+
+    if (!response.ok) {
+      setAppError("Nao foi possivel registrar nota na timeline.");
+      return;
+    }
+
+    const detailResponse = await fetch(`/api/retirement-leads/${retirementLeadId}`);
+    if (detailResponse.ok) {
+      const data = (await detailResponse.json()) as { lead: RetirementLeadRow };
+      setSelectedRetirementLead(data.lead);
+    }
+  }
 
   async function updateMyAvailability(status: AvailabilityStatus) {
     setMyAvailability(status);
@@ -2664,6 +2850,7 @@ export default function Home() {
     void loadAttendants();
     if (userCanManageOperation(session)) {
       void loadKanban();
+      void loadRetirementLeads(retirementFilters);
     }
     if (userIsAdmin(session)) {
       void loadChannels();
@@ -2687,11 +2874,13 @@ export default function Home() {
     loadConversations,
     loadAttendants,
     loadLeadAssignmentSettings,
+    loadRetirementLeads,
     loadMessageLogs,
     loadNotifications,
     loadProposals,
     loadCompanies,
     proposalFilters,
+    retirementFilters,
     session
   ]);
 
@@ -2707,6 +2896,14 @@ export default function Home() {
 
     void loadDashboard(dashboardFilters);
   }, [dashboardFilters, loadDashboard, session]);
+
+  useEffect(() => {
+    if (!session || !userCanManageOperation(session) || active !== "recem-aposentados") {
+      return;
+    }
+
+    void loadRetirementLeads(retirementFilters);
+  }, [active, loadRetirementLeads, retirementFilters, session]);
 
   useEffect(() => {
     if (!session || active !== "atendimento") return;
@@ -3241,6 +3438,20 @@ export default function Home() {
               loading={campaignsLoading}
               onCreateCampaign={handleCreateCampaign}
               onRefreshCampaigns={loadCampaigns}
+            />
+          )}
+          {active === "recem-aposentados" && userCanManageOperation(session) && (
+            <RecemAposentados
+              leads={retirementLeads}
+              dashboard={retirementDashboard}
+              pagination={retirementPagination}
+              filters={retirementFilters}
+              loading={retirementLoading}
+              selectedLead={selectedRetirementLead}
+              onFiltersChange={setRetirementFilters}
+              onSelectLead={setSelectedRetirementLead}
+              onUpdateLead={updateRetirementLead}
+              onCreateEvent={createRetirementLeadEvent}
             />
           )}
           {active === "empresas" && userIsPlatformAdmin(session) && (
@@ -9716,9 +9927,9 @@ function Disparos({
 
   function downloadImportTemplate() {
     const csv = [
-      ["CPF", "Nome", "Telefone"].join(";"),
-      ["12345678901", "Maria Silva", "33999413444"].join(";"),
-      ["98765432100", "Joao Pereira", "5533998887766"].join(";")
+      ["CPF", "Nome", "Telefone", "Data Concessao", "Beneficio", "Cidade", "Estado"].join(";"),
+      ["12345678901", "Maria Silva", "33999413444", "01/04/2026", "Aposentadoria", "Governador Valadares", "MG"].join(";"),
+      ["98765432100", "Joao Pereira", "5533998887766", "", "", "", ""].join(";")
     ].join("\n");
 
     const url = URL.createObjectURL(
@@ -10684,6 +10895,460 @@ function Chatbot() {
         ))}
       </div>
     </section>
+  );
+}
+
+const retirementInterestLabels = {
+  NONE: "Sem interesse",
+  LOW: "Baixo",
+  MEDIUM: "Medio",
+  HIGH: "Alto"
+} as const;
+
+const retirementStatusLabels = {
+  IMPORTED: "Importado",
+  FIRST_CONTACT: "Primeiro contato",
+  RESPONDED: "Respondeu",
+  INTERESTED: "Interessado",
+  NURTURING: "Nutricao",
+  PRE_UNLOCK: "Pre-desbloqueio",
+  READY_TO_CONVERT: "Pronto para converter",
+  CONVERTED: "Convertido",
+  LOST: "Perdido"
+} as const;
+
+function formatShortDate(value?: string | null) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleDateString("pt-BR");
+}
+
+function RecemAposentados({
+  leads,
+  dashboard,
+  pagination,
+  filters,
+  loading,
+  selectedLead,
+  onFiltersChange,
+  onSelectLead,
+  onUpdateLead,
+  onCreateEvent
+}: {
+  leads: RetirementLeadRow[];
+  dashboard: RetirementLeadDashboard;
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+  filters: RetirementLeadFilters;
+  loading: boolean;
+  selectedLead: RetirementLeadRow | null;
+  onFiltersChange: (filters: RetirementLeadFilters) => void;
+  onSelectLead: (lead: RetirementLeadRow | null) => void;
+  onUpdateLead: (id: string, payload: Partial<RetirementLeadRow>) => Promise<void>;
+  onCreateEvent: (retirementLeadId: string, description: string) => Promise<void>;
+}) {
+  const [note, setNote] = useState("");
+
+  function updateFilter(key: keyof RetirementLeadFilters, value: string | number) {
+    onFiltersChange({ ...filters, [key]: value, page: key === "page" ? Number(value) : 1 });
+  }
+
+  async function handleNoteSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedLead || !note.trim()) return;
+    await onCreateEvent(selectedLead.id, note);
+    setNote("");
+  }
+
+  return (
+    <div className="space-y-4">
+      <section className="rounded-3xl border border-line bg-white p-5 shadow-soft">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-brand">
+              Jornada 90 dias
+            </p>
+            <h3 className="mt-1 text-2xl font-black text-slate-950">
+              Recem-Aposentados
+            </h3>
+            <p className="mt-1 text-sm text-slate-500">
+              Base preparada para organizar concessao, desbloqueio e proxima acao.
+            </p>
+          </div>
+          <button
+            className="inline-flex h-10 items-center gap-2 rounded-full border border-line bg-white px-4 text-sm font-bold text-slate-600 hover:bg-slate-50"
+            onClick={() => onFiltersChange({ ...filters, page: 1 })}
+            type="button"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Atualizar
+          </button>
+        </div>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-4 xl:grid-cols-8">
+          <RetirementMetric label="Total importados" value={dashboard.totalImported} />
+          <RetirementMetric label="Ate 90 dias" value={dashboard.until90} />
+          <RetirementMetric label="Ate 60 dias" value={dashboard.until60} />
+          <RetirementMetric label="Ate 30 dias" value={dashboard.until30} />
+          <RetirementMetric label="Ate 15 dias" value={dashboard.until15} />
+          <RetirementMetric label="Prontos" value={dashboard.readyToConvert} />
+          <RetirementMetric label="Quentes" value={dashboard.hotLeads} tone="hot" />
+          <RetirementMetric label="Frios" value={dashboard.coldLeads} tone="cold" />
+        </div>
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="rounded-3xl border border-line bg-white shadow-soft">
+          <div className="border-b border-line p-4">
+            <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-8">
+              <input
+                className="h-10 rounded-2xl border border-line px-3 text-sm outline-none focus:border-primary md:col-span-2"
+                placeholder="Buscar nome, CPF, telefone ou beneficio"
+                value={filters.search}
+                onChange={(event) => updateFilter("search", event.target.value)}
+              />
+              <input
+                className="h-10 rounded-2xl border border-line px-3 text-sm outline-none focus:border-primary"
+                placeholder="Estado"
+                value={filters.state}
+                onChange={(event) => updateFilter("state", event.target.value)}
+              />
+              <input
+                className="h-10 rounded-2xl border border-line px-3 text-sm outline-none focus:border-primary"
+                placeholder="Cidade"
+                value={filters.city}
+                onChange={(event) => updateFilter("city", event.target.value)}
+              />
+              <select
+                className="h-10 rounded-2xl border border-line bg-white px-3 text-sm outline-none"
+                value={filters.maxDaysToUnlock}
+                onChange={(event) => updateFilter("maxDaysToUnlock", event.target.value)}
+              >
+                <option value="">Dias</option>
+                <option value="90">Ate 90</option>
+                <option value="60">Ate 60</option>
+                <option value="30">Ate 30</option>
+                <option value="15">Ate 15</option>
+              </select>
+              <input
+                className="h-10 rounded-2xl border border-line px-3 text-sm outline-none focus:border-primary"
+                placeholder="Score min."
+                value={filters.minScore}
+                onChange={(event) => updateFilter("minScore", event.target.value)}
+              />
+              <select
+                className="h-10 rounded-2xl border border-line bg-white px-3 text-sm outline-none"
+                value={filters.interestLevel}
+                onChange={(event) => updateFilter("interestLevel", event.target.value)}
+              >
+                <option value="">Interesse</option>
+                {Object.entries(retirementInterestLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="h-10 rounded-2xl border border-line bg-white px-3 text-sm outline-none"
+                value={filters.journeyStatus}
+                onChange={(event) => updateFilter("journeyStatus", event.target.value)}
+              >
+                <option value="">Status</option>
+                {Object.entries(retirementStatusLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <select
+                className="h-9 rounded-full border border-line bg-white px-3 text-xs font-semibold text-slate-600 outline-none"
+                value={filters.hasCorrespondent}
+                onChange={(event) => updateFilter("hasCorrespondent", event.target.value)}
+              >
+                <option value="">Correspondente: todos</option>
+                <option value="true">Possui</option>
+                <option value="false">Nao possui</option>
+              </select>
+              <select
+                className="h-9 rounded-full border border-line bg-white px-3 text-xs font-semibold text-slate-600 outline-none"
+                value={filters.nextAction}
+                onChange={(event) => updateFilter("nextAction", event.target.value)}
+              >
+                <option value="">Proxima acao: todas</option>
+                <option value="due">Vencida/hoje</option>
+                <option value="scheduled">Agendada</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="min-w-[980px] w-full text-left text-sm">
+              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">Nome</th>
+                  <th className="px-4 py-3">Telefone</th>
+                  <th className="px-4 py-3">Cidade/UF</th>
+                  <th className="px-4 py-3">Beneficio</th>
+                  <th className="px-4 py-3">Concessao</th>
+                  <th className="px-4 py-3">Dias</th>
+                  <th className="px-4 py-3">Score</th>
+                  <th className="px-4 py-3">Interesse</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Proxima acao</th>
+                </tr>
+              </thead>
+              <tbody>
+                {leads.map((lead) => (
+                  <tr
+                    key={lead.id}
+                    className={clsx(
+                      "cursor-pointer border-t border-line hover:bg-blue-50/40",
+                      selectedLead?.id === lead.id && "bg-blue-50"
+                    )}
+                    onClick={() => onSelectLead(lead)}
+                  >
+                    <td className="px-4 py-3 font-bold text-slate-900">
+                      {lead.contact.name}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{lead.contact.phone}</td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {[lead.city, lead.state].filter(Boolean).join(" / ") || "-"}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {lead.benefitType || lead.benefitNumber || "-"}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {formatShortDate(lead.grantDate)}
+                    </td>
+                    <td className="px-4 py-3 font-semibold text-slate-700">
+                      {lead.daysToUnlock ?? "-"}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold">
+                        {lead.score}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <RetirementBadge value={retirementInterestLabels[lead.interestLevel]} />
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {retirementStatusLabels[lead.journeyStatus]}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {formatShortDate(lead.nextContactDate)}
+                    </td>
+                  </tr>
+                ))}
+                {!loading && leads.length === 0 && (
+                  <tr>
+                    <td className="px-4 py-8 text-center text-slate-500" colSpan={10}>
+                      Nenhum lead de recem-aposentado encontrado.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex items-center justify-between border-t border-line p-4 text-sm text-slate-600">
+            <span>
+              {loading ? "Carregando..." : `${pagination.total} registro(s)`}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                className="h-9 rounded-full border border-line px-3 font-semibold disabled:opacity-40"
+                disabled={pagination.page <= 1}
+                onClick={() => updateFilter("page", pagination.page - 1)}
+                type="button"
+              >
+                Anterior
+              </button>
+              <span className="text-xs font-bold">
+                {pagination.page} / {pagination.totalPages}
+              </span>
+              <button
+                className="h-9 rounded-full border border-line px-3 font-semibold disabled:opacity-40"
+                disabled={pagination.page >= pagination.totalPages}
+                onClick={() => updateFilter("page", pagination.page + 1)}
+                type="button"
+              >
+                Proxima
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <aside className="rounded-3xl border border-line bg-white p-5 shadow-soft">
+          {!selectedLead ? (
+            <div className="grid min-h-72 place-items-center text-center text-sm text-slate-500">
+              Selecione um lead para ver dados e timeline.
+            </div>
+          ) : (
+            <div className="space-y-5">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide text-brand">
+                  Detalhe do lead
+                </p>
+                <h4 className="mt-1 text-xl font-black text-slate-950">
+                  {selectedLead.contact.name}
+                </h4>
+                <p className="text-sm text-slate-500">{selectedLead.contact.phone}</p>
+              </div>
+
+              <div className="grid gap-2 text-sm">
+                <RetirementInfo label="CPF" value={selectedLead.contact.cpf || "-"} />
+                <RetirementInfo label="Cidade" value={selectedLead.city || "-"} />
+                <RetirementInfo label="Estado" value={selectedLead.state || "-"} />
+                <RetirementInfo label="Beneficio" value={selectedLead.benefitType || "-"} />
+                <RetirementInfo label="Concessao" value={formatShortDate(selectedLead.grantDate)} />
+                <RetirementInfo
+                  label="Desbloqueio"
+                  value={formatShortDate(selectedLead.estimatedUnlockDate)}
+                />
+              </div>
+
+              <div className="rounded-2xl border border-line bg-slate-50 p-3">
+                <p className="text-sm font-bold text-slate-900">Informacoes comerciais</p>
+                <div className="mt-3 grid gap-2">
+                  <label className="text-xs font-bold uppercase text-slate-500">
+                    Interesse
+                    <select
+                      className="mt-1 h-10 w-full rounded-xl border border-line bg-white px-3 text-sm normal-case text-slate-700"
+                      value={selectedLead.interestLevel}
+                      onChange={(event) =>
+                        void onUpdateLead(selectedLead.id, {
+                          interestLevel: event.target.value as RetirementLeadRow["interestLevel"]
+                        })
+                      }
+                    >
+                      {Object.entries(retirementInterestLabels).map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-xs font-bold uppercase text-slate-500">
+                    Status da jornada
+                    <select
+                      className="mt-1 h-10 w-full rounded-xl border border-line bg-white px-3 text-sm normal-case text-slate-700"
+                      value={selectedLead.journeyStatus}
+                      onChange={(event) =>
+                        void onUpdateLead(selectedLead.id, {
+                          journeyStatus: event.target.value as RetirementLeadRow["journeyStatus"]
+                        })
+                      }
+                    >
+                      {Object.entries(retirementStatusLabels).map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex items-center justify-between rounded-xl bg-white px-3 py-2 text-sm font-semibold text-slate-600">
+                    Possui correspondente
+                    <input
+                      checked={selectedLead.hasCorrespondent}
+                      onChange={(event) =>
+                        void onUpdateLead(selectedLead.id, {
+                          hasCorrespondent: event.target.checked
+                        })
+                      }
+                      type="checkbox"
+                    />
+                  </label>
+                  <RetirementInfo label="Valor desejado" value={selectedLead.desiredAmount ? formatCurrency(selectedLead.desiredAmount) : "-"} />
+                  <RetirementInfo label="Score" value={String(selectedLead.score)} />
+                </div>
+              </div>
+
+              <div>
+                <p className="text-sm font-bold text-slate-900">Timeline</p>
+                <form className="mt-2 flex gap-2" onSubmit={handleNoteSubmit}>
+                  <input
+                    className="h-10 min-w-0 flex-1 rounded-xl border border-line px-3 text-sm outline-none"
+                    placeholder="Adicionar nota"
+                    value={note}
+                    onChange={(event) => setNote(event.target.value)}
+                  />
+                  <button className="h-10 rounded-xl bg-brand px-3 text-xs font-bold text-white">
+                    Salvar
+                  </button>
+                </form>
+                <div className="mt-3 max-h-80 space-y-3 overflow-y-auto pr-1">
+                  {selectedLead.events.map((event) => (
+                    <div key={event.id} className="rounded-2xl border border-line p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-bold uppercase text-slate-500">
+                          {event.eventType}
+                        </p>
+                        <span className="text-xs text-slate-400">
+                          {formatRelativeDate(event.createdAt)}
+                        </span>
+                      </div>
+                      {event.description && (
+                        <p className="mt-1 text-sm text-slate-700">{event.description}</p>
+                      )}
+                    </div>
+                  ))}
+                  {selectedLead.events.length === 0 && (
+                    <p className="rounded-2xl border border-dashed border-line p-4 text-sm text-slate-500">
+                      Nenhum evento registrado.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </aside>
+      </section>
+    </div>
+  );
+}
+
+function RetirementMetric({
+  label,
+  value,
+  tone = "neutral"
+}: {
+  label: string;
+  value: number;
+  tone?: "neutral" | "hot" | "cold";
+}) {
+  return (
+    <div
+      className={clsx(
+        "rounded-2xl border p-3",
+        tone === "hot"
+          ? "border-emerald-100 bg-emerald-50"
+          : tone === "cold"
+            ? "border-slate-200 bg-slate-50"
+            : "border-line bg-white"
+      )}
+    >
+      <p className="text-[11px] font-bold uppercase text-slate-500">{label}</p>
+      <p className="mt-1 text-2xl font-black text-slate-950">{value}</p>
+    </div>
+  );
+}
+
+function RetirementBadge({ value }: { value: string }) {
+  return (
+    <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700">
+      {value}
+    </span>
+  );
+}
+
+function RetirementInfo({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2">
+      <span className="text-xs font-bold uppercase text-slate-500">{label}</span>
+      <span className="text-right text-sm font-semibold text-slate-800">{value}</span>
+    </div>
   );
 }
 

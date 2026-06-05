@@ -18,6 +18,7 @@ model Company {
   createdAt     DateTime        @default(now())
   users         User[]
   contacts      Contact[]
+  retirementLeads RetirementLead[]
   channels      Channel[]
   campaigns     Campaign[]
   notifications Notification[]
@@ -30,7 +31,7 @@ model Company {
   cltIntegrations CltIntegration[]
   cltSimulationLogs CltSimulationLog[]
   userAvailabilities UserAvailability[]
-  leadAssignmentSettings LeadAssignmentSetting[]
+  leadAssignmentSetting LeadAssignmentSetting?
   leadAssignmentHistory LeadAssignmentHistory[]
 }
 
@@ -79,6 +80,7 @@ model User {
   availability  UserAvailability?
   assignedLeadHistory LeadAssignmentHistory[] @relation("AssignedLeadHistory")
   createdLeadAssignments LeadAssignmentHistory[] @relation("CreatedLeadAssignments")
+  retirementLeadEvents RetirementLeadEvent[]
 
   @@index([companyId])
 }
@@ -158,11 +160,67 @@ model Contact {
   tasks              Task[]
   notifications      Notification[]
   cltSimulationLogs  CltSimulationLog[]
+  retirementLeads    RetirementLead[]
 
+  @@unique([companyId, phone])
+  @@unique([companyId, cpf])
   @@index([companyId])
+  @@index([companyId, updatedAt])
+  @@index([companyId, createdAt])
   @@index([ownerId])
   @@index([stageId])
   @@index([originId])
+}
+
+model RetirementLead {
+  id                  String                @id @default(cuid())
+  companyId           String
+  contactId           String
+  grantDate           DateTime?
+  estimatedUnlockDate DateTime?
+  daysToUnlock        Int?
+  benefitType         String?
+  benefitNumber       String?
+  state               String?
+  city                String?
+  desiredAmount       Decimal?
+  interestLevel       String                @default("NONE")
+  hasCorrespondent    Boolean               @default(false)
+  score               Int                   @default(0)
+  journeyStatus       String                @default("IMPORTED")
+  nextContactDate     DateTime?
+  lastContactDate     DateTime?
+  notes               String?
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  company             Company               @relation(fields: [companyId], references: [id])
+  contact             Contact               @relation(fields: [contactId], references: [id])
+  events              RetirementLeadEvent[]
+
+  @@unique([companyId, contactId])
+  @@index([companyId])
+  @@index([contactId])
+  @@index([estimatedUnlockDate])
+  @@index([daysToUnlock])
+  @@index([score])
+  @@index([journeyStatus])
+  @@index([nextContactDate])
+}
+
+model RetirementLeadEvent {
+  id               String         @id @default(cuid())
+  retirementLeadId String
+  eventType        String
+  description      String?
+  createdByUserId  String?
+  createdAt        DateTime       @default(now())
+  retirementLead   RetirementLead @relation(fields: [retirementLeadId], references: [id])
+  createdBy        User?          @relation(fields: [createdByUserId], references: [id])
+
+  @@index([retirementLeadId])
+  @@index([eventType])
+  @@index([createdByUserId])
+  @@index([createdAt])
 }
 
 model ContactActivity {
@@ -197,8 +255,10 @@ model Task {
   assignee    User?     @relation(fields: [assigneeId], references: [id])
 
   @@index([companyId])
+  @@index([companyId, status, dueAt])
   @@index([contactId])
   @@index([assigneeId])
+  @@index([assigneeId, status, dueAt])
   @@index([dueAt])
 }
 
@@ -216,6 +276,7 @@ model Tag {
   contacts  ContactTag[]
   conversations ConversationTag[]
 
+  @@unique([companyId, name])
   @@index([companyId])
 }
 
@@ -248,6 +309,7 @@ model PipelineStage {
   contacts  Contact[]
 
   @@index([companyId])
+  @@index([companyId, position])
 }
 
 model Conversation {
@@ -273,6 +335,12 @@ model Conversation {
   notifications Notification[]
   tags          ConversationTag[]
   assignmentHistory LeadAssignmentHistory[]
+
+  @@index([contactId])
+  @@index([agentId])
+  @@index([agentId, status, updatedAt])
+  @@index([lastMessageAt])
+  @@index([status])
 }
 
 model ConversationTag {
@@ -314,6 +382,9 @@ model Message {
   createdAt         DateTime     @default(now())
   conversation      Conversation @relation(fields: [conversationId], references: [id])
 
+  @@index([conversationId, createdAt])
+  @@index([status])
+  @@index([direction])
   @@index([providerMessageId])
 }
 
@@ -396,6 +467,8 @@ model CampaignRecipient {
 
   @@unique([campaignId, contactId])
   @@index([contactId])
+  @@index([campaignId, status])
+  @@index([contactId, status])
   @@index([conversationId])
   @@index([providerMessageId])
   @@index([status])
