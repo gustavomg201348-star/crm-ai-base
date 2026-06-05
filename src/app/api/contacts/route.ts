@@ -4,6 +4,8 @@ import { getSessionFromRequest } from "@/lib/auth";
 import { createActivity } from "@/lib/activities";
 import {
   contactInclude,
+  findContactByNormalizedPhone,
+  logContactNameMutationAttempt,
   mapContact,
   normalizeContactCpf,
   normalizeContactPhone,
@@ -108,13 +110,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const duplicated = await prisma.contact.findFirst({
-      where: {
+    const duplicated =
+      (await findContactByNormalizedPhone(prisma, {
         companyId: session.companyId,
-        OR: [{ phone }, ...(cpf ? [{ cpf }] : [])]
-      },
-      select: { id: true }
-    });
+        phone,
+        archived: true
+      })) ??
+      (cpf
+        ? await prisma.contact.findFirst({
+            where: {
+              companyId: session.companyId,
+              cpf
+            },
+            select: { id: true }
+          })
+        : null);
 
     if (duplicated) {
       return NextResponse.json(
@@ -161,6 +171,18 @@ export async function POST(request: NextRequest) {
         type: "CONTACT_CREATED",
         title: "Contato criado",
         detail: `${created.name} foi adicionado ao CRM.`
+      });
+
+      logContactNameMutationAttempt({
+        origin: "edicao_manual",
+        file: "src/app/api/contacts/route.ts",
+        functionName: "POST /api/contacts",
+        contactId: created.id,
+        phone: created.phone,
+        oldName: null,
+        newName: created.name,
+        reason: "contato criado manualmente",
+        allowed: true
       });
 
       return created;

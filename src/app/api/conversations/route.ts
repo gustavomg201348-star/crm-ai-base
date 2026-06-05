@@ -8,7 +8,12 @@ import {
 import { prisma } from "@/lib/db";
 import { maybeAutoAssignConversation } from "@/lib/lead-assignment";
 import { conversationVisibilityWhere, isAdmin } from "@/lib/permissions";
-import { normalizeContactCpf, normalizeContactPhone } from "@/lib/contacts";
+import {
+  findContactByNormalizedPhone,
+  logContactNameMutationAttempt,
+  normalizeContactCpf,
+  normalizeContactPhone
+} from "@/lib/contacts";
 
 export async function GET(request: NextRequest) {
   try {
@@ -123,16 +128,20 @@ export async function POST(request: NextRequest) {
       : null;
 
     if (!contact && normalizedPhone) {
-      contact = await prisma.contact.findFirst({
-        where: {
-          companyId: session.companyId,
-          archivedAt: null,
-          OR: [
-            { phone: normalizedPhone },
-            ...(normalizedCpf ? [{ cpf: normalizedCpf }] : [])
-          ]
-        }
+      contact = await findContactByNormalizedPhone(prisma, {
+        companyId: session.companyId,
+        phone: normalizedPhone
       });
+
+      if (!contact && normalizedCpf) {
+        contact = await prisma.contact.findFirst({
+          where: {
+            companyId: session.companyId,
+            archivedAt: null,
+            cpf: normalizedCpf
+          }
+        });
+      }
     }
 
     const contactByCpf = normalizedCpf
@@ -185,6 +194,18 @@ export async function POST(request: NextRequest) {
           stageId: stage?.id ?? null,
           temperature: "WARM"
         }
+      });
+
+      logContactNameMutationAttempt({
+        origin: "criacao_manual_conversa",
+        file: "src/app/api/conversations/route.ts",
+        functionName: "POST /api/conversations",
+        contactId: contact.id,
+        phone: contact.phone,
+        oldName: null,
+        newName: contact.name,
+        reason: "novo contato criado pelo modal iniciar conversa",
+        allowed: true
       });
     }
 

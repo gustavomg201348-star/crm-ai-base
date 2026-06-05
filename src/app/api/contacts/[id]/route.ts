@@ -3,6 +3,8 @@ import { getSessionFromRequest } from "@/lib/auth";
 import { createActivity } from "@/lib/activities";
 import {
   contactInclude,
+  findContactByNormalizedPhone,
+  logContactNameMutationAttempt,
   mapContact,
   normalizeContactCpf,
   normalizeContactPhone,
@@ -110,17 +112,27 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
 
     if (normalizedPhone !== undefined || normalizedCpf !== undefined) {
-      const duplicate = await prisma.contact.findFirst({
-        where: {
-          companyId: session.companyId,
-          id: { not: existing.id },
-          OR: [
-            ...(normalizedPhone ? [{ phone: normalizedPhone }] : []),
-            ...(normalizedCpf ? [{ cpf: normalizedCpf }] : [])
-          ]
-        },
-        select: { id: true }
-      });
+      const duplicateByPhone = normalizedPhone
+        ? await findContactByNormalizedPhone(prisma, {
+            companyId: session.companyId,
+            phone: normalizedPhone,
+            archived: true
+          })
+        : null;
+      const duplicateByCpf = normalizedCpf
+        ? await prisma.contact.findFirst({
+            where: {
+              companyId: session.companyId,
+              id: { not: existing.id },
+              cpf: normalizedCpf
+            },
+            select: { id: true }
+          })
+        : null;
+      const duplicate =
+        duplicateByPhone && duplicateByPhone.id !== existing.id
+          ? duplicateByPhone
+          : duplicateByCpf;
 
       if (duplicate) {
         return NextResponse.json(
@@ -169,6 +181,17 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
       if (manualName !== undefined && manualName !== existing.name) {
         activityDetails.push(`Nome alterado manualmente: ${existing.name} -> ${manualName}.`);
+        logContactNameMutationAttempt({
+          origin: "edicao_manual",
+          file: "src/app/api/contacts/[id]/route.ts",
+          functionName: "PATCH /api/contacts/[id]",
+          contactId: existing.id,
+          phone: normalizedPhone ?? existing.phone,
+          oldName: existing.name,
+          newName: manualName,
+          reason: "usuario alterou nome manualmente",
+          allowed: true
+        });
       }
 
       const updated = await tx.contact.update({

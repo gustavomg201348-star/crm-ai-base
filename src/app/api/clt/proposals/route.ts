@@ -3,7 +3,7 @@ import { createActivity } from "@/lib/activities";
 import { getSessionFromRequest } from "@/lib/auth";
 import { createCltLog } from "@/lib/clt-logs";
 import { onlyDigits, type CltCustomerData, type CltSimulationOffer } from "@/lib/clt-integration";
-import { getAutomaticContactNameUpdate } from "@/lib/contacts";
+import { getAutomaticContactNameUpdate, logContactNameMutationAttempt } from "@/lib/contacts";
 import { prisma } from "@/lib/db";
 import { mapProposal, proposalInclude } from "@/lib/proposals";
 
@@ -67,6 +67,21 @@ export async function POST(request: NextRequest) {
             phone: existing.phone || phone
           })
         : null;
+      if (existing) {
+        logContactNameMutationAttempt({
+          origin: "simulacao_clt",
+          file: "src/app/api/clt/proposals/route.ts",
+          functionName: "POST /api/clt/proposals",
+          contactId: existing.id,
+          phone: existing.phone || phone,
+          oldName: existing.name,
+          newName: nameUpdate?.nextName ?? customer.name,
+          reason: nameUpdate
+            ? "contato sem nome real recebeu nome da simulacao CLT"
+            : "nome da simulacao bloqueado porque contato ja possui nome salvo",
+          allowed: Boolean(nameUpdate)
+        });
+      }
 
       const contact = existing
         ? await tx.contact.update({

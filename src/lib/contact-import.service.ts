@@ -1,6 +1,6 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { createActivity } from "@/lib/activities";
-import { getAutomaticContactNameUpdate } from "@/lib/contacts";
+import { getAutomaticContactNameUpdate, logContactNameMutationAttempt } from "@/lib/contacts";
 import { prisma } from "@/lib/db";
 import { upsertRetirementLeadForContact } from "@/lib/retirement-leads";
 
@@ -354,6 +354,19 @@ export async function confirmContactImport({
           currentName: existing.name,
           incomingName: row.name,
           phone: existing.phone || row.whatsapp
+        });
+        logContactNameMutationAttempt({
+          origin: "importacao",
+          file: "src/lib/contact-import.service.ts",
+          functionName: "confirmContactImport",
+          contactId: existing.id,
+          phone: existing.phone || row.whatsapp,
+          oldName: existing.name,
+          newName: nameUpdate?.nextName ?? row.name,
+          reason: nameUpdate
+            ? "contato sem nome real recebeu nome da planilha"
+            : "nome da planilha bloqueado porque contato ja possui nome salvo",
+          allowed: Boolean(nameUpdate)
         });
         const contact = await tx.contact.update({
           where: { id: existing.id },

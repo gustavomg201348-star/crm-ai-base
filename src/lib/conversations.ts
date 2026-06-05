@@ -1,5 +1,4 @@
 import type { Prisma } from "@prisma/client";
-import { formatContactDisplayName } from "@/lib/contacts";
 
 export type ConversationStatus = "OPEN" | "PENDING" | "BOT" | "SOLD" | "RESOLVED";
 
@@ -55,7 +54,7 @@ export function mapConversation(conversation: ConversationWithRelations) {
     assignmentStatus: conversation.agentId ? "ASSIGNED" : "UNASSIGNED",
     contact: {
       id: conversation.contact.id,
-      name: formatContactDisplayName(conversation.contact.name),
+      name: conversation.contact.name,
       phone: conversation.contact.phone,
       email: conversation.contact.email,
       cpf: conversation.contact.cpf,

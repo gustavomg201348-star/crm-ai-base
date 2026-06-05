@@ -1,6 +1,8 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 
 export type LeadTemperature = "HOT" | "WARM" | "COLD";
+
+type ContactLookupDbClient = Prisma.TransactionClient | PrismaClient;
 
 export function normalizeContactPhone(phone?: string | null) {
   return phone?.replace(/\D/g, "") ?? "";
@@ -59,6 +61,104 @@ export function getAutomaticContactNameUpdate({
   };
 }
 
+export async function findContactByNormalizedPhone(
+  db: ContactLookupDbClient,
+  {
+    companyId,
+    phone,
+    archived = false
+  }: {
+    companyId: string;
+    phone?: string | null;
+    archived?: boolean;
+  }
+) {
+  const normalizedPhone = normalizeContactPhone(phone);
+
+  if (!normalizedPhone) {
+    return null;
+  }
+
+  const direct = await db.contact.findFirst({
+    where: {
+      companyId,
+      ...(archived ? {} : { archivedAt: null }),
+      phone: normalizedPhone
+    }
+  });
+
+  if (direct) {
+    return direct;
+  }
+
+  const matches = await db.$queryRaw<Array<{ id: string }>>`
+    SELECT "id"
+    FROM "Contact"
+    WHERE "companyId" = ${companyId}
+      ${archived ? Prisma.empty : Prisma.sql`AND "archivedAt" IS NULL`}
+      AND regexp_replace("phone", '\\D', '', 'g') = ${normalizedPhone}
+    LIMIT 1
+  `;
+
+  if (matches[0]?.id) {
+    return db.contact.findUnique({ where: { id: matches[0].id } });
+  }
+
+  return db.contact.findFirst({
+    where: {
+      companyId,
+      ...(archived ? {} : { archivedAt: null }),
+      OR: [
+        { phone: normalizedPhone },
+        { phone: { contains: normalizedPhone } },
+        { phone: { contains: normalizedPhone.slice(-11) } },
+        { phone: { contains: normalizedPhone.slice(-10) } }
+      ]
+    }
+  });
+}
+
+export function logContactNameMutationAttempt({
+  origin,
+  file,
+  functionName,
+  contactId,
+  phone,
+  oldName,
+  newName,
+  reason,
+  allowed
+}: {
+  origin: string;
+  file: string;
+  functionName: string;
+  contactId?: string | null;
+  phone?: string | null;
+  oldName?: string | null;
+  newName?: string | null;
+  reason: string;
+  allowed: boolean;
+}) {
+  const normalizedOld = oldName?.trim() ?? "";
+  const normalizedNew = newName?.trim() ?? "";
+
+  if (normalizedOld === normalizedNew) {
+    return;
+  }
+
+  console.warn("[contact-name-audit]", {
+    contactId: contactId ?? null,
+    phone: normalizeContactPhone(phone),
+    oldName: normalizedOld || null,
+    newName: normalizedNew || null,
+    origin,
+    file,
+    functionName,
+    reason,
+    allowed
+  });
+}
+
 export const contactInclude = {
   owner: true,
   origin: true,
@@ -82,7 +182,7 @@ export type ContactWithRelations = Prisma.ContactGetPayload<{
 export function mapContact(contact: ContactWithRelations) {
   return {
     id: contact.id,
-    name: formatContactDisplayName(contact.name),
+    name: contact.name,
     phone: contact.phone,
     email: contact.email,
     cpf: contact.cpf,

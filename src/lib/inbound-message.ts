@@ -7,7 +7,9 @@ import { createInboundMessageNotification, mapNotification } from "@/lib/notific
 import { createActivity } from "@/lib/activities";
 import {
   formatContactDisplayName,
+  findContactByNormalizedPhone,
   getAutomaticContactNameUpdate,
+  logContactNameMutationAttempt,
   normalizeContactPhone
 } from "@/lib/contacts";
 
@@ -59,14 +61,25 @@ export async function processInboundMessage({
     })
   ]);
 
-  let contact = await prisma.contact.findFirst({
-    where: {
-      companyId,
-      phone: normalizedPhone
-    }
+  let contact = await findContactByNormalizedPhone(prisma, {
+    companyId,
+    phone: normalizedPhone,
+    archived: true
   });
 
   if (!contact) {
+    logContactNameMutationAttempt({
+      origin: "webhook",
+      file: "src/lib/inbound-message.ts",
+      functionName: "processInboundMessage",
+      contactId: null,
+      phone: normalizedPhone,
+      oldName: null,
+      newName: name?.trim() || normalizedPhone,
+      reason: "criacao de contato por mensagem inbound",
+      allowed: true
+    });
+
     contact = await prisma.contact.create({
       data: {
         companyId,
@@ -83,6 +96,20 @@ export async function processInboundMessage({
       currentName: contact.name,
       incomingName: name,
       phone: normalizedPhone
+    });
+
+    logContactNameMutationAttempt({
+      origin: "webhook",
+      file: "src/lib/inbound-message.ts",
+      functionName: "processInboundMessage",
+      contactId: contact.id,
+      phone: contact.phone,
+      oldName: contact.name,
+      newName: nameUpdate?.nextName ?? name?.trim() ?? contact.name,
+      reason: nameUpdate
+        ? "contato sem nome real recebeu nome do WhatsApp"
+        : "nome automatico bloqueado porque contato ja possui nome salvo",
+      allowed: Boolean(nameUpdate)
     });
 
     contact = await prisma.contact.update({

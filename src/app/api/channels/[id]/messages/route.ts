@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { createActivity } from "@/lib/activities";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
+import { findContactByNormalizedPhone, logContactNameMutationAttempt } from "@/lib/contacts";
 import { prisma } from "@/lib/db";
 import { saveFailedOutboundMessage } from "@/lib/message-delivery";
 import { readMetaMessageId, sendMetaTextMessage } from "@/lib/meta-whatsapp";
@@ -91,10 +92,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
         })
       ]);
 
+      let createdContactForSend = false;
+      const existingContact = await findContactByNormalizedPhone(prisma, {
+        companyId: session.companyId,
+        phone: normalizedPhone
+      });
       const contact =
-        (await prisma.contact.findFirst({
-          where: { companyId: session.companyId, phone: normalizedPhone }
-        })) ??
+        existingContact ??
         (await prisma.contact.create({
           data: {
             companyId: session.companyId,
@@ -107,6 +111,21 @@ export async function POST(request: NextRequest, context: RouteContext) {
             lastMessage: message
           }
         }));
+
+      createdContactForSend = !existingContact;
+      if (createdContactForSend) {
+        logContactNameMutationAttempt({
+          origin: "envio_avulso_canal",
+          file: "src/app/api/channels/[id]/messages/route.ts",
+          functionName: "POST /api/channels/[id]/messages",
+          contactId: contact.id,
+          phone: contact.phone,
+          oldName: null,
+          newName: contact.name,
+          reason: "contato criado automaticamente para envio avulso",
+          allowed: true
+        });
+      }
 
       conversation =
         (await prisma.conversation.findFirst({
