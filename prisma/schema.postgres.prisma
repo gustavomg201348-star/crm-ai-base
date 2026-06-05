@@ -377,9 +377,7 @@ model Message {
   templateVariables String?
   status            String       @default("sent")
   providerMessageId String?
-  deliveredAt       DateTime?
   readAt            DateTime?
-  failedReason      String?
   senderType        String?
   createdAt         DateTime     @default(now())
   conversation      Conversation @relation(fields: [conversationId], references: [id])

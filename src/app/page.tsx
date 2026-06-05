@@ -242,9 +242,7 @@ type ConversationRow = {
     mimeType?: string | null;
     templateName?: string | null;
     status?: string;
-    deliveredAt?: string | null;
     readAt?: string | null;
-    failedReason?: string | null;
     senderType?: string | null;
   } | null;
   messages: Array<{
@@ -262,9 +260,7 @@ type ConversationRow = {
     templateVariables?: string | null;
     status?: string;
     providerMessageId?: string | null;
-    deliveredAt?: string | null;
     readAt?: string | null;
-    failedReason?: string | null;
     senderType?: string | null;
   }>;
 };
@@ -4925,9 +4921,7 @@ function Atendimento({
               key={item.id}
               side={item.direction === "outbound" ? "right" : "left"}
               status={item.status}
-              deliveredAt={item.deliveredAt}
               readAt={item.readAt}
-              failedReason={item.failedReason}
               timestamp={formatRelativeDate(item.createdAt)}
             >
               {item.body}
@@ -5679,17 +5673,13 @@ function ConversationList({
 function ChatBubble({
   side,
   status,
-  deliveredAt,
   readAt,
-  failedReason,
   timestamp,
   children
 }: {
   side: "left" | "right";
   status?: string;
-  deliveredAt?: string | null;
   readAt?: string | null;
-  failedReason?: string | null;
   timestamp?: string;
   children: React.ReactNode;
 }) {
@@ -5732,7 +5722,7 @@ function ChatBubble({
         </div>
         {failed && (
           <p className="mt-1 px-1 text-[11px] font-semibold text-rose-600">
-            {failedReason || "Falha ao enviar"}
+            Falha ao enviar
           </p>
         )}
         {(timestamp || showDeliveryStatus) && (
@@ -5754,9 +5744,7 @@ function ChatBubble({
                 title={
                   normalizedStatus === "read" && readAt
                     ? `Visualizada ${formatRelativeDate(readAt)}`
-                    : normalizedStatus === "delivered" && deliveredAt
-                      ? `Entregue ${formatRelativeDate(deliveredAt)}`
-                      : deliveryLabel
+                    : deliveryLabel
                 }
               >
                 <DeliveryIcon
