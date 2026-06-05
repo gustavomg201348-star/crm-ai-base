@@ -73,7 +73,7 @@ export async function GET(request: NextRequest) {
         ...(status === "ALL" ? {} : { status })
       },
       include: conversationInclude,
-      orderBy: { updatedAt: "desc" },
+      orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }],
       take: 100
     });
 
@@ -209,7 +209,7 @@ export async function POST(request: NextRequest) {
         status: { not: "RESOLVED" }
       },
       include: conversationInclude,
-      orderBy: { updatedAt: "desc" }
+      orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }]
     });
 
     if (existingConversation) {

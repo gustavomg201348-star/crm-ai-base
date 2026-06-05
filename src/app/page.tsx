@@ -832,6 +832,14 @@ function formatMessagePreview(value?: string | null) {
   return value?.replace(/\s+/g, " ").trim() || "Sem mensagens.";
 }
 
+function getConversationSortTime(conversation: ConversationRow) {
+  return new Date(
+    conversation.lastMessageAt ??
+      conversation.lastMessage?.createdAt ??
+      conversation.createdAt
+  ).getTime();
+}
+
 function formatCurrency(value: number | string) {
   return Number(value || 0).toLocaleString("pt-BR", {
     style: "currency",
@@ -1403,7 +1411,7 @@ export default function Home() {
         : [conversation, ...current];
 
       return [...next].sort(
-        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+        (a, b) => getConversationSortTime(b) - getConversationSortTime(a)
       );
     });
   }, []);

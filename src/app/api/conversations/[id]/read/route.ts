@@ -44,15 +44,21 @@ export async function POST(request: NextRequest, context: RouteContext) {
         data: { readAt }
       });
 
-      return tx.conversation.update({
+      await tx.$executeRaw`
+        UPDATE "Conversation"
+        SET "unreadCount" = 0, "lastReadAt" = ${readAt}
+        WHERE "id" = ${conversation.id}
+      `;
+
+      return tx.conversation.findUnique({
         where: { id: conversation.id },
-        data: {
-          unreadCount: 0,
-          lastReadAt: readAt
-        },
         include: conversationInclude
       });
     });
+
+    if (!updated) {
+      return NextResponse.json({ error: "Conversa nao encontrada." }, { status: 404 });
+    }
 
     return NextResponse.json({
       conversation: mapConversation(updated),
