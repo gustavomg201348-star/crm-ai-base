@@ -3192,11 +3192,11 @@ export default function Home() {
       <section
         className={clsx(
           "transition-[padding-left] duration-300 ease-out",
-          active === "atendimento" && "h-[100dvh] overflow-hidden",
+          active === "atendimento" && "flex h-[100dvh] flex-col overflow-hidden",
           leftSidebarCollapsed ? "xl:pl-[72px]" : "xl:pl-[264px]"
         )}
       >
-        <header className="sticky top-0 z-10 flex min-h-20 items-center justify-between border-b border-line/70 bg-white/90 px-4 backdrop-blur-xl md:px-8">
+        <header className="sticky top-0 z-10 flex min-h-20 shrink-0 items-center justify-between border-b border-line/70 bg-white/90 px-4 backdrop-blur-xl md:px-8">
           <div className="flex min-w-0 items-center gap-4">
             <button className="grid h-10 w-10 place-items-center rounded-xl border border-line bg-white text-slate-600 shadow-sm xl:hidden">
               <Menu className="h-5 w-5" />
@@ -3339,7 +3339,7 @@ export default function Home() {
         <div
           className={clsx(
             active === "atendimento"
-              ? "h-[calc(100dvh-5rem)] overflow-hidden p-3 md:p-4"
+              ? "min-h-0 flex-1 overflow-hidden p-2 md:p-3"
               : "p-4 md:p-8"
           )}
         >
