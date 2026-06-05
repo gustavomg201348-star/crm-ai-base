@@ -3362,12 +3362,12 @@ export default function Home() {
         <div
           className={clsx(
             active === "atendimento"
-              ? "min-h-0 flex-1 overflow-hidden p-2 md:p-3"
+              ? "flex min-h-0 flex-1 flex-col overflow-hidden p-2 md:p-3"
               : "p-4 md:p-8"
           )}
         >
           {appError && (
-            <div className="mb-4 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            <div className="mb-3 shrink-0 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
               {appError}
             </div>
           )}
@@ -3382,34 +3382,36 @@ export default function Home() {
             />
           )}
           {active === "atendimento" && (
-            <Atendimento
-              conversations={conversationList}
-              filters={conversationFilters}
-              availableTags={reference.tags}
-              attendants={attendants}
-              currentUserId={session.user.id}
-              isAdmin={userCanManageOperation(session)}
-              loading={conversationLoading}
-              selectedConversation={selectedConversation}
-              onFiltersChange={setConversationFilters}
-              onSelectConversation={(conversation) => void handleSelectConversation(conversation)}
-              onAssignConversation={handleAssignConversation}
-              onUnassignConversation={handleUnassignConversation}
-              onTransferConversation={handleTransferConversation}
-              onSendMessage={handleSendMessage}
-              onSendMedia={handleSendMedia}
-              onLoadTemplates={handleLoadTemplates}
-              onSendTemplate={handleSendTemplate}
-              onUpdateStatus={handleConversationStatus}
-              aiAnalysis={aiAnalysis}
-              aiLoading={aiLoading}
-              aiSettings={aiSettings}
-              onAnalyzeConversation={handleAnalyzeConversation}
-              onUpdateConversationAiMode={handleConversationAiMode}
-              onAddTags={handleAddConversationTags}
-              onRemoveTag={handleRemoveConversationTag}
-              onOpenCltSimulation={openCltSimulationFromConversation}
-            />
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <Atendimento
+                conversations={conversationList}
+                filters={conversationFilters}
+                availableTags={reference.tags}
+                attendants={attendants}
+                currentUserId={session.user.id}
+                isAdmin={userCanManageOperation(session)}
+                loading={conversationLoading}
+                selectedConversation={selectedConversation}
+                onFiltersChange={setConversationFilters}
+                onSelectConversation={(conversation) => void handleSelectConversation(conversation)}
+                onAssignConversation={handleAssignConversation}
+                onUnassignConversation={handleUnassignConversation}
+                onTransferConversation={handleTransferConversation}
+                onSendMessage={handleSendMessage}
+                onSendMedia={handleSendMedia}
+                onLoadTemplates={handleLoadTemplates}
+                onSendTemplate={handleSendTemplate}
+                onUpdateStatus={handleConversationStatus}
+                aiAnalysis={aiAnalysis}
+                aiLoading={aiLoading}
+                aiSettings={aiSettings}
+                onAnalyzeConversation={handleAnalyzeConversation}
+                onUpdateConversationAiMode={handleConversationAiMode}
+                onAddTags={handleAddConversationTags}
+                onRemoveTag={handleRemoveConversationTag}
+                onOpenCltSimulation={openCltSimulationFromConversation}
+              />
+            </div>
           )}
           {active === "kanban" && (
             <Kanban
