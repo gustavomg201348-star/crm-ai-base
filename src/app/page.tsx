@@ -919,6 +919,50 @@ function logConversationRenderDebug({
   });
 }
 
+function withStableConversationContactName({
+  previous,
+  next,
+  origin
+}: {
+  previous?: ConversationRow | null;
+  next: ConversationRow;
+  origin: string;
+}) {
+  if (
+    !previous ||
+    previous.id !== next.id ||
+    previous.contact.id !== next.contact.id ||
+    previous.contact.name === next.contact.name
+  ) {
+    return next;
+  }
+
+  const previousName = previous.contact.name.trim();
+  const nextName = next.contact.name.trim();
+
+  if (!previousName || !nextName) {
+    return next;
+  }
+
+  console.warn("[conversation-render-debug]", {
+    origin: `${origin}:preserve-stable-contact-name`,
+    conversationId: next.id,
+    contactId: next.contact.id,
+    phone: next.contact.phone,
+    previousName,
+    nextName,
+    decision: "mantendo nome anterior na UI porque a conversa e o contato sao os mesmos"
+  });
+
+  return {
+    ...next,
+    contact: {
+      ...next.contact,
+      name: previous.contact.name
+    }
+  };
+}
+
 function mergeConversationListItem({
   current,
   conversation,
@@ -929,33 +973,48 @@ function mergeConversationListItem({
   origin: string;
 }) {
   const previous = current.find((item) => item.id === conversation.id) ?? null;
-  logConversationRenderDebug({ origin, previous, next: conversation });
+  const stableConversation = withStableConversationContactName({
+    previous,
+    next: conversation,
+    origin
+  });
+  logConversationRenderDebug({ origin, previous, next: stableConversation });
 
   const next = previous
-    ? current.map((item) => (item.id === conversation.id ? conversation : item))
-    : [conversation, ...current];
+    ? current.map((item) =>
+        item.id === stableConversation.id ? stableConversation : item
+      )
+    : [stableConversation, ...current];
 
   return [...next].sort(
     (a, b) => getConversationSortTime(b) - getConversationSortTime(a)
   );
 }
 
-function logConversationListSnapshot({
-  origin,
-  previous,
-  next
+function mergeConversationListSnapshot({
+  current,
+  incoming,
+  origin
 }: {
+  current: ConversationRow[];
+  incoming: ConversationRow[];
   origin: string;
-  previous: ConversationRow[];
-  next: ConversationRow[];
 }) {
-  const previousById = new Map(previous.map((item) => [item.id, item]));
+  const previousById = new Map(current.map((item) => [item.id, item]));
 
-  next.forEach((conversation) => {
-    const before = previousById.get(conversation.id);
-    if (before) {
-      logConversationRenderDebug({ origin, previous: before, next: conversation });
-    }
+  return incoming.map((conversation) => {
+    const previous = previousById.get(conversation.id) ?? null;
+    const stableConversation = withStableConversationContactName({
+      previous,
+      next: conversation,
+      origin
+    });
+    logConversationRenderDebug({
+      origin,
+      previous,
+      next: stableConversation
+    });
+    return stableConversation;
   });
 }
 
@@ -1018,6 +1077,7 @@ export default function Home() {
     useState<ConversationRow | null>(null);
   const [cltDraft, setCltDraft] = useState<CltSimulationDraft | null>(null);
   const selectedConversationRef = useRef<string | null>(null);
+  const conversationListRef = useRef<ConversationRow[]>([]);
   const knownNotificationIdsRef = useRef<Set<string>>(new Set());
   const notificationsLoadedRef = useRef(false);
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
@@ -1128,6 +1188,10 @@ export default function Home() {
   useEffect(() => {
     selectedConversationRef.current = selectedConversation?.id ?? null;
   }, [selectedConversation?.id]);
+
+  useEffect(() => {
+    conversationListRef.current = conversationList;
+  }, [conversationList]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1450,17 +1514,18 @@ export default function Home() {
         const data = (await response.json()) as {
           conversations: ConversationRow[];
         };
-        setConversationList((current) => {
-          logConversationListSnapshot({
-            origin: options.silent ? "polling" : "initial-load",
-            previous: current,
-            next: data.conversations
-          });
-          return data.conversations;
+        const origin = options.silent ? "polling" : "initial-load";
+        const nextConversations = mergeConversationListSnapshot({
+          current: conversationListRef.current,
+          incoming: data.conversations,
+          origin
         });
+        setConversationList(nextConversations);
         setSelectedConversation((current) => {
           if (!current) return null;
-          const next = data.conversations.find((conversation) => conversation.id === current.id) ?? current;
+          const next =
+            nextConversations.find((conversation) => conversation.id === current.id) ??
+            current;
           logConversationRenderDebug({
             origin: "selected-conversation-load-sync",
             previous: current,
