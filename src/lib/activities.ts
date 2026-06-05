@@ -1,4 +1,6 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
+
+type ActivityDbClient = Prisma.TransactionClient | PrismaClient;
 
 export const activityInclude = {
   user: { select: { id: true, name: true, email: true } }
@@ -27,7 +29,7 @@ export function mapActivity(activity: ActivityWithRelations) {
 }
 
 export async function createActivity(
-  prisma: Prisma.TransactionClient,
+  prisma: ActivityDbClient,
   data: {
     contactId: string;
     userId?: string | null;

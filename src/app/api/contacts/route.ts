@@ -2,7 +2,13 @@ import { NextResponse, type NextRequest } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { getSessionFromRequest } from "@/lib/auth";
 import { createActivity } from "@/lib/activities";
-import { contactInclude, mapContact, type LeadTemperature } from "@/lib/contacts";
+import {
+  contactInclude,
+  mapContact,
+  normalizeContactCpf,
+  normalizeContactPhone,
+  type LeadTemperature
+} from "@/lib/contacts";
 import { prisma } from "@/lib/db";
 
 function buildContactWhere(
@@ -85,12 +91,35 @@ export async function POST(request: NextRequest) {
       | null;
 
     const name = body?.name?.trim();
-    const phone = body?.phone?.trim();
+    const phone = normalizeContactPhone(body?.phone);
+    const cpf = normalizeContactCpf(body?.cpf);
 
     if (!name || !phone) {
       return NextResponse.json(
         { error: "Nome e telefone sao obrigatorios." },
         { status: 400 }
+      );
+    }
+
+    if (cpf && cpf.length !== 11) {
+      return NextResponse.json(
+        { error: "Informe um CPF valido com 11 digitos." },
+        { status: 400 }
+      );
+    }
+
+    const duplicated = await prisma.contact.findFirst({
+      where: {
+        companyId: session.companyId,
+        OR: [{ phone }, ...(cpf ? [{ cpf }] : [])]
+      },
+      select: { id: true }
+    });
+
+    if (duplicated) {
+      return NextResponse.json(
+        { error: "Ja existe um contato com este telefone ou CPF." },
+        { status: 409 }
       );
     }
 
@@ -115,7 +144,7 @@ export async function POST(request: NextRequest) {
           name,
           phone,
           email: body?.email?.trim() || null,
-          cpf: body?.cpf?.trim() || null,
+          cpf: cpf || null,
           originId: body?.originId || null,
           stageId: body?.stageId || null,
           temperature: body?.temperature || "WARM",

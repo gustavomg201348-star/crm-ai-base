@@ -2,6 +2,63 @@ import type { Prisma } from "@prisma/client";
 
 export type LeadTemperature = "HOT" | "WARM" | "COLD";
 
+export function normalizeContactPhone(phone?: string | null) {
+  return phone?.replace(/\D/g, "") ?? "";
+}
+
+export function normalizeContactCpf(cpf?: string | null) {
+  return cpf?.replace(/\D/g, "") ?? "";
+}
+
+export function formatContactDisplayName(name: string) {
+  const trimmed = name.trim().replace(/\s+/g, " ");
+
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  return trimmed
+    .toLocaleLowerCase("pt-BR")
+    .replace(/(^|[\s'-])(\S)/g, (_match, prefix: string, letter: string) => {
+      return `${prefix}${letter.toLocaleUpperCase("pt-BR")}`;
+    });
+}
+
+export function isMeaningfulContactName(name?: string | null, phone?: string | null) {
+  const trimmed = name?.trim();
+  const normalizedPhone = normalizeContactPhone(phone);
+
+  return Boolean(trimmed && trimmed !== normalizedPhone);
+}
+
+export function getAutomaticContactNameUpdate({
+  currentName,
+  incomingName,
+  phone
+}: {
+  currentName?: string | null;
+  incomingName?: string | null;
+  phone?: string | null;
+}) {
+  if (isMeaningfulContactName(currentName, phone)) {
+    return null;
+  }
+
+  const nextName = incomingName?.trim().replace(/\s+/g, " ");
+  const fallback = normalizeContactPhone(phone);
+  const normalizedCurrent = currentName?.trim().replace(/\s+/g, " ") ?? "";
+  const candidate = nextName || normalizedCurrent || fallback;
+
+  if (!candidate || candidate === normalizedCurrent) {
+    return null;
+  }
+
+  return {
+    previousName: normalizedCurrent || null,
+    nextName: candidate
+  };
+}
+
 export const contactInclude = {
   owner: true,
   origin: true,
@@ -25,7 +82,7 @@ export type ContactWithRelations = Prisma.ContactGetPayload<{
 export function mapContact(contact: ContactWithRelations) {
   return {
     id: contact.id,
-    name: contact.name,
+    name: formatContactDisplayName(contact.name),
     phone: contact.phone,
     email: contact.email,
     cpf: contact.cpf,

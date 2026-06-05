@@ -4,10 +4,12 @@ import { maybeSendAutomaticAiReply } from "@/lib/ai-attendant.service";
 import { maybeAutoAssignConversation } from "@/lib/lead-assignment";
 import { publishInboundNotification } from "@/lib/notification-stream";
 import { createInboundMessageNotification, mapNotification } from "@/lib/notifications";
-
-function normalizePhone(phone: string) {
-  return phone.replace(/\D/g, "");
-}
+import { createActivity } from "@/lib/activities";
+import {
+  formatContactDisplayName,
+  getAutomaticContactNameUpdate,
+  normalizeContactPhone
+} from "@/lib/contacts";
 
 export async function processInboundMessage({
   companyId,
@@ -24,7 +26,7 @@ export async function processInboundMessage({
   body: string;
   providerMessageId?: string | null;
 }) {
-  const normalizedPhone = normalizePhone(phone);
+  const normalizedPhone = normalizeContactPhone(phone);
   const messageBody = body.trim();
 
   if (!normalizedPhone || !messageBody) {
@@ -60,7 +62,7 @@ export async function processInboundMessage({
   let contact = await prisma.contact.findFirst({
     where: {
       companyId,
-      OR: [{ phone }, { phone: normalizedPhone }]
+      phone: normalizedPhone
     }
   });
 
@@ -68,7 +70,7 @@ export async function processInboundMessage({
     contact = await prisma.contact.create({
       data: {
         companyId,
-        name: name?.trim() || normalizedPhone,
+        name: name?.trim().replace(/\s+/g, " ") || normalizedPhone,
         phone: normalizedPhone,
         originId: origin?.id ?? null,
         stageId: stage?.id ?? null,
@@ -77,14 +79,29 @@ export async function processInboundMessage({
       }
     });
   } else {
+    const nameUpdate = getAutomaticContactNameUpdate({
+      currentName: contact.name,
+      incomingName: name,
+      phone: normalizedPhone
+    });
+
     contact = await prisma.contact.update({
       where: { id: contact.id },
       data: {
-        name: contact.name || name?.trim() || normalizedPhone,
+        ...(nameUpdate ? { name: nameUpdate.nextName } : {}),
         lastMessage: messageBody,
         archivedAt: null
       }
     });
+
+    if (nameUpdate) {
+      await createActivity(prisma, {
+        contactId: contact.id,
+        type: "CONTACT_NAME_AUTO_FILLED",
+        title: "Nome preenchido automaticamente",
+        detail: `Origem: webhook WhatsApp. Antes: ${nameUpdate.previousName ?? "(vazio)"}. Depois: ${nameUpdate.nextName}.`
+      });
+    }
   }
 
   let conversation = await prisma.conversation.findFirst({
@@ -146,7 +163,7 @@ export async function processInboundMessage({
     conversationId: updated.id,
     contactId: updated.contact.id,
     channelId: channelId ?? null,
-    customerName: updated.contact.name,
+    customerName: formatContactDisplayName(updated.contact.name),
     phone: updated.contact.phone,
     message: messageBody,
     channelLabel: channel?.displayPhone ?? channel?.name ?? updated.channel

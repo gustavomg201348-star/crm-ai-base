@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { createActivity } from "@/lib/activities";
+import { getAutomaticContactNameUpdate } from "@/lib/contacts";
 import { prisma } from "@/lib/db";
 import { upsertRetirementLeadForContact } from "@/lib/retirement-leads";
 
@@ -320,7 +321,7 @@ async function findContactForImport(
       companyId,
       OR: [{ cpf: row.cpf }, { phone: row.whatsapp }]
     },
-    select: { id: true }
+    select: { id: true, name: true, phone: true }
   });
 }
 
@@ -349,10 +350,15 @@ export async function confirmContactImport({
     for (const row of validRows) {
       const existing = await findContactForImport(tx, companyId, row);
       if (existing) {
+        const nameUpdate = getAutomaticContactNameUpdate({
+          currentName: existing.name,
+          incomingName: row.name,
+          phone: existing.phone || row.whatsapp
+        });
         const contact = await tx.contact.update({
           where: { id: existing.id },
           data: {
-            name: row.name,
+            ...(nameUpdate ? { name: nameUpdate.nextName } : {}),
             cpf: row.cpf,
             phone: row.whatsapp
           },
@@ -368,6 +374,16 @@ export async function confirmContactImport({
           title: "Contato atualizado por planilha",
           detail: `Linha ${row.rowNumber}: ${row.name}`
         });
+
+        if (nameUpdate) {
+          await createActivity(tx, {
+            contactId: contact.id,
+            userId,
+            type: "CONTACT_NAME_AUTO_FILLED",
+            title: "Nome preenchido automaticamente",
+            detail: `Origem: importacao de planilha. Antes: ${nameUpdate.previousName ?? "(vazio)"}. Depois: ${nameUpdate.nextName}.`
+          });
+        }
 
         if (row.retirementLead?.grantDate) {
           await upsertRetirementLeadForContact({

@@ -8,14 +8,7 @@ import {
 import { prisma } from "@/lib/db";
 import { maybeAutoAssignConversation } from "@/lib/lead-assignment";
 import { conversationVisibilityWhere, isAdmin } from "@/lib/permissions";
-
-function normalizePhone(phone: string) {
-  return phone.replace(/\D/g, "");
-}
-
-function normalizeCpf(cpf?: string | null) {
-  return cpf?.replace(/\D/g, "") ?? "";
-}
+import { normalizeContactCpf, normalizeContactPhone } from "@/lib/contacts";
 
 export async function GET(request: NextRequest) {
   try {
@@ -108,8 +101,8 @@ export async function POST(request: NextRequest) {
       | null;
 
     const phone = body?.phone?.trim();
-    const normalizedPhone = phone ? normalizePhone(phone) : "";
-    const normalizedCpf = normalizeCpf(body?.cpf);
+    const normalizedPhone = normalizeContactPhone(phone);
+    const normalizedCpf = normalizeContactCpf(body?.cpf);
     const name = body?.name?.trim();
 
     if (normalizedCpf && normalizedCpf.length !== 11) {
@@ -136,7 +129,6 @@ export async function POST(request: NextRequest) {
           archivedAt: null,
           OR: [
             { phone: normalizedPhone },
-            { phone: phone ?? normalizedPhone },
             ...(normalizedCpf ? [{ cpf: normalizedCpf }] : [])
           ]
         }

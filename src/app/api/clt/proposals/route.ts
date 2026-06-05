@@ -3,6 +3,7 @@ import { createActivity } from "@/lib/activities";
 import { getSessionFromRequest } from "@/lib/auth";
 import { createCltLog } from "@/lib/clt-logs";
 import { onlyDigits, type CltCustomerData, type CltSimulationOffer } from "@/lib/clt-integration";
+import { getAutomaticContactNameUpdate } from "@/lib/contacts";
 import { prisma } from "@/lib/db";
 import { mapProposal, proposalInclude } from "@/lib/proposals";
 
@@ -59,11 +60,19 @@ export async function POST(request: NextRequest) {
               }
             });
 
+      const nameUpdate = existing
+        ? getAutomaticContactNameUpdate({
+            currentName: existing.name,
+            incomingName: customer.name,
+            phone: existing.phone || phone
+          })
+        : null;
+
       const contact = existing
         ? await tx.contact.update({
             where: { id: existing.id },
             data: {
-              name: customer.name,
+              ...(nameUpdate ? { name: nameUpdate.nextName } : {}),
               phone,
               cpf,
               stageId: proposalStage?.id ?? existing.stageId,
@@ -82,6 +91,16 @@ export async function POST(request: NextRequest) {
               lastMessage: `Simulacao CLT ${offer.bankName}: R$ ${offer.releasedAmount.toFixed(2)} liberado.`
             }
           });
+
+      if (nameUpdate) {
+        await createActivity(tx, {
+          contactId: contact.id,
+          userId: session.id,
+          type: "CONTACT_NAME_AUTO_FILLED",
+          title: "Nome preenchido automaticamente",
+          detail: `Origem: simulacao CLT. Antes: ${nameUpdate.previousName ?? "(vazio)"}. Depois: ${nameUpdate.nextName}.`
+        });
+      }
 
       const created = await tx.proposal.create({
         data: {

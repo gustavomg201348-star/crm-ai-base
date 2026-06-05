@@ -1,7 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { createActivity } from "@/lib/activities";
-import { contactInclude, mapContact, type LeadTemperature } from "@/lib/contacts";
+import {
+  contactInclude,
+  mapContact,
+  normalizeContactCpf,
+  normalizeContactPhone,
+  type LeadTemperature
+} from "@/lib/contacts";
 import { prisma } from "@/lib/db";
 
 type RouteContext = {
@@ -84,9 +90,56 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
             select: { id: true }
           })
         : [];
+    const normalizedPhone =
+      body?.phone !== undefined ? normalizeContactPhone(body.phone) : undefined;
+    const normalizedCpf =
+      body?.cpf !== undefined ? normalizeContactCpf(body.cpf) : undefined;
+
+    if (normalizedCpf && normalizedCpf.length !== 11) {
+      return NextResponse.json(
+        { error: "Informe um CPF valido com 11 digitos." },
+        { status: 400 }
+      );
+    }
+
+    if (body?.phone !== undefined && !normalizedPhone) {
+      return NextResponse.json(
+        { error: "Telefone do contato nao pode ficar vazio." },
+        { status: 400 }
+      );
+    }
+
+    if (normalizedPhone !== undefined || normalizedCpf !== undefined) {
+      const duplicate = await prisma.contact.findFirst({
+        where: {
+          companyId: session.companyId,
+          id: { not: existing.id },
+          OR: [
+            ...(normalizedPhone ? [{ phone: normalizedPhone }] : []),
+            ...(normalizedCpf ? [{ cpf: normalizedCpf }] : [])
+          ]
+        },
+        select: { id: true }
+      });
+
+      if (duplicate) {
+        return NextResponse.json(
+          { error: "Ja existe outro contato com este telefone ou CPF." },
+          { status: 409 }
+        );
+      }
+    }
+
+    if (body?.name !== undefined && !body.name.trim()) {
+      return NextResponse.json(
+        { error: "Nome do contato nao pode ficar vazio." },
+        { status: 400 }
+      );
+    }
 
     const contact = await prisma.$transaction(async (tx) => {
       const activityDetails: string[] = [];
+      const manualName = body?.name?.trim().replace(/\s+/g, " ");
 
       if (tagIds) {
         await tx.contactTag.deleteMany({ where: { contactId: existing.id } });
@@ -114,13 +167,17 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         activityDetails.push(body.archived ? "Contato arquivado." : "Contato reativado.");
       }
 
+      if (manualName !== undefined && manualName !== existing.name) {
+        activityDetails.push(`Nome alterado manualmente: ${existing.name} -> ${manualName}.`);
+      }
+
       const updated = await tx.contact.update({
         where: { id: existing.id },
         data: {
-          ...(body?.name !== undefined ? { name: body.name.trim() } : {}),
-          ...(body?.phone !== undefined ? { phone: body.phone.trim() } : {}),
+          ...(manualName !== undefined ? { name: manualName } : {}),
+          ...(normalizedPhone !== undefined ? { phone: normalizedPhone } : {}),
           ...(body?.email !== undefined ? { email: body.email?.trim() || null } : {}),
-          ...(body?.cpf !== undefined ? { cpf: body.cpf?.trim() || null } : {}),
+          ...(normalizedCpf !== undefined ? { cpf: normalizedCpf || null } : {}),
           ...(body?.originId !== undefined ? { originId: body.originId || null } : {}),
           ...(body?.stageId !== undefined ? { stageId: body.stageId || null } : {}),
           ...(body?.ownerId !== undefined ? { ownerId: owner?.id ?? null } : {}),
