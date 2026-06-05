@@ -58,7 +58,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
           body: messageBody,
           type: "text",
           status: "sent",
-          readAt: direction === "inbound" ? null : now
+          readAt: null
         }
       });
 

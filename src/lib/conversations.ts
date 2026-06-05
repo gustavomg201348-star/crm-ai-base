@@ -88,7 +88,9 @@ export function mapConversation(conversation: ConversationWithRelations) {
           mimeType: lastMessage.mimeType,
           templateName: lastMessage.templateName,
           status: lastMessage.status,
+          deliveredAt: lastMessage.deliveredAt,
           readAt: lastMessage.readAt,
+          failedReason: lastMessage.failedReason,
           senderType: lastMessage.senderType
         }
       : null,
@@ -107,7 +109,9 @@ export function mapConversation(conversation: ConversationWithRelations) {
       templateVariables: message.templateVariables,
       status: message.status,
       providerMessageId: message.providerMessageId,
+      deliveredAt: message.deliveredAt,
       readAt: message.readAt,
+      failedReason: message.failedReason,
       senderType: message.senderType
     }))
   };

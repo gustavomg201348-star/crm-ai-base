@@ -222,7 +222,9 @@ CREATE TABLE IF NOT EXISTS Message (
   templateVariables TEXT,
   status TEXT NOT NULL DEFAULT 'sent',
   providerMessageId TEXT,
+  deliveredAt DATETIME,
   readAt DATETIME,
+  failedReason TEXT,
   senderType TEXT,
   createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT Message_conversationId_fkey FOREIGN KEY (conversationId) REFERENCES Conversation (id) ON DELETE RESTRICT ON UPDATE CASCADE
@@ -481,7 +483,9 @@ for (const [name, type] of [
   ["templateVariables", "TEXT"],
   ["status", "TEXT NOT NULL DEFAULT 'sent'"],
   ["providerMessageId", "TEXT"],
+  ["deliveredAt", "DATETIME"],
   ["readAt", "DATETIME"],
+  ["failedReason", "TEXT"],
   ["senderType", "TEXT"]
 ]) {
   if (!messageColumns.includes(name)) {

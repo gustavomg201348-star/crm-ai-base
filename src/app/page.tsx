@@ -15,10 +15,12 @@ import {
   ArrowRight,
   Archive,
   Activity,
+  AlertTriangle,
   Banknote,
   Bell,
   BriefcaseBusiness,
   Check,
+  CheckCheck,
   ChevronDown,
   CircleDollarSign,
   Clock3,
@@ -240,7 +242,9 @@ type ConversationRow = {
     mimeType?: string | null;
     templateName?: string | null;
     status?: string;
+    deliveredAt?: string | null;
     readAt?: string | null;
+    failedReason?: string | null;
     senderType?: string | null;
   } | null;
   messages: Array<{
@@ -258,7 +262,9 @@ type ConversationRow = {
     templateVariables?: string | null;
     status?: string;
     providerMessageId?: string | null;
+    deliveredAt?: string | null;
     readAt?: string | null;
+    failedReason?: string | null;
     senderType?: string | null;
   }>;
 };
@@ -2315,7 +2321,8 @@ export default function Home() {
         id: `optimistic-${now}`,
         direction: "outbound",
         body: messageBody,
-        createdAt: now
+        createdAt: now,
+        status: "sending"
       },
       messages: [
         ...conversation.messages,
@@ -2323,7 +2330,8 @@ export default function Home() {
           id: `optimistic-${now}`,
           direction: "outbound",
           body: messageBody,
-          createdAt: now
+          createdAt: now,
+          status: "sending"
         }
       ]
     };
@@ -4917,6 +4925,9 @@ function Atendimento({
               key={item.id}
               side={item.direction === "outbound" ? "right" : "left"}
               status={item.status}
+              deliveredAt={item.deliveredAt}
+              readAt={item.readAt}
+              failedReason={item.failedReason}
               timestamp={formatRelativeDate(item.createdAt)}
             >
               {item.body}
@@ -5668,15 +5679,41 @@ function ConversationList({
 function ChatBubble({
   side,
   status,
+  deliveredAt,
+  readAt,
+  failedReason,
   timestamp,
   children
 }: {
   side: "left" | "right";
   status?: string;
+  deliveredAt?: string | null;
+  readAt?: string | null;
+  failedReason?: string | null;
   timestamp?: string;
   children: React.ReactNode;
 }) {
-  const failed = status?.toLowerCase() === "failed";
+  const normalizedStatus = status?.toLowerCase() ?? "sent";
+  const failed = normalizedStatus === "failed";
+  const showDeliveryStatus = side === "right";
+  const deliveryLabel =
+    normalizedStatus === "sending"
+      ? "Enviando..."
+      : failed
+        ? "Falhou"
+        : normalizedStatus === "read"
+          ? "Visualizada"
+          : normalizedStatus === "delivered"
+            ? "Entregue"
+            : "Enviada";
+  const DeliveryIcon =
+    normalizedStatus === "sending"
+      ? Loader2
+      : failed
+        ? AlertTriangle
+        : normalizedStatus === "sent"
+          ? Check
+          : CheckCheck;
 
   return (
     <div className={clsx("flex", side === "right" && "justify-end")}>
@@ -5695,18 +5732,43 @@ function ChatBubble({
         </div>
         {failed && (
           <p className="mt-1 px-1 text-[11px] font-semibold text-rose-600">
-            Falha ao enviar
+            {failedReason || "Falha ao enviar"}
           </p>
         )}
-        {timestamp && (
-          <p
+        {(timestamp || showDeliveryStatus) && (
+          <div
             className={clsx(
-              "mt-1 px-1 text-[11px] text-slate-400",
-              side === "right" && "text-right"
+              "mt-1 flex items-center gap-1 px-1 text-[11px] text-slate-400",
+              side === "right" && "justify-end text-right"
             )}
           >
-            {timestamp}
-          </p>
+            {timestamp && <span>{timestamp}</span>}
+            {showDeliveryStatus && (
+              <span
+                className={clsx(
+                  "inline-flex items-center gap-1 font-medium",
+                  normalizedStatus === "read" && "text-sky-500",
+                  normalizedStatus === "delivered" && "text-slate-500",
+                  failed && "text-rose-600"
+                )}
+                title={
+                  normalizedStatus === "read" && readAt
+                    ? `Visualizada ${formatRelativeDate(readAt)}`
+                    : normalizedStatus === "delivered" && deliveredAt
+                      ? `Entregue ${formatRelativeDate(deliveredAt)}`
+                      : deliveryLabel
+                }
+              >
+                <DeliveryIcon
+                  className={clsx(
+                    "h-3 w-3",
+                    normalizedStatus === "sending" && "animate-spin"
+                  )}
+                />
+                {deliveryLabel}
+              </span>
+            )}
+          </div>
         )}
       </div>
     </div>

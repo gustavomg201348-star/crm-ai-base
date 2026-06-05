@@ -102,8 +102,7 @@ export async function saveOutboundMessage({
         templateLanguage,
         templateVariables,
         providerMessageId,
-        status,
-        readAt: new Date()
+        status
       }
     });
 

@@ -3,6 +3,7 @@ import { getSessionFromRequest } from "@/lib/auth";
 import { createActivity } from "@/lib/activities";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
+import { saveFailedOutboundMessage } from "@/lib/message-delivery";
 import { readMetaMessageId, sendMetaTextMessage } from "@/lib/meta-whatsapp";
 
 type RouteContext = {
@@ -10,6 +11,10 @@ type RouteContext = {
 };
 
 export async function POST(request: NextRequest, context: RouteContext) {
+  let failedConversationId: string | undefined;
+  let failedMessageBody: string | undefined;
+  let metaAcceptedMessage = false;
+
   try {
     const session = getSessionFromRequest(request);
 
@@ -22,6 +27,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
       | { conversationId?: string; to?: string; body?: string }
       | null;
     const message = body?.body?.trim();
+    failedConversationId = body?.conversationId;
+    failedMessageBody = message;
 
     if (!message || !body?.to) {
       return NextResponse.json(
@@ -59,6 +66,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       body: message
     });
     const providerMessageId = readMetaMessageId(sent);
+    metaAcceptedMessage = true;
 
     const normalizedPhone = body.to.replace(/\D/g, "");
     let conversation = body.conversationId
@@ -131,8 +139,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
           body: message,
           type: "text",
           status: "sent",
-          providerMessageId,
-          readAt: sentAt
+          providerMessageId
         }
       });
 
@@ -166,12 +173,22 @@ export async function POST(request: NextRequest, context: RouteContext) {
       conversation: mapConversation(updated)
     });
   } catch (error) {
+    const errorMessage =
+      error instanceof Error
+        ? error.message
+        : "Nao foi possivel enviar mensagem.";
+
+    if (!metaAcceptedMessage && failedConversationId && failedMessageBody) {
+      await saveFailedOutboundMessage({
+        conversationId: failedConversationId,
+        body: failedMessageBody,
+        errorMessage
+      });
+    }
+
     return NextResponse.json(
       {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Nao foi possivel enviar mensagem."
+        error: errorMessage
       },
       { status: 500 }
     );

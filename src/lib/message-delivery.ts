@@ -23,34 +23,21 @@ export async function updateMessageDeliveryStatus({
   errorMessage?: string | null;
 }) {
   const normalizedStatus = normalizeDeliveryStatus(status);
-  const readAt = normalizedStatus === "read" ? new Date() : undefined;
-  const messages = errorMessage
-    ? await prisma.message.findMany({
-        where: { providerMessageId },
-        select: { id: true, body: true }
-      })
-    : [];
+  const statusAt = new Date();
 
   const updated = await prisma.message.updateMany({
     where: { providerMessageId },
     data: {
       status: normalizedStatus,
-      ...(readAt ? { readAt } : {})
+      ...(normalizedStatus === "delivered" || normalizedStatus === "read"
+        ? { deliveredAt: statusAt }
+        : {}),
+      ...(normalizedStatus === "read" ? { readAt: statusAt } : {}),
+      ...(normalizedStatus === "failed"
+        ? { failedReason: errorMessage ?? "Falha reportada pela Meta." }
+        : {})
     }
   });
-
-  if (normalizedStatus === "failed" && errorMessage && messages.length) {
-    await Promise.all(
-      messages
-        .filter((message) => !message.body.includes("Falha:"))
-        .map((message) =>
-          prisma.message.update({
-            where: { id: message.id },
-            data: { body: `${message.body}\n\nFalha: ${errorMessage}`.trim() }
-          })
-        )
-    );
-  }
 
   return updated.count;
 }
@@ -94,7 +81,8 @@ export async function saveFailedOutboundMessage({
       mimeType,
       templateName,
       templateLanguage,
-      status: "failed"
+      status: "failed",
+      failedReason: errorMessage
     }
   });
 }
