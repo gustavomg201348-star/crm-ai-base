@@ -3192,6 +3192,7 @@ export default function Home() {
       <section
         className={clsx(
           "transition-[padding-left] duration-300 ease-out",
+          active === "atendimento" && "h-[100dvh] overflow-hidden",
           leftSidebarCollapsed ? "xl:pl-[72px]" : "xl:pl-[264px]"
         )}
       >
@@ -3335,7 +3336,13 @@ export default function Home() {
           </div>
         </header>
 
-        <div className="p-4 md:p-8">
+        <div
+          className={clsx(
+            active === "atendimento"
+              ? "h-[calc(100dvh-5rem)] overflow-hidden p-3 md:p-4"
+              : "p-4 md:p-8"
+          )}
+        >
           {appError && (
             <div className="mb-4 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
               {appError}
@@ -4718,7 +4725,7 @@ function Atendimento({
   return (
     <div
       className={clsx(
-        "grid h-[calc(100vh-8.5rem)] min-h-0 gap-4 overflow-hidden transition-[grid-template-columns] duration-300 ease-out",
+        "grid h-full min-h-0 gap-3 overflow-hidden transition-[grid-template-columns] duration-300 ease-out md:gap-4",
         aiSidebarCollapsed
           ? "xl:grid-cols-[340px_minmax(0,1fr)_64px]"
           : "xl:grid-cols-[340px_minmax(0,1fr)_320px]"
@@ -4758,7 +4765,7 @@ function Atendimento({
       />
 
       <section className="flex min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-line/80 bg-white shadow-soft">
-        <div className="flex min-h-20 items-center justify-between gap-3 border-b border-line/70 px-5">
+        <div className="flex min-h-16 shrink-0 items-center justify-between gap-3 border-b border-line/70 px-4 py-2 md:px-5">
           <div className="flex min-w-0 items-center gap-3">
             <div className="relative grid h-11 w-11 place-items-center rounded-full bg-blue-50 text-sm font-bold text-brand ring-1 ring-blue-100">
               {selectedConversation?.contact.name.slice(0, 1).toUpperCase() ?? "C"}
@@ -4899,7 +4906,7 @@ function Atendimento({
           <div ref={chatEndRef} />
         </div>
 
-        <form className="border-t border-line/70 bg-white p-4" onSubmit={handleSubmit}>
+        <form className="shrink-0 border-t border-line/70 bg-white p-3" onSubmit={handleSubmit}>
           {composerError && (
             <div className="mb-3 rounded-2xl border border-rose-100 bg-rose-50 px-3 py-2 text-sm text-rose-700">
               {composerError}
