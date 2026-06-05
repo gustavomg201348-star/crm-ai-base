@@ -13,6 +13,10 @@ function normalizePhone(phone: string) {
   return phone.replace(/\D/g, "");
 }
 
+function normalizeCpf(cpf?: string | null) {
+  return cpf?.replace(/\D/g, "") ?? "";
+}
+
 export async function GET(request: NextRequest) {
   try {
     const session = getSessionFromRequest(request);
@@ -97,6 +101,7 @@ export async function POST(request: NextRequest) {
           contactId?: string;
           name?: string;
           phone?: string;
+          cpf?: string;
           status?: ConversationStatus;
           summary?: string;
         }
@@ -104,7 +109,15 @@ export async function POST(request: NextRequest) {
 
     const phone = body?.phone?.trim();
     const normalizedPhone = phone ? normalizePhone(phone) : "";
+    const normalizedCpf = normalizeCpf(body?.cpf);
     const name = body?.name?.trim();
+
+    if (normalizedCpf && normalizedCpf.length !== 11) {
+      return NextResponse.json(
+        { error: "Informe um CPF valido com 11 digitos." },
+        { status: 400 }
+      );
+    }
 
     let contact = body?.contactId
       ? await prisma.contact.findFirst({
@@ -121,8 +134,40 @@ export async function POST(request: NextRequest) {
         where: {
           companyId: session.companyId,
           archivedAt: null,
-          OR: [{ phone: normalizedPhone }, { phone: phone ?? normalizedPhone }]
+          OR: [
+            { phone: normalizedPhone },
+            { phone: phone ?? normalizedPhone },
+            ...(normalizedCpf ? [{ cpf: normalizedCpf }] : [])
+          ]
         }
+      });
+    }
+
+    const contactByCpf = normalizedCpf
+      ? await prisma.contact.findFirst({
+          where: {
+            companyId: session.companyId,
+            archivedAt: null,
+            cpf: normalizedCpf
+          }
+        })
+      : null;
+
+    if (contact && contactByCpf && contactByCpf.id !== contact.id) {
+      return NextResponse.json(
+        { error: "Este CPF ja esta cadastrado em outro contato." },
+        { status: 409 }
+      );
+    }
+
+    if (!contact && contactByCpf) {
+      contact = contactByCpf;
+    }
+
+    if (contact && normalizedCpf && contact.cpf !== normalizedCpf) {
+      contact = await prisma.contact.update({
+        where: { id: contact.id },
+        data: { cpf: normalizedCpf }
       });
     }
 
@@ -143,6 +188,7 @@ export async function POST(request: NextRequest) {
           ownerId: session.id,
           name: name || normalizedPhone,
           phone: normalizedPhone,
+          cpf: normalizedCpf || null,
           originId: origin?.id ?? null,
           stageId: stage?.id ?? null,
           temperature: "WARM"

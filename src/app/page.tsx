@@ -839,6 +839,12 @@ function formatCurrency(value: number | string) {
   });
 }
 
+function formatCpf(value?: string | null) {
+  const digits = value?.replace(/\D/g, "").slice(0, 11) ?? "";
+  if (digits.length !== 11) return value?.trim() ?? "";
+  return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+}
+
 function userIsAdmin(session?: Session | null) {
   return session?.user.role === "ADMIN";
 }
@@ -948,7 +954,8 @@ export default function Home() {
     search: "",
     contactId: "",
     name: "",
-    phone: ""
+    phone: "",
+    cpf: ""
   });
   const [desktopPermission, setDesktopPermission] = useState<
     NotificationPermission | "unsupported"
@@ -1654,10 +1661,15 @@ export default function Home() {
       (contact) => contact.id === newConversationForm.contactId
     );
     const payload = selectedContact
-      ? { contactId: selectedContact.id, status: "OPEN" }
+      ? {
+          contactId: selectedContact.id,
+          cpf: newConversationForm.cpf.trim(),
+          status: "OPEN"
+        }
       : {
           name: newConversationForm.name.trim(),
           phone: newConversationForm.phone.trim(),
+          cpf: newConversationForm.cpf.trim(),
           status: "OPEN"
         };
 
@@ -1690,7 +1702,7 @@ export default function Home() {
     setSelectedConversation(data.conversation);
     mergeConversation(data.conversation);
     setNewConversationOpen(false);
-    setNewConversationForm({ search: "", contactId: "", name: "", phone: "" });
+    setNewConversationForm({ search: "", contactId: "", name: "", phone: "", cpf: "" });
     setNewConversationSaving(false);
     void loadContacts(contactFilters);
     void markConversationRead(data.conversation.id);
@@ -3524,11 +3536,17 @@ function NewConversationModal({
   onSubmit
 }: {
   contacts: ContactRow[];
-  form: { search: string; contactId: string; name: string; phone: string };
+  form: { search: string; contactId: string; name: string; phone: string; cpf: string };
   saving: boolean;
   error: string;
   onClose: () => void;
-  onChange: (form: { search: string; contactId: string; name: string; phone: string }) => void;
+  onChange: (form: {
+    search: string;
+    contactId: string;
+    name: string;
+    phone: string;
+    cpf: string;
+  }) => void;
   onSubmit: () => void;
 }) {
   const normalizedSearch = form.search.trim().toLowerCase();
@@ -3607,7 +3625,8 @@ function NewConversationModal({
                         ...form,
                         contactId: selected ? "" : contact.id,
                         name: selected ? form.name : contact.name,
-                        phone: selected ? form.phone : contact.phone
+                        phone: selected ? form.phone : contact.phone,
+                        cpf: selected ? form.cpf : contact.cpf ?? ""
                       })
                     }
                     type="button"
@@ -3620,7 +3639,9 @@ function NewConversationModal({
                         {contact.name}
                       </p>
                       <p className="truncate text-xs text-slate-500">
-                        {contact.phone} - {contact.origin}
+                        {[contact.phone, contact.cpf ? `CPF: ${formatCpf(contact.cpf)}` : null, contact.origin]
+                          .filter(Boolean)
+                          .join(" - ")}
                       </p>
                     </div>
                     {selected && <Check className="h-4 w-4 text-brand" />}
@@ -3635,7 +3656,7 @@ function NewConversationModal({
             </div>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-3 md:grid-cols-3">
             <label className="text-sm font-semibold text-slate-800">
               Nome do cliente
               <input
@@ -3657,6 +3678,17 @@ function NewConversationModal({
                 value={form.phone}
                 onChange={(event) =>
                   onChange({ ...form, phone: event.target.value, contactId: "" })
+                }
+              />
+            </label>
+            <label className="text-sm font-semibold text-slate-800">
+              CPF do cliente
+              <input
+                className="mt-2 h-11 w-full rounded-2xl border border-line bg-white px-3 text-sm outline-none focus:border-blue-200"
+                placeholder="Ex: 000.000.000-00"
+                value={form.cpf}
+                onChange={(event) =>
+                  onChange({ ...form, cpf: event.target.value })
                 }
               />
             </label>
@@ -4729,7 +4761,16 @@ function Atendimento({
                 {selectedConversation?.contact.name ?? "Selecione uma conversa"}
               </h3>
               <p className="truncate text-sm text-slate-500">
-                {selectedConversation?.contact.phone ?? "Inbox interno"}
+                {selectedConversation
+                  ? [
+                      selectedConversation.contact.phone,
+                      selectedConversation.contact.cpf
+                        ? `CPF: ${formatCpf(selectedConversation.contact.cpf)}`
+                        : null
+                    ]
+                      .filter(Boolean)
+                      .join(" • ")
+                  : "Inbox interno"}
               </p>
               {selectedConversation && (
                 <p className="truncate text-xs font-semibold text-slate-500">
