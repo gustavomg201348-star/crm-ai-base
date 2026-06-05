@@ -2928,6 +2928,20 @@ export default function Home() {
   useEffect(() => {
     if (!session || active !== "atendimento") return;
 
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overflow = previousHtmlOverflow;
+    };
+  }, [active, session]);
+
+  useEffect(() => {
+    if (!session || active !== "atendimento") return;
+
     const interval = window.setInterval(() => {
       void refreshConversation();
       void loadConversations(conversationFilters, { silent: true });
@@ -2986,7 +3000,12 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-paper text-ink">
+    <main
+      className={clsx(
+        "bg-paper text-ink",
+        active === "atendimento" ? "h-[100dvh] overflow-hidden" : "min-h-screen"
+      )}
+    >
       <aside
         className={clsx(
           "fixed left-0 top-0 hidden h-screen flex-col border-r border-line/80 bg-white/95 backdrop-blur transition-[width] duration-300 ease-out xl:flex",
