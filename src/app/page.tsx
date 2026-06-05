@@ -5240,7 +5240,7 @@ function TagBadge({
     <span
       className={clsx(
         "inline-flex max-w-full items-center gap-1 rounded-full font-semibold",
-        compact ? "px-2 py-0.5 text-[11px]" : "px-2.5 py-1 text-xs"
+        compact ? "max-w-[8rem] shrink-0 px-2 py-0.5 text-[11px]" : "px-2.5 py-1 text-xs"
       )}
       style={{
         backgroundColor: tag.color,
@@ -5550,7 +5550,7 @@ function ConversationList({
             <button
               key={item.id}
               className={clsx(
-                "group relative block w-full p-4 text-left transition-colors hover:bg-slate-50",
+                "group relative block h-[120px] w-full overflow-hidden px-4 py-3 text-left transition-colors hover:bg-slate-50",
                 attention.tone === "green" && "bg-emerald-50/45",
                 attention.tone === "amber" && !selected && "bg-amber-50/30",
                 attention.tone === "rose" && !selected && "bg-rose-50/30",
@@ -5567,7 +5567,7 @@ function ConversationList({
                   attention.tone === "slate" && "bg-transparent"
                 )}
               />
-              <div className="flex items-start gap-3">
+              <div className="flex h-full items-start gap-3">
                 <div className="relative grid h-10 w-10 shrink-0 place-items-center rounded-full bg-slate-100 text-xs font-bold text-slate-700">
                   {item.contact.name.slice(0, 2).toUpperCase()}
                   <span
@@ -5584,30 +5584,32 @@ function ConversationList({
                     )}
                   />
                 </div>
-                <div className="min-w-0 flex-1">
+                <div className="flex h-full min-w-0 flex-1 flex-col">
                   <div className="flex items-center justify-between gap-2">
                     <p
                       className={clsx(
-                        "truncate text-slate-950",
+                        "min-w-0 flex-1 truncate text-slate-950",
                         hasUnread ? "font-bold" : "font-semibold"
                       )}
+                      title={item.contact.name}
                     >
                       {item.contact.name}
                     </p>
                     <span
                       className={clsx(
-                        "shrink-0 text-[11px]",
+                        "w-16 shrink-0 truncate text-right text-[11px] tabular-nums",
                         hasUnread ? "font-bold text-emerald-600" : "text-slate-400"
                       )}
+                      title={messageTime ? formatRelativeDate(messageTime) : item.status}
                     >
                       {messageTime ? formatRelativeDate(messageTime) : item.status}
                     </span>
                   </div>
-                  {attention.tone !== "slate" && (
-                    <div className="mt-1">
+                  <div className="mt-1 h-5 overflow-hidden">
+                    {attention.tone !== "slate" && (
                       <span
                         className={clsx(
-                          "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+                          "inline-flex max-w-full truncate rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
                           attention.tone === "green" && "bg-emerald-100 text-emerald-700",
                           attention.tone === "amber" && "bg-amber-100 text-amber-700",
                           attention.tone === "rose" && "bg-rose-100 text-rose-700"
@@ -5615,14 +5617,15 @@ function ConversationList({
                       >
                         {attention.label}
                       </span>
-                    </div>
-                  )}
-                  <div className="mt-1 flex items-start justify-between gap-3">
+                    )}
+                  </div>
+                  <div className="mt-1 flex h-10 items-start justify-between gap-3 overflow-hidden">
                     <p
                       className={clsx(
-                        "line-clamp-2 min-w-0 break-words text-sm",
+                        "line-clamp-2 min-w-0 flex-1 break-words text-sm leading-5",
                         hasUnread ? "font-semibold text-slate-800" : "text-slate-500"
                       )}
+                      title={preview}
                     >
                       {preview}
                     </p>
@@ -5632,9 +5635,12 @@ function ConversationList({
                       </span>
                     )}
                   </div>
-                  <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                  <div className="mt-auto flex h-6 items-center gap-1.5 overflow-hidden">
                     {item.agent && (
-                      <span className="max-w-[7rem] truncate rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+                      <span
+                        className="max-w-[7rem] shrink-0 truncate rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500"
+                        title={item.agent.name}
+                      >
                         {item.agent.name}
                       </span>
                     )}
@@ -5642,11 +5648,11 @@ function ConversationList({
                       <TagBadge key={tag.id} tag={tag} compact />
                     ))}
                     {item.tags.length > 2 && (
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+                      <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
                         +{item.tags.length - 2}
                       </span>
                     )}
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+                    <span className="max-w-[5.5rem] shrink-0 truncate rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
                       {temperatureLabels[item.contact.temperature as keyof typeof temperatureLabels] ?? item.contact.temperature}
                     </span>
                   </div>
