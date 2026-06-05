@@ -893,6 +893,72 @@ function aiModeLabel(mode: AiMode) {
   }[mode];
 }
 
+function logConversationRenderDebug({
+  origin,
+  previous,
+  next
+}: {
+  origin: string;
+  previous?: ConversationRow | null;
+  next: ConversationRow;
+}) {
+  const previousName = previous?.contact.name ?? null;
+  const nextName = next.contact.name;
+
+  if (previousName === nextName) {
+    return;
+  }
+
+  console.warn("[conversation-render-debug]", {
+    origin,
+    conversationId: next.id,
+    contactId: next.contact.id,
+    phone: next.contact.phone,
+    previousName,
+    nextName
+  });
+}
+
+function mergeConversationListItem({
+  current,
+  conversation,
+  origin
+}: {
+  current: ConversationRow[];
+  conversation: ConversationRow;
+  origin: string;
+}) {
+  const previous = current.find((item) => item.id === conversation.id) ?? null;
+  logConversationRenderDebug({ origin, previous, next: conversation });
+
+  const next = previous
+    ? current.map((item) => (item.id === conversation.id ? conversation : item))
+    : [conversation, ...current];
+
+  return [...next].sort(
+    (a, b) => getConversationSortTime(b) - getConversationSortTime(a)
+  );
+}
+
+function logConversationListSnapshot({
+  origin,
+  previous,
+  next
+}: {
+  origin: string;
+  previous: ConversationRow[];
+  next: ConversationRow[];
+}) {
+  const previousById = new Map(previous.map((item) => [item.id, item]));
+
+  next.forEach((conversation) => {
+    const before = previousById.get(conversation.id);
+    if (before) {
+      logConversationRenderDebug({ origin, previous: before, next: conversation });
+    }
+  });
+}
+
 function emptyDashboardData(): DashboardData {
   return {
     metrics: {
@@ -1384,10 +1450,23 @@ export default function Home() {
         const data = (await response.json()) as {
           conversations: ConversationRow[];
         };
-        setConversationList(data.conversations);
+        setConversationList((current) => {
+          logConversationListSnapshot({
+            origin: options.silent ? "polling" : "initial-load",
+            previous: current,
+            next: data.conversations
+          });
+          return data.conversations;
+        });
         setSelectedConversation((current) => {
           if (!current) return null;
-          return data.conversations.find((conversation) => conversation.id === current.id) ?? current;
+          const next = data.conversations.find((conversation) => conversation.id === current.id) ?? current;
+          logConversationRenderDebug({
+            origin: "selected-conversation-load-sync",
+            previous: current,
+            next
+          });
+          return next;
         });
       } else {
         if (!options.silent) {
@@ -1402,20 +1481,22 @@ export default function Home() {
     [conversationFilters]
   );
 
-  const mergeConversation = useCallback((conversation: ConversationRow) => {
+  const mergeConversation = useCallback((conversation: ConversationRow, origin = "merge") => {
     setSelectedConversation((current) =>
-      current?.id === conversation.id ? conversation : current
+      current?.id === conversation.id
+        ? (() => {
+            logConversationRenderDebug({
+              origin: `${origin}:selected-conversation`,
+              previous: current,
+              next: conversation
+            });
+            return conversation;
+          })()
+        : current
     );
-    setConversationList((current) => {
-      const exists = current.some((item) => item.id === conversation.id);
-      const next = exists
-        ? current.map((item) => (item.id === conversation.id ? conversation : item))
-        : [conversation, ...current];
-
-      return [...next].sort(
-        (a, b) => getConversationSortTime(b) - getConversationSortTime(a)
-      );
-    });
+    setConversationList((current) =>
+      mergeConversationListItem({ current, conversation, origin })
+    );
   }, []);
 
   const refreshConversation = useCallback(
@@ -1427,7 +1508,7 @@ export default function Home() {
       if (!response.ok) return null;
 
       const data = (await response.json()) as { conversation: ConversationRow };
-      mergeConversation(data.conversation);
+      mergeConversation(data.conversation, "refresh");
       return data.conversation;
     },
     [mergeConversation]
@@ -1442,7 +1523,7 @@ export default function Home() {
       if (!response.ok) return null;
 
       const data = (await response.json()) as { conversation: ConversationRow };
-      mergeConversation(data.conversation);
+      mergeConversation(data.conversation, "click-read");
       return data.conversation;
     },
     [mergeConversation]
@@ -1483,20 +1564,12 @@ export default function Home() {
       if (response.ok) {
         const data = (await response.json()) as { conversation: ConversationRow };
         setActive("atendimento");
-        setSelectedConversation(data.conversation);
-        setConversationList((current) => {
-          const exists = current.some((conversation) => conversation.id === data.conversation.id);
-          return exists
-            ? current.map((conversation) =>
-                conversation.id === data.conversation.id ? data.conversation : conversation
-              )
-            : [data.conversation, ...current];
-        });
+        mergeConversation(data.conversation, "open-notification");
         await markConversationRead(conversationId);
         await markNotificationsRead({ conversationId });
       }
     },
-    [markConversationRead, markNotificationsRead]
+    [markConversationRead, markNotificationsRead, mergeConversation]
   );
 
   const showDesktopNotification = useCallback((notification: NotificationRow) => {
@@ -1618,7 +1691,7 @@ export default function Home() {
     }
 
     const data = (await response.json()) as { conversation: ConversationRow };
-    mergeConversation(data.conversation);
+    mergeConversation(data.conversation, "assign");
     setSelectedConversation(data.conversation);
     if (conversationFilters.assignedTo === "unassigned") {
       setConversationFilters((current) => ({
@@ -1641,7 +1714,7 @@ export default function Home() {
     }
 
     const data = (await response.json()) as { conversation: ConversationRow };
-    mergeConversation(data.conversation);
+    mergeConversation(data.conversation, "unassign");
     setSelectedConversation(data.conversation);
     void loadAttendants();
   }
@@ -1661,7 +1734,7 @@ export default function Home() {
     }
 
     const data = (await response.json()) as { conversation: ConversationRow };
-    mergeConversation(data.conversation);
+    mergeConversation(data.conversation, "transfer");
     setSelectedConversation(data.conversation);
     void loadAttendants();
   }
@@ -1709,8 +1782,7 @@ export default function Home() {
     const data = (await response.json()) as { conversation: ConversationRow };
     setActive("atendimento");
     setConversationFilters({ search: "", status: "OPEN", tagIds: [], assignedTo: "default" });
-    setSelectedConversation(data.conversation);
-    mergeConversation(data.conversation);
+    mergeConversation(data.conversation, "new-conversation");
     setNewConversationOpen(false);
     setNewConversationForm({ search: "", contactId: "", name: "", phone: "", cpf: "" });
     setNewConversationSaving(false);
@@ -2283,12 +2355,7 @@ export default function Home() {
     }
 
     const data = (await response.json()) as { conversation: ConversationRow };
-    setSelectedConversation(data.conversation);
-    setConversationList((current) =>
-      current.map((conversation) =>
-        conversation.id === data.conversation.id ? data.conversation : conversation
-      )
-    );
+    mergeConversation(data.conversation, "status-change");
     void loadConversations(conversationFilters);
   }
 
@@ -2332,7 +2399,7 @@ export default function Home() {
       ]
     };
 
-    mergeConversation(optimisticConversation);
+    mergeConversation(optimisticConversation, "send-message-optimistic");
 
     const channelId = conversation?.channel.startsWith("whatsapp:")
       ? conversation.channel.replace("whatsapp:", "")
@@ -2361,7 +2428,7 @@ export default function Home() {
     }
 
     const data = (await response.json()) as { conversation: ConversationRow };
-    mergeConversation(data.conversation);
+    mergeConversation(data.conversation, "send-message-response");
   }
 
   async function handleSendMedia(conversationId: string, file: File, caption?: string) {
@@ -2382,7 +2449,7 @@ export default function Home() {
     }
 
     const data = (await response.json()) as { conversation: ConversationRow };
-    mergeConversation(data.conversation);
+    mergeConversation(data.conversation, "send-media-response");
   }
 
   async function handleLoadTemplates(conversationId: string) {
@@ -2417,7 +2484,7 @@ export default function Home() {
     }
 
     const data = (await response.json()) as { conversation: ConversationRow };
-    mergeConversation(data.conversation);
+    mergeConversation(data.conversation, "send-template-response");
   }
 
   async function handleAddConversationTags(conversationId: string, tagIds: string[]) {
@@ -2435,7 +2502,7 @@ export default function Home() {
     }
 
     const data = (await response.json()) as { conversation: ConversationRow };
-    mergeConversation(data.conversation);
+    mergeConversation(data.conversation, "add-tags");
   }
 
   async function handleRemoveConversationTag(conversationId: string, tagId: string) {
@@ -2449,7 +2516,7 @@ export default function Home() {
     }
 
     const data = (await response.json()) as { conversation: ConversationRow };
-    mergeConversation(data.conversation);
+    mergeConversation(data.conversation, "remove-tag");
   }
 
   async function handleAnalyzeConversation(conversationId: string) {
@@ -2472,12 +2539,7 @@ export default function Home() {
     };
 
     setAiAnalysis(data.analysis);
-    setSelectedConversation(data.conversation);
-    setConversationList((current) =>
-      current.map((conversation) =>
-        conversation.id === data.conversation.id ? data.conversation : conversation
-      )
-    );
+    mergeConversation(data.conversation, "ai-analysis");
     setAiLoading(false);
   }
 
@@ -2497,7 +2559,7 @@ export default function Home() {
     }
 
     const data = (await response.json()) as { conversation: ConversationRow };
-    mergeConversation(data.conversation);
+    mergeConversation(data.conversation, "ai-mode");
   }
 
   async function handleSimulateInboundMessage(payload: {
@@ -2521,7 +2583,7 @@ export default function Home() {
     }
 
     const data = (await response.json()) as { conversation: ConversationRow };
-    setSelectedConversation(data.conversation);
+    mergeConversation(data.conversation, "simulate-inbound");
     setConversationFilters({ search: "", status: "OPEN", tagIds: [], assignedTo: "default" });
     await loadConversations({ search: "", status: "OPEN", tagIds: [], assignedTo: "default" });
     void loadContacts(contactFilters);
