@@ -921,10 +921,6 @@ function logConversationRenderDebug({
   );
 }
 
-function normalizeConversationPhone(phone?: string | null) {
-  return phone?.replace(/\D/g, "") ?? "";
-}
-
 function withStableConversationContactName({
   previous,
   next,
@@ -936,13 +932,10 @@ function withStableConversationContactName({
 }) {
   const sameConversation = previous?.id === next.id;
   const sameContact = previous?.contact.id === next.contact.id;
-  const samePhone =
-    normalizeConversationPhone(previous?.contact.phone) ===
-    normalizeConversationPhone(next.contact.phone);
 
   if (
     !previous ||
-    (!sameConversation && !sameContact && !samePhone) ||
+    (!sameConversation && !sameContact) ||
     previous.contact.name === next.contact.name
   ) {
     return next;
@@ -966,8 +959,8 @@ function withStableConversationContactName({
       previousPhone: previous.contact.phone,
       previousName,
       nextName,
-      matchedBy: sameConversation ? "conversationId" : sameContact ? "contactId" : "phone",
-      decision: "mantendo nome anterior na UI porque conversa, contato ou telefone correspondem"
+      matchedBy: sameConversation ? "conversationId" : "contactId",
+      decision: "mantendo nome anterior na UI porque conversa ou contato correspondem"
     })}`
   );
 
@@ -989,15 +982,9 @@ function mergeConversationListItem({
   conversation: ConversationRow;
   origin: string;
 }) {
-  const nextPhone = normalizeConversationPhone(conversation.contact.phone);
   const previous =
     current.find((item) => item.id === conversation.id) ??
     current.find((item) => item.contact.id === conversation.contact.id) ??
-    current.find(
-      (item) =>
-        nextPhone &&
-        normalizeConversationPhone(item.contact.phone) === nextPhone
-    ) ??
     null;
   const stableConversation = withStableConversationContactName({
     previous,
@@ -1028,18 +1015,11 @@ function mergeConversationListSnapshot({
 }) {
   const previousById = new Map(current.map((item) => [item.id, item]));
   const previousByContactId = new Map(current.map((item) => [item.contact.id, item]));
-  const previousByPhone = new Map(
-    current
-      .map((item) => [normalizeConversationPhone(item.contact.phone), item] as const)
-      .filter(([phone]) => Boolean(phone))
-  );
 
   return incoming.map((conversation) => {
-    const previousPhone = normalizeConversationPhone(conversation.contact.phone);
     const previous =
       previousById.get(conversation.id) ??
       previousByContactId.get(conversation.contact.id) ??
-      (previousPhone ? previousByPhone.get(previousPhone) : null) ??
       null;
     const stableConversation = withStableConversationContactName({
       previous,
@@ -1587,12 +1567,17 @@ export default function Home() {
     setSelectedConversation((current) =>
       current?.id === conversation.id
         ? (() => {
+            const stableConversation = withStableConversationContactName({
+              previous: current,
+              next: conversation,
+              origin: `${origin}:selected-conversation`
+            });
             logConversationRenderDebug({
               origin: `${origin}:selected-conversation`,
               previous: current,
-              next: conversation
+              next: stableConversation
             });
-            return conversation;
+            return stableConversation;
           })()
         : current
     );
@@ -5713,6 +5698,11 @@ function ConversationList({
           return (
             <button
               key={item.id}
+              data-conversation-row="true"
+              data-conversation-id={item.id}
+              data-contact-id={item.contact.id}
+              data-contact-phone={item.contact.phone}
+              data-contact-name={item.contact.name}
               className={clsx(
                 "group relative block h-[120px] w-full overflow-hidden px-4 py-3 text-left transition-colors hover:bg-slate-50",
                 attention.tone === "green" && "bg-emerald-50/45",

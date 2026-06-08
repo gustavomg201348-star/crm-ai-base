@@ -79,11 +79,19 @@ export async function findContactByNormalizedPhone(
     return null;
   }
 
+  const phoneWithoutCountryCode =
+    normalizedPhone.startsWith("55") && normalizedPhone.length > 11
+      ? normalizedPhone.slice(2)
+      : "";
+
   const direct = await db.contact.findFirst({
     where: {
       companyId,
       ...(archived ? {} : { archivedAt: null }),
-      phone: normalizedPhone
+      OR: [
+        { phone: normalizedPhone },
+        ...(phoneWithoutCountryCode ? [{ phone: phoneWithoutCountryCode }] : [])
+      ]
     }
   });
 
@@ -96,7 +104,21 @@ export async function findContactByNormalizedPhone(
     FROM "Contact"
     WHERE "companyId" = ${companyId}
       ${archived ? Prisma.empty : Prisma.sql`AND "archivedAt" IS NULL`}
-      AND regexp_replace("phone", '\\D', '', 'g') = ${normalizedPhone}
+      AND (
+        regexp_replace("phone", '\\D', '', 'g') = ${normalizedPhone}
+        ${
+          phoneWithoutCountryCode
+            ? Prisma.sql`OR regexp_replace("phone", '\\D', '', 'g') = ${phoneWithoutCountryCode}`
+            : Prisma.empty
+        }
+      )
+    ORDER BY
+      CASE
+        WHEN NULLIF(trim("name"), '') IS NULL THEN 2
+        WHEN trim("name") = regexp_replace("phone", '\\D', '', 'g') THEN 1
+        ELSE 0
+      END ASC,
+      "updatedAt" DESC
     LIMIT 1
   `;
 
@@ -104,18 +126,7 @@ export async function findContactByNormalizedPhone(
     return db.contact.findUnique({ where: { id: matches[0].id } });
   }
 
-  return db.contact.findFirst({
-    where: {
-      companyId,
-      ...(archived ? {} : { archivedAt: null }),
-      OR: [
-        { phone: normalizedPhone },
-        { phone: { contains: normalizedPhone } },
-        { phone: { contains: normalizedPhone.slice(-11) } },
-        { phone: { contains: normalizedPhone.slice(-10) } }
-      ]
-    }
-  });
+  return null;
 }
 
 export function logContactNameMutationAttempt({
