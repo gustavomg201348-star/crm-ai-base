@@ -855,6 +855,20 @@ function formatCpf(value?: string | null) {
   return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
 }
 
+function formatContactNameForUi(name?: string | null) {
+  const trimmed = name?.trim().replace(/\s+/g, " ") ?? "";
+
+  if (!trimmed) {
+    return "Cliente";
+  }
+
+  return trimmed
+    .toLocaleLowerCase("pt-BR")
+    .replace(/(^|[\s'-])(\S)/g, (_match, prefix: string, letter: string) => {
+      return `${prefix}${letter.toLocaleUpperCase("pt-BR")}`;
+    });
+}
+
 function userIsAdmin(session?: Session | null) {
   return session?.user.role === "ADMIN";
 }
@@ -4942,12 +4956,16 @@ function Atendimento({
         <div className="flex min-h-16 shrink-0 items-center justify-between gap-3 border-b border-line/70 px-4 py-2 md:px-5">
           <div className="flex min-w-0 items-center gap-3">
             <div className="relative grid h-11 w-11 place-items-center rounded-full bg-blue-50 text-sm font-bold text-brand ring-1 ring-blue-100">
-              {selectedConversation?.contact.name.slice(0, 1).toUpperCase() ?? "C"}
+              {formatContactNameForUi(selectedConversation?.contact.name)
+                .slice(0, 1)
+                .toUpperCase() ?? "C"}
               <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-emerald-500" />
             </div>
             <div className="min-w-0">
               <h3 className="truncate font-bold text-slate-950">
-                {selectedConversation?.contact.name ?? "Selecione uma conversa"}
+                {selectedConversation
+                  ? formatContactNameForUi(selectedConversation.contact.name)
+                  : "Selecione uma conversa"}
               </h3>
               <p className="truncate text-sm text-slate-500">
                 {selectedConversation
@@ -5690,6 +5708,7 @@ function ConversationList({
           const selected = selectedConversation?.id === item.id;
           const unread = item.unreadCount ?? 0;
           const hasUnread = unread > 0;
+          const contactName = formatContactNameForUi(item.contact.name);
           const preview = formatMessagePreview(
             item.lastMessagePreview ?? item.lastMessage?.body ?? item.summary
           );
@@ -5702,7 +5721,7 @@ function ConversationList({
               data-conversation-id={item.id}
               data-contact-id={item.contact.id}
               data-contact-phone={item.contact.phone}
-              data-contact-name={item.contact.name}
+              data-contact-name={contactName}
               className={clsx(
                 "group relative block h-[120px] w-full overflow-hidden px-4 py-3 text-left transition-colors hover:bg-slate-50",
                 attention.tone === "green" && "bg-emerald-50/45",
@@ -5723,7 +5742,7 @@ function ConversationList({
               />
               <div className="flex h-full items-start gap-3">
                 <div className="relative grid h-10 w-10 shrink-0 place-items-center rounded-full bg-slate-100 text-xs font-bold text-slate-700">
-                  {item.contact.name.slice(0, 2).toUpperCase()}
+                  {contactName.slice(0, 2).toUpperCase()}
                   <span
                     className={clsx(
                       "absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white",
@@ -5745,9 +5764,9 @@ function ConversationList({
                         "min-w-0 flex-1 truncate text-slate-950",
                         hasUnread ? "font-bold" : "font-semibold"
                       )}
-                      title={item.contact.name}
+                      title={contactName}
                     >
-                      {item.contact.name}
+                      {contactName}
                     </p>
                     <span
                       className={clsx(
