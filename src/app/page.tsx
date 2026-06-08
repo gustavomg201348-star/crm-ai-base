@@ -834,12 +834,22 @@ function formatMessagePreview(value?: string | null) {
   return value?.replace(/\s+/g, " ").trim() || "Sem mensagens.";
 }
 
-function getConversationSortTime(conversation: ConversationRow) {
-  return new Date(
-    conversation.lastMessageAt ??
-      conversation.lastMessage?.createdAt ??
-      conversation.createdAt
-  ).getTime();
+function getConversationMessageTime(conversation: ConversationRow) {
+  const value = conversation.lastMessageAt ?? conversation.lastMessage?.createdAt;
+  return value ? new Date(value).getTime() : 0;
+}
+
+function compareConversationsByActivity(a: ConversationRow, b: ConversationRow) {
+  const aMessageTime = getConversationMessageTime(a);
+  const bMessageTime = getConversationMessageTime(b);
+
+  if (aMessageTime || bMessageTime) {
+    if (!aMessageTime) return 1;
+    if (!bMessageTime) return -1;
+    if (aMessageTime !== bMessageTime) return bMessageTime - aMessageTime;
+  }
+
+  return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
 }
 
 function formatCurrency(value: number | string) {
@@ -1013,9 +1023,7 @@ function mergeConversationListItem({
       )
     : [stableConversation, ...current];
 
-  return [...next].sort(
-    (a, b) => getConversationSortTime(b) - getConversationSortTime(a)
-  );
+  return [...next].sort(compareConversationsByActivity);
 }
 
 function mergeConversationListSnapshot({
