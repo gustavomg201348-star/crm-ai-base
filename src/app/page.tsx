@@ -909,14 +909,20 @@ function logConversationRenderDebug({
     return;
   }
 
-  console.warn("[conversation-render-debug]", {
-    origin,
-    conversationId: next.id,
-    contactId: next.contact.id,
-    phone: next.contact.phone,
-    previousName,
-    nextName
-  });
+  console.warn(
+    `[conversation-render-debug] ${JSON.stringify({
+      origin,
+      conversationId: next.id,
+      contactId: next.contact.id,
+      phone: next.contact.phone,
+      previousName,
+      nextName
+    })}`
+  );
+}
+
+function normalizeConversationPhone(phone?: string | null) {
+  return phone?.replace(/\D/g, "") ?? "";
 }
 
 function withStableConversationContactName({
@@ -928,10 +934,15 @@ function withStableConversationContactName({
   next: ConversationRow;
   origin: string;
 }) {
+  const sameConversation = previous?.id === next.id;
+  const sameContact = previous?.contact.id === next.contact.id;
+  const samePhone =
+    normalizeConversationPhone(previous?.contact.phone) ===
+    normalizeConversationPhone(next.contact.phone);
+
   if (
     !previous ||
-    previous.id !== next.id ||
-    previous.contact.id !== next.contact.id ||
+    (!sameConversation && !sameContact && !samePhone) ||
     previous.contact.name === next.contact.name
   ) {
     return next;
@@ -944,15 +955,21 @@ function withStableConversationContactName({
     return next;
   }
 
-  console.warn("[conversation-render-debug]", {
-    origin: `${origin}:preserve-stable-contact-name`,
-    conversationId: next.id,
-    contactId: next.contact.id,
-    phone: next.contact.phone,
-    previousName,
-    nextName,
-    decision: "mantendo nome anterior na UI porque a conversa e o contato sao os mesmos"
-  });
+  console.warn(
+    `[conversation-render-debug] ${JSON.stringify({
+      origin: `${origin}:preserve-stable-contact-name`,
+      conversationId: next.id,
+      contactId: next.contact.id,
+      previousConversationId: previous.id,
+      previousContactId: previous.contact.id,
+      phone: next.contact.phone,
+      previousPhone: previous.contact.phone,
+      previousName,
+      nextName,
+      matchedBy: sameConversation ? "conversationId" : sameContact ? "contactId" : "phone",
+      decision: "mantendo nome anterior na UI porque conversa, contato ou telefone correspondem"
+    })}`
+  );
 
   return {
     ...next,
@@ -972,7 +989,16 @@ function mergeConversationListItem({
   conversation: ConversationRow;
   origin: string;
 }) {
-  const previous = current.find((item) => item.id === conversation.id) ?? null;
+  const nextPhone = normalizeConversationPhone(conversation.contact.phone);
+  const previous =
+    current.find((item) => item.id === conversation.id) ??
+    current.find((item) => item.contact.id === conversation.contact.id) ??
+    current.find(
+      (item) =>
+        nextPhone &&
+        normalizeConversationPhone(item.contact.phone) === nextPhone
+    ) ??
+    null;
   const stableConversation = withStableConversationContactName({
     previous,
     next: conversation,
@@ -1001,9 +1027,20 @@ function mergeConversationListSnapshot({
   origin: string;
 }) {
   const previousById = new Map(current.map((item) => [item.id, item]));
+  const previousByContactId = new Map(current.map((item) => [item.contact.id, item]));
+  const previousByPhone = new Map(
+    current
+      .map((item) => [normalizeConversationPhone(item.contact.phone), item] as const)
+      .filter(([phone]) => Boolean(phone))
+  );
 
   return incoming.map((conversation) => {
-    const previous = previousById.get(conversation.id) ?? null;
+    const previousPhone = normalizeConversationPhone(conversation.contact.phone);
+    const previous =
+      previousById.get(conversation.id) ??
+      previousByContactId.get(conversation.contact.id) ??
+      (previousPhone ? previousByPhone.get(previousPhone) : null) ??
+      null;
     const stableConversation = withStableConversationContactName({
       previous,
       next: conversation,
