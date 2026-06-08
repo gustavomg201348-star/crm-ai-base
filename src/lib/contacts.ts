@@ -42,14 +42,14 @@ export function getAutomaticContactNameUpdate({
   incomingName?: string | null;
   phone?: string | null;
 }) {
-  if (isMeaningfulContactName(currentName, phone)) {
+  const normalizedCurrent = currentName?.trim().replace(/\s+/g, " ") ?? "";
+
+  if (normalizedCurrent) {
     return null;
   }
 
   const nextName = incomingName?.trim().replace(/\s+/g, " ");
-  const fallback = normalizeContactPhone(phone);
-  const normalizedCurrent = currentName?.trim().replace(/\s+/g, " ") ?? "";
-  const candidate = nextName || normalizedCurrent || fallback;
+  const candidate = nextName || "";
 
   if (!candidate || candidate === normalizedCurrent) {
     return null;
