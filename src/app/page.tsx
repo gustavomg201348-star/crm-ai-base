@@ -834,6 +834,74 @@ function formatMessagePreview(value?: string | null) {
   return value?.replace(/\s+/g, " ").trim() || "Sem mensagens.";
 }
 
+function formatConversationPreview(item: ConversationRow) {
+  const preview = formatMessagePreview(
+    item.lastMessagePreview ?? item.lastMessage?.body ?? item.summary
+  );
+
+  return item.lastMessage?.direction === "outbound" && preview !== "Sem mensagens."
+    ? `Você: ${preview}`
+    : preview;
+}
+
+function formatConversationChannelLine(item: ConversationRow) {
+  const channelName = item.channel?.toLowerCase().includes("whatsapp")
+    ? "WhatsApp"
+    : item.channel || "Canal";
+  const responsible = item.agent?.name ?? "Sem responsavel";
+
+  return `${channelName} • ${responsible}`;
+}
+
+function getConversationBadgeClass(label: string, kind: "tag" | "status" | "agent" = "tag") {
+  const normalized = label
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  if (kind === "agent") {
+    return "bg-slate-100 text-slate-500 ring-slate-200";
+  }
+
+  if (["clt", "credito clt"].some((value) => normalized.includes(value))) {
+    return "bg-blue-50 text-blue-700 ring-blue-100";
+  }
+
+  if (normalized.includes("fgts")) {
+    return "bg-violet-50 text-violet-700 ring-violet-100";
+  }
+
+  if (normalized.includes("inss")) {
+    return "bg-cyan-50 text-cyan-700 ring-cyan-100";
+  }
+
+  if (normalized.includes("negociacao") || normalized.includes("proposta")) {
+    return "bg-amber-50 text-amber-700 ring-amber-100";
+  }
+
+  if (normalized.includes("sem resposta") || normalized.includes("pendente")) {
+    return "bg-orange-50 text-orange-700 ring-orange-100";
+  }
+
+  if (normalized.includes("quente")) {
+    return "bg-rose-50 text-rose-700 ring-rose-100";
+  }
+
+  if (normalized.includes("morno")) {
+    return "bg-slate-100 text-slate-600 ring-slate-200";
+  }
+
+  if (normalized.includes("frio")) {
+    return "bg-sky-50 text-sky-700 ring-sky-100";
+  }
+
+  if (kind === "status") {
+    return "bg-emerald-50 text-emerald-700 ring-emerald-100";
+  }
+
+  return "bg-slate-100 text-slate-600 ring-slate-200";
+}
+
 function getConversationMessageTime(conversation: ConversationRow) {
   const value = conversation.lastMessageAt ?? conversation.lastMessage?.createdAt;
   return value ? new Date(value).getTime() : 0;
@@ -5717,11 +5785,15 @@ function ConversationList({
           const unread = item.unreadCount ?? 0;
           const hasUnread = unread > 0;
           const contactName = formatContactNameForUi(item.contact.name);
-          const preview = formatMessagePreview(
-            item.lastMessagePreview ?? item.lastMessage?.body ?? item.summary
-          );
+          const preview = formatConversationPreview(item);
+          const channelLine = formatConversationChannelLine(item);
           const messageTime = item.lastMessageAt ?? item.lastMessage?.createdAt;
           const attention = getConversationAttention(item);
+          const temperatureLabel =
+            temperatureLabels[item.contact.temperature as keyof typeof temperatureLabels] ??
+            item.contact.temperature;
+          const visibleTags = item.tags.slice(0, 2);
+          const extraTagCount = Math.max(0, item.tags.length - visibleTags.length);
           return (
             <button
               key={item.id}
@@ -5731,7 +5803,7 @@ function ConversationList({
               data-contact-phone={item.contact.phone}
               data-contact-name={contactName}
               className={clsx(
-                "group relative block h-[120px] w-full overflow-hidden px-4 py-3 text-left transition-colors hover:bg-slate-50",
+                "group relative block min-h-[112px] w-full overflow-hidden px-3.5 py-3 text-left transition-colors hover:bg-slate-50",
                 attention.tone === "green" && "bg-emerald-50/45",
                 attention.tone === "amber" && !selected && "bg-amber-50/30",
                 attention.tone === "rose" && !selected && "bg-rose-50/30",
@@ -5748,8 +5820,8 @@ function ConversationList({
                   attention.tone === "slate" && "bg-transparent"
                 )}
               />
-              <div className="flex h-full items-start gap-3">
-                <div className="relative grid h-10 w-10 shrink-0 place-items-center rounded-full bg-slate-100 text-xs font-bold text-slate-700">
+              <div className="flex min-h-[88px] items-start gap-3">
+                <div className="relative mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full bg-slate-100 text-xs font-bold text-slate-700">
                   {contactName.slice(0, 2).toUpperCase()}
                   <span
                     className={clsx(
@@ -5765,11 +5837,11 @@ function ConversationList({
                     )}
                   />
                 </div>
-                <div className="flex h-full min-w-0 flex-1 flex-col">
-                  <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex h-5 items-center justify-between gap-2">
                     <p
                       className={clsx(
-                        "min-w-0 flex-1 truncate text-slate-950",
+                        "min-w-0 flex-1 truncate text-[13px] leading-5 text-slate-950",
                         hasUnread ? "font-bold" : "font-semibold"
                       )}
                       title={contactName}
@@ -5778,7 +5850,7 @@ function ConversationList({
                     </p>
                     <span
                       className={clsx(
-                        "w-16 shrink-0 truncate text-right text-[11px] tabular-nums",
+                        "w-16 shrink-0 truncate text-right text-[10px] tabular-nums",
                         hasUnread ? "font-bold text-emerald-600" : "text-slate-400"
                       )}
                       title={messageTime ? formatRelativeDate(messageTime) : item.status}
@@ -5786,24 +5858,11 @@ function ConversationList({
                       {messageTime ? formatRelativeDate(messageTime) : item.status}
                     </span>
                   </div>
-                  <div className="mt-1 h-5 overflow-hidden">
-                    {attention.tone !== "slate" && (
-                      <span
-                        className={clsx(
-                          "inline-flex max-w-full truncate rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
-                          attention.tone === "green" && "bg-emerald-100 text-emerald-700",
-                          attention.tone === "amber" && "bg-amber-100 text-amber-700",
-                          attention.tone === "rose" && "bg-rose-100 text-rose-700"
-                        )}
-                      >
-                        {attention.label}
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-1 flex h-10 items-start justify-between gap-3 overflow-hidden">
+
+                  <div className="mt-1 flex h-5 items-center justify-between gap-2 overflow-hidden">
                     <p
                       className={clsx(
-                        "line-clamp-2 min-w-0 flex-1 break-words text-sm leading-5",
+                        "min-w-0 flex-1 truncate text-[12px] leading-5",
                         hasUnread ? "font-semibold text-slate-800" : "text-slate-500"
                       )}
                       title={preview}
@@ -5816,25 +5875,48 @@ function ConversationList({
                       </span>
                     )}
                   </div>
-                  <div className="mt-auto flex h-6 items-center gap-1.5 overflow-hidden">
-                    {item.agent && (
+
+                  <p className="mt-0.5 h-4 truncate text-[10px] font-medium leading-4 text-slate-400" title={channelLine}>
+                    {channelLine}
+                  </p>
+
+                  <div className="mt-1.5 flex max-h-10 flex-wrap items-center gap-1 overflow-hidden">
+                    {attention.tone !== "slate" && (
                       <span
-                        className="max-w-[7rem] shrink-0 truncate rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500"
-                        title={item.agent.name}
+                        className={clsx(
+                          "max-w-[8.5rem] truncate rounded-full px-2 py-0.5 text-[10px] font-bold leading-4 ring-1",
+                          getConversationBadgeClass(attention.label, "status")
+                        )}
+                        title={attention.label}
                       >
-                        {item.agent.name}
+                        {attention.label}
                       </span>
                     )}
-                    {item.tags.slice(0, 2).map((tag) => (
-                      <TagBadge key={tag.id} tag={tag} compact />
+                    {visibleTags.map((tag) => (
+                      <span
+                        key={tag.id}
+                        className={clsx(
+                          "max-w-[9rem] truncate rounded-full px-2 py-0.5 text-[10px] font-bold leading-4 ring-1",
+                          getConversationBadgeClass(tag.name)
+                        )}
+                        title={tag.name}
+                      >
+                        {tag.name}
+                      </span>
                     ))}
-                    {item.tags.length > 2 && (
-                      <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
-                        +{item.tags.length - 2}
+                    {extraTagCount > 0 && (
+                      <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold leading-4 text-slate-500 ring-1 ring-slate-200">
+                        +{extraTagCount}
                       </span>
                     )}
-                    <span className="max-w-[5.5rem] shrink-0 truncate rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
-                      {temperatureLabels[item.contact.temperature as keyof typeof temperatureLabels] ?? item.contact.temperature}
+                    <span
+                      className={clsx(
+                        "max-w-[5.5rem] truncate rounded-full px-2 py-0.5 text-[10px] font-bold leading-4 ring-1",
+                        getConversationBadgeClass(temperatureLabel)
+                      )}
+                      title={temperatureLabel}
+                    >
+                      {temperatureLabel}
                     </span>
                   </div>
                 </div>
