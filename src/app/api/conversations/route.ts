@@ -80,7 +80,7 @@ export async function GET(request: NextRequest) {
           { lastMessageAt: { sort: "desc", nulls: "last" } },
           { createdAt: "desc" }
         ],
-        take: 100
+        take: 250
       }),
       prisma.conversation.groupBy({
         by: ["status"],
@@ -103,8 +103,22 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    const mappedConversations = conversations
+      .map(mapConversation)
+      .sort((a, b) => {
+        const aTime = a.lastMessageAt
+          ? new Date(a.lastMessageAt).getTime()
+          : new Date(a.createdAt).getTime();
+        const bTime = b.lastMessageAt
+          ? new Date(b.lastMessageAt).getTime()
+          : new Date(b.createdAt).getTime();
+
+        return bTime - aTime;
+      })
+      .slice(0, 100);
+
     return NextResponse.json({
-      conversations: conversations.map(mapConversation),
+      conversations: mappedConversations,
       statusCounts
     });
   } catch {

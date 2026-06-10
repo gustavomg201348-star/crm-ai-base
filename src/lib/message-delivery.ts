@@ -82,19 +82,34 @@ export async function saveFailedOutboundMessage({
   if (!conversation) return null;
 
   const detail = `${body}\n\nFalha: ${errorMessage}`.trim();
+  const failedAt = new Date();
 
-  return prisma.message.create({
-    data: {
-      conversationId,
-      direction: "outbound",
-      senderType: "agent",
-      body: detail,
-      type,
-      fileName,
-      mimeType,
-      templateName,
-      templateLanguage,
-      status: "failed"
-    }
+  return prisma.$transaction(async (tx) => {
+    const message = await tx.message.create({
+      data: {
+        conversationId,
+        direction: "outbound",
+        senderType: "agent",
+        body: detail,
+        type,
+        fileName,
+        mimeType,
+        templateName,
+        templateLanguage,
+        status: "failed"
+      }
+    });
+
+    await tx.conversation.update({
+      where: { id: conversationId },
+      data: {
+        lastMessageAt: failedAt,
+        lastMessagePreview: detail,
+        updatedAt: failedAt,
+        contact: { update: { lastMessage: detail } }
+      }
+    });
+
+    return message;
   });
 }

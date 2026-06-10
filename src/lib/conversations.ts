@@ -27,6 +27,19 @@ export type ConversationWithRelations = Prisma.ConversationGetPayload<{
 
 export function mapConversation(conversation: ConversationWithRelations) {
   const lastMessage = conversation.messages.at(-1);
+  const effectiveLastMessageAt =
+    lastMessage &&
+    (!conversation.lastMessageAt ||
+      lastMessage.createdAt.getTime() > conversation.lastMessageAt.getTime())
+      ? lastMessage.createdAt
+      : conversation.lastMessageAt;
+  const effectiveLastMessagePreview =
+    lastMessage &&
+    (!conversation.lastMessagePreview ||
+      !conversation.lastMessageAt ||
+      lastMessage.createdAt.getTime() >= conversation.lastMessageAt.getTime())
+      ? lastMessage.body
+      : conversation.lastMessagePreview;
 
   return {
     id: conversation.id,
@@ -37,8 +50,8 @@ export function mapConversation(conversation: ConversationWithRelations) {
     aiPaused: conversation.aiPaused,
     aiLastSuggestion: conversation.aiLastSuggestion,
     unreadCount: conversation.unreadCount,
-    lastMessageAt: conversation.lastMessageAt,
-    lastMessagePreview: conversation.lastMessagePreview,
+    lastMessageAt: effectiveLastMessageAt,
+    lastMessagePreview: effectiveLastMessagePreview,
     lastInboundMessageAt: conversation.lastInboundMessageAt,
     lastReadAt: conversation.lastReadAt,
     createdAt: conversation.createdAt,

@@ -318,6 +318,7 @@ export async function processCampaign(campaignId: string) {
           : personalizedMessage;
 
       await prisma.$transaction(async (tx) => {
+        const sentAt = new Date();
         const conversation = await findOrCreateCampaignConversation({
           db: tx,
           companyId: campaign.companyId,
@@ -351,6 +352,18 @@ export async function processCampaign(campaignId: string) {
           data: { lastMessage: historyBody }
         });
 
+        await tx.conversation.update({
+          where: { id: conversation.id },
+          data: {
+            status: conversation.status === "PENDING" ? "OPEN" : conversation.status,
+            unreadCount: 0,
+            lastReadAt: sentAt,
+            lastMessageAt: sentAt,
+            lastMessagePreview: historyBody,
+            updatedAt: sentAt
+          }
+        });
+
         await createActivity(tx, {
           contactId: recipient.contactId,
           userId: campaign.createdById,
@@ -365,7 +378,7 @@ export async function processCampaign(campaignId: string) {
             conversationId: conversation.id,
             status: "SENT",
             providerMessageId,
-            sentAt: new Date(),
+            sentAt,
             errorCode: null,
             errorMessage: null
           }
