@@ -41,8 +41,7 @@ export async function GET(request: NextRequest) {
             ? { agentId: assignedTo }
             : conversationVisibilityWhere(session);
 
-    const conversations = await prisma.conversation.findMany({
-      where: {
+    const baseWhere = {
         ...assignmentWhere,
         contact: {
           companyId: session.companyId,
@@ -68,18 +67,45 @@ export async function GET(request: NextRequest) {
               }
             }
           : {}),
-        ...(status === "ALL" ? {} : { status })
-      },
-      include: conversationInclude,
-      orderBy: [
-        { lastMessageAt: { sort: "desc", nulls: "last" } },
-        { createdAt: "desc" }
-      ],
-      take: 100
-    });
+      };
+
+    const [conversations, statusGroups] = await Promise.all([
+      prisma.conversation.findMany({
+        where: {
+          ...baseWhere,
+          ...(status === "ALL" ? {} : { status })
+        },
+        include: conversationInclude,
+        orderBy: [
+          { lastMessageAt: { sort: "desc", nulls: "last" } },
+          { createdAt: "desc" }
+        ],
+        take: 100
+      }),
+      prisma.conversation.groupBy({
+        by: ["status"],
+        where: baseWhere,
+        _count: { _all: true }
+      })
+    ]);
+
+    const statusCounts = {
+      OPEN: 0,
+      PENDING: 0,
+      BOT: 0,
+      RESOLVED: 0,
+      SOLD: 0
+    };
+
+    for (const group of statusGroups) {
+      if (group.status in statusCounts) {
+        statusCounts[group.status as keyof typeof statusCounts] = group._count._all;
+      }
+    }
 
     return NextResponse.json({
-      conversations: conversations.map(mapConversation)
+      conversations: conversations.map(mapConversation),
+      statusCounts
     });
   } catch {
     return NextResponse.json(

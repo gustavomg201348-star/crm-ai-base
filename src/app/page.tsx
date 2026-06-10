@@ -265,6 +265,16 @@ type ConversationRow = {
   }>;
 };
 
+type ConversationStatusCounts = Record<ConversationRow["status"], number>;
+
+const emptyConversationStatusCounts: ConversationStatusCounts = {
+  OPEN: 0,
+  PENDING: 0,
+  BOT: 0,
+  SOLD: 0,
+  RESOLVED: 0
+};
+
 type WhatsAppTemplateRow = {
   id: string;
   name: string;
@@ -1155,6 +1165,8 @@ export default function Home() {
   const [contacts, setContacts] = useState<ContactRow[]>([]);
   const [kanbanStages, setKanbanStages] = useState<KanbanStage[]>([]);
   const [conversationList, setConversationList] = useState<ConversationRow[]>([]);
+  const [conversationStatusCounts, setConversationStatusCounts] =
+    useState<ConversationStatusCounts>(emptyConversationStatusCounts);
   const [attendants, setAttendants] = useState<AttendantRow[]>([]);
   const [leadAssignmentSettings, setLeadAssignmentSettings] =
     useState<LeadAssignmentSettings>({
@@ -1620,7 +1632,12 @@ export default function Home() {
       if (response.ok) {
         const data = (await response.json()) as {
           conversations: ConversationRow[];
+          statusCounts?: Partial<ConversationStatusCounts>;
         };
+        setConversationStatusCounts({
+          ...emptyConversationStatusCounts,
+          ...data.statusCounts
+        });
         const origin = options.silent ? "polling" : "initial-load";
         const nextConversations = mergeConversationListSnapshot({
           current: conversationListRef.current,
@@ -3624,6 +3641,7 @@ export default function Home() {
             <div className="min-h-0 flex-1 overflow-hidden">
               <Atendimento
                 conversations={conversationList}
+                statusCounts={conversationStatusCounts}
                 filters={conversationFilters}
                 availableTags={reference.tags}
                 attendants={attendants}
@@ -4676,6 +4694,7 @@ function PipelineCard({
 
 function Atendimento({
   conversations,
+  statusCounts,
   filters,
   availableTags,
   attendants,
@@ -4703,6 +4722,7 @@ function Atendimento({
   onOpenCltSimulation
 }: {
   conversations: ConversationRow[];
+  statusCounts: ConversationStatusCounts;
   filters: { search: string; status: string; tagIds: string[]; assignedTo: string };
   availableTags: ReferenceData["tags"];
   attendants: AttendantRow[];
@@ -5018,6 +5038,7 @@ function Atendimento({
       )}
       <ConversationList
         conversations={conversations}
+        statusCounts={statusCounts}
         filters={filters}
         availableTags={availableTags}
         attendants={attendants}
@@ -5596,6 +5617,7 @@ function ConversationTagSelector({
 
 function ConversationList({
   conversations,
+  statusCounts,
   filters,
   availableTags,
   attendants,
@@ -5606,6 +5628,7 @@ function ConversationList({
   onSelectConversation
 }: {
   conversations: ConversationRow[];
+  statusCounts: ConversationStatusCounts;
   filters: { search: string; status: string; tagIds: string[]; assignedTo: string };
   availableTags: ReferenceData["tags"];
   attendants: AttendantRow[];
@@ -5630,6 +5653,16 @@ function ConversationList({
           : isAdmin
             ? "Todos"
             : "Minha fila";
+  const statusFilterItems: Array<{
+    value: ConversationRow["status"];
+    label: string;
+  }> = [
+    { value: "OPEN", label: "Aberto" },
+    { value: "PENDING", label: "Pendentes" },
+    { value: "BOT", label: "Robo" },
+    { value: "RESOLVED", label: "Resolvidos" },
+    { value: "SOLD", label: "Vendas" }
+  ];
 
   return (
     <section className="flex min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-line/80 bg-white shadow-soft">
@@ -5714,26 +5747,40 @@ function ConversationList({
             }
           />
         </div>
-        <div className="mt-3 flex rounded-2xl bg-slate-50 p-1 text-xs ring-1 ring-line/80">
-          {[
-            ["OPEN", "Aberto"],
-            ["PENDING", "Pend."],
-            ["BOT", "Robo"],
-            ["SOLD", "Vendas"]
-          ].map(([value, label]) => (
+        <div className="mt-3 flex gap-1 overflow-x-auto rounded-2xl bg-slate-50 p-1 text-[11px] ring-1 ring-line/80">
+          {statusFilterItems.map(({ value, label }) => {
+            const count = statusCounts[value] ?? 0;
+            const active = filters.status === value;
+
+            return (
             <button
               key={value}
               className={clsx(
-                "h-8 flex-1 rounded-xl px-2 font-semibold transition-colors",
-                filters.status === value
+                "inline-flex h-8 min-w-max flex-1 items-center justify-center gap-1.5 rounded-xl px-2 font-bold transition-colors",
+                active
                   ? "bg-white text-brand shadow-sm"
                   : "text-slate-500 hover:text-slate-800"
               )}
               onClick={() => onFiltersChange({ ...filters, status: value })}
             >
-              {label}
+              <span>{label}</span>
+              <span
+                className={clsx(
+                  "grid h-4 min-w-4 place-items-center rounded-full px-1 text-[9px] font-black leading-none",
+                  count > 0
+                    ? active
+                      ? "bg-brand text-white"
+                      : "bg-rose-100 text-rose-600"
+                    : active
+                      ? "bg-emerald-50 text-emerald-600"
+                      : "bg-slate-200 text-slate-400"
+                )}
+              >
+                {count > 99 ? "99+" : count}
+              </span>
             </button>
-          ))}
+            );
+          })}
         </div>
         <div className="mt-3 grid gap-2 text-xs">
           <div className="flex items-center gap-2">
