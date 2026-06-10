@@ -13,7 +13,8 @@ import {
 } from "@/lib/meta-whatsapp";
 import {
   extractTemplateButtons,
-  renderTemplateHistoryBody
+  renderTemplateHistoryBody,
+  resolveTemplateHeaderImageUrl
 } from "@/lib/whatsapp-template.service";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
@@ -285,7 +286,11 @@ export async function processCampaign(campaignId: string) {
               to,
               name: campaign.templateName,
               language: campaign.templateLanguage,
-              variables: templateVariables
+              variables: templateVariables,
+              template: campaignTemplate,
+              headerImageUrl: campaignTemplate
+                ? resolveTemplateHeaderImageUrl(campaignTemplate)
+                : null
             })
           : mediaId
             ? await sendMetaImageMessage({

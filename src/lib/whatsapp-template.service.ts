@@ -28,6 +28,45 @@ export function extractTemplateButtons(template: MetaTemplate) {
   );
 }
 
+export function templateHasHeaderImage(template: MetaTemplate) {
+  return template.components?.some(
+    (component) => component.type === "HEADER" && component.format === "IMAGE"
+  ) ?? false;
+}
+
+function normalizeTemplateEnvName(templateName: string) {
+  return templateName
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+export function resolveTemplateHeaderImageUrl(template: MetaTemplate) {
+  if (!templateHasHeaderImage(template)) return null;
+
+  const specificKey = `WHATSAPP_TEMPLATE_HEADER_IMAGE_URL_${normalizeTemplateEnvName(
+    template.name
+  )}`;
+  const url =
+    process.env[specificKey]?.trim() ??
+    process.env.WHATSAPP_TEMPLATE_HEADER_IMAGE_URL?.trim() ??
+    "";
+
+  if (!url) {
+    throw new Error(
+      `O template ${template.name} possui imagem no cabecalho. Configure ${specificKey} com uma URL publica HTTPS da imagem.`
+    );
+  }
+
+  if (!/^https:\/\//i.test(url)) {
+    throw new Error(`A variavel ${specificKey} precisa conter uma URL publica HTTPS.`);
+  }
+
+  return url;
+}
+
 export function extractVariableCount(text: string) {
   const matches = text.match(/\{\{\d+\}\}/g) ?? [];
   return new Set(matches).size;
@@ -49,9 +88,11 @@ export function renderTemplateHistoryBody({
   const body = renderTemplateBody(template, variables).trim();
   const buttons = extractTemplateButtons(template);
   const buttonLines = buttons.map((button) => `Botao: ${button.text}`);
+  const headerLine = templateHasHeaderImage(template) ? "[Imagem no cabecalho]" : "";
 
   return [
     "[Template enviado]",
+    headerLine,
     body || `[Template: ${template.name}]`,
     buttonLines.length ? buttonLines.join("\n") : ""
   ]
@@ -164,7 +205,9 @@ export async function sendConversationTemplate({
     to: conversation.contact.phone.replace(/\D/g, ""),
     name: templateName,
     language,
-    variables: cleanVariables
+    variables: cleanVariables,
+    template,
+    headerImageUrl: resolveTemplateHeaderImageUrl(template)
   });
   const historyBody = renderTemplateHistoryBody({
     template,

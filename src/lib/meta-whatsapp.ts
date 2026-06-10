@@ -454,6 +454,11 @@ export type MetaTemplate = {
     type?: string;
     format?: string;
     text?: string;
+    example?: {
+      header_handle?: string[];
+      header_text?: string[];
+      body_text?: string[][];
+    };
     buttons?: Array<{
       type?: string;
       text?: string;
@@ -462,6 +467,76 @@ export type MetaTemplate = {
     }>;
   }>;
 };
+
+type MetaTemplateSendComponent =
+  | {
+      type: "header";
+      parameters: Array<{
+        type: "image";
+        image: { link: string };
+      }>;
+    }
+  | {
+      type: "body";
+      parameters: Array<{
+        type: "text";
+        text: string;
+      }>;
+    }
+  | {
+      type: "button";
+      sub_type: "quick_reply" | "url";
+      index: string;
+      parameters: Array<
+        | {
+            type: "payload";
+            payload: string;
+          }
+        | {
+            type: "text";
+            text: string;
+          }
+      >;
+    };
+
+function countTemplateVariables(text?: string | null) {
+  const matches = text?.match(/\{\{\d+\}\}/g) ?? [];
+  return new Set(matches).size;
+}
+
+function normalizeButtonPayload(value: string | null | undefined, index: number) {
+  const normalized = (value || `BOTAO_${index + 1}`)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  return normalized || `BOTAO_${index + 1}`;
+}
+
+function readMetaErrorMessage(data: unknown, fallback: string) {
+  const error = data as
+    | {
+        error?: {
+          message?: string;
+          code?: string | number;
+          error_subcode?: string | number;
+          error_data?: { details?: string };
+        };
+      }
+    | null;
+
+  const message = error?.error?.message ?? error?.error?.error_data?.details;
+  if (!message) return fallback;
+
+  const code = error?.error?.code ? ` (#${error.error.code})` : "";
+  const subcode = error?.error?.error_subcode
+    ? ` subcode ${error.error.error_subcode}`
+    : "";
+
+  return `Falha ao enviar template pela Meta${code}${subcode}: ${message}`;
+}
 
 export async function getMetaApprovedTemplates({
   wabaId,
@@ -497,7 +572,11 @@ export async function sendMetaTemplateMessage({
   to,
   name,
   language,
-  variables
+  variables,
+  template,
+  headerImageUrl,
+  buttonPayloads,
+  urlButtonVariables
 }: {
   phoneNumberId: string;
   accessToken: string;
@@ -505,19 +584,114 @@ export async function sendMetaTemplateMessage({
   name: string;
   language: string;
   variables: string[];
+  template?: MetaTemplate | null;
+  headerImageUrl?: string | null;
+  buttonPayloads?: string[];
+  urlButtonVariables?: string[];
 }) {
   const apiVersion = process.env.META_GRAPH_VERSION || "v20.0";
-  const components = variables.length
-    ? [
+  const templateComponents = template?.components ?? [];
+  const header = templateComponents.find((component) => component.type === "HEADER");
+  const body = templateComponents.find((component) => component.type === "BODY");
+  const buttons = templateComponents.find((component) => component.type === "BUTTONS")?.buttons ?? [];
+  const hasHeaderImage = header?.format === "IMAGE";
+  const bodyVariableCount = countTemplateVariables(body?.text);
+  const components: MetaTemplateSendComponent[] = [];
+
+  if (hasHeaderImage) {
+    if (!headerImageUrl) {
+      throw new Error(
+        `O template ${name} possui imagem no cabecalho. Configure uma URL HTTPS publica em WHATSAPP_TEMPLATE_HEADER_IMAGE_URL_${name
+          .toUpperCase()
+          .replace(/[^A-Z0-9]+/g, "_")} ou WHATSAPP_TEMPLATE_HEADER_IMAGE_URL.`
+      );
+    }
+
+    if (!/^https:\/\//i.test(headerImageUrl)) {
+      throw new Error("A imagem do cabecalho do template precisa ser uma URL publica HTTPS.");
+    }
+
+    components.push({
+      type: "header",
+      parameters: [
         {
-          type: "body",
-          parameters: variables.map((value) => ({
-            type: "text",
-            text: value
-          }))
+          type: "image",
+          image: { link: headerImageUrl }
         }
       ]
-    : undefined;
+    });
+  }
+
+  if (bodyVariableCount > 0) {
+    components.push({
+      type: "body",
+      parameters: variables.slice(0, bodyVariableCount).map((value) => ({
+        type: "text",
+        text: value
+      }))
+    });
+  }
+
+  buttons.forEach((button, index) => {
+    const buttonType = button.type?.toUpperCase();
+    if (buttonType === "QUICK_REPLY") {
+      components.push({
+        type: "button",
+        sub_type: "quick_reply",
+        index: String(index),
+        parameters: [
+          {
+            type: "payload",
+            payload: buttonPayloads?.[index] ?? normalizeButtonPayload(button.text, index)
+          }
+        ]
+      });
+      return;
+    }
+
+    if (buttonType === "URL" && countTemplateVariables(button.url) > 0) {
+      const urlVariable = urlButtonVariables?.[index]?.trim();
+      if (!urlVariable) {
+        throw new Error(`Preencha a variavel do botao URL do template ${name}.`);
+      }
+
+      components.push({
+        type: "button",
+        sub_type: "url",
+        index: String(index),
+        parameters: [
+          {
+            type: "text",
+            text: urlVariable
+          }
+        ]
+      });
+    }
+  });
+
+  const payload = {
+    messaging_product: "whatsapp",
+    to,
+    type: "template",
+    template: {
+      name,
+      language: { code: language },
+      ...(components.length ? { components } : {})
+    }
+  };
+
+  console.info(
+    "[template-send-debug]",
+    JSON.stringify({
+      templateName: name,
+      language,
+      possuiHeaderImage: hasHeaderImage,
+      possuiBodyVariables: bodyVariableCount > 0,
+      possuiButtons: buttons.length > 0,
+      componentsEnviados: components,
+      payloadFinal: payload
+    })
+  );
 
   const response = await fetch(
     `https://graph.facebook.com/${apiVersion}/${phoneNumberId}/messages`,
@@ -527,26 +701,23 @@ export async function sendMetaTemplateMessage({
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({
-        messaging_product: "whatsapp",
-        to,
-        type: "template",
-        template: {
-          name,
-          language: { code: language },
-          ...(components ? { components } : {})
-        }
-      })
+      body: JSON.stringify(payload)
     }
   );
   const data = await response.json().catch(() => null);
 
+  console.info(
+    "[template-send-debug]",
+    JSON.stringify({
+      templateName: name,
+      responseStatus: response.status,
+      responseOk: response.ok,
+      respostaMeta: data
+    })
+  );
+
   if (!response.ok) {
-    throw new Error(
-      typeof data?.error?.message === "string"
-        ? data.error.message
-        : "Falha ao enviar template pela Meta."
-    );
+    throw new Error(readMetaErrorMessage(data, "Falha ao enviar template pela Meta."));
   }
 
   return data;
