@@ -14,6 +14,7 @@ type MetaTextMessage = {
   location?: { latitude?: number; longitude?: number; name?: string; address?: string };
   contacts?: Array<{ name?: { formatted_name?: string }; phones?: Array<{ phone?: string; wa_id?: string }> }>;
   reaction?: { message_id?: string; emoji?: string };
+  context?: { id?: string };
   interactive?: {
     button_reply?: { title?: string };
     list_reply?: { title?: string };
@@ -30,6 +31,7 @@ export type MetaWebhookMessage = {
   fileName?: string | null;
   mimeType?: string | null;
   messageId?: string | null;
+  contextMessageId?: string | null;
 };
 
 export type MetaWebhookStatus = {
@@ -199,7 +201,8 @@ export function parseMetaWebhookMessages(payload: unknown): MetaWebhookMessage[]
           mediaId: content.mediaId ?? null,
           fileName: content.fileName ?? null,
           mimeType: content.mimeType ?? null,
-          messageId: message.id ?? null
+          messageId: message.id ?? null,
+          contextMessageId: message.context?.id ?? null
         });
       }
     }

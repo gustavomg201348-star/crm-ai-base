@@ -102,7 +102,8 @@ export async function POST(request: NextRequest) {
           mediaId: message.mediaId,
           fileName: message.fileName,
           mimeType: message.mimeType,
-          providerMessageId: message.messageId
+          providerMessageId: message.messageId,
+          contextProviderMessageId: message.contextMessageId
         });
 
         results.push({ phoneNumberId: message.phoneNumberId, ok: true, conversation });

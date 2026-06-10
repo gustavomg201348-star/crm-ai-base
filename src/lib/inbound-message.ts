@@ -23,7 +23,8 @@ export async function processInboundMessage({
   mediaId,
   fileName,
   mimeType,
-  providerMessageId
+  providerMessageId,
+  contextProviderMessageId
 }: {
   companyId: string;
   channelId?: string | null;
@@ -35,6 +36,7 @@ export async function processInboundMessage({
   fileName?: string | null;
   mimeType?: string | null;
   providerMessageId?: string | null;
+  contextProviderMessageId?: string | null;
 }) {
   const normalizedPhone = normalizeContactPhone(phone);
   const messageBody = body.trim();
@@ -59,6 +61,18 @@ export async function processInboundMessage({
     }
   }
 
+  const referencedMessage = contextProviderMessageId
+    ? await prisma.message.findFirst({
+        where: {
+          providerMessageId: contextProviderMessageId,
+          conversation: { contact: { companyId } }
+        },
+        include: {
+          conversation: { include: conversationInclude }
+        }
+      })
+    : null;
+
   const [origin, stage] = await Promise.all([
     prisma.origin.findFirst({
       where: { companyId, name: "WhatsApp" }
@@ -69,10 +83,29 @@ export async function processInboundMessage({
     })
   ]);
 
-  let contact = await findContactByNormalizedPhone(prisma, {
-    companyId,
-    phone: normalizedPhone,
-    archived: true
+  let contact =
+    referencedMessage && phonesMatch(referencedMessage.conversation.contact.phone, normalizedPhone)
+      ? referencedMessage.conversation.contact
+      : await findContactByNormalizedPhone(prisma, {
+          companyId,
+          phone: normalizedPhone,
+          archived: true
+        });
+
+  console.warn("[whatsapp-inbound-audit]", {
+    rawPhone: phone,
+    normalizedPhone,
+    contactId: contact?.id ?? null,
+    conversationId: referencedMessage?.conversationId ?? null,
+    referencedProviderMessageId: contextProviderMessageId ?? null,
+    referencedMessageFound: Boolean(referencedMessage),
+    referencedPhoneMatched: referencedMessage
+      ? phonesMatch(referencedMessage.conversation.contact.phone, normalizedPhone)
+      : null,
+    oldName: contact?.name ?? null,
+    incomingWhatsappName: name?.trim() || null,
+    cpfBefore: contact?.cpf ?? null,
+    messageType: type ?? "text"
   });
 
   if (!contact) {
@@ -139,13 +172,19 @@ export async function processInboundMessage({
     }
   }
 
-  let conversation = await prisma.conversation.findFirst({
-    where: {
-      contactId: contact.id,
-      status: { not: "RESOLVED" }
-    },
-    orderBy: { updatedAt: "desc" }
-  });
+  let conversation =
+    referencedMessage && phonesMatch(referencedMessage.conversation.contact.phone, normalizedPhone)
+      ? referencedMessage.conversation
+      : await prisma.conversation.findFirst({
+          where: {
+            contactId: contact.id,
+            status: { not: "RESOLVED" }
+          },
+          orderBy: [
+            { lastMessageAt: { sort: "desc", nulls: "last" } },
+            { createdAt: "desc" }
+          ]
+        });
 
   if (!conversation) {
     conversation = await prisma.conversation.create({
@@ -184,9 +223,24 @@ export async function processInboundMessage({
       lastMessageAt: receivedAt,
       lastMessagePreview: messageBody,
       lastInboundMessageAt: receivedAt,
+      status: "PENDING",
       updatedAt: receivedAt
     },
     include: conversationInclude
+  });
+
+  console.warn("[whatsapp-inbound-audit-result]", {
+    rawPhone: phone,
+    normalizedPhone,
+    contactId: updated.contact.id,
+    conversationId: updated.id,
+    oldName: contact.name,
+    finalName: updated.contact.name,
+    incomingWhatsappName: name?.trim() || null,
+    cpfBefore: contact.cpf ?? null,
+    cpfAfter: updated.contact.cpf ?? null,
+    messageType: type ?? "text",
+    status: updated.status
   });
 
   const channel = channelId
@@ -222,4 +276,19 @@ export async function processInboundMessage({
   });
 
   return mapConversation(updated);
+}
+
+function phonesMatch(storedPhone?: string | null, incomingPhone?: string | null) {
+  const stored = normalizeContactPhone(storedPhone);
+  const incoming = normalizeContactPhone(incomingPhone);
+
+  if (!stored || !incoming) return false;
+  if (stored === incoming) return true;
+
+  const storedWithoutCountryCode =
+    stored.startsWith("55") && stored.length > 11 ? stored.slice(2) : stored;
+  const incomingWithoutCountryCode =
+    incoming.startsWith("55") && incoming.length > 11 ? incoming.slice(2) : incoming;
+
+  return storedWithoutCountryCode === incomingWithoutCountryCode;
 }

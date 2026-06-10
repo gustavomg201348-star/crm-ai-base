@@ -84,21 +84,6 @@ export async function findContactByNormalizedPhone(
       ? normalizedPhone.slice(2)
       : "";
 
-  const direct = await db.contact.findFirst({
-    where: {
-      companyId,
-      ...(archived ? {} : { archivedAt: null }),
-      OR: [
-        { phone: normalizedPhone },
-        ...(phoneWithoutCountryCode ? [{ phone: phoneWithoutCountryCode }] : [])
-      ]
-    }
-  });
-
-  if (direct) {
-    return direct;
-  }
-
   const matches = await db.$queryRaw<Array<{ id: string }>>`
     SELECT "id"
     FROM "Contact"
@@ -114,10 +99,12 @@ export async function findContactByNormalizedPhone(
       )
     ORDER BY
       CASE
+        WHEN NULLIF(trim(COALESCE("cpf", '')), '') IS NOT NULL THEN -1
         WHEN NULLIF(trim("name"), '') IS NULL THEN 2
         WHEN trim("name") = regexp_replace("phone", '\\D', '', 'g') THEN 1
         ELSE 0
       END ASC,
+      CASE WHEN regexp_replace("phone", '\\D', '', 'g') = ${normalizedPhone} THEN 0 ELSE 1 END ASC,
       "updatedAt" DESC
     LIMIT 1
   `;
