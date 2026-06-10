@@ -98,6 +98,10 @@ export async function POST(request: NextRequest) {
           name: message.name,
           phone: message.from,
           body: message.body,
+          type: message.type,
+          mediaId: message.mediaId,
+          fileName: message.fileName,
+          mimeType: message.mimeType,
           providerMessageId: message.messageId
         });
 

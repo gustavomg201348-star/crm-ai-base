@@ -19,6 +19,10 @@ export async function processInboundMessage({
   name,
   phone,
   body,
+  type,
+  mediaId,
+  fileName,
+  mimeType,
   providerMessageId
 }: {
   companyId: string;
@@ -26,6 +30,10 @@ export async function processInboundMessage({
   name?: string | null;
   phone: string;
   body: string;
+  type?: string | null;
+  mediaId?: string | null;
+  fileName?: string | null;
+  mimeType?: string | null;
   providerMessageId?: string | null;
 }) {
   const normalizedPhone = normalizeContactPhone(phone);
@@ -160,6 +168,10 @@ export async function processInboundMessage({
       direction: "inbound",
       senderType: "customer",
       body: messageBody,
+      type: type ?? "text",
+      mediaId: mediaId ?? null,
+      fileName: fileName ?? null,
+      mimeType: mimeType ?? null,
       providerMessageId: providerMessageId ?? null
     }
   });

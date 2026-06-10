@@ -6,6 +6,14 @@ type MetaTextMessage = {
   type?: string;
   text?: { body?: string };
   button?: { text?: string };
+  image?: { id?: string; caption?: string; mime_type?: string; sha256?: string };
+  audio?: { id?: string; mime_type?: string; sha256?: string; voice?: boolean };
+  document?: { id?: string; caption?: string; filename?: string; mime_type?: string; sha256?: string };
+  video?: { id?: string; caption?: string; mime_type?: string; sha256?: string };
+  sticker?: { id?: string; mime_type?: string; sha256?: string; animated?: boolean };
+  location?: { latitude?: number; longitude?: number; name?: string; address?: string };
+  contacts?: Array<{ name?: { formatted_name?: string }; phones?: Array<{ phone?: string; wa_id?: string }> }>;
+  reaction?: { message_id?: string; emoji?: string };
   interactive?: {
     button_reply?: { title?: string };
     list_reply?: { title?: string };
@@ -17,6 +25,10 @@ export type MetaWebhookMessage = {
   from: string;
   name?: string | null;
   body: string;
+  type?: string | null;
+  mediaId?: string | null;
+  fileName?: string | null;
+  mimeType?: string | null;
   messageId?: string | null;
 };
 
@@ -53,17 +65,98 @@ export function verifyMetaSignature({
   );
 }
 
-function readMessageBody(message: MetaTextMessage) {
-  if (message.type === "text") return message.text?.body;
-  if (message.type === "button") return message.button?.text;
-  if (message.type === "interactive") {
-    return (
-      message.interactive?.button_reply?.title ??
-      message.interactive?.list_reply?.title
-    );
+function readMessageContent(message: MetaTextMessage) {
+  if (message.type === "text") {
+    return { body: message.text?.body, type: "text" };
   }
 
-  return message.text?.body ?? `[${message.type ?? "mensagem"} recebida]`;
+  if (message.type === "button") {
+    return { body: message.button?.text, type: "button" };
+  }
+
+  if (message.type === "interactive") {
+    const body =
+      message.interactive?.button_reply?.title ??
+      message.interactive?.list_reply?.title;
+
+    return { body: body ? `Resposta interativa: ${body}` : "Resposta interativa recebida", type: "interactive" };
+  }
+
+  if (message.type === "image") {
+    return {
+      body: message.image?.caption ? `[Imagem recebida] ${message.image.caption}` : "Imagem recebida",
+      type: "image",
+      mediaId: message.image?.id ?? null,
+      mimeType: message.image?.mime_type ?? null
+    };
+  }
+
+  if (message.type === "audio") {
+    return {
+      body: message.audio?.voice ? "Mensagem de voz recebida" : "Audio recebido",
+      type: "audio",
+      mediaId: message.audio?.id ?? null,
+      mimeType: message.audio?.mime_type ?? null
+    };
+  }
+
+  if (message.type === "document") {
+    return {
+      body: message.document?.caption
+        ? `[Documento recebido] ${message.document.caption}`
+        : `Documento recebido${message.document?.filename ? `: ${message.document.filename}` : ""}`,
+      type: "document",
+      mediaId: message.document?.id ?? null,
+      fileName: message.document?.filename ?? null,
+      mimeType: message.document?.mime_type ?? null
+    };
+  }
+
+  if (message.type === "video") {
+    return {
+      body: message.video?.caption ? `[Video recebido] ${message.video.caption}` : "Video recebido",
+      type: "video",
+      mediaId: message.video?.id ?? null,
+      mimeType: message.video?.mime_type ?? null
+    };
+  }
+
+  if (message.type === "sticker") {
+    return {
+      body: message.sticker?.animated ? "Figurinha animada recebida" : "Figurinha recebida",
+      type: "sticker",
+      mediaId: message.sticker?.id ?? null,
+      mimeType: message.sticker?.mime_type ?? null
+    };
+  }
+
+  if (message.type === "location") {
+    const details = [message.location?.name, message.location?.address].filter(Boolean).join(" - ");
+    return {
+      body: details ? `Localizacao recebida: ${details}` : "Localizacao recebida",
+      type: "location"
+    };
+  }
+
+  if (message.type === "contacts") {
+    const contactName = message.contacts?.[0]?.name?.formatted_name;
+    return {
+      body: contactName ? `Contato recebido: ${contactName}` : "Contato recebido",
+      type: "contacts"
+    };
+  }
+
+  if (message.type === "reaction") {
+    return {
+      body: message.reaction?.emoji ? `Reacao recebida: ${message.reaction.emoji}` : "Reacao recebida",
+      type: "reaction"
+    };
+  }
+
+  return {
+    body: message.text?.body ?? `Mensagem ${message.type ?? "desconhecida"} recebida`,
+    type: message.type ?? "unsupported"
+  };
 }
 
 export function parseMetaWebhookMessages(payload: unknown): MetaWebhookMessage[] {
@@ -91,7 +184,8 @@ export function parseMetaWebhookMessages(payload: unknown): MetaWebhookMessage[]
 
       for (const message of value?.messages ?? []) {
         const from = message.from;
-        const text = readMessageBody(message);
+        const content = readMessageContent(message);
+        const text = content.body;
         const contact = value.contacts?.find((item) => item.wa_id === from);
 
         if (!from || !text) continue;
@@ -101,6 +195,10 @@ export function parseMetaWebhookMessages(payload: unknown): MetaWebhookMessage[]
           from,
           name: contact?.profile?.name ?? null,
           body: text,
+          type: content.type ?? null,
+          mediaId: content.mediaId ?? null,
+          fileName: content.fileName ?? null,
+          mimeType: content.mimeType ?? null,
           messageId: message.id ?? null
         });
       }
