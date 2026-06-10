@@ -84,6 +84,7 @@ export function mapConversation(conversation: ConversationWithRelations) {
           body: lastMessage.body,
           createdAt: lastMessage.createdAt,
           type: lastMessage.type,
+          mediaUrl: lastMessage.mediaUrl,
           fileName: lastMessage.fileName,
           mimeType: lastMessage.mimeType,
           templateName: lastMessage.templateName,

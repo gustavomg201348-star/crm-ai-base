@@ -238,6 +238,7 @@ type ConversationRow = {
     body: string;
     createdAt: string;
     type?: string;
+    mediaUrl?: string | null;
     fileName?: string | null;
     mimeType?: string | null;
     templateName?: string | null;
@@ -5198,6 +5199,13 @@ function Atendimento({
                   hasMediaId={Boolean(item.mediaId)}
                   side={item.direction === "outbound" ? "right" : "left"}
                 />
+              ) : item.type === "template" ? (
+                <TemplateMessage
+                  body={item.body}
+                  mediaUrl={item.mediaUrl}
+                  templateName={item.templateName}
+                  side={item.direction === "outbound" ? "right" : "left"}
+                />
               ) : (
                 item.body
               )}
@@ -6151,6 +6159,73 @@ function AudioMessage({
           Baixar audio
         </a>
       )}
+    </div>
+  );
+}
+
+function resolveTemplateImageForDisplay({
+  mediaUrl,
+  templateName
+}: {
+  mediaUrl?: string | null;
+  templateName?: string | null;
+}) {
+  if (mediaUrl) return mediaUrl;
+  if (templateName === "inss_utilidade_01") return "/templates/inss_utilidade_01.jpg";
+  return null;
+}
+
+function TemplateMessage({
+  body,
+  mediaUrl,
+  templateName,
+  side
+}: {
+  body: string;
+  mediaUrl?: string | null;
+  templateName?: string | null;
+  side: "left" | "right";
+}) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const imageUrl = resolveTemplateImageForDisplay({ mediaUrl, templateName });
+  const cleanBody = imageUrl
+    ? body
+        .replace(/\[Imagem no cabecalho\]\s*/gi, "")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim()
+    : body;
+
+  return (
+    <div className="space-y-3">
+      {imageUrl && !imageFailed && (
+        <div className="overflow-hidden rounded-2xl border border-white/20 bg-slate-100">
+          <NextImage
+            src={imageUrl}
+            alt={`Imagem do template ${templateName ?? "WhatsApp"}`}
+            width={1024}
+            height={1024}
+            className="h-auto w-full object-cover"
+            unoptimized
+            onError={() => setImageFailed(true)}
+          />
+        </div>
+      )}
+      {imageUrl && imageFailed && (
+        <a
+          className={clsx(
+            "inline-flex rounded-full px-3 py-1.5 text-xs font-bold",
+            side === "right"
+              ? "bg-white/15 text-white hover:bg-white/20"
+              : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+          )}
+          href={imageUrl}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Abrir imagem do template
+        </a>
+      )}
+      <div>{cleanBody}</div>
     </div>
   );
 }

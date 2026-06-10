@@ -59,6 +59,7 @@ export async function saveOutboundMessage({
   body,
   type = "text",
   mediaId,
+  mediaUrl,
   fileName,
   mimeType,
   templateName,
@@ -73,6 +74,7 @@ export async function saveOutboundMessage({
   body: string;
   type?: string;
   mediaId?: string | null;
+  mediaUrl?: string | null;
   fileName?: string | null;
   mimeType?: string | null;
   templateName?: string | null;
@@ -96,6 +98,7 @@ export async function saveOutboundMessage({
         body,
         type,
         mediaId,
+        mediaUrl,
         fileName,
         mimeType,
         templateName,

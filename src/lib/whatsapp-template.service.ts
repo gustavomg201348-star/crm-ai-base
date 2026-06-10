@@ -227,6 +227,7 @@ export async function sendConversationTemplate({
     throw new Error("Preencha todas as variaveis obrigatorias do template.");
   }
 
+  const headerImageUrl = resolveTemplateHeaderImageUrl(template);
   const metaResponse = await sendMetaTemplateMessage({
     phoneNumberId: channel.phoneNumberId!,
     accessToken: channel.accessToken!,
@@ -235,7 +236,7 @@ export async function sendConversationTemplate({
     language,
     variables: cleanVariables,
     template,
-    headerImageUrl: resolveTemplateHeaderImageUrl(template)
+    headerImageUrl
   });
   const historyBody = renderTemplateHistoryBody({
     template,
@@ -248,6 +249,8 @@ export async function sendConversationTemplate({
     userId,
     body: historyBody,
     type: "template",
+    mediaUrl: headerImageUrl,
+    mimeType: headerImageUrl ? "image/jpeg" : null,
     templateName,
     templateLanguage: language,
     templateVariables: JSON.stringify({

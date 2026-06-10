@@ -276,6 +276,9 @@ export async function processCampaign(campaignId: string) {
           phone: recipient.contact.phone
         })
       );
+      const templateHeaderImageUrl = campaignTemplate
+        ? resolveTemplateHeaderImageUrl(campaignTemplate)
+        : null;
       const metaResponse =
         campaign.messageType === "TEMPLATE" &&
         campaign.templateName &&
@@ -288,9 +291,7 @@ export async function processCampaign(campaignId: string) {
               language: campaign.templateLanguage,
               variables: templateVariables,
               template: campaignTemplate,
-              headerImageUrl: campaignTemplate
-                ? resolveTemplateHeaderImageUrl(campaignTemplate)
-                : null
+              headerImageUrl: templateHeaderImageUrl
             })
           : mediaId
             ? await sendMetaImageMessage({
@@ -331,6 +332,8 @@ export async function processCampaign(campaignId: string) {
             direction: "outbound",
             body: historyBody,
             type: campaign.messageType === "TEMPLATE" ? "template" : "text",
+            mediaUrl: templateHeaderImageUrl,
+            mimeType: templateHeaderImageUrl ? "image/jpeg" : null,
             templateName: campaign.templateName,
             templateLanguage: campaign.templateLanguage,
             templateVariables: campaignTemplate
