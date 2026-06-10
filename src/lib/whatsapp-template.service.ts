@@ -43,6 +43,33 @@ function normalizeTemplateEnvName(templateName: string) {
     .replace(/^_+|_+$/g, "");
 }
 
+function getPublicBaseUrl() {
+  const configured =
+    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+    process.env.APP_URL?.trim() ||
+    process.env.PUBLIC_APP_URL?.trim();
+
+  if (configured) return configured.replace(/\/+$/g, "");
+
+  const railwayDomain = process.env.RAILWAY_PUBLIC_DOMAIN?.trim();
+  if (railwayDomain) return `https://${railwayDomain.replace(/^https?:\/\//i, "").replace(/\/+$/g, "")}`;
+
+  if (process.env.NODE_ENV === "production") {
+    return "https://crm-ai-base-production.up.railway.app";
+  }
+
+  return null;
+}
+
+function getBundledTemplateHeaderImageUrl(templateName: string) {
+  if (normalizeTemplateEnvName(templateName) !== "INSS_UTILIDADE_01") return null;
+
+  const baseUrl = getPublicBaseUrl();
+  if (!baseUrl?.startsWith("https://")) return null;
+
+  return `${baseUrl}/templates/inss_utilidade_01.jpg`;
+}
+
 export function resolveTemplateHeaderImageUrl(template: MetaTemplate) {
   if (!templateHasHeaderImage(template)) return null;
 
@@ -52,6 +79,7 @@ export function resolveTemplateHeaderImageUrl(template: MetaTemplate) {
   const url =
     process.env[specificKey]?.trim() ??
     process.env.WHATSAPP_TEMPLATE_HEADER_IMAGE_URL?.trim() ??
+    getBundledTemplateHeaderImageUrl(template.name) ??
     "";
 
   if (!url) {
