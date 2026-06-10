@@ -5214,7 +5214,7 @@ function Atendimento({
           <div ref={chatEndRef} />
         </div>
 
-        <form className="shrink-0 border-t border-line/70 bg-white p-3" onSubmit={handleSubmit}>
+        <form className="shrink-0 border-t border-slate-200 bg-white p-3 shadow-[0_-10px_28px_rgba(15,23,42,0.06)]" onSubmit={handleSubmit}>
           {composerError && (
             <div className="mb-3 rounded-2xl border border-rose-100 bg-rose-50 px-3 py-2 text-sm text-rose-700">
               {composerError}
@@ -5359,7 +5359,7 @@ function Atendimento({
             onChange={(event) => handleFileChange(event.target.files?.[0])}
           />
 
-          <div className="relative flex items-center gap-2 rounded-2xl border border-line bg-slate-50 px-3 py-2 focus-within:border-blue-200 focus-within:bg-white focus-within:shadow-soft">
+          <div className="relative flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-3 py-2 shadow-[0_1px_0_rgba(15,23,42,0.04),0_8px_22px_rgba(15,23,42,0.07)] transition focus-within:border-brand/60 focus-within:shadow-[0_1px_0_rgba(37,99,235,0.08),0_10px_28px_rgba(37,99,235,0.10)] focus-within:ring-4 focus-within:ring-blue-50">
             <ComposerButton title="Anexar arquivo" disabled={!selectedConversation} onClick={() => fileInputRef.current?.click()}>
               <Paperclip className="h-4 w-4" />
             </ComposerButton>
@@ -5385,14 +5385,14 @@ function Atendimento({
 
             <input
               ref={inputRef}
-              className="w-full bg-transparent text-sm outline-none"
+              className="w-full bg-transparent text-sm font-medium text-slate-800 outline-none placeholder:text-slate-500 disabled:text-slate-400 disabled:placeholder:text-slate-400"
               disabled={!selectedConversation}
               placeholder="Digite uma mensagem..."
               value={message}
               onChange={(event) => setMessage(event.target.value)}
             />
             <button
-              className="grid h-10 w-10 place-items-center rounded-full bg-brand text-white shadow-soft disabled:opacity-40"
+              className="grid h-10 w-10 place-items-center rounded-full bg-brand text-white shadow-[0_8px_18px_rgba(37,99,235,0.25)] transition hover:bg-blue-700 active:scale-95 disabled:bg-slate-300 disabled:opacity-70 disabled:shadow-none"
               disabled={!selectedConversation || !message.trim()}
             >
               <Send className="h-4 w-4" />
@@ -6245,11 +6245,14 @@ function ComposerButton({
     <button
       type="button"
       title={title}
-      className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-slate-400 hover:bg-white hover:text-brand disabled:cursor-not-allowed disabled:opacity-40"
+      className="group relative grid h-9 w-9 shrink-0 place-items-center rounded-full text-slate-600 transition hover:bg-blue-50 hover:text-brand active:scale-95 disabled:cursor-not-allowed disabled:text-slate-300 disabled:opacity-60 disabled:hover:bg-transparent"
       disabled={disabled}
       onClick={onClick}
     >
       {children}
+      <span className="pointer-events-none absolute bottom-11 left-1/2 z-30 -translate-x-1/2 whitespace-nowrap rounded-lg bg-slate-900 px-2 py-1 text-[11px] font-semibold text-white opacity-0 shadow-lg transition group-hover:opacity-100 group-disabled:hidden">
+        {title}
+      </span>
     </button>
   );
 }
