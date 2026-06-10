@@ -14,9 +14,49 @@ export function extractBodyText(template: MetaTemplate) {
   return template.components?.find((component) => component.type === "BODY")?.text ?? "";
 }
 
+export function extractTemplateButtons(template: MetaTemplate) {
+  return (
+    template.components
+      ?.find((component) => component.type === "BUTTONS")
+      ?.buttons?.map((button) => ({
+        type: button.type ?? "BUTTON",
+        text: button.text ?? "",
+        url: button.url ?? null,
+        phoneNumber: button.phone_number ?? null
+      }))
+      .filter((button) => button.text) ?? []
+  );
+}
+
 export function extractVariableCount(text: string) {
   const matches = text.match(/\{\{\d+\}\}/g) ?? [];
   return new Set(matches).size;
+}
+
+export function renderTemplateBody(template: MetaTemplate, variables: string[]) {
+  return extractBodyText(template).replace(/\{\{(\d+)\}\}/g, (_, index) => {
+    return variables[Number(index) - 1] ?? "";
+  });
+}
+
+export function renderTemplateHistoryBody({
+  template,
+  variables
+}: {
+  template: MetaTemplate;
+  variables: string[];
+}) {
+  const body = renderTemplateBody(template, variables).trim();
+  const buttons = extractTemplateButtons(template);
+  const buttonLines = buttons.map((button) => `Botao: ${button.text}`);
+
+  return [
+    "[Template enviado]",
+    body || `[Template: ${template.name}]`,
+    buttonLines.length ? buttonLines.join("\n") : ""
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 export function mapApprovedTemplate(template: MetaTemplate) {
@@ -126,18 +166,23 @@ export async function sendConversationTemplate({
     language,
     variables: cleanVariables
   });
-  const preview = extractBodyText(template).replace(/\{\{(\d+)\}\}/g, (_, index) => {
-    return cleanVariables[Number(index) - 1] ?? "";
+  const historyBody = renderTemplateHistoryBody({
+    template,
+    variables: cleanVariables
   });
+  const buttons = extractTemplateButtons(template);
 
   return saveOutboundMessage({
     conversationId,
     userId,
-    body: preview || `[Template: ${templateName}]`,
+    body: historyBody,
     type: "template",
     templateName,
     templateLanguage: language,
-    templateVariables: JSON.stringify(cleanVariables),
+    templateVariables: JSON.stringify({
+      variables: cleanVariables,
+      buttons
+    }),
     providerMessageId: readMetaMessageId(metaResponse)
   });
 }

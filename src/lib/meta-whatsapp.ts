@@ -454,6 +454,12 @@ export type MetaTemplate = {
     type?: string;
     format?: string;
     text?: string;
+    buttons?: Array<{
+      type?: string;
+      text?: string;
+      url?: string;
+      phone_number?: string;
+    }>;
   }>;
 };
 

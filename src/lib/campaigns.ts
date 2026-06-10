@@ -3,12 +3,18 @@ import { createActivity } from "@/lib/activities";
 import { renderCampaignMessage } from "@/lib/contact-import.service";
 import { prisma } from "@/lib/db";
 import {
+  getMetaApprovedTemplates,
   readMetaMessageId,
   sendMetaImageMessage,
   sendMetaTemplateMessage,
   sendMetaTextMessage,
-  uploadMetaMedia
+  uploadMetaMedia,
+  type MetaTemplate
 } from "@/lib/meta-whatsapp";
+import {
+  extractTemplateButtons,
+  renderTemplateHistoryBody
+} from "@/lib/whatsapp-template.service";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -198,6 +204,7 @@ export async function processCampaign(campaignId: string) {
   });
 
   let mediaId: string | null = null;
+  let campaignTemplate: MetaTemplate | null = null;
   if (campaign.imagePath && campaign.imageMime && campaign.imageName) {
     const { readFile } = await import("node:fs/promises");
     const bytes = await readFile(campaign.imagePath);
@@ -209,6 +216,29 @@ export async function processCampaign(campaignId: string) {
       bytes
     });
     mediaId = uploaded.id;
+  }
+
+  if (
+    campaign.messageType === "TEMPLATE" &&
+    campaign.templateName &&
+    campaign.templateLanguage
+  ) {
+    if (!campaign.channel.wabaId) throw new Error("Canal Meta sem WABA ID.");
+
+    const templates = await getMetaApprovedTemplates({
+      wabaId: campaign.channel.wabaId,
+      accessToken: campaign.channel.accessToken
+    });
+    campaignTemplate =
+      templates.find(
+        (template) =>
+          template.name === campaign.templateName &&
+          template.language === campaign.templateLanguage
+      ) ?? null;
+
+    if (!campaignTemplate) {
+      throw new Error("Template aprovado nao encontrado para o disparo.");
+    }
   }
 
   for (const recipient of campaign.recipients) {
@@ -272,9 +302,14 @@ export async function processCampaign(campaignId: string) {
                 body: personalizedMessage
               });
       const providerMessageId = readMetaMessageId(metaResponse);
-      const historyBody = campaign.imageName
-        ? `[Imagem: ${campaign.imageName}] ${personalizedMessage}`.trim()
-        : personalizedMessage;
+      const historyBody = campaignTemplate
+        ? renderTemplateHistoryBody({
+            template: campaignTemplate,
+            variables: templateVariables
+          })
+        : campaign.imageName
+          ? `[Imagem: ${campaign.imageName}] ${personalizedMessage}`.trim()
+          : personalizedMessage;
 
       await prisma.$transaction(async (tx) => {
         const conversation = await findOrCreateCampaignConversation({
@@ -293,7 +328,12 @@ export async function processCampaign(campaignId: string) {
             type: campaign.messageType === "TEMPLATE" ? "template" : "text",
             templateName: campaign.templateName,
             templateLanguage: campaign.templateLanguage,
-            templateVariables: campaign.templateVariables,
+            templateVariables: campaignTemplate
+              ? JSON.stringify({
+                  variables: templateVariables,
+                  buttons: extractTemplateButtons(campaignTemplate)
+                })
+              : campaign.templateVariables,
             providerMessageId
           }
         });
