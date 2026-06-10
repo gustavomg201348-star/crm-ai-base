@@ -5169,7 +5169,17 @@ function Atendimento({
               readAt={item.readAt}
               timestamp={formatRelativeDate(item.createdAt)}
             >
-              {item.body}
+              {item.type === "audio" || item.mimeType?.startsWith("audio/") ? (
+                <AudioMessage
+                  messageId={item.id}
+                  body={item.body}
+                  mediaUrl={item.mediaUrl}
+                  hasMediaId={Boolean(item.mediaId)}
+                  side={item.direction === "outbound" ? "right" : "left"}
+                />
+              ) : (
+                item.body
+              )}
             </ChatBubble>
           ))}
           <div ref={chatEndRef} />
@@ -6035,6 +6045,68 @@ function ChatBubble({
 }
 
 const commonEmojis = ["😀", "🙂", "😉", "👍", "🙏", "✅", "🔥", "🚀", "📌", "💬", "📄", "⏰", "❤️", "👏", "🤝", "💰"];
+
+function AudioMessage({
+  messageId,
+  body,
+  mediaUrl,
+  hasMediaId,
+  side
+}: {
+  messageId: string;
+  body: string;
+  mediaUrl?: string | null;
+  hasMediaId: boolean;
+  side: "left" | "right";
+}) {
+  const [failed, setFailed] = useState(false);
+  const sourceUrl = mediaUrl || (hasMediaId ? `/api/messages/${messageId}/media` : "");
+  const label = body && !body.startsWith("[Audio:") ? body : "Audio";
+
+  return (
+    <div className="w-full min-w-[220px] max-w-sm">
+      <div className="mb-2 flex items-center gap-2 text-xs font-bold">
+        <span
+          className={clsx(
+            "grid h-7 w-7 place-items-center rounded-full",
+            side === "right" ? "bg-white/15 text-white" : "bg-blue-50 text-brand"
+          )}
+        >
+          <Mic className="h-3.5 w-3.5" />
+        </span>
+        <span className={side === "right" ? "text-white" : "text-slate-700"}>
+          {label}
+        </span>
+      </div>
+
+      {sourceUrl && !failed ? (
+        <audio
+          className={clsx(
+            "h-9 w-full min-w-0 rounded-full",
+            side === "right" && "[&::-webkit-media-controls-panel]:bg-blue-50"
+          )}
+          controls
+          preload="metadata"
+          src={sourceUrl}
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <a
+          className={clsx(
+            "inline-flex rounded-full px-3 py-1.5 text-xs font-bold",
+            side === "right"
+              ? "bg-white/15 text-white hover:bg-white/20"
+              : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+          )}
+          href={sourceUrl || undefined}
+          download
+        >
+          Baixar audio
+        </a>
+      )}
+    </div>
+  );
+}
 
 function ComposerButton({
   title,
