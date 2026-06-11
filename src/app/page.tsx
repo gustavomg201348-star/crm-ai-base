@@ -277,6 +277,39 @@ const emptyConversationStatusCounts: ConversationStatusCounts = {
   RESOLVED: 0
 };
 
+const quickReplyTemplates = [
+  {
+    id: "cpf",
+    title: "Pedir CPF",
+    body: "Pode me informar seu CPF para eu consultar sua margem com seguranca?"
+  },
+  {
+    id: "authorization",
+    title: "Pedir autorizacao",
+    body: "Para seguir com a consulta, preciso da sua autorizacao para verificar as opcoes disponiveis para voce."
+  },
+  {
+    id: "document",
+    title: "Pedir comprovante",
+    body: "Pode me enviar um comprovante ou documento atualizado para eu conferir os dados da proposta?"
+  },
+  {
+    id: "simulation",
+    title: "Explicar simulacao CLT/INSS",
+    body: "Vou fazer uma simulacao sem compromisso para verificar valor liberado, prazo e parcela. Assim que tiver o resultado, te envio as melhores opcoes."
+  },
+  {
+    id: "no-margin",
+    title: "Retorno sem margem",
+    body: "No momento nao apareceu margem disponivel para essa consulta. Vou deixar seu atendimento salvo e te aviso se surgir uma nova possibilidade."
+  },
+  {
+    id: "approved",
+    title: "Proposta aprovada",
+    body: "Sua proposta foi aprovada. Vou te orientar nos proximos passos para concluir com seguranca."
+  }
+];
+
 type WhatsAppTemplateRow = {
   id: string;
   name: string;
@@ -4769,6 +4802,7 @@ function Atendimento({
   const [composerError, setComposerError] = useState("");
   const [sendingAttachment, setSendingAttachment] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [quickRepliesOpen, setQuickRepliesOpen] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [templates, setTemplates] = useState<WhatsAppTemplateRow[]>([]);
@@ -4829,6 +4863,17 @@ function Atendimento({
 
   function insertEmoji(emoji: string) {
     setMessage((current) => `${current}${emoji}`);
+    setEmojiOpen(false);
+    setQuickRepliesOpen(false);
+    window.setTimeout(() => inputRef.current?.focus(), 0);
+  }
+
+  function insertQuickReply(body: string) {
+    setMessage((current) => {
+      const trimmed = current.trim();
+      return trimmed ? `${trimmed}\n${body}` : body;
+    });
+    setQuickRepliesOpen(false);
     setEmojiOpen(false);
     window.setTimeout(() => inputRef.current?.focus(), 0);
   }
@@ -4947,6 +4992,8 @@ function Atendimento({
   async function openTemplates() {
     if (!selectedConversation) return;
     setTemplatesOpen((current) => !current);
+    setQuickRepliesOpen(false);
+    setEmojiOpen(false);
     if (templates.length) return;
     setTemplatesLoading(true);
     setComposerError("");
@@ -5405,6 +5452,17 @@ function Atendimento({
             <ComposerButton title="Templates Meta" disabled={!selectedConversation} onClick={() => void openTemplates()}>
               <FileText className="h-4 w-4" />
             </ComposerButton>
+            <ComposerButton
+              title="Respostas rapidas"
+              disabled={!selectedConversation}
+              onClick={() => {
+                setQuickRepliesOpen((current) => !current);
+                setEmojiOpen(false);
+                setTemplatesOpen(false);
+              }}
+            >
+              <MessageSquareText className="h-4 w-4" />
+            </ComposerButton>
 
             {emojiOpen && (
               <div className="absolute bottom-14 left-12 z-20 grid grid-cols-8 gap-1 rounded-2xl border border-line bg-white p-2 shadow-lift">
@@ -5413,6 +5471,39 @@ function Atendimento({
                     {emoji}
                   </button>
                 ))}
+              </div>
+            )}
+
+            {quickRepliesOpen && (
+              <div className="absolute bottom-14 left-2 z-30 w-[min(520px,calc(100vw-2rem))] min-w-[320px] rounded-2xl border border-line bg-white p-3 shadow-lift">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-black text-slate-900">Respostas rapidas</p>
+                    <p className="text-xs text-slate-500">Clique para inserir no campo e revisar antes de enviar.</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="rounded-full px-2 py-1 text-xs font-bold text-slate-500 hover:bg-slate-100"
+                    onClick={() => setQuickRepliesOpen(false)}
+                  >
+                    Fechar
+                  </button>
+                </div>
+                <div className="grid max-h-72 gap-2 overflow-y-auto pr-1 md:grid-cols-2">
+                  {quickReplyTemplates.map((reply) => (
+                    <button
+                      key={reply.id}
+                      type="button"
+                      className="rounded-2xl border border-slate-200 bg-white p-3 text-left transition hover:border-blue-200 hover:bg-blue-50"
+                      onClick={() => insertQuickReply(reply.body)}
+                    >
+                      <span className="text-xs font-black text-slate-900">{reply.title}</span>
+                      <span className="mt-1 block line-clamp-2 text-xs leading-5 text-slate-500">
+                        {reply.body}
+                      </span>
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
 
