@@ -1440,7 +1440,6 @@ export default function Home() {
 
   const loadRetirementLeads = useCallback(async (filters = retirementFilters) => {
     setRetirementLoading(true);
-    setAppError("");
 
     const params = new URLSearchParams();
     Object.entries(filters).forEach(([key, value]) => {
@@ -1467,7 +1466,7 @@ export default function Home() {
         return data.leads.find((lead) => lead.id === current.id) ?? current;
       });
     } else {
-      setAppError("Nao foi possivel carregar recem-aposentados.");
+      console.warn("Nao foi possivel carregar recem-aposentados.");
     }
 
     setRetirementLoading(false);
