@@ -1976,8 +1976,14 @@ export default function Home() {
 
     const data = (await response.json()) as { conversation: ConversationRow };
     setActive("atendimento");
-    setConversationFilters({ search: "", status: "OPEN", tagIds: [], assignedTo: "default" });
+    setConversationFilters({
+      search: "",
+      status: data.conversation.status,
+      tagIds: [],
+      assignedTo: "default"
+    });
     mergeConversation(data.conversation, "new-conversation");
+    setSelectedConversation(data.conversation);
     setNewConversationOpen(false);
     setNewConversationForm({ search: "", contactId: "", name: "", phone: "", cpf: "" });
     setNewConversationSaving(false);
