@@ -267,6 +267,7 @@ type ConversationRow = {
 };
 
 type ConversationStatusCounts = Record<ConversationRow["status"], number>;
+type ConversationMessageRow = ConversationRow["messages"][number];
 
 const emptyConversationStatusCounts: ConversationStatusCounts = {
   OPEN: 0,
@@ -5188,44 +5189,61 @@ function Atendimento({
               </div>
             </div>
           )}
-          {selectedConversation?.messages.map((item) => (
-            <ChatBubble
-              key={item.id}
-              side={item.direction === "outbound" ? "right" : "left"}
-              status={item.status}
-              readAt={item.readAt}
-              timestamp={formatRelativeDate(item.createdAt)}
-            >
-              {item.type === "audio" || item.mimeType?.startsWith("audio/") ? (
-                <AudioMessage
-                  messageId={item.id}
-                  body={item.body}
-                  mediaUrl={item.mediaUrl}
-                  hasMediaId={Boolean(item.mediaId)}
-                  side={item.direction === "outbound" ? "right" : "left"}
-                />
-              ) : item.type === "document" || isDocumentMimeType(item.mimeType) ? (
-                <DocumentMessage
-                  messageId={item.id}
-                  body={item.body}
-                  fileName={item.fileName}
-                  mimeType={item.mimeType}
-                  mediaUrl={item.mediaUrl}
-                  hasMediaId={Boolean(item.mediaId)}
-                  side={item.direction === "outbound" ? "right" : "left"}
-                />
-              ) : item.type === "template" ? (
-                <TemplateMessage
-                  body={item.body}
-                  mediaUrl={item.mediaUrl}
-                  templateName={item.templateName}
-                  side={item.direction === "outbound" ? "right" : "left"}
-                />
-              ) : (
-                item.body
-              )}
-            </ChatBubble>
-          ))}
+          {selectedConversation?.messages.map((item, index, messages) => {
+            const side = item.direction === "outbound" ? "right" : "left";
+            const timelineEvent = getMessageTimelineEvent(item);
+            const previousMessage = messages[index - 1] ?? null;
+
+            return (
+              <div key={item.id} className="space-y-3">
+                {shouldShowTimelineDateSeparator(item, previousMessage) && (
+                  <TimelineDateDivider date={item.createdAt} />
+                )}
+                {timelineEvent && (
+                  <TimelineEventMarker
+                    label={timelineEvent.label}
+                    detail={timelineEvent.detail}
+                    tone={timelineEvent.tone}
+                  />
+                )}
+                <ChatBubble
+                  side={side}
+                  status={item.status}
+                  readAt={item.readAt}
+                  timestamp={formatRelativeDate(item.createdAt)}
+                >
+                  {item.type === "audio" || item.mimeType?.startsWith("audio/") ? (
+                    <AudioMessage
+                      messageId={item.id}
+                      body={item.body}
+                      mediaUrl={item.mediaUrl}
+                      hasMediaId={Boolean(item.mediaId)}
+                      side={side}
+                    />
+                  ) : item.type === "document" || isDocumentMimeType(item.mimeType) ? (
+                    <DocumentMessage
+                      messageId={item.id}
+                      body={item.body}
+                      fileName={item.fileName}
+                      mimeType={item.mimeType}
+                      mediaUrl={item.mediaUrl}
+                      hasMediaId={Boolean(item.mediaId)}
+                      side={side}
+                    />
+                  ) : item.type === "template" ? (
+                    <TemplateMessage
+                      body={item.body}
+                      mediaUrl={item.mediaUrl}
+                      templateName={item.templateName}
+                      side={side}
+                    />
+                  ) : (
+                    item.body
+                  )}
+                </ChatBubble>
+              </div>
+            );
+          })}
           <div ref={chatEndRef} />
         </div>
 
@@ -6018,6 +6036,163 @@ function ConversationList({
         )}
       </div>
     </section>
+  );
+}
+
+type TimelineEventTone = "template" | "interaction" | "media" | "error";
+
+function isSameLocalDay(first: string, second: string) {
+  const firstDate = new Date(first);
+  const secondDate = new Date(second);
+
+  return (
+    firstDate.getFullYear() === secondDate.getFullYear() &&
+    firstDate.getMonth() === secondDate.getMonth() &&
+    firstDate.getDate() === secondDate.getDate()
+  );
+}
+
+function shouldShowTimelineDateSeparator(
+  message: ConversationMessageRow,
+  previousMessage: ConversationMessageRow | null
+) {
+  if (!previousMessage) return true;
+  return !isSameLocalDay(message.createdAt, previousMessage.createdAt);
+}
+
+function formatTimelineDate(value: string) {
+  const date = new Date(value);
+  const now = new Date();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+
+  if (isSameLocalDay(value, now.toISOString())) return "Hoje";
+  if (isSameLocalDay(value, yesterday.toISOString())) return "Ontem";
+
+  return date.toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric"
+  });
+}
+
+function cleanTimelineDetail(value?: string | null) {
+  if (!value) return null;
+  return value
+    .replace(/^Resposta interativa:\s*/i, "")
+    .replace(/\[Imagem no cabecalho\]/gi, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 90);
+}
+
+function getMessageTimelineEvent(message: ConversationMessageRow) {
+  const type = message.type?.toLowerCase() ?? "text";
+  const status = message.status?.toLowerCase() ?? "";
+
+  if (message.direction === "outbound" && status === "failed") {
+    return {
+      label: "Falha no envio",
+      detail: cleanTimelineDetail(message.body),
+      tone: "error" as TimelineEventTone
+    };
+  }
+
+  if (type === "template") {
+    return {
+      label: "Template enviado",
+      detail: message.templateName ? `Modelo: ${message.templateName}` : "Mensagem aprovada pela Meta",
+      tone: "template" as TimelineEventTone
+    };
+  }
+
+  if (type === "button" || type === "interactive") {
+    return {
+      label: "Cliente respondeu botao",
+      detail: cleanTimelineDetail(message.body),
+      tone: "interaction" as TimelineEventTone
+    };
+  }
+
+  if (type === "audio" || message.mimeType?.startsWith("audio/")) {
+    return {
+      label: message.direction === "outbound" ? "Audio enviado" : "Audio recebido",
+      detail: null,
+      tone: "media" as TimelineEventTone
+    };
+  }
+
+  if (type === "document" || isDocumentMimeType(message.mimeType)) {
+    return {
+      label: message.direction === "outbound" ? "Documento enviado" : "Documento recebido",
+      detail: resolveDocumentName({
+        fileName: message.fileName,
+        body: message.body,
+        mimeType: message.mimeType
+      }),
+      tone: "media" as TimelineEventTone
+    };
+  }
+
+  if (type === "image" || message.mimeType?.startsWith("image/")) {
+    return {
+      label: message.direction === "outbound" ? "Imagem enviada" : "Imagem recebida",
+      detail: cleanTimelineDetail(message.body),
+      tone: "media" as TimelineEventTone
+    };
+  }
+
+  return null;
+}
+
+function TimelineDateDivider({ date }: { date: string }) {
+  return (
+    <div className="flex items-center justify-center">
+      <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-slate-500 shadow-sm">
+        {formatTimelineDate(date)}
+      </span>
+    </div>
+  );
+}
+
+function TimelineEventMarker({
+  label,
+  detail,
+  tone
+}: {
+  label: string;
+  detail?: string | null;
+  tone: TimelineEventTone;
+}) {
+  const Icon =
+    tone === "template"
+      ? Sparkles
+      : tone === "interaction"
+        ? MessageSquareText
+        : tone === "error"
+          ? AlertTriangle
+          : FileText;
+
+  return (
+    <div className="flex justify-center">
+      <div
+        className={clsx(
+          "inline-flex max-w-[86%] items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-bold shadow-sm",
+          tone === "template" && "border-blue-100 bg-blue-50 text-blue-700",
+          tone === "interaction" && "border-amber-100 bg-amber-50 text-amber-700",
+          tone === "media" && "border-slate-200 bg-white text-slate-600",
+          tone === "error" && "border-rose-100 bg-rose-50 text-rose-700"
+        )}
+      >
+        <Icon className="h-3.5 w-3.5 shrink-0" />
+        <span className="shrink-0">{label}</span>
+        {detail && (
+          <span className="min-w-0 truncate border-l border-current/20 pl-2 font-semibold opacity-80">
+            {detail}
+          </span>
+        )}
+      </div>
+    </div>
   );
 }
 
