@@ -112,11 +112,16 @@ export async function GET(request: NextRequest, context: RouteContext) {
       );
     }
 
+    const fileName = (message.fileName ?? `${message.id}.bin`).replace(/["\r\n]/g, "");
+    const disposition = request.nextUrl.searchParams.get("download") === "1"
+      ? "attachment"
+      : "inline";
+
     return new Response(mediaResponse.body, {
       headers: {
         "Content-Type": message.mimeType ?? media.mimeType ?? "application/octet-stream",
         "Cache-Control": "private, max-age=300",
-        "Content-Disposition": `inline; filename="${message.fileName ?? `${message.id}.ogg`}"`
+        "Content-Disposition": `${disposition}; filename="${fileName}"`
       }
     });
   } catch (error) {

@@ -5205,6 +5205,16 @@ function Atendimento({
                   hasMediaId={Boolean(item.mediaId)}
                   side={item.direction === "outbound" ? "right" : "left"}
                 />
+              ) : item.type === "document" || isDocumentMimeType(item.mimeType) ? (
+                <DocumentMessage
+                  messageId={item.id}
+                  body={item.body}
+                  fileName={item.fileName}
+                  mimeType={item.mimeType}
+                  mediaUrl={item.mediaUrl}
+                  hasMediaId={Boolean(item.mediaId)}
+                  side={item.direction === "outbound" ? "right" : "left"}
+                />
               ) : item.type === "template" ? (
                 <TemplateMessage
                   body={item.body}
@@ -6165,6 +6175,157 @@ function AudioMessage({
           Baixar audio
         </a>
       )}
+    </div>
+  );
+}
+
+function isDocumentMimeType(mimeType?: string | null) {
+  if (!mimeType) return false;
+  const normalized = mimeType.toLowerCase();
+  return (
+    normalized === "application/pdf" ||
+    normalized.includes("word") ||
+    normalized.includes("spreadsheet") ||
+    normalized.includes("excel") ||
+    normalized.includes("powerpoint") ||
+    normalized === "application/msword" ||
+    normalized === "text/plain"
+  );
+}
+
+function resolveDocumentName({
+  fileName,
+  body,
+  mimeType
+}: {
+  fileName?: string | null;
+  body: string;
+  mimeType?: string | null;
+}) {
+  if (fileName?.trim()) return fileName.trim();
+
+  const fromBody = body.match(/Documento recebido:\s*(.+)$/i)?.[1]?.trim();
+  if (fromBody) return fromBody;
+
+  if (mimeType === "application/pdf") return "documento.pdf";
+  return "documento";
+}
+
+function getDocumentLabel(mimeType?: string | null) {
+  const normalized = mimeType?.toLowerCase() ?? "";
+  if (normalized === "application/pdf") return "PDF";
+  if (normalized.includes("word") || normalized === "application/msword") return "DOC";
+  if (normalized.includes("spreadsheet") || normalized.includes("excel")) return "XLS";
+  if (normalized.includes("powerpoint") || normalized.includes("presentation")) return "PPT";
+  return "ARQ";
+}
+
+function DocumentMessage({
+  messageId,
+  body,
+  fileName,
+  mimeType,
+  mediaUrl,
+  hasMediaId,
+  side
+}: {
+  messageId: string;
+  body: string;
+  fileName?: string | null;
+  mimeType?: string | null;
+  mediaUrl?: string | null;
+  hasMediaId: boolean;
+  side: "left" | "right";
+}) {
+  const sourceUrl = mediaUrl || (hasMediaId ? `/api/messages/${messageId}/media` : "");
+  const downloadUrl = mediaUrl || (hasMediaId ? `/api/messages/${messageId}/media?download=1` : "");
+  const displayName = resolveDocumentName({ fileName, body, mimeType });
+  const documentLabel = getDocumentLabel(mimeType);
+  const isPdf = mimeType?.toLowerCase() === "application/pdf" || displayName.toLowerCase().endsWith(".pdf");
+
+  return (
+    <div
+      className={clsx(
+        "w-full min-w-[240px] max-w-sm rounded-2xl border p-3",
+        side === "right"
+          ? "border-white/20 bg-white/10 text-white"
+          : "border-slate-200 bg-white text-slate-800 shadow-sm"
+      )}
+    >
+      <div className="flex items-start gap-3">
+        <span
+          className={clsx(
+            "grid h-10 w-10 shrink-0 place-items-center rounded-2xl",
+            side === "right" ? "bg-white/15 text-white" : "bg-rose-50 text-rose-600"
+          )}
+        >
+          <FileText className="h-5 w-5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span
+              className={clsx(
+                "rounded-md px-1.5 py-0.5 text-[10px] font-black",
+                side === "right" ? "bg-white/15 text-white" : "bg-slate-100 text-slate-600"
+              )}
+            >
+              {documentLabel}
+            </span>
+            <span className={clsx("text-xs font-semibold", side === "right" ? "text-white/75" : "text-slate-500")}>
+              Documento
+            </span>
+          </div>
+          {sourceUrl ? (
+            <a
+              className={clsx(
+                "mt-1 block truncate text-sm font-bold underline-offset-2 hover:underline",
+                side === "right" ? "text-white" : "text-slate-900"
+              )}
+              href={sourceUrl}
+              target="_blank"
+              rel="noreferrer"
+              title={displayName}
+            >
+              {displayName}
+            </a>
+          ) : (
+            <p className="mt-1 truncate text-sm font-bold" title={displayName}>
+              {displayName}
+            </p>
+          )}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <a
+              className={clsx(
+                "inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-bold transition",
+                !sourceUrl && "pointer-events-none opacity-50",
+                side === "right"
+                  ? "bg-white text-brand hover:bg-blue-50"
+                  : "bg-brand text-white hover:bg-blue-700"
+              )}
+              href={sourceUrl || undefined}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <FileText className="h-3.5 w-3.5" />
+              {isPdf ? "Visualizar" : "Abrir"}
+            </a>
+            <a
+              className={clsx(
+                "inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-bold transition",
+                !downloadUrl && "pointer-events-none opacity-50",
+                side === "right"
+                  ? "bg-white/15 text-white hover:bg-white/20"
+                  : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+              )}
+              href={downloadUrl || undefined}
+              download={displayName}
+            >
+              <Download className="h-3.5 w-3.5" />
+              Baixar
+            </a>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
