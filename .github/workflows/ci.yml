@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    env:
+      AUTH_SECRET: ci-auth-secret-change-me
+      META_VERIFY_TOKEN: ci-meta-verify-token
+      OPENAI_API_KEY: ""
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate Prisma schemas
+        run: npm run prisma:validate
+        env:
+          DATABASE_URL: file:./dev.db
+
+      - name: Validate Prisma production schema
+        run: npx prisma validate --schema prisma/schema.postgres.prisma
+        env:
+          DATABASE_URL: postgresql://crm:password@localhost:5432/crm?schema=public
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint:ci
+
+      - name: Build
+        run: npm run build
