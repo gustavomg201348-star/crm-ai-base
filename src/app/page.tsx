@@ -5315,6 +5315,8 @@ function Atendimento({
                       body={item.body}
                       mediaUrl={item.mediaUrl}
                       templateName={item.templateName}
+                      templateLanguage={item.templateLanguage}
+                      templateVariables={item.templateVariables}
                       side={side}
                     />
                   ) : (
@@ -6647,15 +6649,20 @@ function TemplateMessage({
   body,
   mediaUrl,
   templateName,
+  templateLanguage,
+  templateVariables,
   side
 }: {
   body: string;
   mediaUrl?: string | null;
   templateName?: string | null;
+  templateLanguage?: string | null;
+  templateVariables?: string | null;
   side: "left" | "right";
 }) {
   const [imageFailed, setImageFailed] = useState(false);
   const imageUrl = resolveTemplateImageForDisplay({ mediaUrl, templateName });
+  const parsedVariables = parseTemplateVariablesForDisplay(templateVariables);
   const cleanBody = imageUrl
     ? body
         .replace(/\[Imagem no cabecalho\]\s*/gi, "")
@@ -6665,6 +6672,28 @@ function TemplateMessage({
 
   return (
     <div className="space-y-3">
+      <div
+        className={clsx(
+          "rounded-2xl px-3 py-2 text-xs",
+          side === "right"
+            ? "bg-white/10 text-white/85 ring-1 ring-white/15"
+            : "bg-slate-50 text-slate-600 ring-1 ring-slate-200"
+        )}
+      >
+        <p className={clsx("font-bold", side === "right" ? "text-white" : "text-slate-800")}>
+          {templateName ? `Template: ${templateName}` : "Template WhatsApp"}
+        </p>
+        {(templateLanguage || parsedVariables.length > 0) && (
+          <div className="mt-1 space-y-0.5">
+            {templateLanguage && <p>Idioma: {templateLanguage}</p>}
+            {parsedVariables.length > 0 && (
+              <p className="break-words">
+                Variaveis: {parsedVariables.join(", ")}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
       {imageUrl && !imageFailed && (
         <div className="overflow-hidden rounded-2xl border border-white/20 bg-slate-100">
           <NextImage
@@ -6696,6 +6725,28 @@ function TemplateMessage({
       <div>{cleanBody}</div>
     </div>
   );
+}
+
+function parseTemplateVariablesForDisplay(value?: string | null) {
+  if (!value?.trim()) return [];
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    const variables = Array.isArray(parsed)
+      ? parsed
+      : parsed &&
+          typeof parsed === "object" &&
+          "variables" in parsed &&
+          Array.isArray((parsed as { variables?: unknown }).variables)
+        ? (parsed as { variables: unknown[] }).variables
+        : [];
+
+    return variables
+      .map((item) => String(item ?? "").trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 function ComposerButton({
