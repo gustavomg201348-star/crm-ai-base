@@ -3,6 +3,7 @@ import { getSessionFromRequest } from "@/lib/auth";
 import { cltBanks } from "@/lib/clt-integration";
 import { ensureCltIntegrations, mapCltIntegration } from "@/lib/clt-settings";
 import { prisma } from "@/lib/db";
+import { requireCompanyAdmin } from "@/lib/permissions";
 
 type IntegrationPayload = {
   bankId?: string;
@@ -56,7 +57,7 @@ export async function GET(request: NextRequest) {
     const integrations = await ensureCltIntegrations(session.companyId);
 
     return NextResponse.json({
-      integrations: integrations.map(mapCltIntegration)
+      integrations: integrations.map((integration) => mapCltIntegration(integration, session.role))
     });
   } catch {
     return NextResponse.json({ integrations: fallbackIntegrations(), fallback: true });
@@ -71,6 +72,8 @@ export async function PATCH(request: NextRequest) {
     if (!session) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
+    const blocked = requireCompanyAdmin(session);
+    if (blocked) return blocked;
 
     const body = (await request.json().catch(() => null)) as IntegrationPayload | null;
     fallbackBody = body;

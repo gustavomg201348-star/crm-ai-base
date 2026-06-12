@@ -1,6 +1,8 @@
 import { cltBanks } from "@/lib/clt-integration";
 import { prisma } from "@/lib/db";
 
+type CltIntegrationViewerRole = "ADMIN" | "SUPERVISOR" | "AGENT";
+
 async function ensureCltSchema() {
   if ((process.env.DATABASE_URL || "").startsWith("file:")) {
     return;
@@ -173,7 +175,9 @@ export function mapCltIntegration(integration: {
   lastTestStatus?: string | null;
   lastTestMessage?: string | null;
   updatedAt: Date;
-}) {
+}, viewerRole: CltIntegrationViewerRole = "ADMIN") {
+  const shouldMaskSensitiveFields = viewerRole === "AGENT";
+
   return {
     id: integration.id,
     bankId: integration.bankId,
@@ -182,12 +186,12 @@ export function mapCltIntegration(integration: {
     baseUrl: integration.baseUrl,
     authType: integration.authType,
     hasApiKey: Boolean(integration.apiKey),
-    apiKeyPreview: maskSecret(integration.apiKey),
-    username: integration.username,
+    apiKeyPreview: shouldMaskSensitiveFields ? null : maskSecret(integration.apiKey),
+    username: shouldMaskSensitiveFields ? null : integration.username,
     hasPassword: Boolean(integration.password),
-    newcorbanIdentifier: integration.newcorbanIdentifier,
-    digitadorCode: integration.digitadorCode,
-    certifiedAgentCpf: integration.certifiedAgentCpf,
+    newcorbanIdentifier: shouldMaskSensitiveFields ? null : integration.newcorbanIdentifier,
+    digitadorCode: shouldMaskSensitiveFields ? null : integration.digitadorCode,
+    certifiedAgentCpf: shouldMaskSensitiveFields ? null : integration.certifiedAgentCpf,
     actingUf: integration.actingUf,
     smsStatus: integration.smsStatus,
     smsRequestedAt: integration.smsRequestedAt,

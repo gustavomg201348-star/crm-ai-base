@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { ensureCltIntegrations, mapCltIntegration } from "@/lib/clt-settings";
 import { prisma } from "@/lib/db";
+import { requireCompanyAdmin } from "@/lib/permissions";
 
 export async function POST(request: NextRequest) {
   try {
@@ -9,6 +10,8 @@ export async function POST(request: NextRequest) {
     if (!session) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
+    const blocked = requireCompanyAdmin(session);
+    if (blocked) return blocked;
 
     const body = (await request.json().catch(() => null)) as
       | { bankId?: string; username?: string; password?: string }

@@ -3,6 +3,7 @@ import { getSessionFromRequest } from "@/lib/auth";
 import { getCltBank } from "@/lib/clt-integration";
 import { ensureCltIntegrations, mapCltIntegration } from "@/lib/clt-settings";
 import { prisma } from "@/lib/db";
+import { requireCompanyAdmin } from "@/lib/permissions";
 
 export async function POST(request: NextRequest) {
   let requestedBankId = "mercantil";
@@ -12,6 +13,8 @@ export async function POST(request: NextRequest) {
     if (!session) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
+    const blocked = requireCompanyAdmin(session);
+    if (blocked) return blocked;
 
     const body = (await request.json().catch(() => null)) as { bankId?: string } | null;
     requestedBankId = body?.bankId || requestedBankId;
