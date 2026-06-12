@@ -823,9 +823,9 @@ function formatRelativeDate(value: string) {
   if (minutes < 60) return `ha ${minutes} min`;
 
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `ha ${hours} h`;
+  if (hours < 24) return `ha ${hours}h`;
 
-  return `ha ${Math.floor(hours / 24)} dia(s)`;
+  return `ha ${Math.floor(hours / 24)}d`;
 }
 
 function minutesSince(value?: string | null) {
@@ -860,6 +860,14 @@ function getConversationAttention(item: ConversationRow) {
     };
   }
 
+  if (item.status === "PENDING") {
+    return {
+      label: "Pendente",
+      tone: "amber" as const,
+      pulse: false
+    };
+  }
+
   if (waitingCustomer && lastInboundAge !== null && lastInboundAge >= 30) {
     return {
       label: lastInboundAge >= 120 ? "Resposta atrasada" : "Aguardando resposta",
@@ -873,6 +881,31 @@ function getConversationAttention(item: ConversationRow) {
     tone: "slate" as const,
     pulse: false
   };
+}
+
+function getConversationActionBadges(item: ConversationRow) {
+  const badges: Array<{ label: string; tone: "green" | "amber" | "rose" | "slate" }> = [];
+
+  if ((item.unreadCount ?? 0) > 0) {
+    badges.push({ label: "Nova mensagem", tone: "green" });
+  }
+
+  if (item.assignmentStatus === "UNASSIGNED" || !item.agent) {
+    badges.push({ label: "Sem responsavel", tone: "amber" });
+  }
+
+  if (item.status === "PENDING") {
+    badges.push({ label: "Pendente", tone: "amber" });
+  }
+
+  return badges;
+}
+
+function getConversationActionBadgeClass(tone: "green" | "amber" | "rose" | "slate") {
+  if (tone === "green") return "bg-emerald-50 text-emerald-700 ring-emerald-200";
+  if (tone === "amber") return "bg-amber-50 text-amber-700 ring-amber-200";
+  if (tone === "rose") return "bg-rose-50 text-rose-700 ring-rose-200";
+  return "bg-slate-100 text-slate-600 ring-slate-200";
 }
 
 function formatMessagePreview(value?: string | null) {
@@ -5978,6 +6011,7 @@ function ConversationList({
           const channelLine = formatConversationChannelLine(item);
           const messageTime = item.lastMessageAt ?? item.lastMessage?.createdAt;
           const attention = getConversationAttention(item);
+          const actionBadges = getConversationActionBadges(item);
           const temperatureLabel =
             temperatureLabels[item.contact.temperature as keyof typeof temperatureLabels] ??
             item.contact.temperature;
@@ -5993,6 +6027,7 @@ function ConversationList({
               data-contact-name={contactName}
               className={clsx(
                 "group relative block min-h-[112px] w-full overflow-hidden px-3.5 py-3 text-left transition-colors hover:bg-slate-50",
+                hasUnread && "ring-1 ring-inset ring-emerald-200",
                 attention.tone === "green" && "bg-emerald-50/45",
                 attention.tone === "amber" && !selected && "bg-amber-50/30",
                 attention.tone === "rose" && !selected && "bg-rose-50/30",
@@ -6070,17 +6105,18 @@ function ConversationList({
                   </p>
 
                   <div className="mt-1.5 flex max-h-10 flex-wrap items-center gap-1 overflow-hidden">
-                    {attention.tone !== "slate" && (
+                    {actionBadges.map((badge) => (
                       <span
+                        key={badge.label}
                         className={clsx(
                           "max-w-[8.5rem] truncate rounded-full px-2 py-0.5 text-[10px] font-bold leading-4 ring-1",
-                          getConversationBadgeClass(attention.label, "status")
+                          getConversationActionBadgeClass(badge.tone)
                         )}
-                        title={attention.label}
+                        title={badge.label}
                       >
-                        {attention.label}
+                        {badge.label}
                       </span>
-                    )}
+                    ))}
                     {visibleTags.map((tag) => (
                       <span
                         key={tag.id}
