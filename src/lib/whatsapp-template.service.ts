@@ -62,12 +62,17 @@ function getPublicBaseUrl() {
 }
 
 function getBundledTemplateHeaderImageUrl(templateName: string) {
-  if (normalizeTemplateEnvName(templateName) !== "INSS_UTILIDADE_01") return null;
+  const bundledImages: Record<string, string> = {
+    INSS_UTILIDADE_01: "inss_utilidade_01.jpg",
+    FGTS_UTILIDADE: "fgts_utilidade.jpg"
+  };
+  const fileName = bundledImages[normalizeTemplateEnvName(templateName)];
+  if (!fileName) return null;
 
   const baseUrl = getPublicBaseUrl();
   if (!baseUrl?.startsWith("https://")) return null;
 
-  return `${baseUrl}/templates/inss_utilidade_01.jpg`;
+  return `${baseUrl}/templates/${fileName}`;
 }
 
 export function resolveTemplateHeaderImageUrl(template: MetaTemplate) {
