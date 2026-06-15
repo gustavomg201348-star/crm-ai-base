@@ -18,6 +18,9 @@ model Company {
   createdAt     DateTime        @default(now())
   users         User[]
   contacts      Contact[]
+  multicredClients MulticredClient[]
+  multicredBanks MulticredBank[]
+  multicredProducts MulticredProduct[]
   retirementLeads RetirementLead[]
   channels      Channel[]
   campaigns     Campaign[]
@@ -81,6 +84,9 @@ model User {
   assignedLeadHistory LeadAssignmentHistory[] @relation("AssignedLeadHistory")
   createdLeadAssignments LeadAssignmentHistory[] @relation("CreatedLeadAssignments")
   retirementLeadEvents RetirementLeadEvent[]
+  createdMulticredClients MulticredClient[] @relation("CreatedMulticredClients")
+  assignedProposals Proposal[] @relation("AssignedProposals")
+  proposalHistoryEvents ProposalHistory[] @relation("ProposalHistoryUser")
 
   @@index([companyId])
 }
@@ -161,6 +167,7 @@ model Contact {
   notifications      Notification[]
   cltSimulationLogs  CltSimulationLog[]
   retirementLeads    RetirementLead[]
+  multicredClients    MulticredClient[]
 
   @@unique([companyId, phone])
   @@unique([companyId, cpf])
@@ -170,6 +177,91 @@ model Contact {
   @@index([ownerId])
   @@index([stageId])
   @@index([originId])
+}
+
+model MulticredClient {
+  id            String   @id @default(cuid())
+  companyId     String
+  contactId     String?
+  createdById   String?
+  name          String
+  cpf           String
+  rg            String?
+  birthDate     DateTime?
+  motherName    String?
+  maritalStatus String?
+  phone         String?
+  whatsapp      String?
+  email         String?
+  zipCode       String?
+  street        String?
+  number        String?
+  complement    String?
+  district      String?
+  city          String?
+  state         String?
+  bank          String?
+  agency        String?
+  account       String?
+  accountType   String?
+  pixKey        String?
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  company       Company  @relation(fields: [companyId], references: [id])
+  contact       Contact? @relation(fields: [contactId], references: [id])
+  createdBy     User?    @relation("CreatedMulticredClients", fields: [createdById], references: [id])
+  proposals     Proposal[]
+
+  @@unique([companyId, cpf])
+  @@index([companyId])
+  @@index([companyId, updatedAt])
+  @@index([contactId])
+  @@index([createdById])
+  @@index([phone])
+  @@index([whatsapp])
+}
+
+model MulticredBank {
+  id          String   @id @default(cuid())
+  companyId   String
+  name        String
+  code        String?
+  category    String?
+  description String?
+  color       String   @default("slate")
+  isActive    Boolean  @default(true)
+  position    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  company     Company  @relation(fields: [companyId], references: [id])
+  products    MulticredProduct[]
+
+  @@unique([companyId, name])
+  @@index([companyId])
+  @@index([companyId, isActive])
+  @@index([companyId, position])
+}
+
+model MulticredProduct {
+  id          String        @id @default(cuid())
+  companyId   String
+  bankId      String
+  agreement   String
+  name        String
+  description String?
+  isActive    Boolean       @default(true)
+  position    Int           @default(0)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  company     Company       @relation(fields: [companyId], references: [id])
+  bank        MulticredBank @relation(fields: [bankId], references: [id])
+
+  @@unique([companyId, bankId, agreement, name])
+  @@index([companyId])
+  @@index([bankId])
+  @@index([companyId, isActive])
+  @@index([companyId, position])
 }
 
 model RetirementLead {
@@ -475,18 +567,57 @@ model CampaignRecipient {
 }
 
 model Proposal {
+  id                String            @id @default(cuid())
+  companyId         String
+  contactId         String
+  multicredClientId String?
+  assignedUserId    String?
+  bank              String
+  agreement         String
+  product           String
+  operation         String?
+  proposalNumber    String?
+  contractNumber    String?
+  amount            Decimal
+  financedAmount    Decimal?
+  releasedAmount    Decimal?
+  installmentAmount Decimal?
+  term              Int?
+  commission        Decimal
+  commissionReceived Decimal?
+  notes             String?
+  status            String            @default("DRAFT")
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  company           Company           @relation(fields: [companyId], references: [id])
+  contact           Contact           @relation(fields: [contactId], references: [id])
+  multicredClient   MulticredClient?  @relation(fields: [multicredClientId], references: [id])
+  assignedUser      User?             @relation("AssignedProposals", fields: [assignedUserId], references: [id])
+  history           ProposalHistory[]
+
+  @@index([companyId, createdAt])
+  @@index([companyId, status, createdAt])
+  @@index([companyId, bank])
+  @@index([companyId, product])
+  @@index([assignedUserId])
+  @@index([multicredClientId])
+}
+
+model ProposalHistory {
   id         String   @id @default(cuid())
   companyId  String
-  contactId  String
-  bank       String
-  agreement  String
-  product    String
-  amount     Decimal
-  commission Decimal
-  status     String   @default("DRAFT")
+  proposalId String
+  userId     String?
+  action     String
+  title      String
+  detail     String?
   createdAt  DateTime @default(now())
-  company    Company  @relation(fields: [companyId], references: [id])
-  contact    Contact  @relation(fields: [contactId], references: [id])
+  proposal   Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  user       User?    @relation("ProposalHistoryUser", fields: [userId], references: [id])
+
+  @@index([companyId])
+  @@index([proposalId, createdAt])
+  @@index([userId])
 }
 
 model CltIntegration {

@@ -539,18 +539,55 @@ type AiAnalysis = {
   source?: "openai" | "fallback";
 };
 
-type ProposalStatus = "DRAFT" | "FORMALIZING" | "PAID" | "CANCELED" | "REWORK";
+type ProposalStatus =
+  | "NEW"
+  | "TYPED"
+  | "ANALYSIS"
+  | "PENDING"
+  | "APPROVED"
+  | "PAID"
+  | "CANCELED"
+  | "REJECTED"
+  | "DRAFT"
+  | "FORMALIZING"
+  | "REWORK";
 
 type ProposalRow = {
   id: string;
   contactId: string;
+  multicredClientId?: string | null;
+  assignedUserId?: string | null;
   bank: string;
   agreement: string;
   product: string;
+  operation?: string | null;
+  proposalNumber?: string | null;
+  contractNumber?: string | null;
   amount: string;
+  financedAmount?: string | null;
+  releasedAmount?: string | null;
+  installmentAmount?: string | null;
+  term?: number | null;
   commission: string;
+  commissionReceived?: string | null;
+  notes?: string | null;
   status: ProposalStatus;
   createdAt: string;
+  updatedAt?: string;
+  assignedUser?: {
+    id: string;
+    name: string;
+    email: string;
+    role: UserRole;
+  } | null;
+  history?: Array<{
+    id: string;
+    action: string;
+    title: string;
+    detail?: string | null;
+    createdAt: string;
+    user?: { id: string; name: string; email: string } | null;
+  }>;
   contact: {
     id: string;
     name: string;
@@ -564,6 +601,17 @@ type ProposalRow = {
     lastMessage?: string | null;
     tags: Array<{ id: string; name: string; color: string }>;
   };
+  multicredClient?: {
+    id: string;
+    name: string;
+    cpf: string;
+    phone?: string | null;
+    whatsapp?: string | null;
+    bank?: string | null;
+    agency?: string | null;
+    account?: string | null;
+    pixKey?: string | null;
+  } | null;
 };
 
 type ProposalMetrics = {
@@ -572,7 +620,152 @@ type ProposalMetrics = {
   paidAmount: number;
   formalizingAmount: number;
   commissionForecast: number;
+  commissionReceived: number;
   ticketAverage: number;
+  totalProposals: number;
+  analysisCount: number;
+  pendingCount: number;
+  approvedCount: number;
+  paidCount: number;
+  commissionAverage: number;
+  conversionByProduct: Array<{ name: string; total: number; paid: number; rate: number }>;
+  conversionByBank: Array<{ name: string; total: number; paid: number; rate: number }>;
+  productionByOperator: Array<{ userId: string; total: number; paid: number }>;
+};
+
+type ProposalFilters = {
+  search: string;
+  status: string;
+  product: string;
+  bank: string;
+  period: string;
+  from: string;
+  to: string;
+  assignedUserId: string;
+  sort: string;
+  direction: string;
+};
+
+type MulticredClientRow = {
+  id: string;
+  companyId: string;
+  contactId?: string | null;
+  name: string;
+  cpf: string;
+  rg?: string | null;
+  birthDate?: string | null;
+  motherName?: string | null;
+  maritalStatus?: string | null;
+  phone?: string | null;
+  whatsapp?: string | null;
+  email?: string | null;
+  zipCode?: string | null;
+  street?: string | null;
+  number?: string | null;
+  complement?: string | null;
+  district?: string | null;
+  city?: string | null;
+  state?: string | null;
+  bank?: string | null;
+  agency?: string | null;
+  account?: string | null;
+  accountType?: string | null;
+  pixKey?: string | null;
+  notes?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  createdBy?: { id: string; name: string; email: string } | null;
+  contact?: {
+    id: string;
+    name: string;
+    phone: string;
+    cpf?: string | null;
+    email?: string | null;
+  } | null;
+  proposals?: Array<{
+    id: string;
+    bank: string;
+    agreement: string;
+    product: string;
+    amount: string;
+    commission: string;
+    status: ProposalStatus;
+    createdAt: string;
+  }>;
+};
+
+type MulticredClientForm = {
+  contactId: string;
+  name: string;
+  cpf: string;
+  rg: string;
+  birthDate: string;
+  motherName: string;
+  maritalStatus: string;
+  phone: string;
+  whatsapp: string;
+  email: string;
+  zipCode: string;
+  street: string;
+  number: string;
+  complement: string;
+  district: string;
+  city: string;
+  state: string;
+  bank: string;
+  agency: string;
+  account: string;
+  accountType: string;
+  pixKey: string;
+  notes: string;
+};
+
+type MulticredProductShortcut = {
+  id: string;
+  companyId?: string;
+  bankId: string;
+  bankName: string;
+  bankCode?: string | null;
+  bankColor: string;
+  bankCategory?: string | null;
+  agreement: string;
+  product: string;
+  description?: string | null;
+  isActive: boolean;
+  position: number;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+type MulticredProductForm = {
+  bankName: string;
+  bankCode: string;
+  bankColor: string;
+  bankCategory: string;
+  agreement: string;
+  product: string;
+  description: string;
+};
+
+type MulticredProposalPayload = {
+  contactId?: string;
+  multicredClientId?: string;
+  assignedUserId?: string;
+  bank: string;
+  agreement: string;
+  product: string;
+  operation?: string;
+  proposalNumber?: string;
+  contractNumber?: string;
+  amount: string;
+  financedAmount?: string;
+  releasedAmount?: string;
+  installmentAmount?: string;
+  term?: string;
+  commission: string;
+  commissionReceived?: string;
+  notes?: string;
+  status: ProposalStatus;
 };
 
 type CampaignRow = {
@@ -807,13 +1000,90 @@ const temperatureLabels = {
   COLD: "Frio"
 } as const;
 
+const conversationStatusLabels: Record<ConversationRow["status"], string> = {
+  OPEN: "Aberto",
+  PENDING: "Pendente",
+  BOT: "Robo",
+  SOLD: "Venda",
+  RESOLVED: "Resolvido"
+};
+
 const proposalStatusLabels: Record<ProposalStatus, string> = {
+  NEW: "Novo",
+  TYPED: "Digitado",
+  ANALYSIS: "Em analise",
+  PENDING: "Pendente",
+  APPROVED: "Aprovado",
   DRAFT: "Rascunho",
   FORMALIZING: "Formalizacao",
   PAID: "Pago",
   CANCELED: "Cancelado",
+  REJECTED: "Reprovado",
   REWORK: "Pendencia"
 };
+
+const fallbackMulticredProducts: MulticredProductShortcut[] = [
+  {
+    id: "fallback-mercantil-inss",
+    bankId: "fallback-mercantil",
+    bankName: "Mercantil",
+    agreement: "INSS",
+    product: "Consignado INSS",
+    bankColor: "blue",
+    bankCategory: "INSS",
+    description: "Aposentados e pensionistas.",
+    isActive: true,
+    position: 0
+  },
+  {
+    id: "fallback-mercantil-fgts",
+    bankId: "fallback-mercantil",
+    bankName: "Mercantil",
+    agreement: "FGTS",
+    product: "Antecipacao FGTS",
+    bankColor: "emerald",
+    bankCategory: "FGTS",
+    description: "Saque-aniversario e antecipacao.",
+    isActive: true,
+    position: 1
+  },
+  {
+    id: "fallback-c6-clt",
+    bankId: "fallback-c6",
+    bankName: "C6 Ficsa",
+    agreement: "CLT",
+    product: "Credito do Trabalhador",
+    bankColor: "violet",
+    bankCategory: "CLT",
+    description: "Operacao CLT.",
+    isActive: true,
+    position: 2
+  },
+  {
+    id: "fallback-bmg-inss",
+    bankId: "fallback-bmg",
+    bankName: "BMG",
+    agreement: "INSS",
+    product: "Cartao Beneficio",
+    bankColor: "amber",
+    bankCategory: "INSS",
+    description: "Beneficio e cartao.",
+    isActive: true,
+    position: 3
+  },
+  {
+    id: "fallback-3rn-clt",
+    bankId: "fallback-3rn",
+    bankName: "3RN",
+    agreement: "CLT",
+    product: "Credito do Trabalhador",
+    bankColor: "slate",
+    bankCategory: "CLT",
+    description: "Atalho CLT.",
+    isActive: true,
+    position: 4
+  }
+];
 
 function formatRelativeDate(value: string) {
   const date = new Date(value);
@@ -891,7 +1161,7 @@ function getConversationActionBadges(item: ConversationRow) {
   }
 
   if (item.assignmentStatus === "UNASSIGNED" || !item.agent) {
-    badges.push({ label: "Sem responsavel", tone: "amber" });
+    badges.push({ label: "Sem responsavel", tone: "rose" });
   }
 
   if (item.status === "PENDING") {
@@ -902,9 +1172,9 @@ function getConversationActionBadges(item: ConversationRow) {
 }
 
 function getConversationActionBadgeClass(tone: "green" | "amber" | "rose" | "slate") {
-  if (tone === "green") return "bg-emerald-50 text-emerald-700 ring-emerald-200";
-  if (tone === "amber") return "bg-amber-50 text-amber-700 ring-amber-200";
-  if (tone === "rose") return "bg-rose-50 text-rose-700 ring-rose-200";
+  if (tone === "green") return "bg-emerald-100 text-emerald-800 ring-emerald-200";
+  if (tone === "amber") return "bg-amber-100 text-amber-800 ring-amber-200";
+  if (tone === "rose") return "bg-rose-100 text-rose-800 ring-rose-200";
   return "bg-slate-100 text-slate-600 ring-slate-200";
 }
 
@@ -1259,6 +1529,9 @@ export default function Home() {
   });
   const [campaigns, setCampaigns] = useState<CampaignRow[]>([]);
   const [proposals, setProposals] = useState<ProposalRow[]>([]);
+  const [multicredClients, setMulticredClients] = useState<MulticredClientRow[]>([]);
+  const [multicredProducts, setMulticredProducts] = useState<MulticredProductShortcut[]>([]);
+  const [multicredClientSearch, setMulticredClientSearch] = useState("");
   const [dashboard, setDashboard] = useState<DashboardData>(emptyDashboardData);
   const [selectedConversation, setSelectedConversation] =
     useState<ConversationRow | null>(null);
@@ -1302,7 +1575,15 @@ export default function Home() {
   });
   const [proposalFilters, setProposalFilters] = useState({
     search: "",
-    status: ""
+    status: "",
+    product: "",
+    bank: "",
+    period: "30d",
+    from: "",
+    to: "",
+    assignedUserId: "",
+    sort: "date",
+    direction: "desc"
   });
   const [dashboardFilters, setDashboardFilters] = useState({
     period: "30d",
@@ -1347,7 +1628,17 @@ export default function Home() {
     paidAmount: 0,
     formalizingAmount: 0,
     commissionForecast: 0,
-    ticketAverage: 0
+    commissionReceived: 0,
+    ticketAverage: 0,
+    totalProposals: 0,
+    analysisCount: 0,
+    pendingCount: 0,
+    approvedCount: 0,
+    paidCount: 0,
+    commissionAverage: 0,
+    conversionByProduct: [],
+    conversionByBank: [],
+    productionByOperator: []
   });
   const [reference, setReference] = useState<ReferenceData>({
     origins: [],
@@ -1367,6 +1658,8 @@ export default function Home() {
   const [messageLogsLoading, setMessageLogsLoading] = useState(false);
   const [campaignsLoading, setCampaignsLoading] = useState(false);
   const [proposalsLoading, setProposalsLoading] = useState(false);
+  const [multicredClientsLoading, setMulticredClientsLoading] = useState(false);
+  const [multicredProductsLoading, setMulticredProductsLoading] = useState(false);
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [retirementLoading, setRetirementLoading] = useState(false);
   const [appError, setAppError] = useState("");
@@ -2339,6 +2632,45 @@ export default function Home() {
     setProposalsLoading(false);
   }, [proposalFilters]);
 
+  const loadMulticredClients = useCallback(async (search = multicredClientSearch) => {
+    setMulticredClientsLoading(true);
+    setAppError("");
+
+    const params = new URLSearchParams();
+    if (search.trim()) params.set("search", search.trim());
+
+    const response = await fetch(`/api/multicred/clients?${params.toString()}`);
+    if (response.ok) {
+      const data = (await response.json()) as { clients: MulticredClientRow[] };
+      setMulticredClients(data.clients);
+    } else {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel carregar clientes Multicred.");
+    }
+
+    setMulticredClientsLoading(false);
+  }, [multicredClientSearch]);
+
+  const loadMulticredProducts = useCallback(async () => {
+    setMulticredProductsLoading(true);
+    setAppError("");
+
+    const response = await fetch("/api/multicred/products");
+    if (response.ok) {
+      const data = (await response.json()) as { products: MulticredProductShortcut[] };
+      setMulticredProducts(data.products);
+    } else {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel carregar produtos Multicred.");
+    }
+
+    setMulticredProductsLoading(false);
+  }, []);
+
   const loadDashboard = useCallback(async (filters = dashboardFilters) => {
     setDashboardLoading(true);
     setAppError("");
@@ -2856,15 +3188,7 @@ export default function Home() {
     void loadContacts(contactFilters);
   }
 
-  async function handleCreateProposal(payload: {
-    contactId: string;
-    bank: string;
-    agreement: string;
-    product: string;
-    amount: string;
-    commission: string;
-    status: ProposalStatus;
-  }) {
+  async function handleCreateProposal(payload: MulticredProposalPayload) {
     const response = await fetch("/api/proposals", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2891,10 +3215,21 @@ export default function Home() {
     id: string,
     payload: Partial<{
       bank: string;
+      multicredClientId?: string | null;
+      assignedUserId?: string | null;
       agreement: string;
       product: string;
+      operation: string;
+      proposalNumber: string;
+      contractNumber: string;
       amount: string;
+      financedAmount: string;
+      releasedAmount: string;
+      installmentAmount: string;
+      term: string;
       commission: string;
+      commissionReceived: string;
+      notes: string;
       status: ProposalStatus;
     }>
   ) {
@@ -2935,6 +3270,93 @@ export default function Home() {
     void loadProposals(proposalFilters);
     void loadDashboard(dashboardFilters);
     void loadContacts(contactFilters);
+  }
+
+  async function handleCreateMulticredClient(payload: MulticredClientForm) {
+    const response = await fetch("/api/multicred/clients", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    const data = (await response.json().catch(() => null)) as
+      | { client?: MulticredClientRow; error?: string }
+      | null;
+
+    if (!response.ok || !data?.client) {
+      setAppError(data?.error ?? "Nao foi possivel criar cliente Multicred.");
+      return null;
+    }
+
+    setAppError("");
+    setMulticredClients((current) => [data.client as MulticredClientRow, ...current]);
+    return data.client;
+  }
+
+  async function handleUpdateMulticredClient(id: string, payload: MulticredClientForm) {
+    const response = await fetch(`/api/multicred/clients/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    const data = (await response.json().catch(() => null)) as
+      | { client?: MulticredClientRow; error?: string }
+      | null;
+
+    if (!response.ok || !data?.client) {
+      setAppError(data?.error ?? "Nao foi possivel atualizar cliente Multicred.");
+      return null;
+    }
+
+    setAppError("");
+    setMulticredClients((current) =>
+      current.map((client) => (client.id === id ? (data.client as MulticredClientRow) : client))
+    );
+    return data.client;
+  }
+
+  async function handleLoadMulticredClientDetail(id: string) {
+    const response = await fetch(`/api/multicred/clients/${id}`);
+    const data = (await response.json().catch(() => null)) as
+      | { client?: MulticredClientRow; error?: string }
+      | null;
+
+    if (!response.ok || !data?.client) {
+      setAppError(data?.error ?? "Nao foi possivel carregar cliente Multicred.");
+      return null;
+    }
+
+    setAppError("");
+    return data.client;
+  }
+
+  async function handleCreateMulticredProduct(payload: MulticredProductForm) {
+    const response = await fetch("/api/multicred/products", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    const data = (await response.json().catch(() => null)) as
+      | { product?: MulticredProductShortcut; error?: string }
+      | null;
+
+    if (!response.ok || !data?.product) {
+      setAppError(data?.error ?? "Nao foi possivel salvar produto Multicred.");
+      return null;
+    }
+
+    setAppError("");
+    setMulticredProducts((current) => {
+      const withoutDuplicate = current.filter((product) => product.id !== data.product?.id);
+      return [...withoutDuplicate, data.product as MulticredProductShortcut].sort((a, b) =>
+        `${a.bankName}-${a.position}-${a.product}`.localeCompare(
+          `${b.bankName}-${b.position}-${b.product}`
+        )
+      );
+    });
+    return data.product;
   }
 
   async function handleCreateOrigin(name: string) {
@@ -3212,6 +3634,8 @@ export default function Home() {
       void loadCampaigns();
       void loadLeadAssignmentSettings();
       void loadProposals(proposalFilters);
+      void loadMulticredClients(multicredClientSearch);
+      void loadMulticredProducts();
     }
     if (userIsPlatformAdmin(session)) {
       void loadCompanies();
@@ -3229,9 +3653,12 @@ export default function Home() {
     loadLeadAssignmentSettings,
     loadRetirementLeads,
     loadMessageLogs,
+    loadMulticredClients,
+    loadMulticredProducts,
     loadNotifications,
     loadProposals,
     loadCompanies,
+    multicredClientSearch,
     proposalFilters,
     retirementFilters,
     session
@@ -3780,14 +4207,30 @@ export default function Home() {
           )}
           {active === "multicred" && userIsAdmin(session) && (
             <Multicred
+              attendants={attendants}
               contacts={contacts}
+              clients={multicredClients}
+              clientsLoading={multicredClientsLoading}
+              clientSearch={multicredClientSearch}
               filters={proposalFilters}
               loading={proposalsLoading}
               metrics={proposalMetrics}
+              products={multicredProducts}
+              productsLoading={multicredProductsLoading}
               proposals={proposals}
+              onClientSearchChange={(search) => {
+                setMulticredClientSearch(search);
+                void loadMulticredClients(search);
+              }}
+              onCreateClient={handleCreateMulticredClient}
+              onCreateProduct={handleCreateMulticredProduct}
               onCreateProposal={handleCreateProposal}
               onDeleteProposal={handleDeleteProposal}
               onFiltersChange={setProposalFilters}
+              onLoadClientDetail={handleLoadMulticredClientDetail}
+              onRefreshClients={() => loadMulticredClients(multicredClientSearch)}
+              onRefreshProducts={loadMulticredProducts}
+              onUpdateClient={handleUpdateMulticredClient}
               onUpdateProposal={handleUpdateProposal}
             />
           )}
@@ -5137,8 +5580,8 @@ function Atendimento({
       />
 
       <section className="flex min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-line/80 bg-white shadow-soft">
-        <div className="flex min-h-16 shrink-0 items-center justify-between gap-3 border-b border-line/70 px-4 py-2 md:px-5">
-          <div className="flex min-w-0 items-center gap-3">
+        <div className="flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-3 border-b border-line/70 px-4 py-2 md:px-5">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             <div className="relative grid h-11 w-11 place-items-center rounded-full bg-blue-50 text-sm font-bold text-brand ring-1 ring-blue-100">
               {formatContactNameForUi(selectedConversation?.contact.name)
                 .slice(0, 1)
@@ -5164,21 +5607,60 @@ function Atendimento({
                   : "Inbox interno"}
               </p>
               {selectedConversation && (
-                <p className="truncate text-xs font-semibold text-slate-500">
-                  Responsavel:{" "}
-                  <span className={selectedConversation.agent ? "text-slate-700" : "text-amber-600"}>
+                <div className="mt-1 flex max-w-full flex-wrap items-center gap-1.5 overflow-hidden">
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600">
+                    {conversationStatusLabels[selectedConversation.status] ?? selectedConversation.status}
+                  </span>
+                  <span
+                    className={clsx(
+                      "max-w-[9rem] truncate rounded-full px-2 py-0.5 text-[11px] font-bold",
+                      selectedConversation.agent
+                        ? "bg-emerald-50 text-emerald-700"
+                        : "bg-amber-50 text-amber-700"
+                    )}
+                    title={selectedConversation.agent?.name ?? "Sem responsavel"}
+                  >
                     {selectedConversation.agent?.name ?? "Sem responsavel"}
                   </span>
-                </p>
+                  <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-bold text-rose-700">
+                    {temperatureLabels[
+                      selectedConversation.contact.temperature as keyof typeof temperatureLabels
+                    ] ?? selectedConversation.contact.temperature}
+                  </span>
+                  {selectedConversation.contact.origin && (
+                    <span
+                      className="max-w-[7.5rem] truncate rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-brand"
+                      title={selectedConversation.contact.origin}
+                    >
+                      {selectedConversation.contact.origin}
+                    </span>
+                  )}
+                  {selectedConversation.contact.stage && (
+                    <span
+                      className="max-w-[7.5rem] truncate rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-bold text-violet-700"
+                      title={selectedConversation.contact.stage}
+                    >
+                      {selectedConversation.contact.stage}
+                    </span>
+                  )}
+                  <span className="rounded-full bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+                    Ultima:{" "}
+                    {formatRelativeDate(
+                      selectedConversation.lastMessageAt ??
+                        selectedConversation.lastMessage?.createdAt ??
+                        selectedConversation.updatedAt
+                    )}
+                  </span>
+                </div>
               )}
             </div>
           </div>
           {selectedConversation && (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2 rounded-2xl border border-line/70 bg-slate-50/80 p-1.5">
               {!selectedConversation.agent && (
                 <button
                   type="button"
-                  className="inline-flex h-10 items-center gap-2 rounded-full bg-emerald-600 px-3 text-sm font-bold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
+                  className="inline-flex h-9 items-center gap-2 rounded-full bg-emerald-600 px-3 text-sm font-bold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
                   disabled={assigningConversationId === selectedConversation.id}
                   onClick={() => void submitAssign(selectedConversation.id)}
                 >
@@ -5191,7 +5673,7 @@ function Atendimento({
               {isAdmin && selectedConversation.agent && (
                 <button
                   type="button"
-                  className="hidden h-10 rounded-full border border-line bg-white px-3 text-sm font-semibold text-slate-600 hover:bg-slate-50 lg:inline-flex"
+                  className="hidden h-9 rounded-full border border-line bg-white px-3 text-sm font-semibold text-slate-600 hover:bg-slate-50 lg:inline-flex"
                   onClick={() => setUnassignOpen(true)}
                 >
                   Devolver
@@ -5200,7 +5682,7 @@ function Atendimento({
               {isAdmin && (
                 <button
                   type="button"
-                  className="inline-flex h-10 items-center gap-2 rounded-full border border-line bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                  className="inline-flex h-9 items-center gap-2 rounded-full border border-line bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50"
                   onClick={() => setTransferOpen(true)}
                 >
                   <ArrowRight className="h-4 w-4" />
@@ -5209,7 +5691,7 @@ function Atendimento({
               )}
               <button
                 type="button"
-                className="hidden h-10 items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 text-sm font-bold text-primary hover:bg-blue-100 lg:inline-flex"
+                className="hidden h-9 items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 text-sm font-bold text-primary hover:bg-blue-100 lg:inline-flex"
                 onClick={() => onOpenCltSimulation(selectedConversation)}
               >
                 <BriefcaseBusiness className="h-4 w-4" />
@@ -5221,11 +5703,8 @@ function Atendimento({
                 onAdd={(tagIds) => onAddTags(selectedConversation.id, tagIds)}
                 onRemove={(tagId) => onRemoveTag(selectedConversation.id, tagId)}
               />
-              <span className="hidden rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 md:inline-flex">
-                Online
-              </span>
               <select
-                className="h-10 rounded-full border border-line bg-slate-50 px-3 text-sm font-medium text-slate-700 outline-none hover:bg-white focus:border-blue-200 focus:bg-white"
+                className="h-9 rounded-full border border-line bg-white px-3 text-sm font-medium text-slate-700 outline-none hover:bg-white focus:border-blue-200 focus:bg-white"
                 value={selectedConversation.status}
                 onChange={(event) =>
                   void onUpdateStatus(
@@ -5913,6 +6392,44 @@ function ConversationList({
               onFiltersChange({ ...filters, search: event.target.value })
             }
           />
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-1.5 text-[11px] sm:grid-cols-4">
+          {[
+            {
+              label: "Minhas",
+              active: filters.assignedTo === "me",
+              next: { ...filters, assignedTo: "me" }
+            },
+            {
+              label: "Pendentes",
+              active: filters.status === "PENDING",
+              next: { ...filters, status: "PENDING" }
+            },
+            {
+              label: "Sem responsavel",
+              active: filters.assignedTo === "unassigned",
+              next: { ...filters, assignedTo: "unassigned" }
+            },
+            {
+              label: "Todas abertas",
+              active: filters.status === "OPEN" && filters.assignedTo === "default",
+              next: { ...filters, status: "OPEN", assignedTo: "default" }
+            }
+          ].map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              className={clsx(
+                "h-8 rounded-xl border px-2 font-bold transition-colors",
+                item.active
+                  ? "border-blue-200 bg-blue-50 text-brand"
+                  : "border-line bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+              )}
+              onClick={() => onFiltersChange(item.next)}
+            >
+              {item.label}
+            </button>
+          ))}
         </div>
         <div className="mt-3 flex gap-1 overflow-x-auto rounded-2xl bg-slate-50 p-1 text-[11px] ring-1 ring-line/80">
           {statusFilterItems.map(({ value, label }) => {
@@ -6676,11 +7193,11 @@ function TemplateMessage({
         className={clsx(
           "rounded-2xl px-3 py-2 text-xs",
           side === "right"
-            ? "bg-white/10 text-white/85 ring-1 ring-white/15"
-            : "bg-slate-50 text-slate-600 ring-1 ring-slate-200"
+            ? "bg-white/15 text-white/90 ring-1 ring-white/20"
+            : "bg-blue-50 text-slate-600 ring-1 ring-blue-100"
         )}
       >
-        <p className={clsx("font-bold", side === "right" ? "text-white" : "text-slate-800")}>
+        <p className={clsx("text-[13px] font-black", side === "right" ? "text-white" : "text-brand")}>
           {templateName ? `Template: ${templateName}` : "Template WhatsApp"}
         </p>
         {(templateLanguage || parsedVariables.length > 0) && (
@@ -9046,79 +9563,369 @@ function cltActionLabel(action: string) {
   return labels[action] ?? action;
 }
 
+function createEmptyMulticredClientForm(): MulticredClientForm {
+  return {
+    contactId: "",
+    name: "",
+    cpf: "",
+    rg: "",
+    birthDate: "",
+    motherName: "",
+    maritalStatus: "",
+    phone: "",
+    whatsapp: "",
+    email: "",
+    zipCode: "",
+    street: "",
+    number: "",
+    complement: "",
+    district: "",
+    city: "",
+    state: "",
+    bank: "",
+    agency: "",
+    account: "",
+    accountType: "",
+    pixKey: "",
+    notes: ""
+  };
+}
+
+function multicredClientToForm(client: MulticredClientRow): MulticredClientForm {
+  return {
+    contactId: client.contactId ?? "",
+    name: client.name ?? "",
+    cpf: client.cpf ?? "",
+    rg: client.rg ?? "",
+    birthDate: client.birthDate ? client.birthDate.slice(0, 10) : "",
+    motherName: client.motherName ?? "",
+    maritalStatus: client.maritalStatus ?? "",
+    phone: client.phone ?? "",
+    whatsapp: client.whatsapp ?? "",
+    email: client.email ?? "",
+    zipCode: client.zipCode ?? "",
+    street: client.street ?? "",
+    number: client.number ?? "",
+    complement: client.complement ?? "",
+    district: client.district ?? "",
+    city: client.city ?? "",
+    state: client.state ?? "",
+    bank: client.bank ?? "",
+    agency: client.agency ?? "",
+    account: client.account ?? "",
+    accountType: client.accountType ?? "",
+    pixKey: client.pixKey ?? "",
+    notes: client.notes ?? ""
+  };
+}
+
+function QuickSelectGroup({
+  label,
+  options,
+  value,
+  otherValue,
+  onChange,
+  onOtherChange
+}: {
+  label: string;
+  options: string[];
+  value: string;
+  otherValue: string;
+  onChange: (value: string) => void;
+  onOtherChange: (value: string) => void;
+}) {
+  const isOther = value === "Outros" || (value && !options.includes(value));
+
+  return (
+    <div>
+      <p className="text-sm font-bold">{label}</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {options.map((option) => (
+          <button
+            key={option}
+            className={clsx(
+              "rounded-full border px-3 py-2 text-sm font-semibold transition",
+              (value === option || (option === "Outros" && isOther))
+                ? "border-brand bg-blue-50 text-brand"
+                : "border-line bg-white text-slate-600 hover:bg-slate-50"
+            )}
+            onClick={() => onChange(option)}
+            type="button"
+          >
+            {option}
+          </button>
+        ))}
+      </div>
+      {isOther && (
+        <input
+          className="mt-3 h-10 w-full rounded border border-line px-3 text-sm outline-none"
+          placeholder="Digite manualmente"
+          value={otherValue}
+          onChange={(event) => onOtherChange(event.target.value)}
+        />
+      )}
+    </div>
+  );
+}
+
+function ProductQuickSelect({
+  options,
+  value,
+  onChange
+}: {
+  options: string[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const isKnown = options.includes(value);
+  return (
+    <QuickSelectGroup
+      label="Produto"
+      options={options}
+      value={isKnown ? value : value ? "Outros" : ""}
+      otherValue={isKnown ? "" : value}
+      onChange={(next) => onChange(next === "Outros" ? "" : next)}
+      onOtherChange={onChange}
+    />
+  );
+}
+
+function BankQuickSelect({
+  options,
+  value,
+  onChange
+}: {
+  options: string[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const isKnown = options.includes(value);
+  return (
+    <QuickSelectGroup
+      label="Banco"
+      options={options}
+      value={isKnown ? value : value ? "Outros" : ""}
+      otherValue={isKnown ? "" : value}
+      onChange={(next) => onChange(next === "Outros" ? "" : next)}
+      onOtherChange={onChange}
+    />
+  );
+}
+
 function Multicred({
+  attendants,
   contacts,
+  clients,
+  clientsLoading,
+  clientSearch,
   filters,
   loading,
   metrics,
+  products,
+  productsLoading,
   proposals,
+  onClientSearchChange,
+  onCreateClient,
+  onCreateProduct,
   onCreateProposal,
   onDeleteProposal,
   onFiltersChange,
+  onLoadClientDetail,
+  onRefreshClients,
+  onRefreshProducts,
+  onUpdateClient,
   onUpdateProposal
 }: {
+  attendants: AttendantRow[];
   contacts: ContactRow[];
-  filters: { search: string; status: string };
+  clients: MulticredClientRow[];
+  clientsLoading: boolean;
+  clientSearch: string;
+  filters: ProposalFilters;
   loading: boolean;
   metrics: ProposalMetrics;
+  products: MulticredProductShortcut[];
+  productsLoading: boolean;
   proposals: ProposalRow[];
-  onCreateProposal: (payload: {
-    contactId: string;
-    bank: string;
-    agreement: string;
-    product: string;
-    amount: string;
-    commission: string;
-    status: ProposalStatus;
-  }) => Promise<void>;
+  onClientSearchChange: (search: string) => void;
+  onCreateClient: (payload: MulticredClientForm) => Promise<MulticredClientRow | null>;
+  onCreateProduct: (payload: MulticredProductForm) => Promise<MulticredProductShortcut | null>;
+  onCreateProposal: (payload: MulticredProposalPayload) => Promise<void>;
   onDeleteProposal: (id: string) => Promise<void>;
-  onFiltersChange: (filters: { search: string; status: string }) => void;
+  onFiltersChange: (filters: ProposalFilters) => void;
+  onLoadClientDetail: (id: string) => Promise<MulticredClientRow | null>;
+  onRefreshClients: () => Promise<void>;
+  onRefreshProducts: () => Promise<void>;
+  onUpdateClient: (
+    id: string,
+    payload: MulticredClientForm
+  ) => Promise<MulticredClientRow | null>;
   onUpdateProposal: (
     id: string,
     payload: Partial<{
       bank: string;
+      multicredClientId?: string | null;
+      assignedUserId?: string | null;
       agreement: string;
       product: string;
+      operation: string;
+      proposalNumber: string;
+      contractNumber: string;
       amount: string;
+      financedAmount: string;
+      releasedAmount: string;
+      installmentAmount: string;
+      term: string;
       commission: string;
+      commissionReceived: string;
+      notes: string;
       status: ProposalStatus;
     }>
   ) => Promise<void>;
 }) {
+  const [activeTab, setActiveTab] = useState<"proposals" | "clients">("proposals");
   const [showForm, setShowForm] = useState(false);
+  const [proposalStep, setProposalStep] = useState<1 | 2 | 3 | 4>(1);
+  const [quickClientOpen, setQuickClientOpen] = useState(false);
+  const [selectedProposal, setSelectedProposal] = useState<ProposalRow | null>(null);
+  const [showProductForm, setShowProductForm] = useState(false);
+  const [showClientForm, setShowClientForm] = useState(false);
+  const [clientFormTab, setClientFormTab] = useState<
+    "personal" | "address" | "bank" | "notes"
+  >("personal");
+  const [editingClientId, setEditingClientId] = useState<string | null>(null);
+  const [selectedClientDetail, setSelectedClientDetail] =
+    useState<MulticredClientRow | null>(null);
+  const [clientDetailLoading, setClientDetailLoading] = useState(false);
+  const [clientForm, setClientForm] = useState<MulticredClientForm>(
+    createEmptyMulticredClientForm
+  );
   const [editingProposalId, setEditingProposalId] = useState<string | null>(null);
   const [form, setForm] = useState({
     contactId: "",
+    multicredClientId: "",
     bank: "Banco Master",
     agreement: "FGTS",
     product: "Antecipacao FGTS",
+    operation: "",
+    proposalNumber: "",
+    contractNumber: "",
     amount: "",
+    financedAmount: "",
+    releasedAmount: "",
+    installmentAmount: "",
+    term: "",
     commission: "",
-    status: "DRAFT" as ProposalStatus
+    commissionReceived: "",
+    notes: "",
+    assignedUserId: "",
+    status: "NEW" as ProposalStatus
   });
   const [editForm, setEditForm] = useState({
+    multicredClientId: "",
     bank: "",
     agreement: "",
     product: "",
+    operation: "",
+    proposalNumber: "",
+    contractNumber: "",
     amount: "",
+    financedAmount: "",
+    releasedAmount: "",
+    installmentAmount: "",
+    term: "",
     commission: "",
-    status: "DRAFT" as ProposalStatus
+    commissionReceived: "",
+    notes: "",
+    assignedUserId: "",
+    status: "NEW" as ProposalStatus
   });
+  const [productForm, setProductForm] = useState<MulticredProductForm>({
+    bankName: "",
+    bankCode: "",
+    bankColor: "blue",
+    bankCategory: "",
+    agreement: "",
+    product: "",
+    description: ""
+  });
+  const clientFormTabs = [
+    { id: "personal", label: "Dados pessoais" },
+    { id: "address", label: "Endereco" },
+    { id: "bank", label: "Dados bancarios" },
+    { id: "notes", label: "Observacoes" }
+  ] as const;
 
-  const selectedContactId = form.contactId || contacts[0]?.id || "";
+  const selectedMulticredClient =
+    clients.find((client) => client.id === form.multicredClientId) ?? null;
+  const selectedContactId =
+    form.contactId || selectedMulticredClient?.contactId || "";
+  const visibleProducts = products.length > 0 ? products : fallbackMulticredProducts;
   const statusOptions = Object.entries(proposalStatusLabels) as Array<
     [ProposalStatus, string]
   >;
+  const productColorOptions = ["blue", "emerald", "violet", "amber", "slate"] as const;
+  const proposalSteps = [
+    { id: 1, label: "Cliente" },
+    { id: 2, label: "Produto" },
+    { id: 3, label: "Banco" },
+    { id: 4, label: "Dados" }
+  ] as const;
+  const quickProducts = [
+    "FGTS",
+    "CLT",
+    "INSS",
+    "Portabilidade",
+    "Cartao",
+    "Refin",
+    "Saque",
+    "Outros"
+  ];
+  const quickBanks = [
+    "V8",
+    "PAN",
+    "C6",
+    "BMG",
+    "Mercantil",
+    "Facta",
+    "Caixa",
+    "Daycoval",
+    "Outros"
+  ];
+  const productFilters = ["FGTS", "CLT", "INSS", "Portabilidade", "Cartao", "Refin", "Saque"];
+  const bankFilters = ["V8", "PAN", "C6", "BMG", "Mercantil", "Facta", "Caixa", "Daycoval"];
+  const periodOptions = [
+    ["today", "Hoje"],
+    ["yesterday", "Ontem"],
+    ["7d", "7 dias"],
+    ["30d", "30 dias"],
+    ["custom", "Personalizado"]
+  ] as const;
   const stats = [
     {
-      label: "Carteira ativa",
-      value: formatCurrency(metrics.totalAmount),
-      icon: CircleDollarSign
+      label: "Total de propostas",
+      value: String(metrics.totalProposals ?? metrics.count),
+      icon: FileText
     },
     {
-      label: "Em formalizacao",
-      value: formatCurrency(metrics.formalizingAmount),
+      label: "Em analise",
+      value: String(metrics.analysisCount ?? 0),
       icon: Clock3
+    },
+    {
+      label: "Pendentes",
+      value: String(metrics.pendingCount ?? 0),
+      icon: AlertTriangle
+    },
+    {
+      label: "Aprovadas",
+      value: String(metrics.approvedCount ?? 0),
+      icon: Check
+    },
+    {
+      label: "Pagas",
+      value: String(metrics.paidCount ?? 0),
+      icon: CheckCheck
     },
     {
       label: "Comissao prevista",
@@ -9126,34 +9933,66 @@ function Multicred({
       icon: Banknote
     },
     {
+      label: "Comissao recebida",
+      value: formatCurrency(metrics.commissionReceived ?? 0),
+      icon: CircleDollarSign
+    },
+    {
       label: "Ticket medio",
       value: formatCurrency(metrics.ticketAverage),
-      icon: FileText
+      icon: TrendingUp
     }
   ];
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedContactId) return;
+    if (!selectedContactId && !form.multicredClientId) return;
 
-    await onCreateProposal({ ...form, contactId: selectedContactId });
+    await onCreateProposal({
+      ...form,
+      contactId: selectedContactId || undefined,
+      amount: form.releasedAmount || form.amount || form.financedAmount,
+      commission: form.commission || "0"
+    });
     setForm((current) => ({
       ...current,
+      proposalNumber: "",
+      contractNumber: "",
       amount: "",
+      financedAmount: "",
+      releasedAmount: "",
+      installmentAmount: "",
+      term: "",
       commission: "",
-      contactId: selectedContactId
+      commissionReceived: "",
+      notes: "",
+      multicredClientId: form.multicredClientId,
+      contactId: selectedContactId,
+      assignedUserId: form.assignedUserId
     }));
     setShowForm(false);
+    setProposalStep(1);
   }
 
   function startEdit(proposal: ProposalRow) {
     setEditingProposalId(proposal.id);
     setEditForm({
+      multicredClientId: proposal.multicredClientId ?? "",
       bank: proposal.bank,
       agreement: proposal.agreement,
       product: proposal.product,
+      operation: proposal.operation ?? "",
+      proposalNumber: proposal.proposalNumber ?? "",
+      contractNumber: proposal.contractNumber ?? "",
       amount: proposal.amount,
+      financedAmount: proposal.financedAmount ?? "",
+      releasedAmount: proposal.releasedAmount ?? "",
+      installmentAmount: proposal.installmentAmount ?? "",
+      term: proposal.term ? String(proposal.term) : "",
       commission: proposal.commission,
+      commissionReceived: proposal.commissionReceived ?? "",
+      notes: proposal.notes ?? "",
+      assignedUserId: proposal.assignedUserId ?? "",
       status: proposal.status
     });
   }
@@ -9166,9 +10005,119 @@ function Multicred({
     setEditingProposalId(null);
   }
 
+  function updateClientForm(field: keyof MulticredClientForm, value: string) {
+    setClientForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function startNewClient() {
+    setEditingClientId(null);
+    setClientForm(createEmptyMulticredClientForm());
+    setClientFormTab("personal");
+    setShowClientForm(true);
+  }
+
+  function startEditClient(client: MulticredClientRow) {
+    setEditingClientId(client.id);
+    setClientForm(multicredClientToForm(client));
+    setClientFormTab("personal");
+    setShowClientForm(true);
+  }
+
+  async function handleClientSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const saved = editingClientId
+      ? await onUpdateClient(editingClientId, clientForm)
+      : await onCreateClient(clientForm);
+
+    if (!saved) return;
+
+    setShowClientForm(false);
+    setEditingClientId(null);
+    setClientForm(createEmptyMulticredClientForm());
+    setSelectedClientDetail(saved);
+    await onRefreshClients();
+  }
+
+  async function handleQuickClientSubmit() {
+    const saved = await onCreateClient(clientForm);
+    if (!saved) return;
+
+    setForm((current) => ({
+      ...current,
+      multicredClientId: saved.id,
+      contactId: saved.contactId ?? current.contactId
+    }));
+    setClientForm(createEmptyMulticredClientForm());
+    setQuickClientOpen(false);
+    await onRefreshClients();
+  }
+
+  async function openClientDetail(clientId: string) {
+    setClientDetailLoading(true);
+    const detail = await onLoadClientDetail(clientId);
+    if (detail) setSelectedClientDetail(detail);
+    setClientDetailLoading(false);
+  }
+
+  function applyBankShortcut(shortcut: MulticredProductShortcut) {
+    setActiveTab("proposals");
+    setShowForm(true);
+    setForm((current) => ({
+      ...current,
+      bank: shortcut.bankName,
+      agreement: shortcut.agreement,
+      product: shortcut.product
+    }));
+  }
+
+  async function handleProductSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const saved = await onCreateProduct(productForm);
+    if (!saved) return;
+
+    setProductForm({
+      bankName: "",
+      bankCode: "",
+      bankColor: "blue",
+      bankCategory: "",
+      agreement: "",
+      product: "",
+      description: ""
+    });
+    setShowProductForm(false);
+    await onRefreshProducts();
+  }
+
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="flex flex-wrap items-center gap-2 rounded-full border border-line bg-white p-1 shadow-soft">
+        <button
+          className={clsx(
+            "rounded-full px-4 py-2 text-sm font-semibold transition",
+            activeTab === "proposals"
+              ? "bg-brand text-white shadow-sm"
+              : "text-slate-600 hover:bg-slate-50"
+          )}
+          onClick={() => setActiveTab("proposals")}
+          type="button"
+        >
+          Propostas
+        </button>
+        <button
+          className={clsx(
+            "rounded-full px-4 py-2 text-sm font-semibold transition",
+            activeTab === "clients"
+              ? "bg-brand text-white shadow-sm"
+              : "text-slate-600 hover:bg-slate-50"
+          )}
+          onClick={() => setActiveTab("clients")}
+          type="button"
+        >
+          Clientes
+        </button>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {stats.map((stat) => {
           const Icon = stat.icon;
           return (
@@ -9180,6 +10129,341 @@ function Multicred({
           );
         })}
       </div>
+      {activeTab === "clients" && (
+        <section className="rounded border border-line bg-white p-5 shadow-soft">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h3 className="text-lg font-bold">Clientes Multicred</h3>
+              <p className="text-sm text-slate-500">
+                Cadastro completo para propostas, bancos e operacao interna.
+              </p>
+            </div>
+            <button
+              className="flex h-10 items-center gap-2 rounded bg-brand px-3 text-sm font-semibold text-white"
+              onClick={startNewClient}
+              type="button"
+            >
+              <Plus className="h-4 w-4" />
+              Novo cliente
+            </button>
+          </div>
+
+          <div className="mt-5 flex h-10 items-center gap-2 rounded border border-line px-3">
+            <Search className="h-4 w-4 text-slate-400" />
+            <input
+              className="w-full bg-transparent text-sm outline-none"
+              placeholder="Buscar por nome, CPF ou telefone"
+              value={clientSearch}
+              onChange={(event) => onClientSearchChange(event.target.value)}
+            />
+          </div>
+
+          {showClientForm && (
+            <form
+              className="mt-5 rounded border border-line bg-slate-50 p-4"
+              onSubmit={handleClientSubmit}
+            >
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p className="text-sm font-bold">
+                    {editingClientId ? "Editar cliente" : "Novo cliente"}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Preencha os dados por etapa para manter o cadastro organizado.
+                  </p>
+                </div>
+                <button
+                  className="flex h-9 items-center justify-center gap-2 rounded border border-line bg-white px-3 text-sm font-semibold"
+                  onClick={() => {
+                    setShowClientForm(false);
+                    setEditingClientId(null);
+                  }}
+                  type="button"
+                >
+                  <X className="h-4 w-4" />
+                  Fechar
+                </button>
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                {clientFormTabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    className={clsx(
+                      "rounded-full px-3 py-1.5 text-xs font-semibold transition",
+                      clientFormTab === tab.id
+                        ? "bg-brand text-white"
+                        : "border border-line bg-white text-slate-600 hover:bg-slate-50"
+                    )}
+                    onClick={() => setClientFormTab(tab.id)}
+                    type="button"
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                {clientFormTab === "personal" && (
+                  <>
+                    <ContactInput
+                      placeholder="Nome"
+                      required
+                      value={clientForm.name}
+                      onChange={(value) => updateClientForm("name", value)}
+                    />
+                    <ContactInput
+                      placeholder="CPF"
+                      required
+                      value={clientForm.cpf}
+                      onChange={(value) => updateClientForm("cpf", value)}
+                    />
+                    <ContactInput
+                      placeholder="RG"
+                      value={clientForm.rg}
+                      onChange={(value) => updateClientForm("rg", value)}
+                    />
+                    <input
+                      className="h-10 rounded border border-line px-3 outline-none"
+                      type="date"
+                      value={clientForm.birthDate}
+                      onChange={(event) => updateClientForm("birthDate", event.target.value)}
+                    />
+                    <ContactInput
+                      placeholder="Nome da mae"
+                      value={clientForm.motherName}
+                      onChange={(value) => updateClientForm("motherName", value)}
+                    />
+                    <ContactInput
+                      placeholder="Estado civil"
+                      value={clientForm.maritalStatus}
+                      onChange={(value) => updateClientForm("maritalStatus", value)}
+                    />
+                    <ContactInput
+                      placeholder="Telefone"
+                      value={clientForm.phone}
+                      onChange={(value) => updateClientForm("phone", value)}
+                    />
+                    <ContactInput
+                      placeholder="WhatsApp"
+                      value={clientForm.whatsapp}
+                      onChange={(value) => updateClientForm("whatsapp", value)}
+                    />
+                    <ContactInput
+                      placeholder="Email"
+                      type="email"
+                      value={clientForm.email}
+                      onChange={(value) => updateClientForm("email", value)}
+                    />
+                  </>
+                )}
+
+                {clientFormTab === "address" && (
+                  <>
+                    <ContactInput
+                      placeholder="CEP"
+                      value={clientForm.zipCode}
+                      onChange={(value) => updateClientForm("zipCode", value)}
+                    />
+                    <ContactInput
+                      placeholder="Rua"
+                      value={clientForm.street}
+                      onChange={(value) => updateClientForm("street", value)}
+                    />
+                    <ContactInput
+                      placeholder="Numero"
+                      value={clientForm.number}
+                      onChange={(value) => updateClientForm("number", value)}
+                    />
+                    <ContactInput
+                      placeholder="Complemento"
+                      value={clientForm.complement}
+                      onChange={(value) => updateClientForm("complement", value)}
+                    />
+                    <ContactInput
+                      placeholder="Bairro"
+                      value={clientForm.district}
+                      onChange={(value) => updateClientForm("district", value)}
+                    />
+                    <ContactInput
+                      placeholder="Cidade"
+                      value={clientForm.city}
+                      onChange={(value) => updateClientForm("city", value)}
+                    />
+                    <ContactInput
+                      placeholder="UF"
+                      maxLength={2}
+                      value={clientForm.state}
+                      onChange={(value) => updateClientForm("state", value.toUpperCase())}
+                    />
+                  </>
+                )}
+
+                {clientFormTab === "bank" && (
+                  <>
+                    <ContactInput
+                      placeholder="Banco"
+                      value={clientForm.bank}
+                      onChange={(value) => updateClientForm("bank", value)}
+                    />
+                    <ContactInput
+                      placeholder="Agencia"
+                      value={clientForm.agency}
+                      onChange={(value) => updateClientForm("agency", value)}
+                    />
+                    <ContactInput
+                      placeholder="Conta"
+                      value={clientForm.account}
+                      onChange={(value) => updateClientForm("account", value)}
+                    />
+                    <ContactInput
+                      placeholder="Tipo de conta"
+                      value={clientForm.accountType}
+                      onChange={(value) => updateClientForm("accountType", value)}
+                    />
+                    <ContactInput
+                      placeholder="Chave Pix"
+                      value={clientForm.pixKey}
+                      onChange={(value) => updateClientForm("pixKey", value)}
+                    />
+                  </>
+                )}
+
+                {clientFormTab === "notes" && (
+                  <textarea
+                    className="min-h-28 rounded border border-line px-3 py-2 text-sm outline-none md:col-span-3"
+                    placeholder="Observacoes"
+                    value={clientForm.notes}
+                    onChange={(event) => updateClientForm("notes", event.target.value)}
+                  />
+                )}
+              </div>
+
+              <button className="mt-4 h-10 rounded bg-brand px-4 text-sm font-semibold text-white">
+                {editingClientId ? "Salvar alteracoes" : "Criar cliente"}
+              </button>
+            </form>
+          )}
+
+          <div className="mt-5 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+            <div className="overflow-hidden rounded border border-line">
+              <div className="hidden grid-cols-[1.3fr_0.8fr_0.9fr_0.7fr] bg-slate-50 px-4 py-3 text-xs font-semibold uppercase text-slate-500 md:grid">
+                <span>Cliente</span>
+                <span>CPF</span>
+                <span>Contato</span>
+                <span>Acoes</span>
+              </div>
+              <div className="divide-y divide-line">
+                {clients.map((client) => (
+                  <div
+                    key={client.id}
+                    className={clsx(
+                      "grid gap-3 px-4 py-4 text-sm md:grid-cols-[1.3fr_0.8fr_0.9fr_0.7fr]",
+                      selectedClientDetail?.id === client.id && "bg-blue-50"
+                    )}
+                  >
+                    <div>
+                      <p className="font-semibold">{client.name}</p>
+                      <p className="text-xs text-slate-500">
+                        {client.city || client.state
+                          ? `${client.city ?? ""}${client.city && client.state ? " / " : ""}${client.state ?? ""}`
+                          : "Cliente Multicred"}
+                      </p>
+                    </div>
+                    <p className="text-slate-700">{formatCpf(client.cpf)}</p>
+                    <div>
+                      <p>{client.whatsapp ?? client.phone ?? "-"}</p>
+                      <p className="text-xs text-slate-500">{client.email ?? "Sem email"}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        className="grid h-9 w-9 place-items-center rounded border border-line text-slate-600 hover:bg-slate-50"
+                        onClick={() => void openClientDetail(client.id)}
+                        title="Ver propostas"
+                        type="button"
+                      >
+                        <FileText className="h-4 w-4" />
+                      </button>
+                      <button
+                        className="grid h-9 w-9 place-items-center rounded border border-line text-slate-600 hover:bg-slate-50"
+                        onClick={() => startEditClient(client)}
+                        title="Editar cliente"
+                        type="button"
+                      >
+                        <Edit3 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {!clientsLoading && clients.length === 0 && (
+                  <div className="p-6 text-sm text-slate-500">
+                    Nenhum cliente Multicred encontrado.
+                  </div>
+                )}
+                {clientsLoading && (
+                  <div className="p-6 text-sm text-slate-500">
+                    Carregando clientes Multicred...
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <aside className="rounded border border-line bg-slate-50 p-4">
+              <h4 className="font-bold">Detalhes do cliente</h4>
+              {!selectedClientDetail && (
+                <p className="mt-3 text-sm text-slate-500">
+                  Selecione um cliente para visualizar dados e propostas vinculadas.
+                </p>
+              )}
+              {clientDetailLoading && (
+                <p className="mt-3 text-sm text-slate-500">Carregando detalhes...</p>
+              )}
+              {selectedClientDetail && !clientDetailLoading && (
+                <div className="mt-3 space-y-4 text-sm">
+                  <div>
+                    <p className="font-semibold">{selectedClientDetail.name}</p>
+                    <p className="text-slate-500">
+                      CPF {formatCpf(selectedClientDetail.cpf)} ·{" "}
+                      {selectedClientDetail.whatsapp ?? selectedClientDetail.phone ?? "sem telefone"}
+                    </p>
+                  </div>
+                  <div className="rounded border border-line bg-white p-3">
+                    <p className="text-xs font-semibold uppercase text-slate-500">
+                      Propostas vinculadas
+                    </p>
+                    <div className="mt-2 space-y-2">
+                      {(selectedClientDetail.proposals ?? []).map((proposal) => (
+                        <div key={proposal.id} className="rounded bg-slate-50 p-2">
+                          <p className="font-semibold">{proposal.product}</p>
+                          <p className="text-xs text-slate-500">
+                            {proposal.bank} · {formatCurrency(proposal.amount)} ·{" "}
+                            {proposalStatusLabels[proposal.status]}
+                          </p>
+                        </div>
+                      ))}
+                      {(!selectedClientDetail.proposals ||
+                        selectedClientDetail.proposals.length === 0) && (
+                        <p className="text-xs text-slate-500">
+                          Nenhuma proposta vinculada ainda.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  {selectedClientDetail.notes && (
+                    <div className="rounded border border-line bg-white p-3">
+                      <p className="text-xs font-semibold uppercase text-slate-500">
+                        Observacoes
+                      </p>
+                      <p className="mt-2 text-slate-700">{selectedClientDetail.notes}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </aside>
+          </div>
+        </section>
+      )}
+      {activeTab === "proposals" && (
       <section className="rounded border border-line bg-white p-5 shadow-soft">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
@@ -9190,118 +10474,632 @@ function Multicred({
           </div>
           <button
             className="flex h-10 items-center gap-2 rounded bg-brand px-3 text-sm font-semibold text-white"
-            onClick={() => setShowForm((current) => !current)}
+            onClick={() => {
+              setProposalStep(1);
+              setShowForm(true);
+            }}
+            type="button"
           >
             <Plus className="h-4 w-4" />
             Nova proposta
           </button>
         </div>
 
+        <div className="mt-5 rounded border border-line bg-slate-50 p-4">
+          <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-sm font-bold">Atalhos de bancos e produtos</p>
+              <p className="text-xs text-slate-500">
+                Cadastre bancos e produtos para preencher propostas rapidamente.
+              </p>
+            </div>
+            <button
+              className="flex h-9 items-center gap-2 rounded border border-line bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+              onClick={() => setShowProductForm((current) => !current)}
+              type="button"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Novo atalho
+            </button>
+          </div>
+          {showProductForm && (
+            <form
+              className="mt-4 grid gap-3 rounded border border-line bg-white p-3 md:grid-cols-4"
+              onSubmit={handleProductSubmit}
+            >
+              <ContactInput
+                placeholder="Banco"
+                required
+                value={productForm.bankName}
+                onChange={(value) =>
+                  setProductForm((current) => ({ ...current, bankName: value }))
+                }
+              />
+              <ContactInput
+                placeholder="Convenio"
+                required
+                value={productForm.agreement}
+                onChange={(value) =>
+                  setProductForm((current) => ({ ...current, agreement: value }))
+                }
+              />
+              <ContactInput
+                placeholder="Produto"
+                required
+                value={productForm.product}
+                onChange={(value) =>
+                  setProductForm((current) => ({ ...current, product: value }))
+                }
+              />
+              <select
+                className="h-10 rounded border border-line px-3 text-sm outline-none"
+                value={productForm.bankColor}
+                onChange={(event) =>
+                  setProductForm((current) => ({
+                    ...current,
+                    bankColor: event.target.value
+                  }))
+                }
+              >
+                {productColorOptions.map((color) => (
+                  <option key={color} value={color}>
+                    {color}
+                  </option>
+                ))}
+              </select>
+              <ContactInput
+                placeholder="Codigo do banco"
+                value={productForm.bankCode}
+                onChange={(value) =>
+                  setProductForm((current) => ({ ...current, bankCode: value }))
+                }
+              />
+              <ContactInput
+                placeholder="Categoria"
+                value={productForm.bankCategory}
+                onChange={(value) =>
+                  setProductForm((current) => ({ ...current, bankCategory: value }))
+                }
+              />
+              <ContactInput
+                placeholder="Descricao curta"
+                value={productForm.description}
+                onChange={(value) =>
+                  setProductForm((current) => ({ ...current, description: value }))
+                }
+              />
+              <button className="h-10 rounded bg-brand px-3 text-sm font-semibold text-white">
+                Salvar atalho
+              </button>
+            </form>
+          )}
+          <div className="mt-3 grid gap-2 md:grid-cols-5">
+            {visibleProducts.map((shortcut) => (
+              <button
+                key={shortcut.id}
+                className={clsx(
+                  "rounded border bg-white p-3 text-left text-sm transition hover:-translate-y-0.5 hover:shadow-soft",
+                  shortcut.bankColor === "blue" && "border-blue-100 hover:bg-blue-50",
+                  shortcut.bankColor === "emerald" &&
+                    "border-emerald-100 hover:bg-emerald-50",
+                  shortcut.bankColor === "violet" &&
+                    "border-violet-100 hover:bg-violet-50",
+                  shortcut.bankColor === "amber" && "border-amber-100 hover:bg-amber-50",
+                  shortcut.bankColor === "slate" && "border-slate-200 hover:bg-slate-50"
+                )}
+                onClick={() => applyBankShortcut(shortcut)}
+                type="button"
+              >
+                <span className="block font-bold">{shortcut.bankName}</span>
+                <span className="mt-1 block text-xs font-semibold text-brand">
+                  {shortcut.agreement}
+                </span>
+                <span className="mt-2 block text-xs text-slate-500">
+                  {shortcut.description ?? shortcut.product}
+                </span>
+              </button>
+            ))}
+            {productsLoading && (
+              <div className="rounded border border-line bg-white p-3 text-sm text-slate-500">
+                Carregando atalhos...
+              </div>
+            )}
+          </div>
+        </div>
+
         {showForm && (
-          <form
-            className="mt-5 grid gap-3 rounded border border-line bg-slate-50 p-4 md:grid-cols-3"
-            onSubmit={handleSubmit}
-          >
-            <select
-              className="h-10 rounded border border-line px-3 text-sm outline-none"
-              value={selectedContactId}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, contactId: event.target.value }))
-              }
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 p-4">
+            <form
+              className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-line bg-white shadow-2xl"
+              onSubmit={handleSubmit}
             >
-              {contacts.map((contact) => (
-                <option key={contact.id} value={contact.id}>
-                  {contact.name} - {contact.phone}
-                </option>
-              ))}
-            </select>
-            <ContactInput
-              placeholder="Banco"
-              required
-              value={form.bank}
-              onChange={(value) => setForm((current) => ({ ...current, bank: value }))}
-            />
-            <ContactInput
-              placeholder="Convenio"
-              required
-              value={form.agreement}
-              onChange={(value) =>
-                setForm((current) => ({ ...current, agreement: value }))
-              }
-            />
-            <ContactInput
-              placeholder="Produto"
-              required
-              value={form.product}
-              onChange={(value) =>
-                setForm((current) => ({ ...current, product: value }))
-              }
-            />
-            <ContactInput
-              placeholder="Valor liberado"
-              required
-              value={form.amount}
-              onChange={(value) =>
-                setForm((current) => ({ ...current, amount: value }))
-              }
-            />
-            <ContactInput
-              placeholder="Comissao"
-              required
-              value={form.commission}
-              onChange={(value) =>
-                setForm((current) => ({ ...current, commission: value }))
-              }
-            />
+              <div className="flex items-start justify-between border-b border-line p-5">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-brand">
+                    Multicred
+                  </p>
+                  <h3 className="text-xl font-bold">Nova proposta</h3>
+                  <p className="text-sm text-slate-500">
+                    Cadastre a proposta em etapas e vincule ao cliente Multicred.
+                  </p>
+                </div>
+                <button
+                  className="grid h-9 w-9 place-items-center rounded-full border border-line text-slate-500 hover:bg-slate-50"
+                  onClick={() => setShowForm(false)}
+                  type="button"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="border-b border-line px-5 py-3">
+                <div className="grid gap-2 md:grid-cols-4">
+                  {proposalSteps.map((step) => (
+                    <button
+                      key={step.id}
+                      className={clsx(
+                        "rounded-full border px-3 py-2 text-sm font-semibold transition",
+                        proposalStep === step.id
+                          ? "border-brand bg-blue-50 text-brand"
+                          : "border-line bg-white text-slate-500 hover:bg-slate-50"
+                      )}
+                      onClick={() => setProposalStep(step.id)}
+                      type="button"
+                    >
+                      {step.id}. {step.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-5">
+                {proposalStep === 1 && (
+                  <div className="space-y-4">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <p className="font-bold">Cliente</p>
+                        <p className="text-sm text-slate-500">
+                          Busque por nome, CPF ou telefone e selecione o cliente.
+                        </p>
+                      </div>
+                      <button
+                        className="h-10 rounded border border-line px-3 text-sm font-semibold hover:bg-slate-50"
+                        onClick={() => {
+                          setClientForm(createEmptyMulticredClientForm());
+                          setQuickClientOpen((current) => !current);
+                        }}
+                        type="button"
+                      >
+                        Cadastrar novo cliente
+                      </button>
+                    </div>
+
+                    <label className="flex h-11 items-center gap-2 rounded border border-line px-3">
+                      <Search className="h-4 w-4 text-slate-400" />
+                      <input
+                        className="w-full bg-transparent text-sm outline-none"
+                        placeholder="Buscar cliente Multicred"
+                        value={clientSearch}
+                        onChange={(event) => onClientSearchChange(event.target.value)}
+                      />
+                    </label>
+
+                    {quickClientOpen && (
+                      <div className="rounded border border-blue-100 bg-blue-50 p-4">
+                        <p className="text-sm font-bold">Cadastro rapido</p>
+                        <div className="mt-3 grid gap-3 md:grid-cols-3">
+                          <ContactInput
+                            placeholder="Nome"
+                            required
+                            value={clientForm.name}
+                            onChange={(value) => updateClientForm("name", value)}
+                          />
+                          <ContactInput
+                            placeholder="CPF"
+                            required
+                            value={clientForm.cpf}
+                            onChange={(value) => updateClientForm("cpf", value)}
+                          />
+                          <ContactInput
+                            placeholder="WhatsApp"
+                            required
+                            value={clientForm.whatsapp}
+                            onChange={(value) => updateClientForm("whatsapp", value)}
+                          />
+                        </div>
+                        <button
+                          className="mt-3 h-10 rounded bg-brand px-4 text-sm font-semibold text-white"
+                          onClick={() => void handleQuickClientSubmit()}
+                          type="button"
+                        >
+                          Salvar e selecionar
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {clients.map((client) => (
+                        <button
+                          key={client.id}
+                          className={clsx(
+                            "rounded border p-4 text-left transition hover:bg-slate-50",
+                            form.multicredClientId === client.id
+                              ? "border-brand bg-blue-50"
+                              : "border-line bg-white"
+                          )}
+                          onClick={() =>
+                            setForm((current) => ({
+                              ...current,
+                              multicredClientId: client.id,
+                              contactId: client.contactId ?? current.contactId
+                            }))
+                          }
+                          type="button"
+                        >
+                          <p className="font-bold">{client.name}</p>
+                          <p className="mt-1 text-sm text-slate-500">
+                            CPF {formatCpf(client.cpf)} -{" "}
+                            {client.whatsapp ?? client.phone ?? "sem telefone"}
+                          </p>
+                        </button>
+                      ))}
+                      {!clientsLoading && clients.length === 0 && (
+                        <div className="rounded border border-dashed border-line p-4 text-sm text-slate-500 md:col-span-2">
+                          Nenhum cliente encontrado. Cadastre rapidamente acima.
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="rounded border border-line bg-slate-50 p-4">
+                      <p className="text-xs font-semibold uppercase text-slate-500">
+                        Compatibilidade com contatos antigos
+                      </p>
+                      <select
+                        className="mt-2 h-10 w-full rounded border border-line bg-white px-3 text-sm outline-none"
+                        value={form.contactId}
+                        onChange={(event) =>
+                          setForm((current) => ({ ...current, contactId: event.target.value }))
+                        }
+                      >
+                        <option value="">Usar contato vinculado ao cliente</option>
+                        {contacts.map((contact) => (
+                          <option key={contact.id} value={contact.id}>
+                            {contact.name} - {contact.phone}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
+
+                {proposalStep === 2 && (
+                  <ProductQuickSelect
+                    options={quickProducts}
+                    value={form.agreement}
+                    onChange={(value) =>
+                      setForm((current) => ({
+                        ...current,
+                        agreement: value,
+                        product: value || current.product,
+                        operation: value || current.operation
+                      }))
+                    }
+                  />
+                )}
+
+                {proposalStep === 3 && (
+                  <BankQuickSelect
+                    options={quickBanks}
+                    value={form.bank}
+                    onChange={(value) =>
+                      setForm((current) => ({ ...current, bank: value }))
+                    }
+                  />
+                )}
+
+                {proposalStep === 4 && (
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <ContactInput
+                      placeholder="Operacao"
+                      value={form.operation}
+                      onChange={(value) =>
+                        setForm((current) => ({ ...current, operation: value }))
+                      }
+                    />
+                    <ContactInput
+                      placeholder="Numero da proposta"
+                      value={form.proposalNumber}
+                      onChange={(value) =>
+                        setForm((current) => ({ ...current, proposalNumber: value }))
+                      }
+                    />
+                    <ContactInput
+                      placeholder="Numero do contrato"
+                      value={form.contractNumber}
+                      onChange={(value) =>
+                        setForm((current) => ({ ...current, contractNumber: value }))
+                      }
+                    />
+                    <ContactInput
+                      placeholder="Valor financiado"
+                      value={form.financedAmount}
+                      onChange={(value) =>
+                        setForm((current) => ({ ...current, financedAmount: value }))
+                      }
+                    />
+                    <ContactInput
+                      placeholder="Valor liberado"
+                      value={form.releasedAmount}
+                      onChange={(value) =>
+                        setForm((current) => ({
+                          ...current,
+                          releasedAmount: value,
+                          amount: value
+                        }))
+                      }
+                    />
+                    <ContactInput
+                      placeholder="Valor parcela"
+                      value={form.installmentAmount}
+                      onChange={(value) =>
+                        setForm((current) => ({ ...current, installmentAmount: value }))
+                      }
+                    />
+                    <ContactInput
+                      placeholder="Prazo"
+                      value={form.term}
+                      onChange={(value) =>
+                        setForm((current) => ({ ...current, term: value }))
+                      }
+                    />
+                    <ContactInput
+                      placeholder="Comissao prevista"
+                      value={form.commission}
+                      onChange={(value) =>
+                        setForm((current) => ({ ...current, commission: value }))
+                      }
+                    />
+                    <ContactInput
+                      placeholder="Comissao recebida"
+                      value={form.commissionReceived}
+                      onChange={(value) =>
+                        setForm((current) => ({ ...current, commissionReceived: value }))
+                      }
+                    />
+                    <select
+                      className="h-10 rounded border border-line px-3 text-sm outline-none"
+                      value={form.status}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          status: event.target.value as ProposalStatus
+                        }))
+                      }
+                    >
+                      {statusOptions.map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      className="h-10 rounded border border-line px-3 text-sm outline-none"
+                      value={form.assignedUserId}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          assignedUserId: event.target.value
+                        }))
+                      }
+                    >
+                      <option value="">Sem responsavel</option>
+                      {attendants.map((attendant) => (
+                        <option key={attendant.id} value={attendant.id}>
+                          {attendant.name}
+                        </option>
+                      ))}
+                    </select>
+                    <textarea
+                      className="min-h-24 rounded border border-line px-3 py-2 text-sm outline-none md:col-span-3"
+                      placeholder="Observacoes"
+                      value={form.notes}
+                      onChange={(event) =>
+                        setForm((current) => ({ ...current, notes: event.target.value }))
+                      }
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between border-t border-line bg-slate-50 p-4">
+                <button
+                  className="h-10 rounded border border-line bg-white px-4 text-sm font-semibold disabled:opacity-40"
+                  disabled={proposalStep === 1}
+                  onClick={() =>
+                    setProposalStep((current) => Math.max(1, current - 1) as 1 | 2 | 3 | 4)
+                  }
+                  type="button"
+                >
+                  Voltar
+                </button>
+                {proposalStep < 4 ? (
+                  <button
+                    className="h-10 rounded bg-brand px-4 text-sm font-semibold text-white"
+                    onClick={() =>
+                      setProposalStep((current) => Math.min(4, current + 1) as 1 | 2 | 3 | 4)
+                    }
+                    type="button"
+                  >
+                    Proximo
+                  </button>
+                ) : (
+                  <button
+                    className="h-10 rounded bg-brand px-4 text-sm font-semibold text-white disabled:opacity-50"
+                    disabled={!selectedContactId && !form.multicredClientId}
+                  >
+                    Salvar proposta
+                  </button>
+                )}
+              </div>
+            </form>
+          </div>
+        )}
+
+        <div className="mt-5 rounded border border-line bg-slate-50 p-4">
+          <div className="grid gap-3 xl:grid-cols-[1.5fr_1fr_1fr_1fr]">
+            <label className="flex h-10 items-center gap-2 rounded border border-line bg-white px-3">
+              <Search className="h-4 w-4 text-slate-400" />
+              <input
+                className="w-full bg-transparent text-sm outline-none"
+                placeholder="Buscar por cliente, banco, CPF ou produto"
+                value={filters.search}
+                onChange={(event) =>
+                  onFiltersChange({ ...filters, search: event.target.value })
+                }
+              />
+            </label>
             <select
-              className="h-10 rounded border border-line px-3 text-sm outline-none"
-              value={form.status}
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  status: event.target.value as ProposalStatus
-                }))
-              }
+              className="h-10 rounded border border-line bg-white px-3 text-sm outline-none"
+              value={filters.period}
+              onChange={(event) => onFiltersChange({ ...filters, period: event.target.value })}
             >
-              {statusOptions.map(([value, label]) => (
+              {periodOptions.map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}
                 </option>
               ))}
             </select>
-            <button
-              className="h-10 rounded bg-brand px-4 text-sm font-semibold text-white disabled:opacity-50 md:col-span-2"
-              disabled={!selectedContactId}
-            >
-              Salvar proposta
-            </button>
-          </form>
-        )}
-
-        <div className="mt-5 flex flex-col gap-3 md:flex-row">
-          <label className="flex h-10 flex-1 items-center gap-2 rounded border border-line px-3">
-            <Search className="h-4 w-4 text-slate-400" />
-            <input
-              className="w-full bg-transparent text-sm outline-none"
-              placeholder="Buscar por cliente, banco, CPF ou produto"
-              value={filters.search}
+            <select
+              className="h-10 rounded border border-line bg-white px-3 text-sm outline-none"
+              value={filters.assignedUserId}
               onChange={(event) =>
-                onFiltersChange({ ...filters, search: event.target.value })
+                onFiltersChange({ ...filters, assignedUserId: event.target.value })
               }
-            />
-          </label>
-          <select
-            className="h-10 rounded border border-line px-3 text-sm outline-none"
-            value={filters.status}
-            onChange={(event) => onFiltersChange({ ...filters, status: event.target.value })}
-          >
-            <option value="">Todos os status</option>
-            {statusOptions.map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
+            >
+              <option value="">Todos os operadores</option>
+              {attendants.map((attendant) => (
+                <option key={attendant.id} value={attendant.id}>
+                  {attendant.name}
+                </option>
+              ))}
+            </select>
+            <select
+              className="h-10 rounded border border-line bg-white px-3 text-sm outline-none"
+              value={`${filters.sort}:${filters.direction}`}
+              onChange={(event) => {
+                const [sort, direction] = event.target.value.split(":");
+                onFiltersChange({ ...filters, sort, direction });
+              }}
+            >
+              <option value="date:desc">Mais recentes</option>
+              <option value="date:asc">Mais antigas</option>
+              <option value="value:desc">Maior valor</option>
+              <option value="value:asc">Menor valor</option>
+              <option value="bank:asc">Banco A-Z</option>
+              <option value="product:asc">Produto A-Z</option>
+              <option value="status:asc">Status A-Z</option>
+            </select>
+          </div>
+
+          {filters.period === "custom" && (
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <input
+                className="h-10 rounded border border-line bg-white px-3 text-sm outline-none"
+                type="date"
+                value={filters.from}
+                onChange={(event) => onFiltersChange({ ...filters, from: event.target.value })}
+              />
+              <input
+                className="h-10 rounded border border-line bg-white px-3 text-sm outline-none"
+                type="date"
+                value={filters.to}
+                onChange={(event) => onFiltersChange({ ...filters, to: event.target.value })}
+              />
+            </div>
+          )}
+
+          <div className="mt-4 space-y-3">
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase text-slate-500">Status</p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className={clsx(
+                    "rounded-full border px-3 py-1.5 text-xs font-semibold",
+                    !filters.status ? "border-brand bg-blue-50 text-brand" : "border-line bg-white"
+                  )}
+                  onClick={() => onFiltersChange({ ...filters, status: "" })}
+                  type="button"
+                >
+                  Todos
+                </button>
+                {statusOptions.map(([value, label]) => (
+                  <button
+                    key={value}
+                    className={clsx(
+                      "rounded-full border px-3 py-1.5 text-xs font-semibold",
+                      filters.status === value
+                        ? "border-brand bg-blue-50 text-brand"
+                        : "border-line bg-white text-slate-600"
+                    )}
+                    onClick={() => onFiltersChange({ ...filters, status: value })}
+                    type="button"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase text-slate-500">Produto</p>
+              <div className="flex flex-wrap gap-2">
+                {productFilters.map((product) => (
+                  <button
+                    key={product}
+                    className={clsx(
+                      "rounded-full border px-3 py-1.5 text-xs font-semibold",
+                      filters.product === product
+                        ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                        : "border-line bg-white text-slate-600"
+                    )}
+                    onClick={() =>
+                      onFiltersChange({
+                        ...filters,
+                        product: filters.product === product ? "" : product
+                      })
+                    }
+                    type="button"
+                  >
+                    {product}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase text-slate-500">Banco</p>
+              <div className="flex flex-wrap gap-2">
+                {bankFilters.map((bank) => (
+                  <button
+                    key={bank}
+                    className={clsx(
+                      "rounded-full border px-3 py-1.5 text-xs font-semibold",
+                      filters.bank === bank
+                        ? "border-violet-300 bg-violet-50 text-violet-700"
+                        : "border-line bg-white text-slate-600"
+                    )}
+                    onClick={() =>
+                      onFiltersChange({
+                        ...filters,
+                        bank: filters.bank === bank ? "" : bank
+                      })
+                    }
+                    type="button"
+                  >
+                    {bank}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
 
         {editingProposalId && (
@@ -9315,6 +11113,23 @@ function Multicred({
                 Ajuste banco, produto, valores ou status e salve a alteracao.
               </p>
             </div>
+            <select
+              className="h-10 rounded border border-line px-3 text-sm outline-none md:col-span-3"
+              value={editForm.multicredClientId}
+              onChange={(event) =>
+                setEditForm((current) => ({
+                  ...current,
+                  multicredClientId: event.target.value
+                }))
+              }
+            >
+              <option value="">Sem cliente Multicred vinculado</option>
+              {clients.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {client.name} - {formatCpf(client.cpf)}
+                </option>
+              ))}
+            </select>
             <ContactInput
               placeholder="Banco"
               required
@@ -9371,6 +11186,23 @@ function Multicred({
                 </option>
               ))}
             </select>
+            <select
+              className="h-10 rounded border border-line px-3 text-sm outline-none"
+              value={editForm.assignedUserId}
+              onChange={(event) =>
+                setEditForm((current) => ({
+                  ...current,
+                  assignedUserId: event.target.value
+                }))
+              }
+            >
+              <option value="">Sem responsavel</option>
+              {attendants.map((attendant) => (
+                <option key={attendant.id} value={attendant.id}>
+                  {attendant.name}
+                </option>
+              ))}
+            </select>
             <button className="flex h-10 items-center justify-center gap-2 rounded bg-brand px-4 text-sm font-semibold text-white">
               <Check className="h-4 w-4" />
               Salvar alteracoes
@@ -9386,13 +11218,15 @@ function Multicred({
           </form>
         )}
 
-        <div className="mt-5 overflow-hidden rounded border border-line">
-          <div className="hidden grid-cols-[1.2fr_1fr_1fr_0.8fr_0.8fr_0.7fr] bg-slate-50 px-4 py-3 text-xs font-semibold uppercase text-slate-500 md:grid">
+        <div className="mt-5 overflow-hidden rounded border border-line bg-white">
+          <div className="hidden grid-cols-[1.4fr_1fr_0.9fr_0.9fr_0.8fr_0.9fr_0.9fr_0.7fr] bg-slate-50 px-4 py-3 text-xs font-semibold uppercase text-slate-500 xl:grid">
             <span>Cliente</span>
             <span>Produto</span>
             <span>Banco</span>
             <span>Valores</span>
+            <span>Comissao</span>
             <span>Status</span>
+            <span>Responsavel</span>
             <span>Acoes</span>
           </div>
           <div className="divide-y divide-line">
@@ -9400,40 +11234,75 @@ function Multicred({
               <div
                 key={proposal.id}
                 className={clsx(
-                  "grid gap-3 px-4 py-4 text-sm md:grid-cols-[1.2fr_1fr_1fr_0.8fr_0.8fr_0.7fr]",
+                  "grid cursor-pointer gap-3 px-4 py-4 text-sm transition hover:bg-slate-50 xl:grid-cols-[1.4fr_1fr_0.9fr_0.9fr_0.8fr_0.9fr_0.9fr_0.7fr]",
                   editingProposalId === proposal.id && "bg-teal-50"
                 )}
+                onClick={() => setSelectedProposal(proposal)}
               >
                 <div>
-                  <p className="font-semibold">{proposal.contact.name}</p>
-                  <p className="text-xs text-slate-500">
-                    {proposal.contact.phone} {proposal.contact.cpf ? `- ${proposal.contact.cpf}` : ""}
+                  <p className="font-semibold">
+                    {proposal.multicredClient?.name ?? proposal.contact.name}
                   </p>
-                </div>
-                <div>
-                  <p className="font-medium">{proposal.product}</p>
-                  <p className="text-xs text-slate-500">{proposal.agreement}</p>
-                </div>
-                <div>
-                  <p>{proposal.bank}</p>
                   <p className="text-xs text-slate-500">
+                    {proposal.multicredClient
+                      ? `${proposal.multicredClient.whatsapp ?? proposal.multicredClient.phone ?? proposal.contact.phone} - ${formatCpf(proposal.multicredClient.cpf)}`
+                      : `${proposal.contact.phone} ${
+                          proposal.contact.cpf ? `- ${proposal.contact.cpf}` : ""
+                        }`}
+                  </p>
+                  {proposal.multicredClient && (
+                    <p className="mt-1 text-xs text-slate-500">
+                      Contato CRM: {proposal.contact.name}
+                    </p>
+                  )}
+                  <p className="mt-1 text-xs text-slate-500">
                     Criada {formatRelativeDate(proposal.createdAt)}
                   </p>
                 </div>
                 <div>
-                  <p className="font-semibold">{formatCurrency(proposal.amount)}</p>
+                  <p className="font-medium">{proposal.product}</p>
                   <p className="text-xs text-slate-500">
-                    Comissao {formatCurrency(proposal.commission)}
+                    {proposal.operation || proposal.agreement}
+                  </p>
+                  {proposal.proposalNumber && (
+                    <p className="text-xs text-slate-500">Prop. {proposal.proposalNumber}</p>
+                  )}
+                </div>
+                <div>
+                  <p>{proposal.bank}</p>
+                  {proposal.contractNumber && (
+                    <p className="text-xs text-slate-500">Contrato {proposal.contractNumber}</p>
+                  )}
+                  <p className="text-xs text-slate-500">Prazo {proposal.term ?? "-"}x</p>
+                </div>
+                <div>
+                  <p className="font-semibold">
+                    {formatCurrency(proposal.releasedAmount ?? proposal.amount)}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Parcela {proposal.installmentAmount ? formatCurrency(proposal.installmentAmount) : "-"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">
+                    Prev. {formatCurrency(proposal.commission)}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Rec. {proposal.commissionReceived ? formatCurrency(proposal.commissionReceived) : "-"}
                   </p>
                 </div>
                 <select
                   className={clsx(
                     "h-9 rounded border px-2 text-xs font-semibold outline-none",
-                    proposal.status === "PAID" && "border-emerald-200 bg-emerald-50 text-emerald-700",
-                    proposal.status === "FORMALIZING" && "border-amber-200 bg-amber-50 text-amber-700",
+                    ["PAID", "APPROVED"].includes(proposal.status) &&
+                      "border-emerald-200 bg-emerald-50 text-emerald-700",
+                    ["FORMALIZING", "ANALYSIS", "TYPED"].includes(proposal.status) &&
+                      "border-amber-200 bg-amber-50 text-amber-700",
                     proposal.status === "CANCELED" && "border-rose-200 bg-rose-50 text-rose-700",
-                    proposal.status === "REWORK" && "border-orange-200 bg-orange-50 text-orange-700",
-                    proposal.status === "DRAFT" && "border-line bg-white text-slate-700"
+                    ["REWORK", "PENDING", "REJECTED"].includes(proposal.status) &&
+                      "border-orange-200 bg-orange-50 text-orange-700",
+                    ["DRAFT", "NEW"].includes(proposal.status) &&
+                      "border-line bg-white text-slate-700"
                   )}
                   value={proposal.status}
                   onChange={(event) =>
@@ -9441,6 +11310,7 @@ function Multicred({
                       status: event.target.value as ProposalStatus
                     })
                   }
+                  onClick={(event) => event.stopPropagation()}
                 >
                   {statusOptions.map(([value, label]) => (
                     <option key={value} value={value}>
@@ -9448,10 +11318,30 @@ function Multicred({
                     </option>
                   ))}
                 </select>
+                <select
+                  className="h-9 rounded border border-line bg-white px-2 text-xs font-semibold outline-none"
+                  value={proposal.assignedUserId ?? ""}
+                  onChange={(event) =>
+                    void onUpdateProposal(proposal.id, {
+                      assignedUserId: event.target.value || null
+                    })
+                  }
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <option value="">Sem responsavel</option>
+                  {attendants.map((attendant) => (
+                    <option key={attendant.id} value={attendant.id}>
+                      {attendant.name}
+                    </option>
+                  ))}
+                </select>
                 <div className="flex items-center gap-2">
                   <button
                     className="grid h-9 w-9 place-items-center rounded border border-line text-slate-600 hover:bg-slate-50"
-                    onClick={() => startEdit(proposal)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      startEdit(proposal);
+                    }}
                     title="Editar proposta"
                     type="button"
                   >
@@ -9459,7 +11349,8 @@ function Multicred({
                   </button>
                   <button
                     className="grid h-9 w-9 place-items-center rounded border border-rose-200 text-rose-600 hover:bg-rose-50"
-                    onClick={() => {
+                    onClick={(event) => {
+                      event.stopPropagation();
                       if (window.confirm("Remover esta proposta da esteira?")) {
                         void onDeleteProposal(proposal.id);
                       }
@@ -9480,6 +11371,129 @@ function Multicred({
           </div>
         </div>
       </section>
+      )}
+      {selectedProposal && (
+        <div className="fixed inset-0 z-40 bg-slate-950/20" onClick={() => setSelectedProposal(null)}>
+          <aside
+            className="ml-auto flex h-full w-full max-w-xl flex-col bg-white shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="border-b border-line p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase text-brand">
+                    Detalhe da proposta
+                  </p>
+                  <h3 className="mt-1 text-xl font-bold">
+                    {selectedProposal.multicredClient?.name ?? selectedProposal.contact.name}
+                  </h3>
+                  <p className="text-sm text-slate-500">
+                    CPF{" "}
+                    {formatCpf(
+                      selectedProposal.multicredClient?.cpf ??
+                        selectedProposal.contact.cpf ??
+                        ""
+                    )}{" "}
+                    - {selectedProposal.multicredClient?.whatsapp ??
+                      selectedProposal.multicredClient?.phone ??
+                      selectedProposal.contact.phone}
+                  </p>
+                </div>
+                <button
+                  className="grid h-10 w-10 place-items-center rounded-full border border-line text-slate-500 hover:bg-slate-50"
+                  onClick={() => setSelectedProposal(null)}
+                  type="button"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 space-y-4 overflow-y-auto p-5">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded border border-line p-4">
+                  <p className="text-xs uppercase text-slate-500">Produto</p>
+                  <p className="mt-1 font-bold">{selectedProposal.product}</p>
+                  <p className="text-sm text-slate-500">
+                    {selectedProposal.operation || selectedProposal.agreement}
+                  </p>
+                </div>
+                <div className="rounded border border-line p-4">
+                  <p className="text-xs uppercase text-slate-500">Banco</p>
+                  <p className="mt-1 font-bold">{selectedProposal.bank}</p>
+                  <p className="text-sm text-slate-500">
+                    Contrato {selectedProposal.contractNumber ?? "-"}
+                  </p>
+                </div>
+                <div className="rounded border border-line p-4">
+                  <p className="text-xs uppercase text-slate-500">Valor liberado</p>
+                  <p className="mt-1 font-bold">
+                    {formatCurrency(selectedProposal.releasedAmount ?? selectedProposal.amount)}
+                  </p>
+                  <p className="text-sm text-slate-500">
+                    Parcela{" "}
+                    {selectedProposal.installmentAmount
+                      ? formatCurrency(selectedProposal.installmentAmount)
+                      : "-"}
+                  </p>
+                </div>
+                <div className="rounded border border-line p-4">
+                  <p className="text-xs uppercase text-slate-500">Status atual</p>
+                  <p className="mt-1 font-bold">
+                    {proposalStatusLabels[selectedProposal.status]}
+                  </p>
+                  <p className="text-sm text-slate-500">
+                    Resp. {selectedProposal.assignedUser?.name ?? "Sem responsavel"}
+                  </p>
+                </div>
+              </div>
+
+              {selectedProposal.multicredClient && (
+                <div className="rounded border border-line p-4">
+                  <p className="font-bold">Dados bancarios do cliente</p>
+                  <div className="mt-3 grid gap-2 text-sm text-slate-600 sm:grid-cols-2">
+                    <span>Banco: {selectedProposal.multicredClient.bank ?? "-"}</span>
+                    <span>Agencia: {selectedProposal.multicredClient.agency ?? "-"}</span>
+                    <span>Conta: {selectedProposal.multicredClient.account ?? "-"}</span>
+                    <span>Pix: {selectedProposal.multicredClient.pixKey ?? "-"}</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="rounded border border-line p-4">
+                <p className="font-bold">Observacoes</p>
+                <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">
+                  {selectedProposal.notes || "Nenhuma observacao registrada."}
+                </p>
+              </div>
+
+              <div className="rounded border border-line p-4">
+                <p className="font-bold">Historico da proposta</p>
+                <div className="mt-4 space-y-4">
+                  {(selectedProposal.history ?? []).length > 0 ? (
+                    selectedProposal.history?.map((event) => (
+                      <div key={event.id} className="border-l-2 border-brand pl-3">
+                        <p className="text-xs text-slate-500">
+                          {new Date(event.createdAt).toLocaleString("pt-BR")}
+                          {event.user ? ` - ${event.user.name}` : ""}
+                        </p>
+                        <p className="font-semibold">{event.title}</p>
+                        {event.detail && (
+                          <p className="text-sm text-slate-600">{event.detail}</p>
+                        )}
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-slate-500">
+                      Historico ainda nao registrado para esta proposta.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </aside>
+        </div>
+      )}
     </div>
   );
 }
