@@ -35,10 +35,42 @@ async function main() {
     ? hashPassword(seedAdminPassword)
     : existingAdmin?.passwordHash ?? hashPassword("admin123");
 
+  let adminCompanyId = existingAdmin?.companyId ?? company.id;
+
+  if (process.env.NODE_ENV === "production" && existingAdmin?.companyId === company.id) {
+    const companies = await prisma.company.findMany({
+      where: { id: { not: company.id } },
+      select: {
+        id: true,
+        _count: {
+          select: {
+            users: true,
+            contacts: true,
+            channels: true
+          }
+        }
+      }
+    });
+
+    const likelyProductionCompany = companies
+      .map((item) => ({
+        id: item.id,
+        score: item._count.contacts * 10 + item._count.channels * 5 + item._count.users
+      }))
+      .sort((a, b) => b.score - a.score)[0];
+
+    if (likelyProductionCompany) {
+      console.warn(
+        `[seed] Preserving production admin on existing company ${likelyProductionCompany.id}.`
+      );
+      adminCompanyId = likelyProductionCompany.id;
+    }
+  }
+
   const admin = await prisma.user.upsert({
     where: { email: "admin@crm.local" },
     update: {
-      companyId: company.id,
+      companyId: adminCompanyId,
       name: "Administrador",
       ...(seedAdminPassword ? { passwordHash: adminPasswordHash } : {}),
       role: "ADMIN"
@@ -113,6 +145,10 @@ async function main() {
       })
     )
   );
+
+  if (process.env.NODE_ENV === "production") {
+    return;
+  }
 
   const samples = [
     {

@@ -169,9 +169,9 @@ model Contact {
   retirementLeads    RetirementLead[]
   multicredClients    MulticredClient[]
 
-  @@unique([companyId, phone])
-  @@unique([companyId, cpf])
   @@index([companyId])
+  @@index([companyId, phone])
+  @@index([companyId, cpf])
   @@index([companyId, updatedAt])
   @@index([companyId, createdAt])
   @@index([ownerId])

@@ -9,41 +9,47 @@ function run(command, args, options = {}) {
   });
 }
 
-const dbSync = run("node", [
+function runAndWait(command, args) {
+  return new Promise((resolve) => {
+    const child = run(command, args);
+    child.on("exit", (code) => resolve(code ?? 1));
+    child.on("error", () => resolve(1));
+  });
+}
+
+const dbSyncCode = await runAndWait("node", [
   "prisma/retry-command.mjs",
   "npm",
   "run",
   "prisma:push:prod"
 ]);
 
-dbSync.on("exit", (code) => {
-  if (code === 0) {
-    console.log("Database schema sync completed.");
-    if (process.env.SEED_ADMIN_PASSWORD) {
-      const seed = run("node", [
-        "prisma/retry-command.mjs",
-        "npm",
-        "run",
-        "prisma:seed:prod"
-      ]);
+if (dbSyncCode !== 0) {
+  console.error(`Database schema sync exited with code ${dbSyncCode}. App startup aborted.`);
+  process.exit(dbSyncCode);
+}
 
-      seed.on("exit", (seedCode) => {
-        if (seedCode === 0) {
-          console.log("Seed completed.");
-        } else {
-          console.error(`Seed exited with code ${seedCode}. App will keep running.`);
-        }
-      });
-    }
+console.log("Database schema sync completed.");
+
+if (process.env.SEED_ADMIN_PASSWORD) {
+  const seedCode = await runAndWait("node", [
+    "prisma/retry-command.mjs",
+    "npm",
+    "run",
+    "prisma:seed:prod"
+  ]);
+
+  if (seedCode === 0) {
+    console.log("Seed completed.");
   } else {
-    console.error(`Database schema sync exited with code ${code}. App will keep running.`);
+    console.error(`Seed exited with code ${seedCode}. App startup aborted.`);
+    process.exit(seedCode);
   }
-});
+}
 
 const app = run("npm", ["run", "start"]);
 
 function shutdown(signal) {
-  dbSync.kill(signal);
   app.kill(signal);
 }
 
