@@ -1,6 +1,22 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
+import { contactInclude } from "@/lib/contacts";
 import { prisma } from "@/lib/db";
+
+export const dynamic = "force-dynamic";
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function runCheck(name: string, check: () => Promise<unknown>) {
+  try {
+    await check();
+    return { name, ok: true };
+  } catch (error) {
+    return { name, ok: false, error: getErrorMessage(error) };
+  }
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -10,7 +26,23 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
 
-    const [users, contacts, channels, conversations, messages] = await Promise.all([
+    const [sessionUser, currentCompany, users, contacts, channels, conversations, messages] =
+      await Promise.all([
+        prisma.user.findUnique({
+          where: { id: session.id },
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+            companyId: true,
+            company: { select: { id: true, name: true, segment: true } }
+          }
+        }),
+        prisma.company.findUnique({
+          where: { id: session.companyId },
+          select: { id: true, name: true, segment: true }
+        }),
       prisma.user.count({ where: { companyId: session.companyId } }),
       prisma.contact.count({ where: { companyId: session.companyId } }),
       prisma.channel.findMany({
@@ -37,6 +69,67 @@ export async function GET(request: NextRequest) {
       })
     ]);
 
+    const companyInventory = await prisma.company.findMany({
+      select: {
+        id: true,
+        name: true,
+        segment: true,
+        _count: {
+          select: {
+            users: true,
+            contacts: true,
+            channels: true,
+            proposals: true,
+            stages: true
+          }
+        }
+      },
+      orderBy: { createdAt: "asc" },
+      take: 20
+    });
+
+    const checks = await Promise.all([
+      runCheck("contact-count-current-company", () =>
+        prisma.contact.count({ where: { companyId: session.companyId } })
+      ),
+      runCheck("kanban-stage-query", () =>
+        prisma.pipelineStage.findMany({
+          where: { companyId: session.companyId },
+          include: {
+            contacts: {
+              where: { archivedAt: null },
+              include: contactInclude,
+              take: 1
+            }
+          },
+          take: 1
+        })
+      ),
+      runCheck("kanban-unstaged-query", () =>
+        prisma.contact.findMany({
+          where: {
+            companyId: session.companyId,
+            archivedAt: null,
+            stageId: null
+          },
+          include: contactInclude,
+          take: 1
+        })
+      ),
+      runCheck("proposal-new-fields", () =>
+        prisma.proposal.findFirst({
+          select: {
+            id: true,
+            updatedAt: true,
+            assignedUserId: true,
+            multicredClientId: true
+          }
+        })
+      ),
+      runCheck("proposal-history", () => prisma.proposalHistory.count()),
+      runCheck("multicred-client", () => prisma.multicredClient.count())
+    ]);
+
     const origin = request.nextUrl.origin;
     const webhookUrl = `${origin}/api/webhooks/whatsapp`;
     const metaChannels = channels.filter((channel) => channel.provider === "meta");
@@ -56,6 +149,22 @@ export async function GET(request: NextRequest) {
         environment: process.env.NODE_ENV ?? "unknown",
         timestamp: new Date().toISOString()
       },
+      session: {
+        cookieCompanyId: session.companyId,
+        cookieUserId: session.id,
+        cookieRole: session.role,
+        databaseUser: sessionUser
+          ? {
+              id: sessionUser.id,
+              email: sessionUser.email,
+              name: sessionUser.name,
+              role: sessionUser.role,
+              companyId: sessionUser.companyId,
+              company: sessionUser.company
+            }
+          : null,
+        currentCompany
+      },
       database: {
         ok: true,
         users,
@@ -63,6 +172,17 @@ export async function GET(request: NextRequest) {
         conversations,
         messages
       },
+      companies: companyInventory.map((company) => ({
+        id: company.id,
+        name: company.name,
+        segment: company.segment,
+        users: company._count.users,
+        contacts: company._count.contacts,
+        channels: company._count.channels,
+        proposals: company._count.proposals,
+        stages: company._count.stages
+      })),
+      checks,
       whatsapp: {
         webhookUrl,
         totalChannels: channels.length,
