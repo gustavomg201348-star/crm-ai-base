@@ -1,9 +1,13 @@
+import { spawn } from "node:child_process";
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { contactInclude } from "@/lib/contacts";
 import { prisma } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+const MAX_MAINTENANCE_OUTPUT_LENGTH = 12000;
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
@@ -18,12 +22,83 @@ async function runCheck(name: string, check: () => Promise<unknown>) {
   }
 }
 
+function sanitizeMaintenanceOutput(value: string) {
+  return value
+    .replace(/postgres(?:ql)?:\/\/[^\s"']+/gi, "[DATABASE_URL_MASKED]")
+    .replace(/prisma:\/\/[^\s"']+/gi, "[DATABASE_URL_MASKED]")
+    .slice(-MAX_MAINTENANCE_OUTPUT_LENGTH);
+}
+
+function runMaintenanceCommand(command: string, args: string[]) {
+  return new Promise<{ code: number; output: string }>((resolve) => {
+    let output = "";
+
+    const child = spawn(command, args, {
+      cwd: process.cwd(),
+      env: process.env,
+      shell: true
+    });
+
+    const append = (chunk: Buffer) => {
+      output += chunk.toString();
+      if (output.length > MAX_MAINTENANCE_OUTPUT_LENGTH * 2) {
+        output = output.slice(-MAX_MAINTENANCE_OUTPUT_LENGTH);
+      }
+    };
+
+    child.stdout.on("data", append);
+    child.stderr.on("data", append);
+    child.on("error", (error) => {
+      output += `\n${error instanceof Error ? error.message : String(error)}`;
+      resolve({ code: 1, output: sanitizeMaintenanceOutput(output) });
+    });
+    child.on("close", (code) => {
+      resolve({ code: code ?? 1, output: sanitizeMaintenanceOutput(output) });
+    });
+  });
+}
+
 export async function GET(request: NextRequest) {
   try {
     const session = getSessionFromRequest(request);
 
     if (!session) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+    }
+
+    if (
+      request.nextUrl.searchParams.get("maintenance") === "db-push" ||
+      request.nextUrl.searchParams.get("action") === "db-push"
+    ) {
+      if (session.role !== "ADMIN") {
+        return NextResponse.json(
+          { ok: false, error: "Apenas ADMIN pode executar manutencao." },
+          { status: 403 }
+        );
+      }
+
+      if (request.nextUrl.searchParams.get("confirm") !== "apply") {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: "Confirme usando maintenance=db-push&confirm=apply.",
+            command: "npm run prisma:push:prod"
+          },
+          { status: 400 }
+        );
+      }
+
+      const startedAt = new Date();
+      const result = await runMaintenanceCommand("npm", ["run", "prisma:push:prod"]);
+
+      return NextResponse.json({
+        ok: result.code === 0,
+        code: result.code,
+        startedAt: startedAt.toISOString(),
+        finishedAt: new Date().toISOString(),
+        command: "npm run prisma:push:prod",
+        output: result.output
+      });
     }
 
     const [sessionUser, currentCompany, users, contacts, channels, conversations, messages] =
