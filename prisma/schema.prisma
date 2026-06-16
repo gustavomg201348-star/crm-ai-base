@@ -237,8 +237,8 @@ model MulticredBank {
   company     Company  @relation(fields: [companyId], references: [id])
   products    MulticredProduct[]
 
-  @@unique([companyId, name])
   @@index([companyId])
+  @@index([companyId, name])
   @@index([companyId, isActive])
   @@index([companyId, position])
 }
