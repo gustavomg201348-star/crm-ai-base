@@ -22,6 +22,30 @@ async function main() {
     }
   });
 
+  async function findProductionCompanyWithContacts() {
+    const activeContactGroups = await prisma.contact.groupBy({
+      by: ["companyId"],
+      where: { archivedAt: null },
+      _count: { _all: true }
+    });
+
+    const mostActiveCompany = activeContactGroups
+      .map((item) => ({
+        id: item.companyId,
+        activeContacts: item._count._all
+      }))
+      .sort((a, b) => b.activeContacts - a.activeContacts)[0];
+
+    if (!mostActiveCompany || mostActiveCompany.activeContacts === 0) {
+      return null;
+    }
+
+    return prisma.company.findUnique({
+      where: { id: mostActiveCompany.id },
+      select: { id: true }
+    });
+  }
+
   const seedAdminPassword = process.env.SEED_ADMIN_PASSWORD;
   const existingAdmin = await prisma.user.findUnique({
     where: { email: "admin@crm.local" }
@@ -37,33 +61,14 @@ async function main() {
 
   let adminCompanyId = existingAdmin?.companyId ?? company.id;
 
-  if (process.env.NODE_ENV === "production" && existingAdmin?.companyId === company.id) {
-    const companies = await prisma.company.findMany({
-      where: { id: { not: company.id } },
-      select: {
-        id: true,
-        _count: {
-          select: {
-            users: true,
-            contacts: true,
-            channels: true
-          }
-        }
-      }
-    });
+  if (process.env.NODE_ENV === "production") {
+    const productionCompany = await findProductionCompanyWithContacts();
 
-    const likelyProductionCompany = companies
-      .map((item) => ({
-        id: item.id,
-        score: item._count.contacts * 10 + item._count.channels * 5 + item._count.users
-      }))
-      .sort((a, b) => b.score - a.score)[0];
-
-    if (likelyProductionCompany) {
+    if (productionCompany) {
       console.warn(
-        `[seed] Preserving production admin on existing company ${likelyProductionCompany.id}.`
+        `[seed] Using company with active contacts for admin@crm.local: ${productionCompany.id}.`
       );
-      adminCompanyId = likelyProductionCompany.id;
+      adminCompanyId = productionCompany.id;
     }
   }
 
@@ -76,7 +81,7 @@ async function main() {
       role: "ADMIN"
     },
     create: {
-      companyId: company.id,
+      companyId: adminCompanyId,
       name: "Administrador",
       email: "admin@crm.local",
       passwordHash: adminPasswordHash,

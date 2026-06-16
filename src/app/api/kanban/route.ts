@@ -3,6 +3,8 @@ import { getSessionFromRequest } from "@/lib/auth";
 import { contactInclude, mapContact } from "@/lib/contacts";
 import { prisma } from "@/lib/db";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(request: NextRequest) {
   try {
     const session = getSessionFromRequest(request);
@@ -51,7 +53,8 @@ export async function GET(request: NextRequest) {
         }
       ]
     });
-  } catch {
+  } catch (error) {
+    console.error("[kanban-load-error]", error);
     return NextResponse.json(
       { error: "Nao foi possivel carregar o Kanban." },
       { status: 500 }

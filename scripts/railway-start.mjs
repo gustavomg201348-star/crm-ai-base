@@ -31,6 +31,15 @@ if (dbSyncCode !== 0) {
 
 console.log("Database schema sync completed.");
 
+const adminRepairCode = await runAndWait("node", [
+  "prisma/repair-production-admin-company.mjs"
+]);
+
+if (adminRepairCode !== 0) {
+  console.error(`Admin company repair exited with code ${adminRepairCode}. App startup aborted.`);
+  process.exit(adminRepairCode);
+}
+
 if (process.env.SEED_ADMIN_PASSWORD) {
   const seedCode = await runAndWait("node", [
     "prisma/retry-command.mjs",
