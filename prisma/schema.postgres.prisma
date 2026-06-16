@@ -368,8 +368,8 @@ model Tag {
   contacts  ContactTag[]
   conversations ConversationTag[]
 
-  @@unique([companyId, name])
   @@index([companyId])
+  @@index([companyId, name])
 }
 
 model ContactTag {
