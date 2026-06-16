@@ -50,12 +50,14 @@ export async function GET(request: NextRequest) {
   const blocked = requireCompanyAdmin(session);
   if (blocked) return blocked;
 
+  const action = request.nextUrl.searchParams.get("action");
   const confirm = request.nextUrl.searchParams.get("confirm");
-  if (confirm !== "apply-schema") {
+
+  if (action !== "db-push" || confirm !== "apply") {
     return NextResponse.json(
       {
         ok: false,
-        error: "Confirme a execucao usando ?confirm=apply-schema.",
+        error: "Informe action=db-push&confirm=apply.",
         action: "npm run prisma:push:prod"
       },
       { status: 400 }
