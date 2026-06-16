@@ -17,46 +17,51 @@ function runAndWait(command, args) {
   });
 }
 
-const dbSyncCode = await runAndWait("node", [
-  "prisma/retry-command.mjs",
-  "npm",
-  "run",
-  "prisma:push:prod"
-]);
+const app = run("npm", ["run", "start"]);
 
-if (dbSyncCode !== 0) {
-  console.error(`Database schema sync exited with code ${dbSyncCode}. App startup aborted.`);
-  process.exit(dbSyncCode);
-}
-
-console.log("Database schema sync completed.");
-
-const adminRepairCode = await runAndWait("node", [
-  "prisma/repair-production-admin-company.mjs"
-]);
-
-if (adminRepairCode !== 0) {
-  console.error(`Admin company repair exited with code ${adminRepairCode}. App startup aborted.`);
-  process.exit(adminRepairCode);
-}
-
-if (process.env.SEED_ADMIN_PASSWORD) {
-  const seedCode = await runAndWait("node", [
+async function runDatabaseMaintenance() {
+  const dbSyncCode = await runAndWait("node", [
     "prisma/retry-command.mjs",
     "npm",
     "run",
-    "prisma:seed:prod"
+    "prisma:push:prod"
   ]);
 
-  if (seedCode === 0) {
-    console.log("Seed completed.");
-  } else {
-    console.error(`Seed exited with code ${seedCode}. App startup aborted.`);
-    process.exit(seedCode);
+  if (dbSyncCode !== 0) {
+    console.error(`Database schema sync exited with code ${dbSyncCode}. App remains running.`);
+    return;
+  }
+
+  console.log("Database schema sync completed.");
+
+  const adminRepairCode = await runAndWait("node", [
+    "prisma/repair-production-admin-company.mjs"
+  ]);
+
+  if (adminRepairCode !== 0) {
+    console.error(`Admin company repair exited with code ${adminRepairCode}. App remains running.`);
+    return;
+  }
+
+  if (process.env.SEED_ADMIN_PASSWORD) {
+    const seedCode = await runAndWait("node", [
+      "prisma/retry-command.mjs",
+      "npm",
+      "run",
+      "prisma:seed:prod"
+    ]);
+
+    if (seedCode === 0) {
+      console.log("Seed completed.");
+    } else {
+      console.error(`Seed exited with code ${seedCode}. App remains running.`);
+    }
   }
 }
 
-const app = run("npm", ["run", "start"]);
+runDatabaseMaintenance().catch((error) => {
+  console.error("Database maintenance failed.", error);
+});
 
 function shutdown(signal) {
   app.kill(signal);
