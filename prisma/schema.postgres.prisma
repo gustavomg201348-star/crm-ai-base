@@ -588,7 +588,7 @@ model Proposal {
   notes             String?
   status            String            @default("DRAFT")
   createdAt         DateTime          @default(now())
-  updatedAt         DateTime          @updatedAt
+  updatedAt         DateTime          @default(now()) @updatedAt
   company           Company           @relation(fields: [companyId], references: [id])
   contact           Contact           @relation(fields: [contactId], references: [id])
   multicredClient   MulticredClient?  @relation(fields: [multicredClientId], references: [id])
