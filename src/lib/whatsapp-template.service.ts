@@ -64,7 +64,8 @@ function getPublicBaseUrl() {
 function getBundledTemplateHeaderImageUrl(templateName: string) {
   const bundledImages: Record<string, string> = {
     INSS_UTILIDADE_01: "inss_utilidade_01.jpg",
-    FGTS_UTILIDADE: "fgts_utilidade.jpg"
+    FGTS_UTILIDADE: "fgts_utilidade.jpg",
+    CLTCOMIMAGEM: "cltcomimagem.jpg"
   };
   const fileName = bundledImages[normalizeTemplateEnvName(templateName)];
   if (!fileName) return null;
