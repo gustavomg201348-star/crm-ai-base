@@ -74,27 +74,31 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Produto e obrigatorio." }, { status: 400 });
     }
 
-    const bank = await prisma.multicredBank.upsert({
+    const existingBank = await prisma.multicredBank.findFirst({
       where: {
-        companyId_name: {
-          companyId: session.companyId,
-          name: data.bankName
-        }
-      },
-      update: {
-        code: data.bankCode,
-        category: data.bankCategory,
-        color: data.bankColor,
-        isActive: true
-      },
-      create: {
         companyId: session.companyId,
-        name: data.bankName,
-        code: data.bankCode,
-        category: data.bankCategory,
-        color: data.bankColor
+        name: data.bankName
       }
     });
+    const bank = existingBank
+      ? await prisma.multicredBank.update({
+          where: { id: existingBank.id },
+          data: {
+            code: data.bankCode,
+            category: data.bankCategory,
+            color: data.bankColor,
+            isActive: true
+          }
+        })
+      : await prisma.multicredBank.create({
+          data: {
+            companyId: session.companyId,
+            name: data.bankName,
+            code: data.bankCode,
+            category: data.bankCategory,
+            color: data.bankColor
+          }
+        });
 
     const product = await prisma.multicredProduct.upsert({
       where: {

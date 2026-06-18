@@ -86,26 +86,30 @@ export async function ensureDefaultMulticredCatalog(companyId: string) {
 
   for (let index = 0; index < defaultMulticredCatalog.length; index += 1) {
     const item = defaultMulticredCatalog[index];
-    const bank = await prisma.multicredBank.upsert({
+    const existingBank = await prisma.multicredBank.findFirst({
       where: {
-        companyId_name: {
-          companyId,
-          name: item.bank
-        }
-      },
-      update: {
-        isActive: true,
-        color: item.color,
-        category: item.category
-      },
-      create: {
         companyId,
-        name: item.bank,
-        color: item.color,
-        category: item.category,
-        position: index
+        name: item.bank
       }
     });
+    const bank = existingBank
+      ? await prisma.multicredBank.update({
+          where: { id: existingBank.id },
+          data: {
+            isActive: true,
+            color: item.color,
+            category: item.category
+          }
+        })
+      : await prisma.multicredBank.create({
+          data: {
+            companyId,
+            name: item.bank,
+            color: item.color,
+            category: item.category,
+            position: index
+          }
+        });
 
     await prisma.multicredProduct.upsert({
       where: {
