@@ -49,6 +49,14 @@ export function translateMetaError(payload: unknown, fallback = "Falha ao consul
     return "Token invalido ou expirado. Gere um novo token no Business Manager/Meta.";
   }
 
+  if (lower.includes("business account locked")) {
+    return "Conta empresarial bloqueada na Meta. Isso pode impedir envios e operacoes de assinatura/permissao ate a restricao ser resolvida no Business Manager.";
+  }
+
+  if (lower.includes("business") && (lower.includes("locked") || lower.includes("disabled"))) {
+    return "Conta empresarial com restricao na Meta. Revise a qualidade/restricoes da BM antes de usar a API em producao.";
+  }
+
   if (lower.includes("unsupported get request") || lower.includes("unsupported post request")) {
     return "A WABA ID pode estar incorreta ou o token nao tem acesso ao ativo informado.";
   }
@@ -334,6 +342,13 @@ export async function subscribeMetaWebhook({
     return {
       ok: false,
       error: result.error
+    };
+  }
+
+  if (result.data.success === false) {
+    return {
+      ok: false,
+      error: "A Meta respondeu a assinatura do webhook sem confirmar sucesso."
     };
   }
 

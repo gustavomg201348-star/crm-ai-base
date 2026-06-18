@@ -135,6 +135,7 @@ export async function GET(request: NextRequest) {
               checks.wabaId &&
               checks.accessToken &&
               checks.verifyToken &&
+              checks.webhookSubscribed &&
               checks.metaReachable;
         const warnings = [
           !checks.active ? "Canal inativo." : null,
@@ -148,6 +149,11 @@ export async function GET(request: NextRequest) {
             : null,
           channel.provider === "meta" && !checks.webhookSubscribed
             ? "Webhook sem assinatura registrada pelo CRM. Use Assinar webhook."
+            : null,
+          channel.provider === "meta" &&
+          checks.webhookSubscribed &&
+          !checks.webhookReceived
+            ? "Webhook assinado, mas nenhuma mensagem real foi recebida ainda. Teste com um numero externo."
             : null,
           channel.provider === "meta" && !checks.appSecret
             ? "App secret ausente. Assinatura do webhook nao esta validando."

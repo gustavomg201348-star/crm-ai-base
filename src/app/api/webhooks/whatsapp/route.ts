@@ -9,6 +9,56 @@ import { prisma } from "@/lib/db";
 import { updateCampaignDeliveryStatus } from "@/lib/campaigns";
 import { updateMessageDeliveryStatus } from "@/lib/message-delivery";
 
+type MetaWebhookPayload = {
+  object?: string;
+  entry?: Array<{
+    id?: string;
+    changes?: Array<{
+      field?: string;
+      value?: {
+        metadata?: { phone_number_id?: string };
+        contacts?: Array<{ wa_id?: string }>;
+        messages?: Array<{
+          from?: string;
+          type?: string;
+          text?: { body?: string };
+        }>;
+      };
+    }>;
+  }>;
+};
+
+function summarizeMetaWebhookPayload(payload: unknown) {
+  const body = payload as MetaWebhookPayload | null;
+
+  return {
+    object: body?.object ?? null,
+    entries:
+      body?.entry?.map((entry) => ({
+        id: entry.id ?? null,
+        changes:
+          entry.changes?.map((change) => ({
+            field: change.field ?? null,
+            phoneNumberId: change.value?.metadata?.phone_number_id ?? null,
+            contactWaIds: change.value?.contacts?.map((contact) => contact.wa_id).filter(Boolean) ?? [],
+            messages:
+              change.value?.messages?.map((message) => ({
+                from: message.from ?? null,
+                type: message.type ?? null,
+                body: message.text?.body ?? null
+              })) ?? []
+          })) ?? []
+      })) ?? []
+  };
+}
+
+function logWebhookAudit(event: string, details: Record<string, unknown>) {
+  console.info("[whatsapp-webhook-audit]", {
+    event,
+    ...details
+  });
+}
+
 export async function GET(request: NextRequest) {
   const mode = request.nextUrl.searchParams.get("hub.mode");
   const challenge = request.nextUrl.searchParams.get("hub.challenge");
@@ -51,11 +101,20 @@ export async function POST(request: NextRequest) {
         }
       | null;
 
+    logWebhookAudit("received", summarizeMetaWebhookPayload(body));
+
     const metaMessages = parseMetaWebhookMessages(body);
     if (metaMessages.length) {
       const results = [];
 
       for (const message of metaMessages) {
+        logWebhookAudit("message-parsed", {
+          phoneNumberId: message.phoneNumberId,
+          from: message.from,
+          type: message.type ?? null,
+          body: message.body
+        });
+
         const channel = await prisma.channel.findFirst({
           where: {
             type: "whatsapp",
@@ -69,6 +128,11 @@ export async function POST(request: NextRequest) {
         });
 
         if (!channel) {
+          logWebhookAudit("message-discarded", {
+            reason: "channel-not-found",
+            phoneNumberId: message.phoneNumberId,
+            from: message.from
+          });
           results.push({
             phoneNumberId: message.phoneNumberId,
             ok: false,
@@ -84,6 +148,13 @@ export async function POST(request: NextRequest) {
         });
 
         if (!signatureOk) {
+          logWebhookAudit("message-discarded", {
+            reason: "invalid-signature",
+            channelId: channel.id,
+            companyId: channel.companyId,
+            phoneNumberId: message.phoneNumberId,
+            from: message.from
+          });
           return NextResponse.json({ error: "Assinatura invalida." }, { status: 403 });
         }
 
@@ -106,6 +177,12 @@ export async function POST(request: NextRequest) {
           contextProviderMessageId: message.contextMessageId
         });
 
+        logWebhookAudit("message-processed", {
+          channelId: channel.id,
+          companyId: channel.companyId,
+          phoneNumberId: message.phoneNumberId,
+          from: message.from
+        });
         results.push({ phoneNumberId: message.phoneNumberId, ok: true, conversation });
       }
 
@@ -117,6 +194,14 @@ export async function POST(request: NextRequest) {
       const results = [];
 
       for (const status of metaStatuses) {
+        logWebhookAudit("status-parsed", {
+          phoneNumberId: status.phoneNumberId,
+          messageId: status.messageId,
+          status: status.status,
+          errorCode: status.errorCode ?? null,
+          errorMessage: status.errorMessage ?? null
+        });
+
         const channel = await prisma.channel.findFirst({
           where: {
             type: "whatsapp",
@@ -133,6 +218,13 @@ export async function POST(request: NextRequest) {
           await prisma.channel.update({
             where: { id: channel.id },
             data: { lastWebhookReceivedAt: new Date() }
+          });
+        } else {
+          logWebhookAudit("status-discarded", {
+            reason: "channel-not-found",
+            phoneNumberId: status.phoneNumberId,
+            messageId: status.messageId,
+            status: status.status
           });
         }
 
@@ -174,12 +266,21 @@ export async function POST(request: NextRequest) {
     }
 
     if (body && "entry" in body) {
+      logWebhookAudit("meta-payload-discarded", {
+        reason: "no-messages-or-statuses",
+        ...summarizeMetaWebhookPayload(body)
+      });
       return NextResponse.json({ ok: true, mode: "meta", results: [] });
     }
 
     const companyId = body?.companyId ?? "seed-company";
 
     if (!body?.phone || !body?.message) {
+      logWebhookAudit("sandbox-discarded", {
+        reason: "missing-phone-or-message",
+        hasPhone: Boolean(body?.phone),
+        hasMessage: Boolean(body?.message)
+      });
       return NextResponse.json(
         { error: "Payload sandbox requer phone e message." },
         { status: 400 }
@@ -203,7 +304,10 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({ ok: true, conversation });
-  } catch {
+  } catch (error) {
+    logWebhookAudit("error", {
+      reason: error instanceof Error ? error.message : "unknown-error"
+    });
     return NextResponse.json(
       { error: "Nao foi possivel processar webhook." },
       { status: 500 }
