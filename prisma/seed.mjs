@@ -22,30 +22,6 @@ async function main() {
     }
   });
 
-  async function findProductionCompanyWithContacts() {
-    const activeContactGroups = await prisma.contact.groupBy({
-      by: ["companyId"],
-      where: { archivedAt: null },
-      _count: { _all: true }
-    });
-
-    const mostActiveCompany = activeContactGroups
-      .map((item) => ({
-        id: item.companyId,
-        activeContacts: item._count._all
-      }))
-      .sort((a, b) => b.activeContacts - a.activeContacts)[0];
-
-    if (!mostActiveCompany || mostActiveCompany.activeContacts === 0) {
-      return null;
-    }
-
-    return prisma.company.findUnique({
-      where: { id: mostActiveCompany.id },
-      select: { id: true }
-    });
-  }
-
   const seedAdminPassword = process.env.SEED_ADMIN_PASSWORD;
   const existingAdmin = await prisma.user.findUnique({
     where: { email: "admin@crm.local" }
@@ -61,21 +37,9 @@ async function main() {
 
   let adminCompanyId = existingAdmin?.companyId ?? company.id;
 
-  if (process.env.NODE_ENV === "production") {
-    const productionCompany = await findProductionCompanyWithContacts();
-
-    if (productionCompany) {
-      console.warn(
-        `[seed] Using company with active contacts for admin@crm.local: ${productionCompany.id}.`
-      );
-      adminCompanyId = productionCompany.id;
-    }
-  }
-
   const admin = await prisma.user.upsert({
     where: { email: "admin@crm.local" },
     update: {
-      companyId: adminCompanyId,
       name: "Administrador",
       ...(seedAdminPassword ? { passwordHash: adminPasswordHash } : {}),
       role: "ADMIN"
