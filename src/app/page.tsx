@@ -2810,6 +2810,50 @@ export default function Home() {
     return data.contact;
   }
 
+  async function handleUpdateConversationContact(
+    id: string,
+    payload: { name: string; cpf: string }
+  ) {
+    const response = await fetch(`/api/contacts/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      throw new Error(data?.error ?? "Nao foi possivel atualizar contato.");
+    }
+
+    const data = (await response.json()) as { contact: ContactRow };
+    const updated = data.contact;
+
+    setContacts((current) =>
+      current.map((contact) => (contact.id === id ? updated : contact))
+    );
+
+    const applyContactUpdate = (conversation: ConversationRow): ConversationRow =>
+      conversation.contact.id === id
+        ? {
+            ...conversation,
+            contact: {
+              ...conversation.contact,
+              name: updated.name,
+              cpf: updated.cpf
+            }
+          }
+        : conversation;
+
+    setSelectedConversation((current) =>
+      current ? applyContactUpdate(current) : current
+    );
+    setConversationList((current) => current.map(applyContactUpdate));
+
+    return updated;
+  }
+
   async function handleArchiveContact(id: string) {
     const response = await fetch(`/api/contacts/${id}`, { method: "DELETE" });
 
@@ -4168,6 +4212,7 @@ export default function Home() {
                 onUpdateConversationAiMode={handleConversationAiMode}
                 onAddTags={handleAddConversationTags}
                 onRemoveTag={handleRemoveConversationTag}
+                onUpdateContact={handleUpdateConversationContact}
                 onOpenCltSimulation={openCltSimulationFromConversation}
               />
             </div>
@@ -4669,6 +4714,99 @@ function TransferConversationModal({
   );
 }
 
+function EditConversationContactModal({
+  contactName,
+  contactCpf,
+  error,
+  saving,
+  onChange,
+  onClose,
+  onSubmit
+}: {
+  contactName: string;
+  contactCpf: string;
+  error: string;
+  saving: boolean;
+  onChange: (value: { name: string; cpf: string }) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/30 px-4 backdrop-blur-sm">
+      <form
+        className="w-full max-w-md overflow-hidden rounded-[1.5rem] border border-line bg-white shadow-soft"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-line/70 p-5">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-brand">
+              Atendimento
+            </p>
+            <h3 className="mt-1 text-xl font-bold text-slate-950">Editar contato</h3>
+          </div>
+          <button
+            className="grid h-9 w-9 place-items-center rounded-full border border-line text-slate-500 hover:bg-slate-50"
+            onClick={onClose}
+            type="button"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-4 p-5">
+          {error && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">
+              {error}
+            </div>
+          )}
+
+          <label className="block text-sm font-semibold text-slate-800">
+            Nome
+            <input
+              className="mt-2 h-11 w-full rounded-2xl border border-line px-3 text-sm outline-none focus:border-blue-200"
+              placeholder="Nome do cliente"
+              value={contactName}
+              onChange={(event) => onChange({ name: event.target.value, cpf: contactCpf })}
+            />
+          </label>
+
+          <label className="block text-sm font-semibold text-slate-800">
+            CPF
+            <input
+              className="mt-2 h-11 w-full rounded-2xl border border-line px-3 text-sm outline-none focus:border-blue-200"
+              inputMode="numeric"
+              placeholder="CPF do cliente"
+              value={contactCpf}
+              onChange={(event) => onChange({ name: contactName, cpf: event.target.value })}
+            />
+          </label>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-line/70 bg-slate-50 px-5 py-4">
+          <button
+            className="h-10 rounded-full border border-line bg-white px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+            disabled={saving}
+            onClick={onClose}
+            type="button"
+          >
+            Cancelar
+          </button>
+          <button
+            className="inline-flex h-10 items-center gap-2 rounded-full bg-brand px-4 text-sm font-bold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
+            disabled={saving}
+            type="submit"
+          >
+            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            {saving ? "Salvando..." : "Salvar"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
 function ConfirmUnassignModal({
   conversation,
   saving,
@@ -5237,6 +5375,7 @@ function Atendimento({
   onUpdateConversationAiMode,
   onAddTags,
   onRemoveTag,
+  onUpdateContact,
   onOpenCltSimulation
 }: {
   conversations: ConversationRow[];
@@ -5274,6 +5413,10 @@ function Atendimento({
   ) => Promise<void>;
   onAddTags: (conversationId: string, tagIds: string[]) => Promise<void>;
   onRemoveTag: (conversationId: string, tagId: string) => Promise<void>;
+  onUpdateContact: (
+    contactId: string,
+    payload: { name: string; cpf: string }
+  ) => Promise<ContactRow | null>;
   onOpenCltSimulation: (conversation: ConversationRow) => void;
 }) {
   const [message, setMessage] = useState("");
@@ -5294,6 +5437,10 @@ function Atendimento({
   const [assigningConversationId, setAssigningConversationId] = useState<string | null>(null);
   const [unassignOpen, setUnassignOpen] = useState(false);
   const [unassignSaving, setUnassignSaving] = useState(false);
+  const [contactEditOpen, setContactEditOpen] = useState(false);
+  const [contactEditForm, setContactEditForm] = useState({ name: "", cpf: "" });
+  const [contactEditSaving, setContactEditSaving] = useState(false);
+  const [contactEditError, setContactEditError] = useState("");
   const [recording, setRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [aiSidebarCollapsed, setAiSidebarCollapsed] = useState(false);
@@ -5527,6 +5674,42 @@ function Atendimento({
     }
   }
 
+  function openContactEdit() {
+    if (!selectedConversation) return;
+    setContactEditForm({
+      name: selectedConversation.contact.name,
+      cpf: selectedConversation.contact.cpf ?? ""
+    });
+    setContactEditError("");
+    setContactEditOpen(true);
+  }
+
+  async function submitContactEdit() {
+    if (!selectedConversation) return;
+
+    setContactEditSaving(true);
+    setContactEditError("");
+
+    try {
+      const updated = await onUpdateContact(selectedConversation.contact.id, {
+        name: contactEditForm.name,
+        cpf: contactEditForm.cpf
+      });
+
+      if (updated) {
+        setContactEditOpen(false);
+      } else {
+        setContactEditError("Nao foi possivel atualizar o contato.");
+      }
+    } catch (error) {
+      setContactEditError(
+        error instanceof Error ? error.message : "Nao foi possivel atualizar o contato."
+      );
+    } finally {
+      setContactEditSaving(false);
+    }
+  }
+
   async function submitUnassign() {
     if (!selectedConversation) return;
     setUnassignSaving(true);
@@ -5568,6 +5751,17 @@ function Atendimento({
           onConfirm={() => void submitUnassign()}
         />
       )}
+      {contactEditOpen && selectedConversation && (
+        <EditConversationContactModal
+          contactName={contactEditForm.name}
+          contactCpf={contactEditForm.cpf}
+          error={contactEditError}
+          saving={contactEditSaving}
+          onChange={setContactEditForm}
+          onClose={() => setContactEditOpen(false)}
+          onSubmit={() => void submitContactEdit()}
+        />
+      )}
       <ConversationList
         conversations={conversations}
         statusCounts={statusCounts}
@@ -5591,11 +5785,23 @@ function Atendimento({
               <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-emerald-500" />
             </div>
             <div className="min-w-0">
-              <h3 className="truncate font-bold text-slate-950">
-                {selectedConversation
-                  ? formatContactNameForUi(selectedConversation.contact.name)
-                  : "Selecione uma conversa"}
-              </h3>
+              <div className="flex min-w-0 items-center gap-2">
+                <h3 className="truncate font-bold text-slate-950">
+                  {selectedConversation
+                    ? formatContactNameForUi(selectedConversation.contact.name)
+                    : "Selecione uma conversa"}
+                </h3>
+                {selectedConversation && (
+                  <button
+                    className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-line bg-white text-slate-500 hover:border-blue-200 hover:bg-blue-50 hover:text-brand"
+                    onClick={openContactEdit}
+                    title="Editar contato"
+                    type="button"
+                  >
+                    <Edit3 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
               <p className="truncate text-sm text-slate-500">
                 {selectedConversation
                   ? [
