@@ -5781,6 +5781,14 @@ function Atendimento({
                       hasMediaId={Boolean(item.mediaId)}
                       side={side}
                     />
+                  ) : item.type === "image" || item.mimeType?.startsWith("image/") ? (
+                    <ImageMessage
+                      messageId={item.id}
+                      body={item.body}
+                      mediaUrl={item.mediaUrl}
+                      hasMediaId={Boolean(item.mediaId)}
+                      side={side}
+                    />
                   ) : item.type === "document" || isDocumentMimeType(item.mimeType) ? (
                     <DocumentMessage
                       messageId={item.id}
@@ -7001,6 +7009,87 @@ function AudioMessage({
   );
 }
 
+function cleanImageCaption(body: string) {
+  return body
+    .replace(/^\[Imagem recebida\]\s*/i, "")
+    .replace(/^Imagem recebida\.?\s*/i, "")
+    .trim();
+}
+
+function ImageMessage({
+  messageId,
+  body,
+  mediaUrl,
+  hasMediaId,
+  side
+}: {
+  messageId: string;
+  body: string;
+  mediaUrl?: string | null;
+  hasMediaId: boolean;
+  side: "left" | "right";
+}) {
+  const [failed, setFailed] = useState(false);
+  const sourceUrl = mediaUrl || (hasMediaId ? `/api/messages/${messageId}/media` : "");
+  const caption = cleanImageCaption(body);
+
+  return (
+    <div className="w-full max-w-[18rem] space-y-2 sm:max-w-sm">
+      {sourceUrl && !failed ? (
+        <a
+          className="block overflow-hidden rounded-2xl border border-white/20 bg-slate-100"
+          href={sourceUrl}
+          target="_blank"
+          rel="noreferrer"
+        >
+          <NextImage
+            src={sourceUrl}
+            alt={caption || "Imagem recebida"}
+            width={640}
+            height={640}
+            loading="lazy"
+            className="max-h-80 w-full object-contain"
+            unoptimized
+            onError={() => setFailed(true)}
+          />
+        </a>
+      ) : (
+        <div
+          className={clsx(
+            "rounded-2xl border px-3 py-2 text-sm",
+            side === "right"
+              ? "border-white/20 bg-white/10 text-white"
+              : "border-slate-200 bg-white text-slate-700 shadow-sm"
+          )}
+        >
+          Imagem recebida
+        </div>
+      )}
+
+      {caption && (
+        <p className={clsx("text-sm", side === "right" ? "text-white" : "text-slate-700")}>
+          {caption}
+        </p>
+      )}
+
+      {sourceUrl && failed && (
+        <a
+          className={clsx(
+            "inline-flex rounded-full px-3 py-1.5 text-xs font-bold",
+            side === "right"
+              ? "bg-white/15 text-white hover:bg-white/20"
+              : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+          )}
+          href={sourceUrl}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Abrir imagem
+        </a>
+      )}
+    </div>
+  );
+}
 function isDocumentMimeType(mimeType?: string | null) {
   if (!mimeType) return false;
   const normalized = mimeType.toLowerCase();
