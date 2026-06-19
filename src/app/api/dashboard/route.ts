@@ -20,6 +20,79 @@ function getPeriodStart(period: string | null) {
   return date;
 }
 
+function getTimeZoneParts(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(date);
+
+  const values = Object.fromEntries(
+    parts
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, Number(part.value)])
+  );
+
+  return {
+    year: values.year,
+    month: values.month,
+    day: values.day,
+    hour: values.hour,
+    minute: values.minute,
+    second: values.second
+  };
+}
+
+function getTimeZoneOffset(date: Date, timeZone: string) {
+  const parts = getTimeZoneParts(date, timeZone);
+  const asUtc = Date.UTC(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    parts.hour,
+    parts.minute,
+    parts.second
+  );
+
+  return asUtc - date.getTime();
+}
+
+function localDateTimeToUtcDate({
+  year,
+  month,
+  day,
+  timeZone
+}: {
+  year: number;
+  month: number;
+  day: number;
+  timeZone: string;
+}) {
+  const utcGuess = new Date(Date.UTC(year, month - 1, day));
+  const offset = getTimeZoneOffset(utcGuess, timeZone);
+
+  return new Date(utcGuess.getTime() - offset);
+}
+
+function getTodayRange(timeZone = "America/Sao_Paulo") {
+  const today = getTimeZoneParts(new Date(), timeZone);
+  const tomorrowDate = new Date(Date.UTC(today.year, today.month - 1, today.day + 1));
+  const tomorrow = {
+    year: tomorrowDate.getUTCFullYear(),
+    month: tomorrowDate.getUTCMonth() + 1,
+    day: tomorrowDate.getUTCDate()
+  };
+
+  return {
+    start: localDateTimeToUtcDate({ ...today, timeZone }),
+    end: localDateTimeToUtcDate({ ...tomorrow, timeZone })
+  };
+}
 function sumMoney<T extends { amount?: { toNumber: () => number }; commission?: { toNumber: () => number } }>(
   rows: T[],
   field: "amount" | "commission"
@@ -41,6 +114,7 @@ export async function GET(request: NextRequest) {
     const originId = request.nextUrl.searchParams.get("originId") ?? "";
     const ownerId = request.nextUrl.searchParams.get("ownerId") ?? "";
     const since = getPeriodStart(period);
+    const todayRange = getTodayRange();
     const contactWhere = {
       companyId: session.companyId,
       archivedAt: null,
@@ -50,6 +124,13 @@ export async function GET(request: NextRequest) {
     const periodContactWhere = {
       ...contactWhere,
       ...(since ? { createdAt: { gte: since } } : {})
+    };
+    const todayContactWhere = {
+      ...contactWhere,
+      createdAt: {
+        gte: todayRange.start,
+        lt: todayRange.end
+      }
     };
     const proposalWhere = {
       companyId: session.companyId,
@@ -67,6 +148,7 @@ export async function GET(request: NextRequest) {
     const [
       activeContacts,
       newContacts,
+      todayContacts,
       hotContacts,
       openConversations,
       staleConversations,
@@ -81,6 +163,7 @@ export async function GET(request: NextRequest) {
     ] = await Promise.all([
       prisma.contact.count({ where: contactWhere }),
       prisma.contact.count({ where: periodContactWhere }),
+      prisma.contact.count({ where: todayContactWhere }),
       prisma.contact.count({ where: { ...contactWhere, temperature: "HOT" } }),
       prisma.conversation.count({
         where: { status: "OPEN", contact: contactWhere }
@@ -221,6 +304,7 @@ export async function GET(request: NextRequest) {
       metrics: {
         activeContacts,
         newContacts,
+        todayContacts,
         hotContacts,
         openConversations,
         staleConversations,

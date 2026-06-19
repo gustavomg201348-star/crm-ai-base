@@ -827,6 +827,7 @@ type DashboardData = {
   metrics: {
     activeContacts: number;
     newContacts: number;
+    todayContacts?: number;
     hotContacts: number;
     openConversations: number;
     staleConversations: number;
@@ -1478,6 +1479,7 @@ function emptyDashboardData(): DashboardData {
     metrics: {
       activeContacts: 0,
       newContacts: 0,
+      todayContacts: 0,
       hotContacts: 0,
       openConversations: 0,
       staleConversations: 0,
@@ -4870,7 +4872,7 @@ function Dashboard({
     {
       label: "Leads ativos",
       value: data.metrics.activeContacts.toString(),
-      hint: `${data.metrics.newContacts} novo(s) no periodo`,
+      hint: `${data.metrics.todayContacts ?? 0} novo(s) hoje`,
       trend: "+8%",
       icon: UserRound,
       tone: "slate"
