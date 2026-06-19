@@ -6166,15 +6166,21 @@ function TagBadge({
   compact?: boolean;
   onRemove?: () => void;
 }) {
+  const textColor = tag.textColor || "#ffffff";
+
   return (
     <span
       className={clsx(
-        "inline-flex max-w-full items-center gap-1 rounded-full font-semibold",
-        compact ? "max-w-[8rem] shrink-0 px-2 py-0.5 text-[11px]" : "px-2.5 py-1 text-xs"
+        "inline-flex max-w-full items-center gap-1 rounded-full border font-bold shadow-sm ring-1 ring-black/5",
+        compact
+          ? "max-w-[8rem] shrink-0 px-2 py-0.5 text-[11px] leading-4"
+          : "px-2.5 py-1 text-xs"
       )}
       style={{
         backgroundColor: tag.color,
-        color: tag.textColor || "#ffffff"
+        borderColor: tag.color,
+        color: textColor,
+        boxShadow: `0 6px 14px ${tag.color}26`
       }}
       title={tag.name}
     >
@@ -6365,10 +6371,10 @@ function ConversationList({
                       <button
                         key={tag.id}
                         className={clsx(
-                          "rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors",
+                          "rounded-full border p-0.5 transition-colors",
                           selected
-                            ? "border-blue-200 bg-blue-50 text-brand"
-                            : "border-line bg-white text-slate-600 hover:bg-slate-50"
+                            ? "border-slate-300 bg-slate-50 ring-2 ring-slate-200"
+                            : "border-transparent hover:bg-slate-50"
                         )}
                         onClick={() =>
                           onFiltersChange({
@@ -6380,7 +6386,7 @@ function ConversationList({
                         }
                         type="button"
                       >
-                        {tag.name}
+                        <TagBadge tag={tag} compact />
                       </button>
                     );
                   })}
@@ -6647,16 +6653,7 @@ function ConversationList({
                       </span>
                     ))}
                     {visibleTags.map((tag) => (
-                      <span
-                        key={tag.id}
-                        className={clsx(
-                          "max-w-[9rem] truncate rounded-full px-2 py-0.5 text-[10px] font-bold leading-4 ring-1",
-                          getConversationBadgeClass(tag.name)
-                        )}
-                        title={tag.name}
-                      >
-                        {tag.name}
-                      </span>
+                      <TagBadge key={tag.id} tag={tag} compact />
                     ))}
                     {extraTagCount > 0 && (
                       <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold leading-4 text-slate-500 ring-1 ring-slate-200">
@@ -8354,8 +8351,10 @@ function ContactDrawer({
                     <button
                       key={tag.id}
                       className={clsx(
-                        "rounded border px-2 py-1 text-xs font-semibold",
-                        active ? "border-transparent text-white" : "border-line text-slate-600"
+                        "rounded-full border p-0.5 transition-colors",
+                        active
+                          ? "border-slate-300 bg-slate-50 ring-2 ring-slate-200"
+                          : "border-transparent opacity-80 hover:bg-slate-50 hover:opacity-100"
                       )}
                       onClick={() =>
                         setDraft((current) => ({
@@ -8365,10 +8364,9 @@ function ContactDrawer({
                             : [...current.tagIds, tag.id]
                         }))
                       }
-                      style={active ? { backgroundColor: tag.color } : undefined}
                       type="button"
                     >
-                      {tag.name}
+                      <TagBadge tag={tag} compact />
                     </button>
                   );
                 })}
@@ -8425,13 +8423,7 @@ function ContactDrawer({
             </dl>
             <div className="flex flex-wrap gap-2">
               {contact.tags.map((tag) => (
-                <span
-                  key={tag.id}
-                  className="rounded px-2 py-1 text-xs font-semibold text-white"
-                  style={{ backgroundColor: tag.color }}
-                >
-                  {tag.name}
-                </span>
+                <TagBadge key={tag.id} tag={tag} compact />
               ))}
               {contact.tags.length === 0 && (
                 <span className="text-sm text-slate-500">Sem tags aplicadas.</span>
