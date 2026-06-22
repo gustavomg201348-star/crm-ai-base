@@ -25,6 +25,7 @@ import {
   ChevronDown,
   CircleDollarSign,
   Clock3,
+  Clipboard,
   Download,
   Edit3,
   File as FileIcon,
@@ -4998,6 +4999,178 @@ function ScheduleFollowUpModal({
   );
 }
 
+function ScheduledReturnsModal({
+  tasks,
+  loading,
+  error,
+  onClose,
+  onRefresh
+}: {
+  tasks: TaskRow[];
+  loading: boolean;
+  error: string;
+  onClose: () => void;
+  onRefresh: () => void;
+}) {
+  const [copiedTaskId, setCopiedTaskId] = useState<string | null>(null);
+  const now = new Date();
+  const tomorrowStart = new Date(now);
+  tomorrowStart.setHours(24, 0, 0, 0);
+
+  const overdueTasks = tasks.filter((task) => new Date(task.dueAt).getTime() < now.getTime());
+  const todayTasks = tasks.filter((task) => {
+    const dueAt = new Date(task.dueAt);
+    return dueAt.getTime() >= now.getTime() && dueAt.getTime() < tomorrowStart.getTime();
+  });
+  const upcomingTasks = tasks.filter(
+    (task) => new Date(task.dueAt).getTime() >= tomorrowStart.getTime()
+  );
+  const groups = [
+    { key: "overdue", title: "Atrasados", tasks: overdueTasks, tone: "rose" },
+    { key: "today", title: "Hoje", tasks: todayTasks, tone: "amber" },
+    { key: "upcoming", title: "Proximos", tasks: upcomingTasks, tone: "blue" }
+  ];
+  const totalTasks = tasks.length;
+
+  async function copyPhone(task: TaskRow) {
+    try {
+      await navigator.clipboard?.writeText(task.contact.phone);
+      setCopiedTaskId(task.id);
+      window.setTimeout(() => setCopiedTaskId(null), 1800);
+    } catch {
+      setCopiedTaskId(null);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/30 px-4 backdrop-blur-sm">
+      <div className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-[1.5rem] border border-line bg-white shadow-soft">
+        <div className="flex items-start justify-between gap-4 border-b border-line/70 p-5">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-brand">
+              Acompanhamento
+            </p>
+            <h3 className="mt-1 text-xl font-bold text-slate-950">Retornos</h3>
+            <p className="mt-1 text-sm text-slate-500">
+              {loading ? "Carregando retornos..." : `${totalTasks} retorno(s) pendente(s)`}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              className="h-9 rounded-full border border-line bg-white px-3 text-xs font-bold text-slate-600 hover:bg-slate-50"
+              disabled={loading}
+              onClick={onRefresh}
+              type="button"
+            >
+              Atualizar
+            </button>
+            <button
+              className="grid h-9 w-9 place-items-center rounded-full border border-line text-slate-500 hover:bg-slate-50"
+              onClick={onClose}
+              type="button"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
+          {error && (
+            <div className="rounded-2xl border border-rose-100 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
+              {error}
+            </div>
+          )}
+
+          {loading && (
+            <div className="space-y-3">
+              {[0, 1, 2].map((item) => (
+                <div key={item} className="h-20 animate-pulse rounded-2xl bg-slate-100" />
+              ))}
+            </div>
+          )}
+
+          {!loading && !error && totalTasks === 0 && (
+            <div className="rounded-2xl border border-dashed border-line p-6 text-center text-sm text-slate-500">
+              Nenhum retorno pendente para voce.
+            </div>
+          )}
+
+          {!loading &&
+            !error &&
+            groups.map((group) => (
+              <section key={group.key} className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-bold text-slate-950">{group.title}</h4>
+                  <span
+                    className={clsx(
+                      "rounded-full px-2 py-0.5 text-xs font-bold",
+                      group.tone === "rose" && "bg-rose-50 text-rose-700",
+                      group.tone === "amber" && "bg-amber-50 text-amber-700",
+                      group.tone === "blue" && "bg-blue-50 text-brand"
+                    )}
+                  >
+                    {group.tasks.length}
+                  </span>
+                </div>
+
+                {group.tasks.length === 0 ? (
+                  <p className="rounded-2xl border border-line bg-slate-50 p-3 text-sm text-slate-500">
+                    Nenhum retorno nesta faixa.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {group.tasks.map((task) => (
+                      <div
+                        key={task.id}
+                        className="rounded-2xl border border-line bg-white p-3 text-sm shadow-sm"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate font-bold text-slate-950">
+                              {task.contact.name}
+                            </p>
+                            <p className="text-xs font-semibold text-slate-500">
+                              {task.contact.phone}
+                            </p>
+                          </div>
+                          <p
+                            className={clsx(
+                              "shrink-0 text-right text-xs font-bold tabular-nums",
+                              group.tone === "rose" ? "text-rose-600" : "text-slate-500"
+                            )}
+                          >
+                            {new Date(task.dueAt).toLocaleString("pt-BR")}
+                          </p>
+                        </div>
+                        <p className="mt-2 font-semibold text-slate-800">{task.title}</p>
+                        {task.note && (
+                          <p className="mt-1 line-clamp-2 text-slate-600">{task.note}</p>
+                        )}
+                        <div className="mt-3 flex items-center justify-between gap-2">
+                          <span className="truncate text-xs text-slate-400">
+                            {task.assignee ? `Responsavel: ${task.assignee.name}` : "Sem responsavel"}
+                          </span>
+                          <button
+                            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-line bg-slate-50 px-3 text-xs font-bold text-slate-600 hover:bg-white"
+                            onClick={() => void copyPhone(task)}
+                            type="button"
+                          >
+                            <Clipboard className="h-3.5 w-3.5" />
+                            {copiedTaskId === task.id ? "Copiado" : "Copiar telefone"}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ConfirmUnassignModal({
   conversation,
   saving,
@@ -5644,6 +5817,10 @@ function Atendimento({
   const [followUpSaving, setFollowUpSaving] = useState(false);
   const [followUpError, setFollowUpError] = useState("");
   const [followUpSuccess, setFollowUpSuccess] = useState("");
+  const [scheduledReturnsOpen, setScheduledReturnsOpen] = useState(false);
+  const [scheduledReturns, setScheduledReturns] = useState<TaskRow[]>([]);
+  const [scheduledReturnsLoading, setScheduledReturnsLoading] = useState(false);
+  const [scheduledReturnsError, setScheduledReturnsError] = useState("");
   const [recording, setRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [aiSidebarCollapsed, setAiSidebarCollapsed] = useState(false);
@@ -5908,6 +6085,38 @@ function Atendimento({
     setFollowUpOpen(true);
   }
 
+  async function loadScheduledReturns() {
+    setScheduledReturnsLoading(true);
+    setScheduledReturnsError("");
+
+    try {
+      const response = await fetch(
+        `/api/tasks?assigneeId=${encodeURIComponent(currentUserId)}&status=PENDING`
+      );
+
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        throw new Error(data?.error ?? "Nao foi possivel carregar retornos.");
+      }
+
+      const data = (await response.json()) as { tasks?: TaskRow[] };
+      setScheduledReturns(data.tasks ?? []);
+    } catch (error) {
+      setScheduledReturnsError(
+        error instanceof Error ? error.message : "Nao foi possivel carregar retornos."
+      );
+    } finally {
+      setScheduledReturnsLoading(false);
+    }
+  }
+
+  function openScheduledReturns() {
+    setScheduledReturnsOpen(true);
+    void loadScheduledReturns();
+  }
+
   async function submitContactEdit() {
     if (!selectedConversation) return;
 
@@ -6047,6 +6256,15 @@ function Atendimento({
           onSubmit={() => void submitFollowUp()}
         />
       )}
+      {scheduledReturnsOpen && (
+        <ScheduledReturnsModal
+          error={scheduledReturnsError}
+          loading={scheduledReturnsLoading}
+          tasks={scheduledReturns}
+          onClose={() => setScheduledReturnsOpen(false)}
+          onRefresh={() => void loadScheduledReturns()}
+        />
+      )}
       <ConversationList
         conversations={conversations}
         statusCounts={statusCounts}
@@ -6155,6 +6373,14 @@ function Atendimento({
                   {followUpSuccess}
                 </span>
               )}
+              <button
+                type="button"
+                className="inline-flex h-9 items-center gap-2 rounded-full border border-line bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                onClick={openScheduledReturns}
+              >
+                <Clock3 className="h-4 w-4" />
+                Retornos
+              </button>
               <button
                 type="button"
                 className="inline-flex h-9 items-center gap-2 rounded-full border border-amber-100 bg-amber-50 px-3 text-sm font-bold text-amber-700 hover:bg-amber-100"
