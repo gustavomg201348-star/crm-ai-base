@@ -4186,6 +4186,7 @@ export default function Home() {
           {active === "atendimento" && (
             <div className="min-h-0 flex-1 overflow-hidden">
               <Atendimento
+                leftSidebarCollapsed={leftSidebarCollapsed}
                 conversations={conversationList}
                 statusCounts={conversationStatusCounts}
                 filters={conversationFilters}
@@ -5349,6 +5350,7 @@ function PipelineCard({
 }
 
 function Atendimento({
+  leftSidebarCollapsed,
   conversations,
   statusCounts,
   filters,
@@ -5378,6 +5380,7 @@ function Atendimento({
   onUpdateContact,
   onOpenCltSimulation
 }: {
+  leftSidebarCollapsed: boolean;
   conversations: ConversationRow[];
   statusCounts: ConversationStatusCounts;
   filters: { search: string; status: string; tagIds: string[]; assignedTo: string };
@@ -5726,8 +5729,12 @@ function Atendimento({
       className={clsx(
         "grid h-full min-h-0 gap-3 overflow-hidden transition-[grid-template-columns] duration-300 ease-out md:gap-4",
         aiSidebarCollapsed
-          ? "xl:grid-cols-[340px_minmax(0,1fr)_64px]"
-          : "xl:grid-cols-[340px_minmax(0,1fr)_320px]"
+          ? leftSidebarCollapsed
+            ? "xl:grid-cols-[400px_minmax(0,1fr)_64px]"
+            : "xl:grid-cols-[340px_minmax(0,1fr)_64px]"
+          : leftSidebarCollapsed
+            ? "xl:grid-cols-[400px_minmax(0,1fr)_320px]"
+            : "xl:grid-cols-[340px_minmax(0,1fr)_320px]"
       )}
     >
       {transferOpen && selectedConversation && (
