@@ -5004,15 +5004,23 @@ function ScheduledReturnsModal({
   loading,
   error,
   onClose,
-  onRefresh
+  onRefresh,
+  onTaskCompleted,
+  onTaskUpdated
 }: {
   tasks: TaskRow[];
   loading: boolean;
   error: string;
   onClose: () => void;
   onRefresh: () => void;
+  onTaskCompleted: (taskId: string) => void;
+  onTaskUpdated: (task: TaskRow) => void;
 }) {
   const [copiedTaskId, setCopiedTaskId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState("");
+  const [savingTaskId, setSavingTaskId] = useState<string | null>(null);
+  const [reschedulingTask, setReschedulingTask] = useState<TaskRow | null>(null);
+  const [rescheduleDueAt, setRescheduleDueAt] = useState("");
   const now = new Date();
   const tomorrowStart = new Date(now);
   tomorrowStart.setHours(24, 0, 0, 0);
@@ -5039,6 +5047,64 @@ function ScheduledReturnsModal({
       window.setTimeout(() => setCopiedTaskId(null), 1800);
     } catch {
       setCopiedTaskId(null);
+    }
+  }
+
+  async function patchTask(taskId: string, payload: { status?: "DONE"; dueAt?: string }) {
+    setSavingTaskId(taskId);
+    setActionError("");
+
+    try {
+      const response = await fetch(`/api/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        throw new Error(data?.error ?? "Nao foi possivel atualizar o retorno.");
+      }
+
+      const data = (await response.json()) as { task: TaskRow };
+      return data.task;
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : "Nao foi possivel atualizar o retorno."
+      );
+      return null;
+    } finally {
+      setSavingTaskId(null);
+    }
+  }
+
+  async function completeTask(task: TaskRow) {
+    const updated = await patchTask(task.id, { status: "DONE" });
+    if (updated) onTaskCompleted(task.id);
+  }
+
+  function openReschedule(task: TaskRow) {
+    setActionError("");
+    setReschedulingTask(task);
+    setRescheduleDueAt(new Date(task.dueAt).toISOString().slice(0, 16));
+  }
+
+  async function submitReschedule() {
+    if (!reschedulingTask) return;
+
+    const dueAt = rescheduleDueAt ? new Date(rescheduleDueAt) : null;
+    if (!dueAt || Number.isNaN(dueAt.getTime())) {
+      setActionError("Informe uma nova data/hora valida.");
+      return;
+    }
+
+    const updated = await patchTask(reschedulingTask.id, { dueAt: dueAt.toISOString() });
+    if (updated) {
+      onTaskUpdated(updated);
+      setReschedulingTask(null);
+      setRescheduleDueAt("");
     }
   }
 
@@ -5079,6 +5145,54 @@ function ScheduledReturnsModal({
             <div className="rounded-2xl border border-rose-100 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
               {error}
             </div>
+          )}
+          {actionError && (
+            <div className="rounded-2xl border border-rose-100 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
+              {actionError}
+            </div>
+          )}
+
+          {reschedulingTask && (
+            <form
+              className="rounded-2xl border border-blue-100 bg-blue-50 p-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void submitReschedule();
+              }}
+            >
+              <p className="text-sm font-bold text-slate-950">
+                Reagendar {reschedulingTask.contact.name}
+              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <input
+                  className="h-10 min-w-[220px] flex-1 rounded-full border border-line bg-white px-3 text-sm outline-none focus:border-blue-200"
+                  type="datetime-local"
+                  value={rescheduleDueAt}
+                  onChange={(event) => setRescheduleDueAt(event.target.value)}
+                />
+                <button
+                  className="h-10 rounded-full border border-line bg-white px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                  disabled={savingTaskId === reschedulingTask.id}
+                  onClick={() => {
+                    setReschedulingTask(null);
+                    setRescheduleDueAt("");
+                  }}
+                  type="button"
+                >
+                  Cancelar
+                </button>
+                <button
+                  className="inline-flex h-10 items-center gap-2 rounded-full bg-brand px-4 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-70"
+                  disabled={savingTaskId === reschedulingTask.id || !rescheduleDueAt}
+                  type="submit"
+                >
+                  {savingTaskId === reschedulingTask.id && (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  )}
+                  Salvar
+                </button>
+              </div>
+            </form>
           )}
 
           {loading && (
@@ -5150,14 +5264,38 @@ function ScheduledReturnsModal({
                           <span className="truncate text-xs text-slate-400">
                             {task.assignee ? `Responsavel: ${task.assignee.name}` : "Sem responsavel"}
                           </span>
-                          <button
-                            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-line bg-slate-50 px-3 text-xs font-bold text-slate-600 hover:bg-white"
-                            onClick={() => void copyPhone(task)}
-                            type="button"
-                          >
-                            <Clipboard className="h-3.5 w-3.5" />
-                            {copiedTaskId === task.id ? "Copiado" : "Copiar telefone"}
-                          </button>
+                          <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                            <button
+                              className="inline-flex h-8 items-center gap-1.5 rounded-full border border-line bg-slate-50 px-3 text-xs font-bold text-slate-600 hover:bg-white"
+                              onClick={() => void copyPhone(task)}
+                              type="button"
+                            >
+                              <Clipboard className="h-3.5 w-3.5" />
+                              {copiedTaskId === task.id ? "Copiado" : "Copiar telefone"}
+                            </button>
+                            <button
+                              className="inline-flex h-8 items-center gap-1.5 rounded-full border border-blue-100 bg-blue-50 px-3 text-xs font-bold text-brand hover:bg-blue-100"
+                              disabled={savingTaskId === task.id}
+                              onClick={() => openReschedule(task)}
+                              type="button"
+                            >
+                              <CalendarClock className="h-3.5 w-3.5" />
+                              Reagendar
+                            </button>
+                            <button
+                              className="inline-flex h-8 items-center gap-1.5 rounded-full border border-emerald-100 bg-emerald-50 px-3 text-xs font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-70"
+                              disabled={savingTaskId === task.id}
+                              onClick={() => void completeTask(task)}
+                              type="button"
+                            >
+                              {savingTaskId === task.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Check className="h-3.5 w-3.5" />
+                              )}
+                              Concluir
+                            </button>
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -6263,6 +6401,14 @@ function Atendimento({
           tasks={scheduledReturns}
           onClose={() => setScheduledReturnsOpen(false)}
           onRefresh={() => void loadScheduledReturns()}
+          onTaskCompleted={(taskId) =>
+            setScheduledReturns((current) => current.filter((task) => task.id !== taskId))
+          }
+          onTaskUpdated={(updatedTask) =>
+            setScheduledReturns((current) =>
+              current.map((task) => (task.id === updatedTask.id ? updatedTask : task))
+            )
+          }
         />
       )}
       <ConversationList
