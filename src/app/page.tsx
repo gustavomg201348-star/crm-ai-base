@@ -19,6 +19,7 @@ import {
   Banknote,
   Bell,
   BriefcaseBusiness,
+  CalendarClock,
   Check,
   CheckCheck,
   ChevronDown,
@@ -221,6 +222,7 @@ type ConversationRow = {
     stage: string;
     temperature: string;
     owner: string;
+    ownerId?: string | null;
     lastMessage?: string | null;
     tags: Array<{ id: string; name: string; color: string }>;
   };
@@ -308,6 +310,18 @@ const quickReplyTemplates = [
     title: "Proposta aprovada",
     body: "Sua proposta foi aprovada. Vou te orientar nos proximos passos para concluir com seguranca."
   }
+];
+
+const followUpReasons = [
+  "Juros alto",
+  "Valor baixo",
+  "Vai pensar",
+  "Sem tempo",
+  "Comparando",
+  "Sem documentos",
+  "Aguardando pagamento",
+  "Sem margem",
+  "Outro"
 ];
 
 type WhatsAppTemplateRow = {
@@ -4808,6 +4822,182 @@ function EditConversationContactModal({
     </div>
   );
 }
+
+function ScheduleFollowUpModal({
+  attendants,
+  currentUserId,
+  conversation,
+  error,
+  form,
+  saving,
+  onChange,
+  onClose,
+  onSubmit
+}: {
+  attendants: AttendantRow[];
+  currentUserId: string;
+  conversation: ConversationRow;
+  error: string;
+  form: { reason: string; note: string; dueAt: string; assigneeId: string };
+  saving: boolean;
+  onChange: (value: { reason: string; note: string; dueAt: string; assigneeId: string }) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  const assigneeOptions = [
+    ...attendants.map((attendant) => ({
+      id: attendant.id,
+      label: attendant.name,
+      detail: attendant.email
+    })),
+    ...(conversation.agent && !attendants.some((attendant) => attendant.id === conversation.agent?.id)
+      ? [
+          {
+            id: conversation.agent.id,
+            label: conversation.agent.name,
+            detail: conversation.agent.email
+          }
+        ]
+      : []),
+    ...(conversation.contact.ownerId &&
+    !attendants.some((attendant) => attendant.id === conversation.contact.ownerId) &&
+    conversation.agent?.id !== conversation.contact.ownerId
+      ? [
+          {
+            id: conversation.contact.ownerId,
+            label: conversation.contact.owner,
+            detail: "Responsavel do contato"
+          }
+        ]
+      : []),
+    ...(!attendants.some((attendant) => attendant.id === currentUserId) &&
+    conversation.agent?.id !== currentUserId
+    && conversation.contact.ownerId !== currentUserId
+      ? [
+          {
+            id: currentUserId,
+            label: "Usuario atual",
+            detail: ""
+          }
+        ]
+      : [])
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/30 px-4 backdrop-blur-sm">
+      <form
+        className="w-full max-w-lg overflow-hidden rounded-[1.5rem] border border-line bg-white shadow-soft"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-line/70 p-5">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-amber-600">
+              Acompanhamento
+            </p>
+            <h3 className="mt-1 text-xl font-bold text-slate-950">Agendar retorno</h3>
+            <p className="mt-1 text-sm text-slate-500">
+              Registre o motivo e quando retornar para {conversation.contact.name}.
+            </p>
+          </div>
+          <button
+            className="grid h-9 w-9 place-items-center rounded-full border border-line text-slate-500 hover:bg-slate-50"
+            disabled={saving}
+            onClick={onClose}
+            type="button"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-4 p-5">
+          {error && (
+            <div className="rounded-2xl border border-rose-100 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
+              {error}
+            </div>
+          )}
+
+          <div className="rounded-2xl border border-line bg-slate-50 p-3 text-sm">
+            <p className="font-bold text-slate-900">{conversation.contact.name}</p>
+            <p className="text-slate-500">{conversation.contact.phone}</p>
+          </div>
+
+          <label className="block text-sm font-semibold text-slate-800">
+            Motivo da nao venda
+            <select
+              className="mt-2 h-11 w-full rounded-2xl border border-line bg-white px-3 text-sm outline-none focus:border-blue-200"
+              value={form.reason}
+              onChange={(event) => onChange({ ...form, reason: event.target.value })}
+            >
+              {followUpReasons.map((reason) => (
+                <option key={reason} value={reason}>
+                  {reason}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block text-sm font-semibold text-slate-800">
+            Data/hora de retorno
+            <input
+              className="mt-2 h-11 w-full rounded-2xl border border-line px-3 text-sm outline-none focus:border-blue-200"
+              type="datetime-local"
+              value={form.dueAt}
+              onChange={(event) => onChange({ ...form, dueAt: event.target.value })}
+            />
+          </label>
+
+          <label className="block text-sm font-semibold text-slate-800">
+            Responsavel
+            <select
+              className="mt-2 h-11 w-full rounded-2xl border border-line bg-white px-3 text-sm outline-none focus:border-blue-200"
+              value={form.assigneeId}
+              onChange={(event) => onChange({ ...form, assigneeId: event.target.value })}
+            >
+              {assigneeOptions.map((assignee) => (
+                <option key={assignee.id} value={assignee.id}>
+                  {assignee.detail ? `${assignee.label} - ${assignee.detail}` : assignee.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block text-sm font-semibold text-slate-800">
+            Observacao
+            <textarea
+              className="mt-2 min-h-24 w-full rounded-2xl border border-line p-3 text-sm outline-none focus:border-blue-200"
+              placeholder="Ex: Cliente achou juros alto. Retornar com nova simulacao."
+              value={form.note}
+              onChange={(event) => onChange({ ...form, note: event.target.value })}
+            />
+          </label>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-line/70 bg-slate-50 px-5 py-4">
+          <button
+            className="h-10 rounded-full border border-line bg-white px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+            disabled={saving}
+            onClick={onClose}
+            type="button"
+          >
+            Cancelar
+          </button>
+          <button
+            className="inline-flex h-10 items-center gap-2 rounded-full bg-brand px-4 text-sm font-bold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
+            disabled={saving || !form.reason.trim() || !form.dueAt}
+            type="submit"
+          >
+            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            {saving ? "Agendando..." : "Agendar retorno"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function ConfirmUnassignModal({
   conversation,
   saving,
@@ -5444,6 +5634,16 @@ function Atendimento({
   const [contactEditForm, setContactEditForm] = useState({ name: "", cpf: "" });
   const [contactEditSaving, setContactEditSaving] = useState(false);
   const [contactEditError, setContactEditError] = useState("");
+  const [followUpOpen, setFollowUpOpen] = useState(false);
+  const [followUpForm, setFollowUpForm] = useState({
+    reason: followUpReasons[0],
+    note: "",
+    dueAt: "",
+    assigneeId: ""
+  });
+  const [followUpSaving, setFollowUpSaving] = useState(false);
+  const [followUpError, setFollowUpError] = useState("");
+  const [followUpSuccess, setFollowUpSuccess] = useState("");
   const [recording, setRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [aiSidebarCollapsed, setAiSidebarCollapsed] = useState(false);
@@ -5457,6 +5657,10 @@ function Atendimento({
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ block: "end" });
   }, [selectedConversation?.id, selectedConversation?.messages.length]);
+
+  useEffect(() => {
+    setFollowUpSuccess("");
+  }, [selectedConversation?.id]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -5687,6 +5891,23 @@ function Atendimento({
     setContactEditOpen(true);
   }
 
+  function openFollowUp() {
+    if (!selectedConversation) return;
+
+    setFollowUpForm({
+      reason: followUpReasons[0],
+      note: "",
+      dueAt: new Date(Date.now() + 1000 * 60 * 60 * 24).toISOString().slice(0, 16),
+      assigneeId:
+        selectedConversation.agent?.id ??
+        selectedConversation.contact.ownerId ??
+        currentUserId
+    });
+    setFollowUpError("");
+    setFollowUpSuccess("");
+    setFollowUpOpen(true);
+  }
+
   async function submitContactEdit() {
     if (!selectedConversation) return;
 
@@ -5710,6 +5931,50 @@ function Atendimento({
       );
     } finally {
       setContactEditSaving(false);
+    }
+  }
+
+  async function submitFollowUp() {
+    if (!selectedConversation) return;
+
+    const dueAt = followUpForm.dueAt ? new Date(followUpForm.dueAt) : null;
+    if (!followUpForm.reason.trim() || !dueAt || Number.isNaN(dueAt.getTime())) {
+      setFollowUpError("Informe motivo e data/hora de retorno validos.");
+      return;
+    }
+
+    setFollowUpSaving(true);
+    setFollowUpError("");
+    setFollowUpSuccess("");
+
+    try {
+      const response = await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contactId: selectedConversation.contact.id,
+          title: `Retorno: ${followUpForm.reason.trim()}`,
+          note: followUpForm.note,
+          dueAt: dueAt.toISOString(),
+          assigneeId: followUpForm.assigneeId
+        })
+      });
+
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        throw new Error(data?.error ?? "Nao foi possivel agendar o retorno.");
+      }
+
+      setFollowUpOpen(false);
+      setFollowUpSuccess("Retorno agendado");
+    } catch (error) {
+      setFollowUpError(
+        error instanceof Error ? error.message : "Nao foi possivel agendar o retorno."
+      );
+    } finally {
+      setFollowUpSaving(false);
     }
   }
 
@@ -5767,6 +6032,19 @@ function Atendimento({
           onChange={setContactEditForm}
           onClose={() => setContactEditOpen(false)}
           onSubmit={() => void submitContactEdit()}
+        />
+      )}
+      {followUpOpen && selectedConversation && (
+        <ScheduleFollowUpModal
+          attendants={attendants}
+          currentUserId={currentUserId}
+          conversation={selectedConversation}
+          error={followUpError}
+          form={followUpForm}
+          saving={followUpSaving}
+          onChange={setFollowUpForm}
+          onClose={() => setFollowUpOpen(false)}
+          onSubmit={() => void submitFollowUp()}
         />
       )}
       <ConversationList
@@ -5872,6 +6150,19 @@ function Atendimento({
           </div>
           {selectedConversation && (
             <div className="flex flex-wrap items-center justify-end gap-2 rounded-2xl border border-line/70 bg-slate-50/80 p-1.5">
+              {followUpSuccess && (
+                <span className="inline-flex h-9 items-center rounded-full bg-emerald-50 px-3 text-xs font-bold text-emerald-700 ring-1 ring-emerald-100">
+                  {followUpSuccess}
+                </span>
+              )}
+              <button
+                type="button"
+                className="inline-flex h-9 items-center gap-2 rounded-full border border-amber-100 bg-amber-50 px-3 text-sm font-bold text-amber-700 hover:bg-amber-100"
+                onClick={openFollowUp}
+              >
+                <CalendarClock className="h-4 w-4" />
+                Agendar retorno
+              </button>
               {!selectedConversation.agent && (
                 <button
                   type="button"
