@@ -857,6 +857,13 @@ type DashboardData = {
   funnel: Array<{ id: string; label: string; color: string; count: number }>;
   proposalStatus: Array<{ status: ProposalStatus; count: number }>;
   tasks: TaskRow[];
+  returns?: {
+    totalPending: number;
+    overdue: number;
+    today: number;
+    upcoming: number;
+    items: TaskRow[];
+  };
   priorities: Array<{
     id: string;
     type: string;
@@ -1509,6 +1516,13 @@ function emptyDashboardData(): DashboardData {
     funnel: [],
     proposalStatus: [],
     tasks: [],
+    returns: {
+      totalPending: 0,
+      overdue: 0,
+      today: 0,
+      upcoming: 0,
+      items: []
+    },
     priorities: []
   };
 }
@@ -5500,6 +5514,13 @@ function Dashboard({
 }) {
   const maxFunnel = Math.max(...data.funnel.map((item) => item.count), 1);
   const maxStatus = Math.max(...data.proposalStatus.map((item) => item.count), 1);
+  const scheduledReturns = data.returns ?? {
+    totalPending: 0,
+    overdue: 0,
+    today: 0,
+    upcoming: 0,
+    items: []
+  };
   const cards = [
     {
       label: "Conversas abertas",
@@ -5628,6 +5649,79 @@ function Dashboard({
         </div>
 
         <div className="space-y-6">
+          <section className="rounded-[1.35rem] border border-line/80 bg-white p-5 shadow-soft">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-bold text-slate-950">Retornos agendados</h3>
+                <p className="text-sm text-slate-500">
+                  {scheduledReturns.totalPending} pendente(s)
+                </p>
+              </div>
+              <CalendarClock className="h-5 w-5 text-brand" />
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+              <div className="rounded-2xl bg-slate-50 p-3">
+                <p className="text-xs font-semibold text-slate-500">Pendentes</p>
+                <strong className="mt-1 block text-lg text-slate-950">
+                  {scheduledReturns.totalPending}
+                </strong>
+              </div>
+              <div className="rounded-2xl bg-rose-50 p-3">
+                <p className="text-xs font-semibold text-rose-600">Atrasados</p>
+                <strong className="mt-1 block text-lg text-rose-700">
+                  {scheduledReturns.overdue}
+                </strong>
+              </div>
+              <div className="rounded-2xl bg-amber-50 p-3">
+                <p className="text-xs font-semibold text-amber-700">Hoje</p>
+                <strong className="mt-1 block text-lg text-amber-800">
+                  {scheduledReturns.today}
+                </strong>
+              </div>
+              <div className="rounded-2xl bg-blue-50 p-3">
+                <p className="text-xs font-semibold text-brand">Proximos</p>
+                <strong className="mt-1 block text-lg text-blue-700">
+                  {scheduledReturns.upcoming}
+                </strong>
+              </div>
+            </div>
+            <div className="mt-5 space-y-3">
+              {scheduledReturns.items.map((task) => (
+                <div
+                  key={task.id}
+                  className="rounded-2xl border border-line/80 bg-slate-50/60 p-3 text-sm"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold text-slate-950">{task.title}</p>
+                      <p className="mt-1 truncate text-slate-600">
+                        {task.contact.name} · {task.contact.phone}
+                      </p>
+                      {task.note ? (
+                        <p className="mt-1 line-clamp-1 text-xs text-slate-500">
+                          {task.note}
+                        </p>
+                      ) : null}
+                    </div>
+                    <span className="shrink-0 rounded-full bg-white px-2 py-1 text-xs font-semibold text-slate-500 ring-1 ring-line">
+                      {new Date(task.dueAt).toLocaleString("pt-BR", {
+                        day: "2-digit",
+                        month: "2-digit",
+                        hour: "2-digit",
+                        minute: "2-digit"
+                      })}
+                    </span>
+                  </div>
+                </div>
+              ))}
+              {!loading && scheduledReturns.items.length === 0 && (
+                <p className="rounded-2xl border border-dashed border-line p-4 text-sm text-slate-500">
+                  Nenhum retorno de hoje ou proximo retorno pendente.
+                </p>
+              )}
+            </div>
+          </section>
+
           <section className="rounded-[1.35rem] border border-line/80 bg-white p-5 shadow-soft">
             <div className="flex items-center justify-between">
               <div>

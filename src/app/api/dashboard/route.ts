@@ -115,6 +115,7 @@ export async function GET(request: NextRequest) {
     const ownerId = request.nextUrl.searchParams.get("ownerId") ?? "";
     const since = getPeriodStart(period);
     const todayRange = getTodayRange();
+    const now = new Date();
     const contactWhere = {
       companyId: session.companyId,
       archivedAt: null,
@@ -144,6 +145,11 @@ export async function GET(request: NextRequest) {
           }
         : {})
     };
+    const returnsWhere = {
+      companyId: session.companyId,
+      status: "PENDING",
+      ...(ownerId ? { assigneeId: ownerId } : { assigneeId: session.id })
+    };
 
     const [
       activeContacts,
@@ -157,6 +163,11 @@ export async function GET(request: NextRequest) {
       stages,
       statusCounts,
       upcomingTasks,
+      pendingReturns,
+      overdueReturns,
+      todayReturns,
+      upcomingReturns,
+      returnItems,
       priorityConversations,
       priorityProposals,
       priorityContacts
@@ -206,6 +217,40 @@ export async function GET(request: NextRequest) {
         },
         orderBy: { dueAt: "asc" },
         take: 6
+      }),
+      prisma.task.count({ where: returnsWhere }),
+      prisma.task.count({
+        where: {
+          ...returnsWhere,
+          dueAt: { lt: now }
+        }
+      }),
+      prisma.task.count({
+        where: {
+          ...returnsWhere,
+          dueAt: {
+            gte: now,
+            lt: todayRange.end
+          }
+        }
+      }),
+      prisma.task.count({
+        where: {
+          ...returnsWhere,
+          dueAt: { gte: todayRange.end }
+        }
+      }),
+      prisma.task.findMany({
+        where: {
+          ...returnsWhere,
+          dueAt: { gte: now }
+        },
+        include: {
+          contact: { select: { id: true, name: true, phone: true } },
+          assignee: { select: { id: true, name: true, email: true } }
+        },
+        orderBy: { dueAt: "asc" },
+        take: 8
       }),
       prisma.conversation.findMany({
         where: {
@@ -327,6 +372,21 @@ export async function GET(request: NextRequest) {
         contact: task.contact,
         assignee: task.assignee
       })),
+      returns: {
+        totalPending: pendingReturns,
+        overdue: overdueReturns,
+        today: todayReturns,
+        upcoming: upcomingReturns,
+        items: returnItems.map((task) => ({
+          id: task.id,
+          title: task.title,
+          note: task.note,
+          dueAt: task.dueAt,
+          status: task.status,
+          contact: task.contact,
+          assignee: task.assignee
+        }))
+      },
       priorities
     });
   } catch {
