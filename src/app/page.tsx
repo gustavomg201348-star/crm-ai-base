@@ -1365,6 +1365,10 @@ function logConversationRenderDebug({
   previous?: ConversationRow | null;
   next: ConversationRow;
 }) {
+  if (process.env.NODE_ENV === "production") {
+    return;
+  }
+
   const previousName = previous?.contact.name ?? null;
   const nextName = next.contact.name;
 
@@ -1584,6 +1588,7 @@ export default function Home() {
   const selectedConversationRef = useRef<string | null>(null);
   const conversationListRef = useRef<ConversationRow[]>([]);
   const conversationRequestIdRef = useRef(0);
+  const conversationSearchSettlingRef = useRef(false);
   const knownNotificationIdsRef = useRef<Set<string>>(new Set());
   const notificationsLoadedRef = useRef(false);
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
@@ -2098,6 +2103,10 @@ export default function Home() {
     },
     []
   );
+
+  const handleConversationSearchSettlingChange = useCallback((settling: boolean) => {
+    conversationSearchSettlingRef.current = settling;
+  }, []);
 
   const mergeConversation = useCallback((conversation: ConversationRow, origin = "merge") => {
     setSelectedConversation((current) =>
@@ -3823,6 +3832,11 @@ export default function Home() {
 
     const interval = window.setInterval(() => {
       void refreshConversation();
+
+      if (document.hidden || conversationSearchSettlingRef.current) {
+        return;
+      }
+
       void loadConversations(conversationFilters, { silent: true });
     }, 3000);
 
@@ -4270,6 +4284,7 @@ export default function Home() {
                 loading={conversationLoading}
                 selectedConversation={selectedConversation}
                 onFiltersChange={setConversationFilters}
+                onSearchSettlingChange={handleConversationSearchSettlingChange}
                 onSelectConversation={(conversation) => void handleSelectConversation(conversation)}
                 onAssignConversation={handleAssignConversation}
                 onUnassignConversation={handleUnassignConversation}
@@ -6000,6 +6015,7 @@ function Atendimento({
   loading,
   selectedConversation,
   onFiltersChange,
+  onSearchSettlingChange,
   onSelectConversation,
   onAssignConversation,
   onUnassignConversation,
@@ -6030,6 +6046,7 @@ function Atendimento({
   loading: boolean;
   selectedConversation: ConversationRow | null;
   onFiltersChange: (filters: { search: string; status: string; tagIds: string[]; assignedTo: string }) => void;
+  onSearchSettlingChange?: (settling: boolean) => void;
   onSelectConversation: (conversation: ConversationRow) => void;
   onAssignConversation: (conversationId: string, userId?: string) => Promise<void>;
   onUnassignConversation: (conversationId: string) => Promise<void>;
@@ -6559,6 +6576,7 @@ function Atendimento({
         loading={loading}
         selectedConversation={selectedConversation}
         onFiltersChange={onFiltersChange}
+        onSearchSettlingChange={onSearchSettlingChange}
         onSelectConversation={onSelectConversation}
       />
 
@@ -7301,6 +7319,7 @@ function ConversationList({
   loading,
   selectedConversation,
   onFiltersChange,
+  onSearchSettlingChange,
   onSelectConversation
 }: {
   conversations: ConversationRow[];
@@ -7312,10 +7331,12 @@ function ConversationList({
   loading: boolean;
   selectedConversation: ConversationRow | null;
   onFiltersChange: (filters: { search: string; status: string; tagIds: string[]; assignedTo: string }) => void;
+  onSearchSettlingChange?: (settling: boolean) => void;
   onSelectConversation: (conversation: ConversationRow) => void;
 }) {
   const activeTags = availableTags.filter((tag) => tag.isActive !== false);
   const [tagFilterOpen, setTagFilterOpen] = useState(false);
+  const [conversationSearchDraft, setConversationSearchDraft] = useState(filters.search);
   const selectedTagNames = activeTags
     .filter((tag) => filters.tagIds.includes(tag.id))
     .map((tag) => tag.name);
@@ -7339,6 +7360,30 @@ function ConversationList({
     { value: "RESOLVED", label: "Resolvidos" },
     { value: "SOLD", label: "Vendas" }
   ];
+
+  useEffect(() => {
+    setConversationSearchDraft(filters.search);
+  }, [filters.search]);
+
+  useEffect(() => {
+    if (conversationSearchDraft === filters.search) {
+      onSearchSettlingChange?.(false);
+      return;
+    }
+
+    onSearchSettlingChange?.(true);
+
+    const timeout = window.setTimeout(() => {
+      onFiltersChange({ ...filters, search: conversationSearchDraft });
+      onSearchSettlingChange?.(false);
+    }, 400);
+
+    return () => window.clearTimeout(timeout);
+  }, [conversationSearchDraft, filters, onFiltersChange, onSearchSettlingChange]);
+
+  useEffect(() => {
+    return () => onSearchSettlingChange?.(false);
+  }, [onSearchSettlingChange]);
 
   return (
     <section className="flex min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-line/80 bg-white shadow-soft">
@@ -7417,10 +7462,8 @@ function ConversationList({
           <input
             className="w-full bg-transparent text-sm outline-none"
             placeholder="Buscar conversas..."
-            value={filters.search}
-            onChange={(event) =>
-              onFiltersChange({ ...filters, search: event.target.value })
-            }
+            value={conversationSearchDraft}
+            onChange={(event) => setConversationSearchDraft(event.target.value)}
           />
         </div>
         <div className="mt-3 grid grid-cols-2 gap-1.5 text-[11px] sm:grid-cols-4">
