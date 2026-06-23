@@ -82,7 +82,7 @@ export async function GET(request: NextRequest) {
           { lastMessageAt: { sort: "desc", nulls: "last" } },
           { createdAt: "desc" }
         ],
-        take: 250
+        take: 100
       }),
       prisma.conversation.groupBy({
         by: ["status"],
