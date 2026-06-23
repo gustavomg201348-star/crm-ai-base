@@ -1,9 +1,69 @@
 import { NextResponse, type NextRequest } from "next/server";
+import type { Prisma } from "@prisma/client";
 import { getSessionFromRequest } from "@/lib/auth";
-import { contactInclude, mapContact } from "@/lib/contacts";
 import { prisma } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
+
+const kanbanContactSelect = {
+  id: true,
+  name: true,
+  phone: true,
+  email: true,
+  cpf: true,
+  temperature: true,
+  lastMessage: true,
+  archivedAt: true,
+  createdAt: true,
+  updatedAt: true,
+  ownerId: true,
+  originId: true,
+  stageId: true,
+  owner: { select: { name: true } },
+  origin: { select: { name: true } },
+  stage: { select: { name: true } },
+  tags: {
+    include: {
+      tag: {
+        select: {
+          id: true,
+          name: true,
+          color: true
+        }
+      }
+    }
+  }
+} satisfies Prisma.ContactSelect;
+
+type KanbanContact = Prisma.ContactGetPayload<{ select: typeof kanbanContactSelect }>;
+
+function mapKanbanContact(contact: KanbanContact) {
+  return {
+    id: contact.id,
+    name: contact.name,
+    phone: contact.phone,
+    email: contact.email,
+    cpf: contact.cpf,
+    temperature: contact.temperature,
+    lastMessage: contact.lastMessage,
+    archivedAt: contact.archivedAt,
+    createdAt: contact.createdAt,
+    updatedAt: contact.updatedAt,
+    owner: contact.owner?.name ?? "Sem responsavel",
+    origin: contact.origin?.name ?? "Sem origem",
+    stage: contact.stage?.name ?? "Sem etapa",
+    ownerId: contact.ownerId,
+    originId: contact.originId,
+    stageId: contact.stageId,
+    tags: contact.tags.map((item) => ({
+      id: item.tag.id,
+      name: item.tag.name,
+      color: item.tag.color
+    })),
+    conversations: [],
+    proposals: []
+  };
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -19,7 +79,7 @@ export async function GET(request: NextRequest) {
       include: {
         contacts: {
           where: { archivedAt: null },
-          include: contactInclude,
+          select: kanbanContactSelect,
           orderBy: { updatedAt: "desc" }
         }
       }
@@ -31,7 +91,7 @@ export async function GET(request: NextRequest) {
         archivedAt: null,
         stageId: null
       },
-      include: contactInclude,
+      select: kanbanContactSelect,
       orderBy: { updatedAt: "desc" }
     });
 
@@ -42,14 +102,14 @@ export async function GET(request: NextRequest) {
           name: stage.name,
           color: stage.color,
           position: stage.position,
-          contacts: stage.contacts.map(mapContact)
+          contacts: stage.contacts.map(mapKanbanContact)
         })),
         {
           id: "",
           name: "Sem etapa",
           color: "#64748b",
           position: 999,
-          contacts: unstaged.map(mapContact)
+          contacts: unstaged.map(mapKanbanContact)
         }
       ]
     });
