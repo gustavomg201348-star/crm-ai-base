@@ -21,8 +21,28 @@ export const conversationInclude = {
   }
 } satisfies Prisma.ConversationInclude;
 
+export const conversationListInclude = {
+  contact: {
+    include: {
+      owner: true,
+      origin: true,
+      stage: true,
+      tags: { include: { tag: true } }
+    }
+  },
+  agent: true,
+  tags: {
+    include: { tag: true },
+    orderBy: { createdAt: "asc" }
+  }
+} satisfies Prisma.ConversationInclude;
+
 export type ConversationWithRelations = Prisma.ConversationGetPayload<{
   include: typeof conversationInclude;
+}>;
+
+export type ConversationListWithRelations = Prisma.ConversationGetPayload<{
+  include: typeof conversationListInclude;
 }>;
 
 export function mapConversation(conversation: ConversationWithRelations) {
@@ -124,5 +144,60 @@ export function mapConversation(conversation: ConversationWithRelations) {
       readAt: message.readAt,
       senderType: message.senderType
     }))
+  };
+}
+
+export function mapConversationListItem(conversation: ConversationListWithRelations) {
+  return {
+    id: conversation.id,
+    status: conversation.status as ConversationStatus,
+    channel: conversation.channel,
+    summary: conversation.summary,
+    aiMode: conversation.aiMode,
+    aiPaused: conversation.aiPaused,
+    aiLastSuggestion: conversation.aiLastSuggestion,
+    unreadCount: conversation.unreadCount,
+    lastMessageAt: conversation.lastMessageAt,
+    lastMessagePreview: conversation.lastMessagePreview,
+    lastInboundMessageAt: conversation.lastInboundMessageAt,
+    lastReadAt: conversation.lastReadAt,
+    createdAt: conversation.createdAt,
+    updatedAt: conversation.updatedAt,
+    agent: conversation.agent
+      ? {
+          id: conversation.agent.id,
+          name: conversation.agent.name,
+          email: conversation.agent.email,
+          role: conversation.agent.role
+        }
+      : null,
+    assignmentStatus: conversation.agentId ? "ASSIGNED" : "UNASSIGNED",
+    contact: {
+      id: conversation.contact.id,
+      name: conversation.contact.name,
+      phone: conversation.contact.phone,
+      email: conversation.contact.email,
+      cpf: conversation.contact.cpf,
+      origin: conversation.contact.origin?.name ?? "Sem origem",
+      stage: conversation.contact.stage?.name ?? "Sem etapa",
+      temperature: conversation.contact.temperature,
+      owner: conversation.contact.owner?.name ?? "Sem responsavel",
+      lastMessage: conversation.contact.lastMessage,
+      tags: conversation.contact.tags.map((item) => ({
+        id: item.tag.id,
+        name: item.tag.name,
+        color: item.tag.color
+      }))
+    },
+    tags: conversation.tags.map((item) => ({
+      id: item.tag.id,
+      name: item.tag.name,
+      color: item.tag.color,
+      textColor: item.tag.textColor,
+      category: item.tag.category,
+      isActive: item.tag.isActive
+    })),
+    lastMessage: null,
+    messages: []
   };
 }

@@ -2,7 +2,9 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import {
   conversationInclude,
+  conversationListInclude,
   mapConversation,
+  mapConversationListItem,
   type ConversationStatus
 } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
@@ -75,7 +77,7 @@ export async function GET(request: NextRequest) {
           ...baseWhere,
           ...(status === "ALL" ? {} : { status })
         },
-        include: conversationInclude,
+        include: conversationListInclude,
         orderBy: [
           { lastMessageAt: { sort: "desc", nulls: "last" } },
           { createdAt: "desc" }
@@ -104,7 +106,7 @@ export async function GET(request: NextRequest) {
     }
 
     const mappedConversations = conversations
-      .map(mapConversation)
+      .map(mapConversationListItem)
       .sort((a, b) => {
         const aTime = a.lastMessageAt
           ? new Date(a.lastMessageAt).getTime()

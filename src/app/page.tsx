@@ -1496,6 +1496,20 @@ function mergeConversationListSnapshot({
   });
 }
 
+function preserveConversationTimeline(
+  previous: ConversationRow | null,
+  next: ConversationRow
+) {
+  if (!previous || previous.id !== next.id) return next;
+  if (next.messages.length > 0 || previous.messages.length === 0) return next;
+
+  return {
+    ...next,
+    lastMessage: next.lastMessage ?? previous.lastMessage,
+    messages: previous.messages
+  };
+}
+
 function emptyDashboardData(): DashboardData {
   return {
     metrics: {
@@ -1569,6 +1583,7 @@ export default function Home() {
   const [cltDraft, setCltDraft] = useState<CltSimulationDraft | null>(null);
   const selectedConversationRef = useRef<string | null>(null);
   const conversationListRef = useRef<ConversationRow[]>([]);
+  const conversationRequestIdRef = useRef(0);
   const knownNotificationIdsRef = useRef<Set<string>>(new Set());
   const notificationsLoadedRef = useRef(false);
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
@@ -1761,15 +1776,25 @@ export default function Home() {
 
   async function loadSession() {
     setSessionLoading(true);
-    const response = await fetch("/api/auth/session");
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 10000);
 
-    if (response.ok) {
-      setSession((await response.json()) as Session);
-    } else {
+    try {
+      const response = await fetch("/api/auth/session", {
+        signal: controller.signal
+      });
+
+      if (response.ok) {
+        setSession((await response.json()) as Session);
+      } else {
+        setSession(null);
+      }
+    } catch {
       setSession(null);
+    } finally {
+      window.clearTimeout(timeout);
+      setSessionLoading(false);
     }
-
-    setSessionLoading(false);
   }
 
   const loadContacts = useCallback(async (filters = contactFilters) => {
@@ -1998,9 +2023,13 @@ export default function Home() {
 
   const loadConversations = useCallback(
     async (
-      filters = conversationFilters,
+      filters: typeof conversationFilters,
       options: { silent?: boolean } = {}
     ) => {
+      const requestId = options.silent
+        ? conversationRequestIdRef.current
+        : (conversationRequestIdRef.current += 1);
+
       if (!options.silent) {
         setConversationLoading(true);
         setAppError("");
@@ -2019,46 +2048,55 @@ export default function Home() {
         if (value) params.set(key, value);
       });
 
-      const response = await fetch(`/api/conversations?${params.toString()}`);
-      if (response.ok) {
-        const data = (await response.json()) as {
-          conversations: ConversationRow[];
-          statusCounts?: Partial<ConversationStatusCounts>;
-        };
-        setConversationStatusCounts({
-          ...emptyConversationStatusCounts,
-          ...data.statusCounts
-        });
-        const origin = options.silent ? "polling" : "initial-load";
-        const nextConversations = mergeConversationListSnapshot({
-          current: conversationListRef.current,
-          incoming: data.conversations,
-          origin
-        });
-        setConversationList(nextConversations);
-        setSelectedConversation((current) => {
-          if (!current) return null;
-          const next =
-            nextConversations.find((conversation) => conversation.id === current.id) ??
-            current;
-          logConversationRenderDebug({
-            origin: "selected-conversation-load-sync",
-            previous: current,
-            next
+      try {
+        const response = await fetch(`/api/conversations?${params.toString()}`);
+        if (requestId !== conversationRequestIdRef.current) {
+          return;
+        }
+
+        if (response.ok) {
+          const data = (await response.json()) as {
+            conversations: ConversationRow[];
+            statusCounts?: Partial<ConversationStatusCounts>;
+          };
+          setConversationStatusCounts({
+            ...emptyConversationStatusCounts,
+            ...data.statusCounts
           });
-          return next;
-        });
-      } else {
-        if (!options.silent) {
+          const origin = options.silent ? "polling" : "initial-load";
+          const nextConversations = mergeConversationListSnapshot({
+            current: conversationListRef.current,
+            incoming: data.conversations,
+            origin
+          });
+          setConversationList(nextConversations);
+          setSelectedConversation((current) => {
+            if (!current) return null;
+            const next =
+              nextConversations.find((conversation) => conversation.id === current.id) ??
+              current;
+            const stableNext = preserveConversationTimeline(current, next);
+            logConversationRenderDebug({
+              origin: "selected-conversation-load-sync",
+              previous: current,
+              next: stableNext
+            });
+            return stableNext;
+          });
+        } else if (!options.silent) {
           setAppError("Nao foi possivel carregar conversas.");
         }
-      }
-
-      if (!options.silent) {
-        setConversationLoading(false);
+      } catch {
+        if (requestId === conversationRequestIdRef.current && !options.silent) {
+          setAppError("Nao foi possivel carregar conversas.");
+        }
+      } finally {
+        if (requestId === conversationRequestIdRef.current && !options.silent) {
+          setConversationLoading(false);
+        }
       }
     },
-    [conversationFilters]
+    []
   );
 
   const mergeConversation = useCallback((conversation: ConversationRow, origin = "merge") => {
@@ -2257,7 +2295,10 @@ export default function Home() {
   }
 
   async function handleSelectConversation(conversation: ConversationRow) {
-    setSelectedConversation(conversation);
+    setSelectedConversation((current) =>
+      preserveConversationTimeline(current, conversation)
+    );
+    void refreshConversation(conversation.id);
     void markConversationRead(conversation.id);
     await markNotificationsRead({ conversationId: conversation.id });
   }
@@ -3715,15 +3756,12 @@ export default function Home() {
     if (userIsPlatformAdmin(session)) {
       void loadCompanies();
     }
-    void loadConversations(conversationFilters);
     void loadNotifications({ silent: true });
   }, [
     contactFilters,
-    conversationFilters,
     loadContacts,
     loadAiSettings,
     loadSettingsTags,
-    loadConversations,
     loadAttendants,
     loadLeadAssignmentSettings,
     loadRetirementLeads,
@@ -3738,6 +3776,12 @@ export default function Home() {
     retirementFilters,
     session
   ]);
+
+  useEffect(() => {
+    if (!session) return;
+
+    void loadConversations(conversationFilters);
+  }, [conversationFilters, loadConversations, session]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
