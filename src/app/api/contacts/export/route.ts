@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { getSessionFromRequest } from "@/lib/auth";
 import { contactInclude, mapContact } from "@/lib/contacts";
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/permissions";
 
 function buildContactWhere(
   companyId: string,
@@ -49,6 +50,8 @@ export async function GET(request: NextRequest) {
     if (!session) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
+    const blocked = requireAdmin(session);
+    if (blocked) return blocked;
 
     const contacts = await prisma.contact.findMany({
       where: buildContactWhere(session.companyId, request.nextUrl.searchParams),

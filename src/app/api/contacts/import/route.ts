@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { contactInclude, mapContact, type LeadTemperature } from "@/lib/contacts";
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/permissions";
 
 type CsvRow = Record<string, string>;
 
@@ -110,6 +111,8 @@ export async function POST(request: NextRequest) {
     if (!session) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
+    const blocked = requireAdmin(session);
+    if (blocked) return blocked;
 
     const body = (await request.json().catch(() => null)) as
       | { csv?: string; defaults?: { originId?: string; stageId?: string; ownerId?: string } }
