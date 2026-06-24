@@ -273,6 +273,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, mode: "meta", results: [] });
     }
 
+    if (
+      process.env.NODE_ENV === "production" ||
+      process.env.RAILWAY_ENVIRONMENT === "production"
+    ) {
+      return NextResponse.json(
+        { error: "Sandbox webhook is disabled in production." },
+        { status: 403 }
+      );
+    }
+
     const companyId = body?.companyId ?? "seed-company";
 
     if (!body?.phone || !body?.message) {
