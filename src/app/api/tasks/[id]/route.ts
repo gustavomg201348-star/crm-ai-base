@@ -3,6 +3,7 @@ import { getSessionFromRequest } from "@/lib/auth";
 import { createActivity } from "@/lib/activities";
 import { prisma } from "@/lib/db";
 import { mapTask, taskInclude } from "@/lib/tasks";
+import { forbidden, isAdmin } from "@/lib/permissions";
 
 export async function PATCH(
   request: NextRequest,
@@ -24,6 +25,11 @@ export async function PATCH(
       return NextResponse.json({ error: "Tarefa nao encontrada." }, { status: 404 });
     }
 
+    const canManageAnyTask = isAdmin(session);
+    if (!canManageAnyTask && current.assigneeId !== session.id) {
+      return forbidden("Voce nao tem permissao para alterar esta tarefa.");
+    }
+
     const body = (await request.json().catch(() => null)) as
       | {
           status?: "PENDING" | "DONE";
@@ -37,6 +43,10 @@ export async function PATCH(
 
     if (dueAt && Number.isNaN(dueAt.getTime())) {
       return NextResponse.json({ error: "Prazo invalido." }, { status: 400 });
+    }
+
+    if (!canManageAnyTask && body?.assigneeId !== undefined) {
+      return forbidden("Voce nao tem permissao para transferir esta tarefa.");
     }
 
     const assignee =
