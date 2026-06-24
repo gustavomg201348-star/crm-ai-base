@@ -6383,9 +6383,10 @@ function Atendimento({
     setScheduledReturnsError("");
 
     try {
-      const response = await fetch(
-        `/api/tasks?assigneeId=${encodeURIComponent(currentUserId)}&status=PENDING`
-      );
+      const query = isAdmin
+        ? "status=PENDING"
+        : `assigneeId=${encodeURIComponent(currentUserId)}&status=PENDING`;
+      const response = await fetch(`/api/tasks?${query}`);
 
       if (!response.ok) {
         const data = (await response.json().catch(() => null)) as
