@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/permissions";
 
 export async function PATCH(
   request: NextRequest,
@@ -12,6 +13,9 @@ export async function PATCH(
     if (!session) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
+
+    const blocked = requireAdmin(session);
+    if (blocked) return blocked;
 
     const { id } = await params;
     const body = (await request.json().catch(() => null)) as { name?: string } | null;
@@ -53,6 +57,9 @@ export async function DELETE(
     if (!session) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
+
+    const blocked = requireAdmin(session);
+    if (blocked) return blocked;
 
     const { id } = await params;
     const current = await prisma.origin.findFirst({
