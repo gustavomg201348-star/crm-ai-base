@@ -148,7 +148,11 @@ export async function GET(request: NextRequest) {
     const returnsWhere = {
       companyId: session.companyId,
       status: "PENDING",
-      ...(ownerId ? { assigneeId: ownerId } : { assigneeId: session.id })
+      ...(ownerId
+        ? { assigneeId: ownerId }
+        : session.role === "AGENT"
+          ? { assigneeId: session.id }
+          : {})
     };
 
     const [
