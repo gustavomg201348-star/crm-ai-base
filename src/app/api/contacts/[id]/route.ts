@@ -11,6 +11,7 @@ import {
   type LeadTemperature
 } from "@/lib/contacts";
 import { prisma } from "@/lib/db";
+import { forbidden, isAdmin } from "@/lib/permissions";
 
 type RouteContext = {
   params: { id: string };
@@ -21,6 +22,23 @@ async function findOwnedContact(id: string, companyId: string) {
     where: { id, companyId },
     include: contactInclude
   });
+}
+
+const agentAllowedPatchFields = new Set(["name", "cpf", "stageId"]);
+
+async function agentCanEditContact(contact: { id: string; ownerId: string | null }, session: { id: string; companyId: string }) {
+  if (contact.ownerId === session.id) return true;
+
+  const assignedConversation = await prisma.conversation.findFirst({
+    where: {
+      contactId: contact.id,
+      agentId: session.id,
+      contact: { companyId: session.companyId }
+    },
+    select: { id: true }
+  });
+
+  return Boolean(assignedConversation);
 }
 
 export async function GET(request: NextRequest, context: RouteContext) {
@@ -75,6 +93,22 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           archived?: boolean;
         }
       | null;
+
+    if (!isAdmin(session)) {
+      const blockedFields = Object.keys(body ?? {}).filter(
+        (field) => !agentAllowedPatchFields.has(field)
+      );
+
+      if (blockedFields.length) {
+        return forbidden("Atendentes podem editar apenas nome, CPF e etapa do contato.");
+      }
+
+      const canEdit = await agentCanEditContact(existing, session);
+
+      if (!canEdit) {
+        return forbidden("Voce nao tem permissao para editar este contato.");
+      }
+    }
 
     const owner =
       body?.ownerId !== undefined && body.ownerId
@@ -255,6 +289,10 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
 
     if (!existing) {
       return NextResponse.json({ error: "Contato nao encontrado." }, { status: 404 });
+    }
+
+    if (!isAdmin(session)) {
+      return forbidden("Apenas administradores e supervisores podem arquivar contatos.");
     }
 
     const contact = await prisma.$transaction(async (tx) => {
