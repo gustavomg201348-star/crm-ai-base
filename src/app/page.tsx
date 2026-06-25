@@ -3819,10 +3819,12 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!session || !userCanManageOperation(session)) return;
+    if (!session || !userCanManageOperation(session) || active !== "dashboard") return;
 
+    const dashboardKey = `${session.company.id}:${session.user.role}:${JSON.stringify(dashboardFilters)}`;
+    if (!shouldLoadView("dashboard", dashboardKey)) return;
     void loadDashboard(dashboardFilters);
-  }, [dashboardFilters, loadDashboard, session]);
+  }, [active, dashboardFilters, loadDashboard, session, shouldLoadView]);
 
   useEffect(() => {
     if (!session || !userCanManageOperation(session) || active !== "recem-aposentados") {
