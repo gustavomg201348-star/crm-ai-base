@@ -7413,19 +7413,19 @@ function ConversationList({
 
   return (
     <section className="flex min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-line/80 bg-white shadow-soft">
-      <div className="border-b border-line/70 p-4">
+      <div className="border-b border-line/70 bg-slate-50/35 p-4">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="font-bold text-slate-950">Conversas</h3>
-            <p className="text-sm text-slate-500">{conversations.length} atendimentos</p>
+            <h3 className="text-sm font-black uppercase tracking-wide text-slate-950">Conversas</h3>
+            <p className="mt-0.5 text-xs font-medium text-slate-500">{conversations.length} atendimentos</p>
           </div>
           <div className="relative">
             <button
               className={clsx(
-                "inline-flex h-9 items-center gap-2 rounded-full border px-3 text-xs font-bold transition-colors",
+                "inline-flex h-9 items-center gap-2 rounded-full border px-3 text-xs font-bold shadow-sm transition-colors",
                 filters.tagIds.length
                   ? "border-blue-200 bg-blue-50 text-brand"
-                  : "border-line bg-slate-50 text-slate-500 hover:bg-white"
+                  : "border-line bg-white text-slate-500 hover:border-slate-300 hover:text-slate-800"
               )}
               onClick={() => setTagFilterOpen((current) => !current)}
               type="button"
@@ -7483,10 +7483,10 @@ function ConversationList({
             )}
           </div>
         </div>
-        <div className="mt-4 flex h-10 items-center gap-2 rounded-2xl border border-line bg-slate-50 px-3 focus-within:border-blue-200 focus-within:bg-white">
+        <div className="mt-4 flex h-10 items-center gap-2 rounded-2xl border border-line bg-white px-3 shadow-sm transition focus-within:border-blue-200 focus-within:bg-white focus-within:ring-4 focus-within:ring-blue-50">
           <Search className="h-4 w-4 text-slate-400" />
           <input
-            className="w-full bg-transparent text-sm outline-none"
+            className="w-full bg-transparent text-sm font-medium text-slate-700 outline-none placeholder:text-slate-400"
             placeholder="Buscar conversas..."
             value={conversationSearchDraft}
             onChange={(event) => setConversationSearchDraft(event.target.value)}
@@ -7519,10 +7519,10 @@ function ConversationList({
               key={item.label}
               type="button"
               className={clsx(
-                "h-8 rounded-xl border px-2 font-bold transition-colors",
+                "h-8 rounded-xl border px-2 font-bold shadow-sm transition-colors",
                 item.active
-                  ? "border-blue-200 bg-blue-50 text-brand"
-                  : "border-line bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+                  ? "border-blue-200 bg-white text-brand"
+                  : "border-line bg-white/80 text-slate-500 hover:border-slate-300 hover:bg-white hover:text-slate-800"
               )}
               onClick={() => onFiltersChange(item.next)}
             >
@@ -7530,7 +7530,7 @@ function ConversationList({
             </button>
           ))}
         </div>
-        <div className="mt-3 flex gap-1 overflow-x-auto rounded-2xl bg-slate-50 p-1 text-[11px] ring-1 ring-line/80">
+        <div className="mt-3 flex gap-1 overflow-x-auto rounded-2xl bg-white p-1 text-[11px] shadow-sm ring-1 ring-line/80">
           {statusFilterItems.map(({ value, label }) => {
             const count = statusCounts[value] ?? 0;
             const active = filters.status === value;
@@ -7541,7 +7541,7 @@ function ConversationList({
               className={clsx(
                 "inline-flex h-8 min-w-max flex-1 items-center justify-center gap-1.5 rounded-xl px-2 font-bold transition-colors",
                 active
-                  ? "bg-white text-brand shadow-sm"
+                  ? "bg-blue-50 text-brand shadow-sm"
                   : "text-slate-500 hover:text-slate-800"
               )}
               onClick={() => onFiltersChange({ ...filters, status: value })}
@@ -7553,7 +7553,7 @@ function ConversationList({
                   count > 0
                     ? active
                       ? "bg-brand text-white"
-                      : "bg-rose-100 text-rose-600"
+                      : "bg-slate-200 text-slate-600"
                     : active
                       ? "bg-emerald-50 text-emerald-600"
                       : "bg-slate-200 text-slate-400"
@@ -7568,7 +7568,7 @@ function ConversationList({
         <div className="mt-3 grid gap-2 text-xs">
           <div className="flex items-center gap-2">
             <select
-              className="h-9 min-w-0 flex-1 rounded-full border border-line bg-white px-3 text-xs font-semibold text-slate-600 outline-none"
+              className="h-9 min-w-0 flex-1 rounded-full border border-line bg-white px-3 text-xs font-semibold text-slate-600 shadow-sm outline-none hover:border-slate-300 focus:border-blue-200"
               value={filters.assignedTo}
               onChange={(event) =>
                 onFiltersChange({
@@ -7589,7 +7589,7 @@ function ConversationList({
             </select>
             {filters.tagIds.length > 0 && (
               <button
-                className="h-9 rounded-full border border-line bg-white px-3 text-xs font-bold text-slate-500 hover:bg-slate-50"
+                className="h-9 rounded-full border border-line bg-white px-3 text-xs font-bold text-slate-500 shadow-sm hover:border-slate-300 hover:text-slate-800"
                 onClick={() => onFiltersChange({ ...filters, tagIds: [] })}
                 type="button"
               >
@@ -7619,7 +7619,7 @@ function ConversationList({
           )}
         </div>
       </div>
-      <div className="min-h-0 flex-1 divide-y divide-line/70 overflow-y-auto overscroll-contain">
+      <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto overscroll-contain bg-slate-50/35 p-2">
         {conversations.map((item) => {
           const selected = selectedConversation?.id === item.id;
           const unread = item.unreadCount ?? 0;
@@ -7644,26 +7644,26 @@ function ConversationList({
               data-contact-phone={item.contact.phone}
               data-contact-name={contactName}
               className={clsx(
-                "group relative block min-h-[112px] w-full overflow-hidden px-3.5 py-3 text-left transition-colors hover:bg-slate-50",
+                "group relative block min-h-[116px] w-full overflow-hidden rounded-2xl border border-transparent bg-white px-3.5 py-3 text-left shadow-sm transition-all hover:border-slate-200 hover:bg-white hover:shadow-md",
                 hasUnread && "ring-1 ring-inset ring-emerald-200",
                 attention.tone === "green" && "bg-emerald-50/45",
                 attention.tone === "amber" && !selected && "bg-amber-50/30",
                 attention.tone === "rose" && !selected && "bg-rose-50/30",
-                selected && "bg-blue-50/70"
+                selected && "border-blue-200 bg-blue-50/80 shadow-md ring-1 ring-inset ring-blue-100"
               )}
               onClick={() => onSelectConversation(item)}
             >
               <span
                 className={clsx(
-                  "absolute left-0 top-4 h-10 w-1 rounded-r-full",
+                  "absolute left-0 top-4 h-10 w-1 rounded-r-full opacity-80",
                   attention.tone === "green" && "bg-emerald-500",
                   attention.tone === "amber" && "bg-amber-400",
                   attention.tone === "rose" && "bg-rose-500",
                   attention.tone === "slate" && "bg-transparent"
                 )}
               />
-              <div className="flex min-h-[88px] items-start gap-3">
-                <div className="relative mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full bg-slate-100 text-xs font-bold text-slate-700">
+              <div className="flex min-h-[90px] items-start gap-3">
+                <div className="relative mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full bg-slate-100 text-xs font-bold text-slate-700 ring-1 ring-slate-200">
                   {contactName.slice(0, 2).toUpperCase()}
                   <span
                     className={clsx(
@@ -7683,7 +7683,7 @@ function ConversationList({
                   <div className="flex h-5 items-center justify-between gap-2">
                     <p
                       className={clsx(
-                        "min-w-0 flex-1 truncate text-[13px] leading-5 text-slate-950",
+                        "min-w-0 flex-1 truncate text-sm leading-5 text-slate-950",
                         hasUnread ? "font-bold" : "font-semibold"
                       )}
                       title={contactName}
@@ -7692,7 +7692,7 @@ function ConversationList({
                     </p>
                     <span
                       className={clsx(
-                        "w-16 shrink-0 truncate text-right text-[10px] tabular-nums",
+                        "w-16 shrink-0 truncate text-right text-[10px] font-medium tabular-nums",
                         hasUnread ? "font-bold text-emerald-600" : "text-slate-400"
                       )}
                       title={messageTime ? formatRelativeDate(messageTime) : item.status}
@@ -7701,7 +7701,7 @@ function ConversationList({
                     </span>
                   </div>
 
-                  <div className="mt-1 flex h-5 items-center justify-between gap-2 overflow-hidden">
+                  <div className="mt-1.5 flex h-5 items-center justify-between gap-2 overflow-hidden">
                     <p
                       className={clsx(
                         "min-w-0 flex-1 truncate text-[12px] leading-5",
@@ -7712,22 +7712,22 @@ function ConversationList({
                       {preview}
                     </p>
                     {hasUnread && (
-                      <span className="grid h-5 min-w-[1.25rem] shrink-0 place-items-center rounded-full bg-emerald-500 px-1.5 text-[11px] font-bold leading-none text-white shadow-sm">
+                      <span className="grid h-5 min-w-[1.25rem] shrink-0 place-items-center rounded-full bg-emerald-500 px-1.5 text-[11px] font-bold leading-none text-white shadow-sm ring-1 ring-emerald-600/10">
                         {unread > 99 ? "99+" : unread}
                       </span>
                     )}
                   </div>
 
-                  <p className="mt-0.5 h-4 truncate text-[10px] font-medium leading-4 text-slate-400" title={channelLine}>
+                  <p className="mt-1 h-4 truncate text-[10px] font-semibold leading-4 text-slate-400" title={channelLine}>
                     {channelLine}
                   </p>
 
-                  <div className="mt-1.5 flex max-h-10 flex-wrap items-center gap-1 overflow-hidden">
+                  <div className="mt-2 flex max-h-10 flex-wrap items-center gap-1.5 overflow-hidden">
                     {actionBadges.map((badge) => (
                       <span
                         key={badge.label}
                         className={clsx(
-                          "max-w-[8.5rem] truncate rounded-full px-2 py-0.5 text-[10px] font-bold leading-4 ring-1",
+                          "max-w-[8.5rem] truncate rounded-full px-2 py-0.5 text-[10px] font-semibold leading-4 ring-1",
                           getConversationActionBadgeClass(badge.tone)
                         )}
                         title={badge.label}
@@ -7739,13 +7739,13 @@ function ConversationList({
                       <TagBadge key={tag.id} tag={tag} compact />
                     ))}
                     {extraTagCount > 0 && (
-                      <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold leading-4 text-slate-500 ring-1 ring-slate-200">
+                      <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold leading-4 text-slate-500 ring-1 ring-slate-200">
                         +{extraTagCount}
                       </span>
                     )}
                     <span
                       className={clsx(
-                        "max-w-[5.5rem] truncate rounded-full px-2 py-0.5 text-[10px] font-bold leading-4 ring-1",
+                        "max-w-[5.5rem] truncate rounded-full px-2 py-0.5 text-[10px] font-semibold leading-4 ring-1",
                         getConversationBadgeClass(temperatureLabel)
                       )}
                       title={temperatureLabel}
@@ -7759,14 +7759,14 @@ function ConversationList({
           );
         })}
         {!loading && conversations.length === 0 && (
-          <div className="p-6 text-center text-sm text-slate-500">
+          <div className="rounded-2xl border border-dashed border-line bg-white p-6 text-center text-sm text-slate-500">
             Nenhuma conversa nesta fila.
           </div>
         )}
         {loading && (
-          <div className="space-y-3 p-4">
+          <div className="space-y-3 p-2">
             {[0, 1, 2].map((item) => (
-              <div key={item} className="h-20 animate-pulse rounded-2xl bg-slate-100" />
+              <div key={item} className="h-24 animate-pulse rounded-2xl bg-white shadow-sm ring-1 ring-line/70" />
             ))}
           </div>
         )}
