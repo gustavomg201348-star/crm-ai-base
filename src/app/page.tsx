@@ -1591,6 +1591,7 @@ export default function Home() {
   const conversationSearchSettlingRef = useRef(false);
   const knownNotificationIdsRef = useRef<Set<string>>(new Set());
   const notificationsLoadedRef = useRef(false);
+  const loadedViewKeysRef = useRef<Record<string, string>>({});
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -2106,6 +2107,12 @@ export default function Home() {
 
   const handleConversationSearchSettlingChange = useCallback((settling: boolean) => {
     conversationSearchSettlingRef.current = settling;
+  }, []);
+
+  const shouldLoadView = useCallback((view: string, key: string) => {
+    if (loadedViewKeysRef.current[view] === key) return false;
+    loadedViewKeysRef.current[view] = key;
+    return true;
   }, []);
 
   const mergeConversation = useCallback((conversation: ConversationRow, origin = "merge") => {
@@ -3749,7 +3756,6 @@ export default function Home() {
     void loadReference();
     void loadAttendants();
     if (userCanManageOperation(session)) {
-      void loadKanban();
       void loadRetirementLeads(retirementFilters);
     }
     if (userIsAdmin(session)) {
@@ -3785,6 +3791,14 @@ export default function Home() {
     retirementFilters,
     session
   ]);
+
+  useEffect(() => {
+    if (!session || !userCanManageOperation(session) || active !== "kanban") return;
+
+    const kanbanKey = `${session.company.id}:${session.user.role}`;
+    if (!shouldLoadView("kanban", kanbanKey)) return;
+    void loadKanban();
+  }, [active, session, shouldLoadView]);
 
   useEffect(() => {
     if (!session) return;
