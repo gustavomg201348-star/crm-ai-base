@@ -3756,7 +3756,6 @@ export default function Home() {
     void loadAttendants();
     if (userIsAdmin(session)) {
       void loadChannels();
-      void loadChannelStatus();
       void loadMessageLogs({ channelId: "", status: "ALL", type: "ALL" });
       void loadCampaigns();
       void loadLeadAssignmentSettings();
@@ -3820,6 +3819,12 @@ export default function Home() {
     if (!shouldLoadView("dashboard", dashboardKey)) return;
     void loadDashboard(dashboardFilters);
   }, [active, dashboardFilters, loadDashboard, session, shouldLoadView]);
+
+  useEffect(() => {
+    if (!session || !userIsAdmin(session) || active !== "canais") return;
+
+    void loadChannelStatus();
+  }, [active, session]);
 
   useEffect(() => {
     if (!session || !userCanManageOperation(session) || active !== "recem-aposentados") {
