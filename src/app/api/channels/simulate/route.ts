@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { processInboundMessage } from "@/lib/inbound-message";
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/permissions";
 
 export async function POST(request: NextRequest) {
   try {
@@ -10,6 +11,8 @@ export async function POST(request: NextRequest) {
     if (!session) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
+    const blocked = requireAdmin(session);
+    if (blocked) return blocked;
 
     const body = (await request.json().catch(() => null)) as
       | {
