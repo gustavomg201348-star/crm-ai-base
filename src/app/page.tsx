@@ -3756,7 +3756,6 @@ export default function Home() {
     void loadAttendants();
     if (userIsAdmin(session)) {
       void loadChannels();
-      void loadMessageLogs({ channelId: "", status: "ALL", type: "ALL" });
       void loadCampaigns();
       void loadLeadAssignmentSettings();
       void loadProposals(proposalFilters);
@@ -3772,7 +3771,6 @@ export default function Home() {
     loadSettingsTags,
     loadAttendants,
     loadLeadAssignmentSettings,
-    loadMessageLogs,
     loadMulticredClients,
     loadMulticredProducts,
     loadNotifications,
@@ -3825,6 +3823,12 @@ export default function Home() {
 
     void loadChannelStatus();
   }, [active, session]);
+
+  useEffect(() => {
+    if (!session || !userIsAdmin(session) || active !== "canais") return;
+
+    void loadMessageLogs(messageLogFilters);
+  }, [active, loadMessageLogs, messageLogFilters, session]);
 
   useEffect(() => {
     if (!session || !userCanManageOperation(session) || active !== "recem-aposentados") {
