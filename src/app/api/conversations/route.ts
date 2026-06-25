@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import {
   conversationInclude,
-  conversationListInclude,
+  conversationListSelect,
   mapConversation,
   mapConversationListItem,
   type ConversationStatus
@@ -77,7 +77,7 @@ export async function GET(request: NextRequest) {
           ...baseWhere,
           ...(status === "ALL" ? {} : { status })
         },
-        include: conversationListInclude,
+        select: conversationListSelect,
         orderBy: [
           { lastMessageAt: { sort: "desc", nulls: "last" } },
           { createdAt: "desc" }

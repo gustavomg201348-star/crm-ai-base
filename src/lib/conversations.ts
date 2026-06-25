@@ -21,28 +21,78 @@ export const conversationInclude = {
   }
 } satisfies Prisma.ConversationInclude;
 
-export const conversationListInclude = {
+export const conversationListSelect = {
+  id: true,
+  status: true,
+  channel: true,
+  summary: true,
+  aiMode: true,
+  aiPaused: true,
+  aiLastSuggestion: true,
+  unreadCount: true,
+  lastMessageAt: true,
+  lastMessagePreview: true,
+  lastInboundMessageAt: true,
+  lastReadAt: true,
+  createdAt: true,
+  updatedAt: true,
+  agentId: true,
   contact: {
-    include: {
-      owner: true,
-      origin: true,
-      stage: true,
-      tags: { include: { tag: true } }
+    select: {
+      id: true,
+      name: true,
+      phone: true,
+      email: true,
+      cpf: true,
+      temperature: true,
+      lastMessage: true,
+      owner: { select: { name: true } },
+      origin: { select: { name: true } },
+      stage: { select: { name: true } },
+      tags: {
+        select: {
+          tag: {
+            select: {
+              id: true,
+              name: true,
+              color: true
+            }
+          }
+        }
+      }
     }
   },
-  agent: true,
+  agent: {
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true
+    }
+  },
   tags: {
-    include: { tag: true },
+    select: {
+      tag: {
+        select: {
+          id: true,
+          name: true,
+          color: true,
+          textColor: true,
+          category: true,
+          isActive: true
+        }
+      }
+    },
     orderBy: { createdAt: "asc" }
   }
-} satisfies Prisma.ConversationInclude;
+} satisfies Prisma.ConversationSelect;
 
 export type ConversationWithRelations = Prisma.ConversationGetPayload<{
   include: typeof conversationInclude;
 }>;
 
 export type ConversationListWithRelations = Prisma.ConversationGetPayload<{
-  include: typeof conversationListInclude;
+  select: typeof conversationListSelect;
 }>;
 
 export function mapConversation(conversation: ConversationWithRelations) {
