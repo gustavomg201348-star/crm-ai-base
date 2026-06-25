@@ -3754,9 +3754,6 @@ export default function Home() {
     void loadAiSettings();
     void loadReference();
     void loadAttendants();
-    if (userCanManageOperation(session)) {
-      void loadRetirementLeads(retirementFilters);
-    }
     if (userIsAdmin(session)) {
       void loadChannels();
       void loadChannelStatus();
@@ -3776,7 +3773,6 @@ export default function Home() {
     loadSettingsTags,
     loadAttendants,
     loadLeadAssignmentSettings,
-    loadRetirementLeads,
     loadMessageLogs,
     loadMulticredClients,
     loadMulticredProducts,
@@ -3785,7 +3781,6 @@ export default function Home() {
     loadCompanies,
     multicredClientSearch,
     proposalFilters,
-    retirementFilters,
     session
   ]);
 
