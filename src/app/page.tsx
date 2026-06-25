@@ -3750,7 +3750,6 @@ export default function Home() {
   useEffect(() => {
     if (!session) return;
 
-    void loadContacts(contactFilters);
     void loadSettingsTags();
     void loadAiSettings();
     void loadReference();
@@ -3773,8 +3772,6 @@ export default function Home() {
     }
     void loadNotifications({ silent: true });
   }, [
-    contactFilters,
-    loadContacts,
     loadAiSettings,
     loadSettingsTags,
     loadAttendants,
@@ -3791,6 +3788,14 @@ export default function Home() {
     retirementFilters,
     session
   ]);
+
+  useEffect(() => {
+    if (!session || active !== "contatos") return;
+
+    const contactsKey = `${session.company.id}:${session.user.role}:${JSON.stringify(contactFilters)}`;
+    if (!shouldLoadView("contatos", contactsKey)) return;
+    void loadContacts(contactFilters);
+  }, [active, contactFilters, loadContacts, session, shouldLoadView]);
 
   useEffect(() => {
     if (!session || !userCanManageOperation(session) || active !== "kanban") return;
