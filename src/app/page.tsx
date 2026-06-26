@@ -6661,27 +6661,6 @@ function Atendimento({
                   >
                     {selectedConversation.agent?.name ?? "Sem responsavel"}
                   </span>
-                  <span className="rounded-full border border-rose-100 bg-rose-50/80 px-2 py-0.5 text-[11px] font-semibold text-rose-700 shadow-sm">
-                    {temperatureLabels[
-                      selectedConversation.contact.temperature as keyof typeof temperatureLabels
-                    ] ?? selectedConversation.contact.temperature}
-                  </span>
-                  {selectedConversation.contact.origin && (
-                    <span
-                      className="max-w-[7.5rem] truncate rounded-full border border-blue-100 bg-blue-50/80 px-2 py-0.5 text-[11px] font-semibold text-brand shadow-sm"
-                      title={selectedConversation.contact.origin}
-                    >
-                      {selectedConversation.contact.origin}
-                    </span>
-                  )}
-                  {selectedConversation.contact.stage && (
-                    <span
-                      className="max-w-[7.5rem] truncate rounded-full border border-violet-100 bg-violet-50/80 px-2 py-0.5 text-[11px] font-semibold text-violet-700 shadow-sm"
-                      title={selectedConversation.contact.stage}
-                    >
-                      {selectedConversation.contact.stage}
-                    </span>
-                  )}
                   <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-500 shadow-sm">
                     Ultima:{" "}
                     {formatRelativeDate(
