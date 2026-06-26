@@ -6609,15 +6609,15 @@ function Atendimento({
       <section className="flex min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-line/80 bg-white shadow-soft">
         <div className="flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-3 border-b border-line/70 px-4 py-2 md:px-5">
           <div className="flex min-w-0 flex-1 items-center gap-3">
-            <div className="relative grid h-11 w-11 place-items-center rounded-full bg-blue-50 text-sm font-bold text-brand ring-1 ring-blue-100">
+            <div className="relative grid h-12 w-12 place-items-center rounded-full bg-slate-50 text-sm font-black text-slate-700 shadow-sm ring-1 ring-slate-200">
               {formatContactNameForUi(selectedConversation?.contact.name)
                 .slice(0, 1)
                 .toUpperCase() ?? "C"}
-              <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-emerald-500" />
+              <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-emerald-500 ring-1 ring-emerald-100" />
             </div>
             <div className="min-w-0">
               <div className="flex min-w-0 items-center gap-2">
-                <h3 className="truncate font-bold text-slate-950">
+                <h3 className="truncate text-base font-black leading-5 text-slate-950">
                   {selectedConversation
                     ? formatContactNameForUi(selectedConversation.contact.name)
                     : "Selecione uma conversa"}
@@ -6633,7 +6633,7 @@ function Atendimento({
                   </button>
                 )}
               </div>
-              <p className="truncate text-sm text-slate-500">
+              <p className="mt-0.5 truncate text-[13px] font-medium text-slate-500">
                 {selectedConversation
                   ? [
                       selectedConversation.contact.phone,
@@ -6646,29 +6646,29 @@ function Atendimento({
                   : "Inbox interno"}
               </p>
               {selectedConversation && (
-                <div className="mt-1 flex max-w-full flex-wrap items-center gap-1.5 overflow-hidden">
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600">
+                <div className="mt-2 flex max-w-full flex-wrap items-center gap-1.5 overflow-hidden">
+                  <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600 shadow-sm">
                     {conversationStatusLabels[selectedConversation.status] ?? selectedConversation.status}
                   </span>
                   <span
                     className={clsx(
-                      "max-w-[9rem] truncate rounded-full px-2 py-0.5 text-[11px] font-bold",
+                      "max-w-[9rem] truncate rounded-full border px-2 py-0.5 text-[11px] font-semibold shadow-sm",
                       selectedConversation.agent
-                        ? "bg-emerald-50 text-emerald-700"
-                        : "bg-amber-50 text-amber-700"
+                        ? "border-emerald-100 bg-emerald-50/80 text-emerald-700"
+                        : "border-amber-100 bg-amber-50/80 text-amber-700"
                     )}
                     title={selectedConversation.agent?.name ?? "Sem responsavel"}
                   >
                     {selectedConversation.agent?.name ?? "Sem responsavel"}
                   </span>
-                  <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-bold text-rose-700">
+                  <span className="rounded-full border border-rose-100 bg-rose-50/80 px-2 py-0.5 text-[11px] font-semibold text-rose-700 shadow-sm">
                     {temperatureLabels[
                       selectedConversation.contact.temperature as keyof typeof temperatureLabels
                     ] ?? selectedConversation.contact.temperature}
                   </span>
                   {selectedConversation.contact.origin && (
                     <span
-                      className="max-w-[7.5rem] truncate rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-brand"
+                      className="max-w-[7.5rem] truncate rounded-full border border-blue-100 bg-blue-50/80 px-2 py-0.5 text-[11px] font-semibold text-brand shadow-sm"
                       title={selectedConversation.contact.origin}
                     >
                       {selectedConversation.contact.origin}
@@ -6676,13 +6676,13 @@ function Atendimento({
                   )}
                   {selectedConversation.contact.stage && (
                     <span
-                      className="max-w-[7.5rem] truncate rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-bold text-violet-700"
+                      className="max-w-[7.5rem] truncate rounded-full border border-violet-100 bg-violet-50/80 px-2 py-0.5 text-[11px] font-semibold text-violet-700 shadow-sm"
                       title={selectedConversation.contact.stage}
                     >
                       {selectedConversation.contact.stage}
                     </span>
                   )}
-                  <span className="rounded-full bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+                  <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-500 shadow-sm">
                     Ultima:{" "}
                     {formatRelativeDate(
                       selectedConversation.lastMessageAt ??
