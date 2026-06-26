@@ -6607,33 +6607,34 @@ function Atendimento({
       />
 
       <section className="flex min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-line/80 bg-white shadow-soft">
-        <div className="flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-3 border-b border-line/70 px-4 py-1.5 md:px-5">
-          <div className="flex min-w-0 flex-1 items-center gap-2">
+        <div className="flex min-h-16 shrink-0 flex-col gap-2 border-b border-line/70 px-4 py-2 md:px-5">
+          <div className="flex min-w-0 items-center gap-2">
             <div className="relative grid h-10 w-10 place-items-center rounded-full bg-slate-50 text-sm font-black text-slate-700 shadow-sm ring-1 ring-slate-200">
               {formatContactNameForUi(selectedConversation?.contact.name)
                 .slice(0, 1)
                 .toUpperCase() ?? "C"}
               <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-emerald-500 ring-1 ring-emerald-100" />
             </div>
-            <div className="min-w-0">
-              <div className="flex min-w-0 items-center gap-2">
-                <h3 className="truncate text-base font-black leading-5 text-slate-950">
-                  {selectedConversation
-                    ? formatContactNameForUi(selectedConversation.contact.name)
-                    : "Selecione uma conversa"}
-                </h3>
-                {selectedConversation && (
-                  <button
-                    className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-line bg-white text-slate-500 hover:border-blue-200 hover:bg-blue-50 hover:text-brand"
-                    onClick={openContactEdit}
-                    title="Editar contato"
-                    type="button"
-                  >
-                    <Edit3 className="h-3.5 w-3.5" />
-                  </button>
-                )}
-              </div>
-              <p className="mt-0.5 truncate text-[13px] font-medium text-slate-500">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <h3 className="truncate text-base font-black leading-5 text-slate-950">
+                {selectedConversation
+                  ? formatContactNameForUi(selectedConversation.contact.name)
+                  : "Selecione uma conversa"}
+              </h3>
+              {selectedConversation && (
+                <button
+                  className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-line bg-white text-slate-500 hover:border-blue-200 hover:bg-blue-50 hover:text-brand"
+                  onClick={openContactEdit}
+                  title="Editar contato"
+                  type="button"
+                >
+                  <Edit3 className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="flex max-w-full flex-wrap items-center gap-1.5 overflow-hidden">
+            <p className="min-w-0 max-w-full truncate text-[13px] font-medium text-slate-500">
                 {selectedConversation
                   ? [
                       selectedConversation.contact.phone,
@@ -6646,7 +6647,7 @@ function Atendimento({
                   : "Inbox interno"}
               </p>
               {selectedConversation && (
-                <div className="mt-1 flex max-w-full flex-wrap items-center gap-1.5 overflow-hidden">
+                <div className="flex max-w-full flex-wrap items-center gap-1.5 overflow-hidden">
                   <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600 shadow-sm">
                     {conversationStatusLabels[selectedConversation.status] ?? selectedConversation.status}
                   </span>
@@ -6671,10 +6672,9 @@ function Atendimento({
                   </span>
                 </div>
               )}
-            </div>
           </div>
           {selectedConversation && (
-            <div className="flex flex-wrap items-center justify-end gap-1.5 rounded-2xl border border-line/60 bg-white/70 p-1">
+            <div className="flex flex-wrap items-center gap-1.5 rounded-2xl border border-line/60 bg-white/70 p-1">
               {followUpSuccess && (
                 <span className="inline-flex h-9 items-center rounded-full bg-emerald-50 px-3 text-xs font-bold text-emerald-700 ring-1 ring-emerald-100">
                   {followUpSuccess}
