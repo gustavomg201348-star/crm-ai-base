@@ -6784,7 +6784,7 @@ function Atendimento({
         </div>
 
         {selectedConversation && selectedConversation.tags.length > 0 && (
-          <div className="flex flex-wrap gap-2 border-b border-line/70 px-5 py-3">
+          <div className="flex flex-wrap items-center gap-1.5 border-b border-line/60 bg-slate-50/30 px-5 py-2">
             {selectedConversation.tags.map((tag) => (
               <TagBadge
                 key={tag.id}
