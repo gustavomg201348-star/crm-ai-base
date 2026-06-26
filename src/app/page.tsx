@@ -6695,7 +6695,7 @@ function Atendimento({
             </div>
           </div>
           {selectedConversation && (
-            <div className="flex flex-wrap items-center justify-end gap-2 rounded-2xl border border-line/70 bg-slate-50/80 p-1.5">
+            <div className="flex flex-wrap items-center justify-end gap-1.5 rounded-2xl border border-line/60 bg-white/70 p-1.5">
               {followUpSuccess && (
                 <span className="inline-flex h-9 items-center rounded-full bg-emerald-50 px-3 text-xs font-bold text-emerald-700 ring-1 ring-emerald-100">
                   {followUpSuccess}
@@ -6703,7 +6703,7 @@ function Atendimento({
               )}
               <button
                 type="button"
-                className="inline-flex h-9 items-center gap-2 rounded-full border border-line bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                className="inline-flex h-9 items-center gap-2 rounded-full border border-line bg-white px-3 text-sm font-semibold text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800"
                 onClick={openScheduledReturns}
               >
                 <Clock3 className="h-4 w-4" />
@@ -6711,7 +6711,7 @@ function Atendimento({
               </button>
               <button
                 type="button"
-                className="inline-flex h-9 items-center gap-2 rounded-full border border-amber-100 bg-amber-50 px-3 text-sm font-bold text-amber-700 hover:bg-amber-100"
+                className="inline-flex h-9 items-center gap-2 rounded-full border border-line bg-white px-3 text-sm font-semibold text-slate-600 hover:border-amber-200 hover:bg-amber-50 hover:text-amber-700"
                 onClick={openFollowUp}
               >
                 <CalendarClock className="h-4 w-4" />
@@ -6733,7 +6733,7 @@ function Atendimento({
               {isAdmin && selectedConversation.agent && (
                 <button
                   type="button"
-                  className="hidden h-9 rounded-full border border-line bg-white px-3 text-sm font-semibold text-slate-600 hover:bg-slate-50 lg:inline-flex"
+                  className="hidden h-9 rounded-full border border-line bg-white px-3 text-sm font-semibold text-slate-500 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 lg:inline-flex"
                   onClick={() => setUnassignOpen(true)}
                 >
                   Devolver
@@ -6742,7 +6742,7 @@ function Atendimento({
               {isAdmin && (
                 <button
                   type="button"
-                  className="inline-flex h-9 items-center gap-2 rounded-full border border-line bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                  className="inline-flex h-9 items-center gap-2 rounded-full border border-line bg-white px-3 text-sm font-semibold text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800"
                   onClick={() => setTransferOpen(true)}
                 >
                   <ArrowRight className="h-4 w-4" />
@@ -6751,7 +6751,7 @@ function Atendimento({
               )}
               <button
                 type="button"
-                className="hidden h-9 items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 text-sm font-bold text-primary hover:bg-blue-100 lg:inline-flex"
+                className="hidden h-9 items-center gap-2 rounded-full border border-line bg-white px-3 text-sm font-semibold text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-primary lg:inline-flex"
                 onClick={() => onOpenCltSimulation(selectedConversation)}
               >
                 <BriefcaseBusiness className="h-4 w-4" />
