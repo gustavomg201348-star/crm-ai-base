@@ -6707,7 +6707,7 @@ function Atendimento({
                 onClick={openScheduledReturns}
               >
                 <Clock3 className="h-4 w-4" />
-                Retornos
+                Retorno
               </button>
               <button
                 type="button"
@@ -6715,7 +6715,7 @@ function Atendimento({
                 onClick={openFollowUp}
               >
                 <CalendarClock className="h-4 w-4" />
-                Agendar retorno
+                Agendar
               </button>
               {!selectedConversation.agent && (
                 <button
@@ -6755,7 +6755,7 @@ function Atendimento({
                 onClick={() => onOpenCltSimulation(selectedConversation)}
               >
                 <BriefcaseBusiness className="h-4 w-4" />
-                Simular CLT
+                CLT
               </button>
               <ConversationTagSelector
                 availableTags={availableTags}
