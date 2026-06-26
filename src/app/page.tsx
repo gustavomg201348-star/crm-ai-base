@@ -5607,35 +5607,45 @@ function Dashboard({
   };
   const cards = [
     {
-      label: "Conversas abertas",
-      value: data.metrics.openConversations.toString(),
-      hint: `${data.metrics.staleConversations} aguardando ha mais de 4h`,
-      trend: "+12%",
-      icon: MessageCircle,
-      tone: "blue"
-    },
-    {
-      label: "Leads ativos",
-      value: data.metrics.activeContacts.toString(),
-      hint: `${data.metrics.todayContacts ?? 0} novo(s) hoje`,
-      trend: "+8%",
-      icon: UserRound,
-      tone: "slate"
-    },
-    {
-      label: "Propostas",
-      value: data.metrics.proposals.toString(),
-      hint: formatCurrency(data.metrics.totalProposalAmount),
-      trend: "+4%",
-      icon: CircleDollarSign,
+      label: "Receita paga",
+      value: formatCurrency(data.metrics.paidAmount),
+      hint: `${data.metrics.paidProposals} proposta(s) paga(s) no filtro atual`,
+      icon: Banknote,
       tone: "emerald"
+    },
+    {
+      label: "Propostas em aberto",
+      value: formatCurrency(data.metrics.totalProposalAmount),
+      hint: `${data.metrics.proposals} proposta(s) ativa(s) no periodo`,
+      icon: CircleDollarSign,
+      tone: "blue"
     },
     {
       label: "Conversao",
       value: `${data.metrics.conversionRate}%`,
-      hint: `${data.metrics.paidProposals} proposta(s) paga(s)`,
-      trend: "estavel",
+      hint: "Propostas pagas sobre a base ativa",
       icon: Activity,
+      tone: "violet"
+    },
+    {
+      label: "Leads novos",
+      value: data.metrics.newContacts.toString(),
+      hint: `${data.metrics.todayContacts ?? 0} novo(s) hoje`,
+      icon: UserRound,
+      tone: "slate"
+    },
+    {
+      label: "SLA critico",
+      value: data.metrics.staleConversations.toString(),
+      hint: "Conversas aguardando ha mais de 4h",
+      icon: AlertTriangle,
+      tone: "rose"
+    },
+    {
+      label: "Comissao prevista",
+      value: formatCurrency(data.metrics.commissionForecast),
+      hint: "Comissao potencial nas propostas ativas",
+      icon: BriefcaseBusiness,
       tone: "violet"
     }
   ];
@@ -5649,10 +5659,10 @@ function Dashboard({
             Visao de gestao
           </div>
           <h2 className="mt-3 text-2xl font-bold tracking-tight text-slate-950">
-            Dashboard operacional
+            Dashboard executivo
           </h2>
           <p className="mt-1 text-sm text-slate-500">
-            Indicadores principais, prioridades e funil comercial em tempo real.
+            Saude comercial, receita, conversao e gargalos do periodo.
           </p>
         </div>
         <div className="grid gap-2 sm:grid-cols-3">
@@ -5699,9 +5709,9 @@ function Dashboard({
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {cards.map((card) => (
-          <MetricCard key={card.label} {...card} />
+          <MetricCard key={card.label} {...card} showTrend={false} variant="executive" />
         ))}
       </div>
 
@@ -5909,44 +5919,79 @@ function MetricCard({
   hint,
   trend,
   icon: Icon,
-  tone
+  tone,
+  showTrend = true,
+  variant = "default"
 }: {
   label: string;
   value: string;
   hint: string;
-  trend: string;
+  trend?: string;
   icon: typeof MessageCircle;
   tone: string;
+  showTrend?: boolean;
+  variant?: "default" | "executive";
 }) {
   const toneClass =
     tone === "emerald"
       ? "bg-emerald-50 text-emerald-600 ring-emerald-100"
       : tone === "violet"
         ? "bg-violet-50 text-violet-600 ring-violet-100"
+        : tone === "rose"
+          ? "bg-rose-50 text-rose-600 ring-rose-100"
         : tone === "slate"
           ? "bg-slate-100 text-slate-600 ring-slate-200"
           : "bg-blue-50 text-brand ring-blue-100";
+  const executive = variant === "executive";
 
   return (
-    <div className="group rounded-[1.35rem] border border-line/80 bg-white p-5 shadow-soft hover:-translate-y-0.5 hover:shadow-lift">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-medium text-slate-500">{label}</p>
-          <strong className="mt-3 block text-3xl font-bold tracking-tight text-slate-950">
+    <div
+      className={clsx(
+        "group rounded-[1.35rem] border border-line/80 bg-white p-5 shadow-soft",
+        !executive && "hover:-translate-y-0.5 hover:shadow-lift"
+      )}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p
+            className={clsx(
+              executive
+                ? "text-sm font-semibold uppercase tracking-wide text-slate-500"
+                : "text-sm font-medium text-slate-500"
+            )}
+          >
+            {label}
+          </p>
+          <strong
+            className={clsx(
+              "mt-3 block truncate tracking-tight text-slate-950",
+              executive ? "text-3xl font-black" : "text-3xl font-bold"
+            )}
+          >
             {value}
           </strong>
         </div>
-        <div className={clsx("grid h-10 w-10 place-items-center rounded-2xl ring-1", toneClass)}>
-          <Icon className="h-4 w-4" />
+        <div
+          className={clsx(
+            "grid shrink-0 place-items-center rounded-2xl ring-1",
+            executive ? "h-11 w-11" : "h-10 w-10",
+            toneClass
+          )}
+        >
+          <Icon className={clsx(executive ? "h-5 w-5" : "h-4 w-4")} />
         </div>
       </div>
-      <div className="mt-4 flex items-center justify-between gap-2">
-        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">
-          <TrendingUp className="h-3.5 w-3.5" />
-          {trend}
-        </span>
-        <span className="truncate text-xs text-slate-500">{hint}</span>
-      </div>
+      {showTrend && trend ? (
+        <div className="mt-4 flex items-center justify-between gap-2">
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">
+            <TrendingUp className="h-3.5 w-3.5" />
+            {trend}
+          </span>
+          <span className="truncate text-xs text-slate-500">{hint}</span>
+        </div>
+      ) : (
+        <p className="mt-4 text-sm leading-5 text-slate-500">{hint}</p>
+      )}
     </div>
   );
 }
