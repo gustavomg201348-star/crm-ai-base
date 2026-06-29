@@ -6009,7 +6009,7 @@ function PriorityItem({
     .toUpperCase();
 
   return (
-    <button className="grid w-full gap-3 py-4 text-left hover:bg-slate-50/70 md:grid-cols-[auto_1fr_auto]">
+    <div className="grid w-full gap-3 py-4 text-left md:grid-cols-[auto_1fr]">
       <div className="grid h-10 w-10 place-items-center rounded-full bg-slate-900 text-xs font-bold text-white">
         {initials || "LD"}
       </div>
@@ -6033,11 +6033,7 @@ function PriorityItem({
         <p className="mt-1 line-clamp-1 text-sm text-slate-600">{item.detail}</p>
         <p className="mt-2 text-xs text-slate-400">{item.meta}</p>
       </div>
-      <div className="flex items-center gap-2 self-center text-sm font-semibold text-brand">
-        Abrir
-        <ArrowRight className="h-4 w-4" />
-      </div>
-    </button>
+    </div>
   );
 }
 
