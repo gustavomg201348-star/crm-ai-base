@@ -5715,7 +5715,58 @@ function Dashboard({
         ))}
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.75fr)]">
+      <div className="grid gap-6 xl:grid-cols-2">
+        <PipelineCard
+          title="Funil de leads"
+          subtitle={`${data.metrics.hotContacts} quente(s)`}
+          empty="Sem leads no filtro atual."
+          loading={loading}
+        >
+          {data.funnel.map((item) => (
+            <div key={item.id} className="group">
+              <div className="mb-2 flex items-center justify-between text-sm">
+                <span className="font-medium text-slate-700">{item.label}</span>
+                <strong className="text-slate-950">{item.count}</strong>
+              </div>
+              <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="h-2.5 rounded-full transition-all duration-500 group-hover:brightness-95"
+                  style={{
+                    width: `${Math.max(6, (item.count / maxFunnel) * 100)}%`,
+                    backgroundColor: item.color
+                  }}
+                />
+              </div>
+            </div>
+          ))}
+        </PipelineCard>
+
+        <PipelineCard
+          title="Status Multicred"
+          subtitle={formatCurrency(data.metrics.commissionForecast)}
+          empty="Sem propostas no filtro atual."
+          loading={loading}
+        >
+          {data.proposalStatus.map((item) => (
+            <div key={item.status} className="group">
+              <div className="mb-2 flex items-center justify-between text-sm">
+                <span className="font-medium text-slate-700">
+                  {proposalStatusLabels[item.status] ?? item.status}
+                </span>
+                <strong className="text-slate-950">{item.count}</strong>
+              </div>
+              <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="h-2.5 rounded-full bg-brand transition-all duration-500 group-hover:bg-blue-700"
+                  style={{ width: `${Math.max(6, (item.count / maxStatus) * 100)}%` }}
+                />
+              </div>
+            </div>
+          ))}
+        </PipelineCard>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.85fr)]">
         <div className="rounded-[1.35rem] border border-line/80 bg-white p-5 shadow-soft">
           <div className="mb-4 flex items-center justify-between">
             <div>
@@ -5858,55 +5909,6 @@ function Dashboard({
               )}
             </div>
           </section>
-
-          <PipelineCard
-            title="Funil de leads"
-            subtitle={`${data.metrics.hotContacts} quente(s)`}
-            empty="Sem leads no filtro atual."
-            loading={loading}
-          >
-            {data.funnel.map((item) => (
-              <div key={item.id} className="group">
-                <div className="mb-2 flex items-center justify-between text-sm">
-                  <span className="font-medium text-slate-700">{item.label}</span>
-                  <strong className="text-slate-950">{item.count}</strong>
-                </div>
-                <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
-                  <div
-                    className="h-2.5 rounded-full transition-all duration-500 group-hover:brightness-95"
-                    style={{
-                      width: `${Math.max(6, (item.count / maxFunnel) * 100)}%`,
-                      backgroundColor: item.color
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
-          </PipelineCard>
-
-          <PipelineCard
-            title="Status Multicred"
-            subtitle={formatCurrency(data.metrics.commissionForecast)}
-            empty="Sem propostas no filtro atual."
-            loading={loading}
-          >
-            {data.proposalStatus.map((item) => (
-              <div key={item.status} className="group">
-                <div className="mb-2 flex items-center justify-between text-sm">
-                  <span className="font-medium text-slate-700">
-                    {proposalStatusLabels[item.status] ?? item.status}
-                  </span>
-                  <strong className="text-slate-950">{item.count}</strong>
-                </div>
-                <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
-                  <div
-                    className="h-2.5 rounded-full bg-brand transition-all duration-500 group-hover:bg-blue-700"
-                    style={{ width: `${Math.max(6, (item.count / maxStatus) * 100)}%` }}
-                  />
-                </div>
-              </div>
-            ))}
-          </PipelineCard>
         </div>
       </div>
     </div>
