@@ -36,7 +36,6 @@ import {
   Menu,
   MessageCircle,
   Mic,
-  MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
@@ -5873,7 +5872,6 @@ function Dashboard({
                 <h3 className="text-lg font-bold text-slate-950">Minhas tarefas</h3>
                 <p className="text-sm text-slate-500">{data.tasks.length} pendente(s)</p>
               </div>
-              <MoreHorizontal className="h-5 w-5 text-slate-400" />
             </div>
             <div className="mt-5 space-y-3">
               {data.tasks.map((task) => {
