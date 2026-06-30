@@ -8781,10 +8781,12 @@ function Contatos({
   return (
     <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
       <section className="rounded border border-line bg-white shadow-soft">
-        <div className="flex flex-col gap-3 border-b border-line p-5 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h3 className="text-lg font-bold">Contatos</h3>
-            <p className="text-sm text-slate-500">Leads, clientes e historico comercial.</p>
+        <div className="flex flex-col gap-4 border-b border-line/80 p-6 md:flex-row md:items-center md:justify-between">
+          <div className="max-w-2xl">
+            <h3 className="text-2xl font-bold tracking-tight text-slate-950">Contatos</h3>
+            <p className="mt-1 text-sm leading-6 text-slate-500">
+              Gerencie leads, clientes e historico comercial em uma visao unificada.
+            </p>
           </div>
           <div className="flex gap-2">
             <button
