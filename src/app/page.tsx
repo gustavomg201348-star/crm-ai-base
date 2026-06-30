@@ -9187,13 +9187,17 @@ function Contatos({
             </tbody>
           </table>
           {!loading && contacts.length === 0 && (
-            <div className="p-8 text-center text-sm text-slate-500">
-              Nenhum contato encontrado.
+            <div className="m-5 rounded-2xl border border-dashed border-line bg-slate-50/70 p-8 text-center">
+              <p className="text-sm font-semibold text-slate-700">Nenhum contato encontrado</p>
+              <p className="mt-1 text-sm text-slate-500">
+                Ajuste a busca ou os filtros para localizar contatos na base.
+              </p>
             </div>
           )}
           {loading && (
-            <div className="p-8 text-center text-sm text-slate-500">
-              Carregando contatos...
+            <div className="m-5 flex items-center justify-center gap-3 rounded-2xl border border-line bg-slate-50/70 p-8 text-sm font-medium text-slate-500">
+              <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-brand" />
+              Carregando contatos da base comercial...
             </div>
           )}
         </div>
@@ -9408,10 +9412,12 @@ function ContactDrawer({
   if (!contact) {
     return (
       <aside className="rounded border border-line bg-white p-5 shadow-soft">
-        <h3 className="font-bold">Ficha do cliente</h3>
-        <p className="mt-2 text-sm text-slate-500">
-          Selecione um contato para ver historico, dados comerciais e proximas acoes.
-        </p>
+        <div className="rounded-2xl border border-dashed border-line bg-slate-50/70 p-5">
+          <h3 className="font-bold text-slate-950">Ficha do cliente</h3>
+          <p className="mt-2 text-sm leading-6 text-slate-500">
+            Selecione um contato na lista para visualizar historico, dados comerciais e proximas acoes.
+          </p>
+        </div>
       </aside>
     );
   }
