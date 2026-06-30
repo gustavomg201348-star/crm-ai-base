@@ -8967,11 +8967,11 @@ function Contatos({
           </form>
         )}
 
-        <div className="grid gap-3 border-b border-line p-5 lg:grid-cols-[1.4fr_150px_150px_150px_150px_130px_120px]">
-          <div className="flex items-center gap-2 rounded border border-line px-3 py-2">
-            <Search className="h-4 w-4 text-slate-400" />
+        <div className="grid gap-3 border-b border-line/80 bg-slate-50/50 p-5 [&_select]:rounded-full [&_select]:border-line/80 [&_select]:bg-white [&_select]:text-sm [&_select]:text-slate-600 [&_select]:shadow-sm [&_select]:transition [&_select]:hover:border-blue-100 [&_select]:hover:bg-white [&_select]:focus:border-blue-200 [&_select]:focus:shadow-soft lg:grid-cols-[1.4fr_150px_150px_150px_150px_130px_120px]">
+          <div className="flex h-11 items-center gap-2 rounded-full border border-line/80 bg-white px-4 shadow-sm transition focus-within:border-blue-200 focus-within:shadow-soft">
+            <Search className="h-4 w-4 text-brand" />
             <input
-              className="w-full outline-none"
+              className="w-full bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400"
               placeholder="Buscar por nome, telefone, CPF ou email..."
               value={filters.search}
               onChange={(event) =>
@@ -9004,7 +9004,7 @@ function Contatos({
             onChange={(value) => onFiltersChange({ ...filters, tagId: value })}
           />
           <select
-            className="h-10 rounded border border-line px-3 outline-none"
+            className="h-10 rounded-full border border-line/80 bg-white px-3 text-sm text-slate-600 shadow-sm transition outline-none hover:border-blue-100 hover:bg-white focus:border-blue-200 focus:shadow-soft"
             value={filters.temperature}
             onChange={(event) =>
               onFiltersChange({ ...filters, temperature: event.target.value })
@@ -9016,7 +9016,7 @@ function Contatos({
             <option value="COLD">Frio</option>
           </select>
           <select
-            className="h-10 rounded border border-line px-3 outline-none"
+            className="h-10 rounded-full border border-line/80 bg-white px-3 text-sm text-slate-600 shadow-sm transition outline-none hover:border-blue-100 hover:bg-white focus:border-blue-200 focus:shadow-soft"
             value={filters.status}
             onChange={(event) =>
               onFiltersChange({ ...filters, status: event.target.value })
