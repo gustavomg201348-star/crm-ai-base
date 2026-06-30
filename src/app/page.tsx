@@ -8790,21 +8790,21 @@ function Contatos({
           </div>
           <div className="flex gap-2">
             <button
-              className="flex h-10 items-center gap-2 rounded border border-line px-3 text-sm"
+              className="flex h-10 items-center gap-2 rounded-full border border-line/80 bg-white px-4 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-blue-100 hover:bg-blue-50/60 hover:text-brand"
               onClick={() => void handleExportContacts()}
             >
               <Download className="h-4 w-4" />
               Exportar
             </button>
             <button
-              className="flex h-10 items-center gap-2 rounded border border-line px-3 text-sm"
+              className="flex h-10 items-center gap-2 rounded-full border border-line/80 bg-white px-4 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-blue-100 hover:bg-blue-50/60 hover:text-brand"
               onClick={() => setShowImport((current) => !current)}
             >
               <Upload className="h-4 w-4" />
               Importar
             </button>
             <button
-              className="flex h-10 items-center gap-2 rounded bg-brand px-3 text-sm font-semibold text-white"
+              className="flex h-10 items-center gap-2 rounded-full bg-brand px-4 text-sm font-semibold text-white shadow-soft transition hover:bg-blue-700"
               onClick={() => setShowForm((current) => !current)}
             >
               <Plus className="h-4 w-4" />
