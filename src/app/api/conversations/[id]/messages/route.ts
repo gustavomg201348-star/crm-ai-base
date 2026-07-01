@@ -1,9 +1,14 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { createActivity } from "@/lib/activities";
+import {
+  getConversationIntegration,
+  saveOutboundMessage
+} from "@/lib/conversation-message.service";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
-import { canAccessConversation, isAgent } from "@/lib/permissions";
+import { readMetaMessageId, sendMetaTextMessage } from "@/lib/meta-whatsapp";
+import { canAccessConversation } from "@/lib/permissions";
 
 type RouteContext = {
   params: { id: string };
@@ -46,15 +51,38 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Conversa atribuida a outro atendente." }, { status: 403 });
     }
 
+    const direction = body?.direction ?? "outbound";
+
+    if (direction === "outbound") {
+      const { conversation: integrationConversation, channel } =
+        await getConversationIntegration({
+          conversationId: conversation.id,
+          companyId: session.companyId
+        });
+      const sent = await sendMetaTextMessage({
+        phoneNumberId: channel.phoneNumberId!,
+        accessToken: channel.accessToken!,
+        to: integrationConversation.contact.phone.replace(/\D/g, ""),
+        body: messageBody
+      });
+      const updated = await saveOutboundMessage({
+        conversationId: conversation.id,
+        userId: session.id,
+        body: messageBody,
+        providerMessageId: readMetaMessageId(sent)
+      });
+
+      return NextResponse.json({ conversation: updated });
+    }
+
     const updated = await prisma.$transaction(async (tx) => {
-      const direction = body?.direction ?? "outbound";
       const now = new Date();
 
       await tx.message.create({
         data: {
           conversationId: conversation.id,
           direction,
-          senderType: direction === "inbound" ? "customer" : "agent",
+          senderType: "customer",
           body: messageBody,
           type: "text",
           status: "sent",
@@ -65,27 +93,20 @@ export async function POST(request: NextRequest, context: RouteContext) {
       await createActivity(tx, {
         contactId: conversation.contactId,
         userId: session.id,
-        type: direction === "outbound" ? "MESSAGE_SENT" : "MESSAGE_RECEIVED",
-        title: direction === "outbound" ? "Mensagem enviada" : "Mensagem recebida",
+        type: "MESSAGE_RECEIVED",
+        title: "Mensagem recebida",
         detail: messageBody
       });
 
       return tx.conversation.update({
         where: { id: conversation.id },
         data: {
-          ...(direction === "outbound" && isAgent(session) && !conversation.agentId
-            ? { agent: { connect: { id: session.id } } }
-            : {}),
-          status:
-            direction === "outbound" && conversation.status === "PENDING"
-              ? "OPEN"
-              : conversation.status,
-          unreadCount: direction === "inbound" ? { increment: 1 } : 0,
-          lastReadAt: direction === "outbound" ? now : conversation.lastReadAt,
+          status: conversation.status,
+          unreadCount: { increment: 1 },
+          lastReadAt: conversation.lastReadAt,
           lastMessageAt: now,
           lastMessagePreview: messageBody,
-          lastInboundMessageAt:
-            direction === "inbound" ? now : conversation.lastInboundMessageAt,
+          lastInboundMessageAt: now,
           updatedAt: now,
           contact: {
             update: {
@@ -98,9 +119,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
     });
 
     return NextResponse.json({ conversation: mapConversation(updated) });
-  } catch {
+  } catch (error) {
     return NextResponse.json(
-      { error: "Nao foi possivel enviar mensagem." },
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Nao foi possivel enviar mensagem."
+      },
       { status: 500 }
     );
   }

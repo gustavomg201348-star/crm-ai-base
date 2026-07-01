@@ -3152,8 +3152,12 @@ export default function Home() {
           });
 
     if (!response.ok) {
-      setAppError("Nao foi possivel enviar mensagem.");
-      void refreshConversation(conversationId);
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setAppError(data?.error ?? "Nao foi possivel enviar mensagem.");
+      mergeConversation(conversation, "send-message-rollback");
+      await refreshConversation(conversationId);
       return;
     }
 

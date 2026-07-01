@@ -2,10 +2,15 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { createActivity } from "@/lib/activities";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
-import { findContactByNormalizedPhone, logContactNameMutationAttempt } from "@/lib/contacts";
+import {
+  findContactByNormalizedPhone,
+  logContactNameMutationAttempt,
+  normalizeContactPhone
+} from "@/lib/contacts";
 import { prisma } from "@/lib/db";
 import { saveFailedOutboundMessage } from "@/lib/message-delivery";
 import { readMetaMessageId, sendMetaTextMessage } from "@/lib/meta-whatsapp";
+import { canAccessConversation } from "@/lib/permissions";
 
 type RouteContext = {
   params: { id: string };
@@ -28,8 +33,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
       | { conversationId?: string; to?: string; body?: string }
       | null;
     const message = body?.body?.trim();
-    failedConversationId = body?.conversationId;
-    failedMessageBody = message;
 
     if (!message || !body?.to) {
       return NextResponse.json(
@@ -60,16 +63,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       );
     }
 
-    const sent = await sendMetaTextMessage({
-      phoneNumberId: channel.phoneNumberId,
-      accessToken: channel.accessToken,
-      to: body.to.replace(/\D/g, ""),
-      body: message
-    });
-    const providerMessageId = readMetaMessageId(sent);
-    metaAcceptedMessage = true;
-
-    const normalizedPhone = body.to.replace(/\D/g, "");
+    const normalizedPhone = normalizeContactPhone(body.to);
     let conversation = body.conversationId
       ? await prisma.conversation.findFirst({
           where: {
@@ -79,6 +73,48 @@ export async function POST(request: NextRequest, context: RouteContext) {
           include: { contact: true }
         })
       : null;
+
+    if (body.conversationId) {
+      if (!conversation) {
+        return NextResponse.json({ error: "Conversa nao encontrada." }, { status: 404 });
+      }
+
+      if (!canAccessConversation({ session, agentId: conversation.agentId })) {
+        return NextResponse.json(
+          { error: "Conversa atribuida a outro atendente." },
+          { status: 403 }
+        );
+      }
+
+      if (conversation.channel !== `whatsapp:${channel.id}`) {
+        return NextResponse.json(
+          { error: "A conversa nao pertence ao canal WhatsApp informado." },
+          { status: 409 }
+        );
+      }
+
+      const conversationPhone = normalizeContactPhone(conversation.contact.phone);
+      if (!conversationPhone || conversationPhone !== normalizedPhone) {
+        return NextResponse.json(
+          { error: "O telefone informado nao corresponde ao contato da conversa." },
+          { status: 400 }
+        );
+      }
+
+      failedConversationId = conversation.id;
+      failedMessageBody = message;
+    }
+
+    const sent = await sendMetaTextMessage({
+      phoneNumberId: channel.phoneNumberId,
+      accessToken: channel.accessToken,
+      to: conversation
+        ? normalizeContactPhone(conversation.contact.phone)
+        : normalizedPhone,
+      body: message
+    });
+    const providerMessageId = readMetaMessageId(sent);
+    metaAcceptedMessage = true;
 
     if (!conversation) {
       const [origin, stage] = await Promise.all([
@@ -173,7 +209,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return tx.conversation.update({
         where: { id: conversation.id },
         data: {
-          channel: `whatsapp:${channel.id}`,
           status: conversation.status === "PENDING" ? "OPEN" : conversation.status,
           unreadCount: 0,
           lastReadAt: sentAt,
