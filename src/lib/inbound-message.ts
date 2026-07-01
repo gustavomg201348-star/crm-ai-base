@@ -40,6 +40,7 @@ export async function processInboundMessage({
 }) {
   const normalizedPhone = normalizeContactPhone(phone);
   const messageBody = body.trim();
+  const channelKey = channelId ? `whatsapp:${channelId}` : null;
 
   if (!normalizedPhone || !messageBody) {
     throw new Error("Mensagem invalida.");
@@ -72,6 +73,12 @@ export async function processInboundMessage({
         }
       })
     : null;
+  const referencedPhoneMatched = referencedMessage
+    ? phonesMatch(referencedMessage.conversation.contact.phone, normalizedPhone)
+    : false;
+  const referencedChannelMatched = referencedMessage
+    ? !channelKey || referencedMessage.conversation.channel === channelKey
+    : false;
 
   const [origin, stage] = await Promise.all([
     prisma.origin.findFirst({
@@ -84,7 +91,7 @@ export async function processInboundMessage({
   ]);
 
   let contact =
-    referencedMessage && phonesMatch(referencedMessage.conversation.contact.phone, normalizedPhone)
+    referencedMessage && referencedPhoneMatched
       ? referencedMessage.conversation.contact
       : await findContactByNormalizedPhone(prisma, {
           companyId,
@@ -99,9 +106,7 @@ export async function processInboundMessage({
     conversationId: referencedMessage?.conversationId ?? null,
     referencedProviderMessageId: contextProviderMessageId ?? null,
     referencedMessageFound: Boolean(referencedMessage),
-    referencedPhoneMatched: referencedMessage
-      ? phonesMatch(referencedMessage.conversation.contact.phone, normalizedPhone)
-      : null,
+    referencedPhoneMatched,
     oldName: contact?.name ?? null,
     incomingWhatsappName: name?.trim() || null,
     cpfBefore: contact?.cpf ?? null,
@@ -173,11 +178,12 @@ export async function processInboundMessage({
   }
 
   let conversation =
-    referencedMessage && phonesMatch(referencedMessage.conversation.contact.phone, normalizedPhone)
+    referencedMessage && referencedPhoneMatched && referencedChannelMatched
       ? referencedMessage.conversation
       : await prisma.conversation.findFirst({
           where: {
             contactId: contact.id,
+            ...(channelKey ? { channel: channelKey } : {}),
             status: { not: "RESOLVED" }
           },
           orderBy: [
