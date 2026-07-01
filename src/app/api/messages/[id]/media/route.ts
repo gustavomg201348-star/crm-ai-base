@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { canAccessConversation } from "@/lib/permissions";
 
 type RouteContext = {
   params: { id: string };
@@ -64,6 +65,13 @@ export async function GET(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Mensagem nao encontrada." }, { status: 404 });
     }
 
+    if (!canAccessConversation({ session, agentId: message.conversation.agentId })) {
+      return NextResponse.json(
+        { error: "Conversa atribuida a outro atendente." },
+        { status: 403 }
+      );
+    }
+
     if (!message.mediaId) {
       return NextResponse.json({ error: "Mensagem sem midia vinculada." }, { status: 404 });
     }
@@ -74,19 +82,33 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
     const channel = channelId
       ? await prisma.channel.findFirst({
-          where: { id: channelId, companyId: session.companyId, type: "whatsapp" }
+          where: {
+            id: channelId,
+            companyId: session.companyId,
+            type: "whatsapp",
+            provider: "meta"
+          }
         })
-      : await prisma.channel.findFirst({
+      : await prisma.channel.findMany({
           where: {
             companyId: session.companyId,
             type: "whatsapp",
             provider: "meta",
             status: { in: ["ACTIVE", "CONNECTED"] }
           },
-          orderBy: { updatedAt: "desc" }
+          take: 2
         });
 
-    if (!channel?.accessToken) {
+    if (!channelId && Array.isArray(channel) && channel.length > 1) {
+      return NextResponse.json(
+        { error: "A conversa nao possui canal WhatsApp definido." },
+        { status: 409 }
+      );
+    }
+
+    const resolvedChannel = Array.isArray(channel) ? channel[0] : channel;
+
+    if (!resolvedChannel?.accessToken) {
       return NextResponse.json(
         { error: "Canal WhatsApp sem token para recuperar midia." },
         { status: 400 }
@@ -95,12 +117,12 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
     const media = await getMetaMediaUrl({
       mediaId: message.mediaId,
-      accessToken: channel.accessToken
+      accessToken: resolvedChannel.accessToken
     });
 
     const mediaResponse = await fetch(media.url, {
       headers: {
-        Authorization: `Bearer ${channel.accessToken}`
+        Authorization: `Bearer ${resolvedChannel.accessToken}`
       },
       cache: "no-store"
     });
