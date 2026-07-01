@@ -37,20 +37,34 @@ export async function getConversationIntegration({
 
   const channel = channelId
     ? await prisma.channel.findFirst({
-        where: { id: channelId, companyId, type: "whatsapp" }
+        where: { id: channelId, companyId, type: "whatsapp", provider: "meta" }
       })
-    : await prisma.channel.findFirst({
-        where: { companyId, type: "whatsapp", provider: "meta", status: "ACTIVE" },
-        orderBy: { updatedAt: "desc" }
+    : await prisma.channel.findMany({
+        where: {
+          companyId,
+          type: "whatsapp",
+          provider: "meta",
+          status: { in: ["ACTIVE", "CONNECTED"] }
+        },
+        take: 2
       });
 
+  if (!channelId && Array.isArray(channel) && channel.length > 1) {
+    throw new Error(
+      "Esta conversa nao possui canal WhatsApp definido. Defina o canal antes de enviar."
+    );
+  }
+
+  const resolvedChannel = Array.isArray(channel) ? channel[0] : channel;
+
   if (!channel) throw new Error("Integração WhatsApp nao encontrada para esta conversa.");
-  if (channel.provider !== "meta") throw new Error("A conversa nao esta vinculada a um canal Meta.");
-  if (!channel.phoneNumberId || !channel.accessToken) {
+  if (!resolvedChannel) throw new Error("Integracao WhatsApp nao encontrada para esta conversa.");
+  if (resolvedChannel.provider !== "meta") throw new Error("A conversa nao esta vinculada a um canal Meta.");
+  if (!resolvedChannel.phoneNumberId || !resolvedChannel.accessToken) {
     throw new Error("Canal Meta sem Phone Number ID ou token.");
   }
 
-  return { conversation, channel };
+  return { conversation, channel: resolvedChannel };
 }
 
 export async function saveOutboundMessage({
