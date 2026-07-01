@@ -1602,7 +1602,8 @@ export default function Home() {
     contactId: "",
     name: "",
     phone: "",
-    cpf: ""
+    cpf: "",
+    channelId: ""
   });
   const [desktopPermission, setDesktopPermission] = useState<
     NotificationPermission | "unsupported"
@@ -1743,6 +1744,17 @@ export default function Home() {
   const pageTitle = useMemo(() => {
     return navItems.find((item) => item.id === active)?.label ?? "Dashboard";
   }, [active]);
+
+  const eligibleNewConversationChannels = useMemo(
+    () =>
+      channels.filter(
+        (channel) =>
+          channel.type === "whatsapp" &&
+          channel.provider === "meta" &&
+          (channel.status === "ACTIVE" || channel.status === "CONNECTED")
+      ),
+    [channels]
+  );
 
   const visibleNavItems = useMemo(() => {
     if (userIsAdmin(session)) {
@@ -2384,16 +2396,44 @@ export default function Home() {
     const selectedContact = contacts.find(
       (contact) => contact.id === newConversationForm.contactId
     );
-    const payload = selectedContact
+    const selectedEligibleChannel = eligibleNewConversationChannels.find(
+      (channel) => channel.id === newConversationForm.channelId
+    );
+    const resolvedChannelId =
+      selectedEligibleChannel?.id ||
+      (eligibleNewConversationChannels.length === 1
+        ? eligibleNewConversationChannels[0].id
+        : "");
+
+    if (userIsAdmin(session) && eligibleNewConversationChannels.length === 0) {
+      setNewConversationError("Nenhum canal Meta ativo disponivel para iniciar conversa.");
+      return;
+    }
+
+    if (userIsAdmin(session) && eligibleNewConversationChannels.length > 1 && !resolvedChannelId) {
+      setNewConversationError("Selecione um canal WhatsApp para iniciar conversa.");
+      return;
+    }
+
+    const payload: {
+      contactId?: string;
+      name?: string;
+      phone?: string;
+      cpf: string;
+      channelId?: string;
+      status: "OPEN";
+    } = selectedContact
       ? {
           contactId: selectedContact.id,
           cpf: newConversationForm.cpf.trim(),
+          ...(resolvedChannelId ? { channelId: resolvedChannelId } : {}),
           status: "OPEN"
         }
       : {
           name: newConversationForm.name.trim(),
           phone: newConversationForm.phone.trim(),
           cpf: newConversationForm.cpf.trim(),
+          ...(resolvedChannelId ? { channelId: resolvedChannelId } : {}),
           status: "OPEN"
         };
 
@@ -2431,7 +2471,7 @@ export default function Home() {
     mergeConversation(data.conversation, "new-conversation");
     setSelectedConversation(data.conversation);
     setNewConversationOpen(false);
-    setNewConversationForm({ search: "", contactId: "", name: "", phone: "", cpf: "" });
+    setNewConversationForm({ search: "", contactId: "", name: "", phone: "", cpf: "", channelId: "" });
     setNewConversationSaving(false);
     void loadContacts(contactFilters);
     void markConversationRead(data.conversation.id);
@@ -4489,6 +4529,8 @@ export default function Home() {
       {newConversationOpen && (
         <NewConversationModal
           contacts={contacts}
+          channels={eligibleNewConversationChannels}
+          channelSelectionKnown={userIsAdmin(session)}
           form={newConversationForm}
           saving={newConversationSaving}
           error={newConversationError}
@@ -4505,6 +4547,8 @@ export default function Home() {
 
 function NewConversationModal({
   contacts,
+  channels,
+  channelSelectionKnown,
   form,
   saving,
   error,
@@ -4513,7 +4557,9 @@ function NewConversationModal({
   onSubmit
 }: {
   contacts: ContactRow[];
-  form: { search: string; contactId: string; name: string; phone: string; cpf: string };
+  channels: ChannelRow[];
+  channelSelectionKnown: boolean;
+  form: { search: string; contactId: string; name: string; phone: string; cpf: string; channelId: string };
   saving: boolean;
   error: string;
   onClose: () => void;
@@ -4523,6 +4569,7 @@ function NewConversationModal({
     name: string;
     phone: string;
     cpf: string;
+    channelId: string;
   }) => void;
   onSubmit: () => void;
 }) {
@@ -4538,6 +4585,14 @@ function NewConversationModal({
     .slice(0, 6);
 
   const selectedContact = contacts.find((contact) => contact.id === form.contactId);
+  const singleChannel = channels.length === 1 ? channels[0] : null;
+  const selectedChannelId = channels.some((channel) => channel.id === form.channelId)
+    ? form.channelId
+    : "";
+  const submitDisabled =
+    saving ||
+    (channelSelectionKnown &&
+      (channels.length === 0 || (channels.length > 1 && !selectedChannelId)));
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/30 px-4 backdrop-blur-sm">
@@ -4567,6 +4622,42 @@ function NewConversationModal({
           {error && (
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
               {error}
+            </div>
+          )}
+
+          {channelSelectionKnown && (
+            <div>
+              <label className="text-sm font-semibold text-slate-800">
+                Canal WhatsApp
+              </label>
+              {channels.length === 0 && (
+                <div className="mt-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  Nenhum canal Meta ativo disponivel para iniciar conversa.
+                </div>
+              )}
+              {singleChannel && (
+                <div className="mt-2 rounded-2xl border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+                  {singleChannel.name}
+                  {singleChannel.displayPhone ? ` - ${singleChannel.displayPhone}` : ""}
+                </div>
+              )}
+              {channels.length > 1 && (
+                <select
+                  className="mt-2 h-11 w-full rounded-2xl border border-line bg-white px-3 text-sm outline-none focus:border-blue-200"
+                  value={selectedChannelId}
+                  onChange={(event) =>
+                    onChange({ ...form, channelId: event.target.value })
+                  }
+                >
+                  <option value="">Selecione um canal</option>
+                  {channels.map((channel) => (
+                    <option key={channel.id} value={channel.id}>
+                      {channel.name}
+                      {channel.displayPhone ? ` - ${channel.displayPhone}` : ""}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
           )}
 
@@ -4683,7 +4774,7 @@ function NewConversationModal({
           </button>
           <button
             className="inline-flex h-10 items-center gap-2 rounded-full bg-brand px-4 text-sm font-semibold text-white shadow-soft disabled:cursor-not-allowed disabled:bg-slate-300"
-            disabled={saving}
+            disabled={submitDisabled}
             onClick={onSubmit}
             type="button"
           >
