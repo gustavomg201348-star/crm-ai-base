@@ -145,6 +145,7 @@ export async function POST(request: NextRequest) {
           name?: string;
           phone?: string;
           cpf?: string;
+          channelId?: string;
           status?: ConversationStatus;
           summary?: string;
         }
@@ -261,9 +262,60 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const requestedChannelId = body?.channelId?.trim();
+    const channel = requestedChannelId
+      ? await prisma.channel.findFirst({
+          where: {
+            id: requestedChannelId,
+            companyId: session.companyId,
+            type: "whatsapp",
+            provider: "meta",
+            status: { in: ["ACTIVE", "CONNECTED"] }
+          }
+        })
+      : await prisma.channel.findMany({
+          where: {
+            companyId: session.companyId,
+            type: "whatsapp",
+            provider: "meta",
+            status: { in: ["ACTIVE", "CONNECTED"] }
+          },
+          take: 2
+        });
+
+    if (requestedChannelId && !channel) {
+      return NextResponse.json(
+        { error: "Canal Meta nao encontrado ou indisponivel." },
+        { status: 404 }
+      );
+    }
+
+    if (!requestedChannelId && Array.isArray(channel) && channel.length === 0) {
+      return NextResponse.json(
+        { error: "Nenhum canal Meta elegivel encontrado para iniciar conversa." },
+        { status: 400 }
+      );
+    }
+
+    if (!requestedChannelId && Array.isArray(channel) && channel.length > 1) {
+      return NextResponse.json(
+        { error: "Selecione um canal WhatsApp para iniciar conversa." },
+        { status: 409 }
+      );
+    }
+
+    const resolvedChannel = Array.isArray(channel) ? channel[0] : channel;
+    if (!resolvedChannel) {
+      return NextResponse.json(
+        { error: "Canal Meta nao encontrado ou indisponivel." },
+        { status: 404 }
+      );
+    }
+
     const existingConversation = await prisma.conversation.findFirst({
       where: {
         contactId: contact.id,
+        channel: `whatsapp:${resolvedChannel.id}`,
         status: { not: "RESOLVED" }
       },
       include: conversationInclude,
@@ -277,17 +329,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ conversation: mapConversation(existingConversation) });
     }
 
-    const channel = await prisma.channel.findFirst({
-      where: { companyId: session.companyId, type: "whatsapp", status: "ACTIVE" },
-      orderBy: { updatedAt: "desc" }
-    });
-
     const conversation = await prisma.conversation.create({
       data: {
         contactId: contact.id,
         agentId: session.id,
         status: body?.status ?? "OPEN",
-        channel: channel ? `whatsapp:${channel.id}` : "whatsapp",
+        channel: `whatsapp:${resolvedChannel.id}`,
         summary: body?.summary?.trim() || null
       },
       include: conversationInclude
