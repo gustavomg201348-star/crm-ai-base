@@ -1,4 +1,5 @@
 import { conversationInclude, mapConversation } from "@/lib/conversations";
+import { findOpenConversationForContactChannel } from "@/lib/conversation-lifecycle.service";
 import { prisma } from "@/lib/db";
 import { maybeSendAutomaticAiReply } from "@/lib/ai-attendant.service";
 import { maybeAutoAssignConversation } from "@/lib/lead-assignment";
@@ -180,17 +181,28 @@ export async function processInboundMessage({
   let conversation =
     referencedMessage && referencedPhoneMatched && referencedChannelMatched
       ? referencedMessage.conversation
-      : await prisma.conversation.findFirst({
-          where: {
+      : channelId
+        ? await findOpenConversationForContactChannel({
+            db: prisma,
+            companyId,
             contactId: contact.id,
-            ...(channelKey ? { channel: channelKey } : {}),
-            status: { not: "RESOLVED" }
-          },
-          orderBy: [
-            { lastMessageAt: { sort: "desc", nulls: "last" } },
-            { createdAt: "desc" }
-          ]
-        });
+            channelId,
+            statuses: ["OPEN", "PENDING", "BOT", "SOLD"],
+            orderBy: [
+              { lastMessageAt: { sort: "desc", nulls: "last" } },
+              { createdAt: "desc" }
+            ]
+          })
+        : await prisma.conversation.findFirst({
+            where: {
+              contactId: contact.id,
+              status: { not: "RESOLVED" }
+            },
+            orderBy: [
+              { lastMessageAt: { sort: "desc", nulls: "last" } },
+              { createdAt: "desc" }
+            ]
+          });
 
   if (!conversation) {
     conversation = await prisma.conversation.create({
