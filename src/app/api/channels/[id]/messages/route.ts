@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
+import type { Contact, Conversation } from "@prisma/client";
 import { getSessionFromRequest } from "@/lib/auth";
 import { createActivity } from "@/lib/activities";
+import { findOpenConversationForContactChannel } from "@/lib/conversation-lifecycle.service";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import {
   findContactByNormalizedPhone,
@@ -15,6 +17,8 @@ import { canAccessConversation } from "@/lib/permissions";
 type RouteContext = {
   params: { id: string };
 };
+
+type ConversationWithContact = Conversation & { contact: Contact };
 
 export async function POST(request: NextRequest, context: RouteContext) {
   let failedConversationId: string | undefined;
@@ -64,7 +68,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
 
     const normalizedPhone = normalizeContactPhone(body.to);
-    let conversation = body.conversationId
+    let conversation: ConversationWithContact | null = body.conversationId
       ? await prisma.conversation.findFirst({
           where: {
             id: body.conversationId,
@@ -163,15 +167,16 @@ export async function POST(request: NextRequest, context: RouteContext) {
         });
       }
 
-      conversation =
-        (await prisma.conversation.findFirst({
-          where: {
-            contactId: contact.id,
-            channel: `whatsapp:${channel.id}`,
-            status: { in: ["OPEN", "PENDING", "BOT"] }
-          },
+      const existingConversation = (await findOpenConversationForContactChannel({
+          db: prisma,
+          companyId: session.companyId,
+          contactId: contact.id,
+          channelId: channel.id,
           include: { contact: true }
-        })) ??
+        })) as ConversationWithContact | null;
+
+      conversation =
+        existingConversation ??
         (await prisma.conversation.create({
           data: {
             contactId: contact.id,
