@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import type { Prisma } from "@prisma/client";
 import { getSessionFromRequest } from "@/lib/auth";
 import {
   conversationInclude,
@@ -7,6 +8,7 @@ import {
   mapConversationListItem,
   type ConversationStatus
 } from "@/lib/conversations";
+import { findOpenConversationForContactChannel } from "@/lib/conversation-lifecycle.service";
 import { prisma } from "@/lib/db";
 import { maybeAutoAssignConversation } from "@/lib/lead-assignment";
 import { conversationVisibilityWhere, isAdmin } from "@/lib/permissions";
@@ -16,6 +18,10 @@ import {
   normalizeContactCpf,
   normalizeContactPhone
 } from "@/lib/contacts";
+
+type ConversationWithInclude = Prisma.ConversationGetPayload<{
+  include: typeof conversationInclude;
+}>;
 
 export async function GET(request: NextRequest) {
   try {
@@ -312,18 +318,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const existingConversation = await prisma.conversation.findFirst({
-      where: {
-        contactId: contact.id,
-        channel: `whatsapp:${resolvedChannel.id}`,
-        status: { not: "RESOLVED" }
-      },
+    const existingConversation = (await findOpenConversationForContactChannel({
+      db: prisma,
+      companyId: session.companyId,
+      contactId: contact.id,
+      channelId: resolvedChannel.id,
+      statuses: ["OPEN", "PENDING", "BOT", "SOLD"],
       include: conversationInclude,
       orderBy: [
         { lastMessageAt: { sort: "desc", nulls: "last" } },
         { createdAt: "desc" }
       ]
-    });
+    })) as ConversationWithInclude | null;
 
     if (existingConversation) {
       return NextResponse.json({ conversation: mapConversation(existingConversation) });
