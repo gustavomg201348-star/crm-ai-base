@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { createActivity } from "@/lib/activities";
+import { findOpenConversationForContactChannel } from "@/lib/conversation-lifecycle.service";
 import { renderCampaignMessage } from "@/lib/contact-import.service";
 import { prisma } from "@/lib/db";
 import {
@@ -119,13 +120,11 @@ async function findOrCreateCampaignConversation({
   channelId: string;
   contactId: string;
 }) {
-  const existing = await db.conversation.findFirst({
-    where: {
-      contactId,
-      contact: { companyId },
-      channel: `whatsapp:${channelId}`,
-      status: { in: ["OPEN", "PENDING", "BOT"] }
-    }
+  const existing = await findOpenConversationForContactChannel({
+    db,
+    companyId,
+    contactId,
+    channelId
   });
 
   if (existing) return existing;
