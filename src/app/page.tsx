@@ -353,6 +353,11 @@ type ChannelRow = {
   updatedAt: string;
 };
 
+type AvailableChannelRow = Pick<
+  ChannelRow,
+  "id" | "name" | "type" | "provider" | "displayPhone" | "status"
+>;
+
 type ChannelStatusRow = {
   id: string;
   name: string;
@@ -1568,6 +1573,7 @@ export default function Home() {
   });
   const [myAvailability, setMyAvailability] = useState<AvailabilityStatus>("OFFLINE");
   const [channels, setChannels] = useState<ChannelRow[]>([]);
+  const [availableChannels, setAvailableChannels] = useState<AvailableChannelRow[]>([]);
   const [channelStatus, setChannelStatus] = useState<ChannelStatusData | null>(null);
   const [messageLogs, setMessageLogs] = useState<MessageLogRow[]>([]);
   const [messageLogFilters, setMessageLogFilters] = useState({
@@ -1747,13 +1753,13 @@ export default function Home() {
 
   const eligibleNewConversationChannels = useMemo(
     () =>
-      channels.filter(
+      availableChannels.filter(
         (channel) =>
           channel.type === "whatsapp" &&
           channel.provider === "meta" &&
           (channel.status === "ACTIVE" || channel.status === "CONNECTED")
       ),
-    [channels]
+    [availableChannels]
   );
 
   const visibleNavItems = useMemo(() => {
@@ -2503,6 +2509,16 @@ export default function Home() {
     }
 
     setChannelsLoading(false);
+  }
+
+  async function loadAvailableChannels() {
+    const response = await fetch("/api/channels/available");
+    if (response.ok) {
+      const data = (await response.json()) as { channels: AvailableChannelRow[] };
+      setAvailableChannels(data.channels);
+    } else {
+      setAvailableChannels([]);
+    }
   }
 
   async function loadChannelStatus() {
@@ -3797,6 +3813,7 @@ export default function Home() {
     void loadAiSettings();
     void loadReference();
     void loadAttendants();
+    void loadAvailableChannels();
     if (userIsAdmin(session)) {
       void loadChannels();
       void loadCampaigns();
@@ -4557,7 +4574,7 @@ function NewConversationModal({
   onSubmit
 }: {
   contacts: ContactRow[];
-  channels: ChannelRow[];
+  channels: AvailableChannelRow[];
   channelSelectionKnown: boolean;
   form: { search: string; contactId: string; name: string; phone: string; cpf: string; channelId: string };
   saving: boolean;
