@@ -31,3 +31,37 @@ export async function findOpenConversationForContactChannel({
     ...(orderBy ? { orderBy } : {})
   });
 }
+
+export async function findOrCreateConversationForChannel({
+  db = prisma,
+  companyId,
+  contactId,
+  channelId,
+  agentId,
+  status = "OPEN"
+}: {
+  db?: DbClient;
+  companyId: string;
+  contactId: string;
+  channelId: string;
+  agentId?: string | null;
+  status?: string;
+}) {
+  const existing = await findOpenConversationForContactChannel({
+    db,
+    companyId,
+    contactId,
+    channelId
+  });
+
+  if (existing) return existing;
+
+  return db.conversation.create({
+    data: {
+      contactId,
+      agentId,
+      status,
+      channel: `whatsapp:${channelId}`
+    }
+  });
+}
