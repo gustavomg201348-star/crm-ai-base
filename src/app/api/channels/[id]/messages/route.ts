@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import type { Contact, Conversation } from "@prisma/client";
 import { getSessionFromRequest } from "@/lib/auth";
 import { createActivity } from "@/lib/activities";
-import { findOpenConversationForContactChannel } from "@/lib/conversation-lifecycle.service";
+import { findOrCreateConversationForChannel } from "@/lib/conversation-lifecycle.service";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import {
   findContactByNormalizedPhone,
@@ -167,25 +167,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
         });
       }
 
-      const existingConversation = (await findOpenConversationForContactChannel({
-          db: prisma,
-          companyId: session.companyId,
-          contactId: contact.id,
-          channelId: channel.id,
-          include: { contact: true }
-        })) as ConversationWithContact | null;
-
-      conversation =
-        existingConversation ??
-        (await prisma.conversation.create({
-          data: {
-            contactId: contact.id,
-            agentId: session.id,
-            status: "OPEN",
-            channel: `whatsapp:${channel.id}`
-          },
-          include: { contact: true }
-        }));
+      conversation = (await findOrCreateConversationForChannel({
+        db: prisma,
+        companyId: session.companyId,
+        contactId: contact.id,
+        channelId: channel.id,
+        agentId: session.id,
+        status: "OPEN",
+        include: { contact: true }
+      })) as ConversationWithContact;
     }
 
     const updated = await prisma.$transaction(async (tx) => {

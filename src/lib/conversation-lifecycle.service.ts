@@ -38,7 +38,8 @@ export async function findOrCreateConversationForChannel({
   contactId,
   channelId,
   agentId,
-  status = "OPEN"
+  status = "OPEN",
+  include
 }: {
   db?: DbClient;
   companyId: string;
@@ -46,12 +47,14 @@ export async function findOrCreateConversationForChannel({
   channelId: string;
   agentId?: string | null;
   status?: string;
+  include?: Prisma.ConversationInclude;
 }) {
   const existing = await findOpenConversationForContactChannel({
     db,
     companyId,
     contactId,
-    channelId
+    channelId,
+    include
   });
 
   if (existing) return existing;
@@ -62,6 +65,7 @@ export async function findOrCreateConversationForChannel({
       agentId,
       status,
       channel: `whatsapp:${channelId}`
-    }
+    },
+    ...(include ? { include } : {})
   });
 }
