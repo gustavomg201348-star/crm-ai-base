@@ -94,6 +94,7 @@ type ContactRow = {
   phone: string;
   email?: string | null;
   cpf?: string | null;
+  internalNote?: string | null;
   origin: string;
   owner: string;
   stage: string;
@@ -218,6 +219,7 @@ type ConversationRow = {
     phone: string;
     email?: string | null;
     cpf?: string | null;
+    internalNote?: string | null;
     origin: string;
     stage: string;
     temperature: string;
@@ -2927,6 +2929,7 @@ export default function Home() {
       tagIds: string[];
       temperature: ContactRow["temperature"];
       lastMessage: string;
+      internalNote: string | null;
       archived: boolean;
     }>
   ) {
@@ -2953,7 +2956,7 @@ export default function Home() {
 
   async function handleUpdateConversationContact(
     id: string,
-    payload: { name: string; cpf: string }
+    payload: Partial<{ name: string; cpf: string; internalNote: string | null }>
   ) {
     const response = await fetch(`/api/contacts/${id}`, {
       method: "PATCH",
@@ -2982,7 +2985,8 @@ export default function Home() {
             contact: {
               ...conversation.contact,
               name: updated.name,
-              cpf: updated.cpf
+              cpf: updated.cpf,
+              internalNote: updated.internalNote
             }
           }
         : conversation;
@@ -6252,7 +6256,7 @@ function Atendimento({
   onRemoveTag: (conversationId: string, tagId: string) => Promise<void>;
   onUpdateContact: (
     contactId: string,
-    payload: { name: string; cpf: string }
+    payload: Partial<{ name: string; cpf: string; internalNote: string | null }>
   ) => Promise<ContactRow | null>;
   onOpenCltSimulation: (conversation: ConversationRow) => void;
 }) {
@@ -6278,6 +6282,10 @@ function Atendimento({
   const [contactEditForm, setContactEditForm] = useState({ name: "", cpf: "" });
   const [contactEditSaving, setContactEditSaving] = useState(false);
   const [contactEditError, setContactEditError] = useState("");
+  const [internalNote, setInternalNote] = useState("");
+  const [internalNoteSaving, setInternalNoteSaving] = useState(false);
+  const [internalNoteStatus, setInternalNoteStatus] = useState("");
+  const [internalNoteError, setInternalNoteError] = useState("");
   const [followUpOpen, setFollowUpOpen] = useState(false);
   const [followUpForm, setFollowUpForm] = useState({
     reason: followUpReasons[0],
@@ -6309,6 +6317,12 @@ function Atendimento({
   useEffect(() => {
     setFollowUpSuccess("");
   }, [selectedConversation?.id]);
+
+  useEffect(() => {
+    setInternalNote(selectedConversation?.contact.internalNote ?? "");
+    setInternalNoteStatus("");
+    setInternalNoteError("");
+  }, [selectedConversation?.contact.internalNote, selectedConversation?.id]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -6612,6 +6626,32 @@ function Atendimento({
       );
     } finally {
       setContactEditSaving(false);
+    }
+  }
+
+  async function submitInternalNote() {
+    if (!selectedConversation) return;
+
+    setInternalNoteSaving(true);
+    setInternalNoteStatus("");
+    setInternalNoteError("");
+
+    try {
+      const updated = await onUpdateContact(selectedConversation.contact.id, {
+        internalNote
+      });
+
+      if (updated) {
+        setInternalNoteStatus("Observacao salva.");
+      } else {
+        setInternalNoteError("Nao foi possivel salvar a observacao.");
+      }
+    } catch (error) {
+      setInternalNoteError(
+        error instanceof Error ? error.message : "Nao foi possivel salvar a observacao."
+      );
+    } finally {
+      setInternalNoteSaving(false);
     }
   }
 
@@ -7326,6 +7366,41 @@ function Atendimento({
                   }
                 />
               </dl>
+            </div>
+            <div className="rounded border border-line bg-white p-4 shadow-soft">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="font-bold">Observacao interna</h3>
+                {internalNoteStatus && (
+                  <span className="text-xs font-semibold text-emerald-600">
+                    {internalNoteStatus}
+                  </span>
+                )}
+              </div>
+              <textarea
+                className="mt-3 min-h-[104px] w-full resize-y rounded-2xl border border-line bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-brand focus:bg-white focus:ring-2 focus:ring-blue-100"
+                disabled={!selectedConversation || internalNoteSaving}
+                maxLength={2000}
+                placeholder="Anotacoes internas sobre este cliente."
+                value={internalNote}
+                onChange={(event) => {
+                  setInternalNote(event.target.value);
+                  setInternalNoteStatus("");
+                  setInternalNoteError("");
+                }}
+              />
+              {internalNoteError && (
+                <p className="mt-2 text-xs font-semibold text-rose-600">
+                  {internalNoteError}
+                </p>
+              )}
+              <button
+                type="button"
+                className="mt-3 flex h-10 w-full items-center justify-center rounded-2xl bg-brand px-3 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={!selectedConversation || internalNoteSaving}
+                onClick={() => void submitInternalNote()}
+              >
+                {internalNoteSaving ? "Salvando..." : "Salvar"}
+              </button>
             </div>
             {selectedConversation?.summary && (
               <div className="rounded border border-line bg-white p-4 shadow-soft">

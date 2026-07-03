@@ -184,6 +184,7 @@ export function mapContact(contact: ContactWithRelations) {
     phone: contact.phone,
     email: contact.email,
     cpf: contact.cpf,
+    internalNote: contact.internalNote,
     temperature: contact.temperature as LeadTemperature,
     lastMessage: contact.lastMessage,
     archivedAt: contact.archivedAt,

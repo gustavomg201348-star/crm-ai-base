@@ -24,7 +24,7 @@ async function findOwnedContact(id: string, companyId: string) {
   });
 }
 
-const agentAllowedPatchFields = new Set(["name", "cpf", "stageId"]);
+const agentAllowedPatchFields = new Set(["name", "cpf", "stageId", "internalNote"]);
 
 async function agentCanEditContact(contact: { id: string; ownerId: string | null }, session: { id: string; companyId: string }) {
   if (contact.ownerId === session.id) return true;
@@ -84,6 +84,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           phone?: string;
           email?: string | null;
           cpf?: string | null;
+          internalNote?: string | null;
           originId?: string | null;
           stageId?: string | null;
           ownerId?: string | null;
@@ -100,7 +101,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       );
 
       if (blockedFields.length) {
-        return forbidden("Atendentes podem editar apenas nome, CPF e etapa do contato.");
+        return forbidden(
+          "Atendentes podem editar apenas nome, CPF, etapa e observacao interna do contato."
+        );
       }
 
       const canEdit = await agentCanEditContact(existing, session);
@@ -228,6 +231,13 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         });
       }
 
+      if (
+        body?.internalNote !== undefined &&
+        (body.internalNote?.trim() || null) !== (existing.internalNote ?? null)
+      ) {
+        activityDetails.push("Observacao interna atualizada.");
+      }
+
       const updated = await tx.contact.update({
         where: { id: existing.id },
         data: {
@@ -235,6 +245,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           ...(normalizedPhone !== undefined ? { phone: normalizedPhone } : {}),
           ...(body?.email !== undefined ? { email: body.email?.trim() || null } : {}),
           ...(normalizedCpf !== undefined ? { cpf: normalizedCpf || null } : {}),
+          ...(body?.internalNote !== undefined
+            ? { internalNote: body.internalNote?.trim() || null }
+            : {}),
           ...(body?.originId !== undefined ? { originId: body.originId || null } : {}),
           ...(body?.stageId !== undefined ? { stageId: body.stageId || null } : {}),
           ...(body?.ownerId !== undefined ? { ownerId: owner?.id ?? null } : {}),

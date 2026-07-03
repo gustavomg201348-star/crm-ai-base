@@ -115,6 +115,7 @@ CREATE TABLE IF NOT EXISTS Contact (
   phone TEXT NOT NULL,
   email TEXT,
   cpf TEXT,
+  internalNote TEXT,
   temperature TEXT NOT NULL DEFAULT 'WARM',
   lastMessage TEXT,
   archivedAt DATETIME,
@@ -421,6 +422,10 @@ const contactColumns = db
 
 if (!contactColumns.includes("archivedAt")) {
   db.exec("ALTER TABLE Contact ADD COLUMN archivedAt DATETIME;");
+}
+
+if (!contactColumns.includes("internalNote")) {
+  db.exec("ALTER TABLE Contact ADD COLUMN internalNote TEXT;");
 }
 
 const channelColumns = db
