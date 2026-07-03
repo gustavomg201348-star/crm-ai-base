@@ -1,5 +1,6 @@
+import type { Conversation } from "@prisma/client";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
-import { findOpenConversationForContactChannel } from "@/lib/conversation-lifecycle.service";
+import { findOrCreateConversationForChannel } from "@/lib/conversation-lifecycle.service";
 import { prisma } from "@/lib/db";
 import { maybeSendAutomaticAiReply } from "@/lib/ai-attendant.service";
 import { maybeAutoAssignConversation } from "@/lib/lead-assignment";
@@ -178,31 +179,42 @@ export async function processInboundMessage({
     }
   }
 
-  let conversation =
+  let conversation: Conversation | null =
     referencedMessage && referencedPhoneMatched && referencedChannelMatched
       ? referencedMessage.conversation
-      : channelId
-        ? await findOpenConversationForContactChannel({
-            db: prisma,
-            companyId,
-            contactId: contact.id,
-            channelId,
-            statuses: ["OPEN", "PENDING", "BOT", "SOLD"],
-            orderBy: [
-              { lastMessageAt: { sort: "desc", nulls: "last" } },
-              { createdAt: "desc" }
-            ]
-          })
-        : await prisma.conversation.findFirst({
-            where: {
-              contactId: contact.id,
-              status: { not: "RESOLVED" }
-            },
-            orderBy: [
-              { lastMessageAt: { sort: "desc", nulls: "last" } },
-              { createdAt: "desc" }
-            ]
-          });
+      : null;
+  let conversationCreated = false;
+
+  if (!conversation && channelId) {
+    const result = await findOrCreateConversationForChannel({
+      db: prisma,
+      companyId,
+      contactId: contact.id,
+      channelId,
+      status: "PENDING",
+      statuses: ["OPEN", "PENDING", "BOT", "SOLD"],
+      orderBy: [
+        { lastMessageAt: { sort: "desc", nulls: "last" } },
+        { createdAt: "desc" }
+      ],
+      withCreated: true
+    });
+    conversation = result.conversation;
+    conversationCreated = result.created;
+  }
+
+  if (!conversation) {
+    conversation = await prisma.conversation.findFirst({
+      where: {
+        contactId: contact.id,
+        status: { not: "RESOLVED" }
+      },
+      orderBy: [
+        { lastMessageAt: { sort: "desc", nulls: "last" } },
+        { createdAt: "desc" }
+      ]
+    });
+  }
 
   if (!conversation) {
     conversation = await prisma.conversation.create({
@@ -212,7 +224,10 @@ export async function processInboundMessage({
         channel: channelId ? `whatsapp:${channelId}` : "whatsapp"
       }
     });
+    conversationCreated = true;
+  }
 
+  if (conversationCreated) {
     await maybeAutoAssignConversation({
       companyId,
       conversationId: conversation.id
