@@ -1,7 +1,24 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { Conversation, Prisma, PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/db";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
+type FindOrCreateConversationForChannelOptions = {
+  db?: DbClient;
+  companyId: string;
+  contactId: string;
+  channelId: string;
+  agentId?: string | null;
+  status?: string;
+  summary?: string | null;
+  statuses?: string[];
+  include?: Prisma.ConversationInclude;
+  orderBy?: Prisma.ConversationOrderByWithRelationInput[];
+  withCreated?: false;
+};
+type FindOrCreateConversationForChannelWithCreatedOptions =
+  Omit<FindOrCreateConversationForChannelOptions, "withCreated"> & {
+    withCreated: true;
+  };
 
 export async function findOpenConversationForContactChannel({
   db = prisma,
@@ -32,6 +49,12 @@ export async function findOpenConversationForContactChannel({
   });
 }
 
+export async function findOrCreateConversationForChannel(
+  options: FindOrCreateConversationForChannelWithCreatedOptions
+): Promise<{ conversation: Conversation; created: boolean }>;
+export async function findOrCreateConversationForChannel(
+  options: FindOrCreateConversationForChannelOptions
+): Promise<Conversation>;
 export async function findOrCreateConversationForChannel({
   db = prisma,
   companyId,
@@ -39,33 +62,36 @@ export async function findOrCreateConversationForChannel({
   channelId,
   agentId,
   status = "OPEN",
-  include
-}: {
-  db?: DbClient;
-  companyId: string;
-  contactId: string;
-  channelId: string;
-  agentId?: string | null;
-  status?: string;
-  include?: Prisma.ConversationInclude;
-}) {
+  summary,
+  statuses,
+  include,
+  orderBy,
+  withCreated = false
+}: FindOrCreateConversationForChannelOptions | FindOrCreateConversationForChannelWithCreatedOptions) {
   const existing = await findOpenConversationForContactChannel({
     db,
     companyId,
     contactId,
     channelId,
-    include
+    statuses,
+    include,
+    orderBy
   });
 
-  if (existing) return existing;
+  if (existing) {
+    return withCreated ? { conversation: existing, created: false } : existing;
+  }
 
-  return db.conversation.create({
+  const created = await db.conversation.create({
     data: {
       contactId,
       agentId,
       status,
-      channel: `whatsapp:${channelId}`
+      channel: `whatsapp:${channelId}`,
+      summary
     },
     ...(include ? { include } : {})
   });
+
+  return withCreated ? { conversation: created, created: true } : created;
 }

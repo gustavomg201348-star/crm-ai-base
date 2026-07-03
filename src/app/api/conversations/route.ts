@@ -8,7 +8,7 @@ import {
   mapConversationListItem,
   type ConversationStatus
 } from "@/lib/conversations";
-import { findOpenConversationForContactChannel } from "@/lib/conversation-lifecycle.service";
+import { findOrCreateConversationForChannel } from "@/lib/conversation-lifecycle.service";
 import { prisma } from "@/lib/db";
 import { maybeAutoAssignConversation } from "@/lib/lead-assignment";
 import { conversationVisibilityWhere, isAdmin } from "@/lib/permissions";
@@ -318,33 +318,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const existingConversation = (await findOpenConversationForContactChannel({
+    const { conversation, created } = (await findOrCreateConversationForChannel({
       db: prisma,
       companyId: session.companyId,
       contactId: contact.id,
       channelId: resolvedChannel.id,
+      agentId: session.id,
+      status: body?.status ?? "OPEN",
+      summary: body?.summary?.trim() || null,
       statuses: ["OPEN", "PENDING", "BOT", "SOLD"],
       include: conversationInclude,
       orderBy: [
         { lastMessageAt: { sort: "desc", nulls: "last" } },
         { createdAt: "desc" }
-      ]
-    })) as ConversationWithInclude | null;
+      ],
+      withCreated: true
+    })) as { conversation: ConversationWithInclude; created: boolean };
 
-    if (existingConversation) {
-      return NextResponse.json({ conversation: mapConversation(existingConversation) });
+    if (!created) {
+      return NextResponse.json({ conversation: mapConversation(conversation) });
     }
-
-    const conversation = await prisma.conversation.create({
-      data: {
-        contactId: contact.id,
-        agentId: session.id,
-        status: body?.status ?? "OPEN",
-        channel: `whatsapp:${resolvedChannel.id}`,
-        summary: body?.summary?.trim() || null
-      },
-      include: conversationInclude
-    });
 
     await maybeAutoAssignConversation({
       companyId: session.companyId,
