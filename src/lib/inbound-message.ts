@@ -203,7 +203,7 @@ export async function processInboundMessage({
     conversationCreated = result.created;
   }
 
-  if (!conversation) {
+  if (!conversation && !channelId) {
     conversation = await prisma.conversation.findFirst({
       where: {
         contactId: contact.id,
@@ -216,15 +216,19 @@ export async function processInboundMessage({
     });
   }
 
-  if (!conversation) {
+  if (!conversation && !channelId) {
     conversation = await prisma.conversation.create({
       data: {
         contactId: contact.id,
         status: "PENDING",
-        channel: channelId ? `whatsapp:${channelId}` : "whatsapp"
+        channel: "whatsapp"
       }
     });
     conversationCreated = true;
+  }
+
+  if (!conversation) {
+    throw new Error("Nao foi possivel resolver conversa inbound.");
   }
 
   if (conversationCreated) {
