@@ -58,6 +58,7 @@ model Channel {
   updatedAt     DateTime   @updatedAt
   company       Company    @relation(fields: [companyId], references: [id])
   campaigns     Campaign[]
+  conversations Conversation[] @relation("ConversationChannel")
 
   @@index([companyId])
 }
@@ -409,6 +410,7 @@ model Conversation {
   id            String         @id @default(cuid())
   contactId     String
   agentId       String?
+  channelId     String?
   status        String         @default("OPEN")
   channel       String         @default("whatsapp")
   summary       String?
@@ -424,12 +426,15 @@ model Conversation {
   updatedAt     DateTime       @updatedAt
   contact       Contact        @relation(fields: [contactId], references: [id])
   agent         User?          @relation(fields: [agentId], references: [id])
+  channelRef    Channel?       @relation("ConversationChannel", fields: [channelId], references: [id])
   messages      Message[]
   notifications Notification[]
   tags          ConversationTag[]
   assignmentHistory LeadAssignmentHistory[]
 
   @@index([contactId])
+  @@index([channelId])
+  @@index([contactId, channelId, status])
   @@index([agentId])
   @@index([agentId, status, updatedAt])
   @@index([lastMessageAt])
