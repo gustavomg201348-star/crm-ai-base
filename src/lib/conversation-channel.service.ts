@@ -53,6 +53,6 @@ export function buildConversationChannelWhere(channelId: string) {
   const normalized = channel.slice(WHATSAPP_CHANNEL_PREFIX.length);
 
   return {
-    OR: [{ channelId: normalized }, { channel }]
+    OR: [{ channelId: normalized }, { channelId: null, channel }]
   };
 }
