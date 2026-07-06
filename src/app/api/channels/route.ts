@@ -42,6 +42,44 @@ function mapChannel(channel: {
   };
 }
 
+async function findMetaIdentifierConflict({
+  phoneNumberId,
+  externalId
+}: {
+  phoneNumberId?: string | null;
+  externalId?: string | null;
+}) {
+  if (phoneNumberId) {
+    const channel = await prisma.channel.findFirst({
+      where: {
+        provider: "meta",
+        phoneNumberId
+      },
+      select: { id: true, name: true }
+    });
+
+    if (channel) {
+      return `Phone Number ID ja esta em uso por outro canal Meta (${channel.name}).`;
+    }
+  }
+
+  if (externalId) {
+    const channel = await prisma.channel.findFirst({
+      where: {
+        provider: "meta",
+        externalId
+      },
+      select: { id: true, name: true }
+    });
+
+    if (channel) {
+      return `External ID ja esta em uso por outro canal Meta (${channel.name}).`;
+    }
+  }
+
+  return null;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const session = getSessionFromRequest(request);
@@ -94,7 +132,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Nome obrigatorio." }, { status: 400 });
     }
 
-    if ((body.provider?.trim() || "sandbox") === "meta") {
+    const provider = body.provider?.trim() || "sandbox";
+    const phoneNumberId = body.phoneNumberId?.trim() || null;
+    const externalId = body.externalId?.trim() || phoneNumberId;
+
+    if (provider === "meta") {
+      const conflict = await findMetaIdentifierConflict({
+        phoneNumberId,
+        externalId
+      });
+
+      if (conflict) {
+        return NextResponse.json({ error: conflict }, { status: 409 });
+      }
+
       const diagnostics = await validateMetaWhatsAppCredentials({
         accessToken: body.accessToken,
         wabaId: body.wabaId,
@@ -118,9 +169,9 @@ export async function POST(request: NextRequest) {
         companyId: session.companyId,
         name: body.name.trim(),
         type: "whatsapp",
-        provider: body.provider?.trim() || "sandbox",
-        externalId: body.externalId?.trim() || body.phoneNumberId?.trim() || null,
-        phoneNumberId: body.phoneNumberId?.trim() || null,
+        provider,
+        externalId,
+        phoneNumberId,
         wabaId: body.wabaId?.trim() || null,
         displayPhone: body.displayPhone?.trim() || null,
         accessToken: body.accessToken?.trim() || null,

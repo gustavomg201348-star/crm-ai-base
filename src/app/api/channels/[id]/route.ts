@@ -41,6 +41,48 @@ function mapChannel(channel: {
   };
 }
 
+async function findMetaIdentifierConflict({
+  phoneNumberId,
+  externalId,
+  excludeChannelId
+}: {
+  phoneNumberId?: string | null;
+  externalId?: string | null;
+  excludeChannelId: string;
+}) {
+  if (phoneNumberId) {
+    const channel = await prisma.channel.findFirst({
+      where: {
+        provider: "meta",
+        phoneNumberId,
+        id: { not: excludeChannelId }
+      },
+      select: { id: true, name: true }
+    });
+
+    if (channel) {
+      return `Phone Number ID ja esta em uso por outro canal Meta (${channel.name}).`;
+    }
+  }
+
+  if (externalId) {
+    const channel = await prisma.channel.findFirst({
+      where: {
+        provider: "meta",
+        externalId,
+        id: { not: excludeChannelId }
+      },
+      select: { id: true, name: true }
+    });
+
+    if (channel) {
+      return `External ID ja esta em uso por outro canal Meta (${channel.name}).`;
+    }
+  }
+
+  return null;
+}
+
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -97,22 +139,43 @@ export async function PATCH(
     }
 
     const phoneNumberId = body?.phoneNumberId?.trim();
+    const effectiveProvider = provider !== undefined ? provider || "meta" : current.provider;
+    const effectivePhoneNumberId =
+      body?.phoneNumberId !== undefined ? phoneNumberId || null : current.phoneNumberId;
+    const effectiveExternalId =
+      body?.externalId !== undefined
+        ? body.externalId.trim() || effectivePhoneNumberId || null
+        : body?.phoneNumberId !== undefined
+          ? effectivePhoneNumberId || current.externalId
+          : current.externalId;
+
+    if (effectiveProvider === "meta") {
+      const conflict = await findMetaIdentifierConflict({
+        phoneNumberId: effectivePhoneNumberId,
+        externalId: effectiveExternalId,
+        excludeChannelId: current.id
+      });
+
+      if (conflict) {
+        return NextResponse.json({ error: conflict }, { status: 409 });
+      }
+    }
 
     const channel = await prisma.channel.update({
       where: { id },
       data: {
         ...(name !== undefined ? { name } : {}),
         ...(type !== undefined ? { type } : {}),
-        ...(provider !== undefined ? { provider: provider || "meta" } : {}),
+        ...(provider !== undefined ? { provider: effectiveProvider } : {}),
         ...(body?.displayPhone !== undefined
           ? { displayPhone: body.displayPhone.trim() || null }
           : {}),
-        ...(body?.phoneNumberId !== undefined ? { phoneNumberId: phoneNumberId || null } : {}),
+        ...(body?.phoneNumberId !== undefined ? { phoneNumberId: effectivePhoneNumberId } : {}),
         ...(body?.wabaId !== undefined ? { wabaId: body.wabaId.trim() || null } : {}),
         ...(body?.externalId !== undefined
-          ? { externalId: body.externalId.trim() || phoneNumberId || null }
+          ? { externalId: effectiveExternalId }
           : body?.phoneNumberId !== undefined
-            ? { externalId: phoneNumberId || current.externalId }
+            ? { externalId: effectiveExternalId }
             : {}),
         ...(body?.accessToken?.trim() ? { accessToken: body.accessToken.trim() } : {}),
         ...(body?.verifyToken?.trim() ? { verifyToken: body.verifyToken.trim() } : {}),
