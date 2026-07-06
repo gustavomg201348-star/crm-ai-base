@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import type { Contact, Conversation } from "@prisma/client";
 import { getSessionFromRequest } from "@/lib/auth";
 import { createActivity } from "@/lib/activities";
+import { conversationMatchesChannel } from "@/lib/conversation-channel.service";
 import { findOrCreateConversationForChannel } from "@/lib/conversation-lifecycle.service";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import {
@@ -90,7 +91,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         );
       }
 
-      if (conversation.channel !== `whatsapp:${channel.id}`) {
+      if (!conversationMatchesChannel(conversation, channel.id)) {
         return NextResponse.json(
           { error: "A conversa nao pertence ao canal WhatsApp informado." },
           { status: 409 }

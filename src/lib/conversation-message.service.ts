@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { createActivity } from "@/lib/activities";
+import { resolveConversationChannelId } from "@/lib/conversation-channel.service";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
 
@@ -31,9 +32,7 @@ export async function getConversationIntegration({
 
   if (!conversation) throw new Error("Conversa nao encontrada.");
 
-  const channelId = conversation.channel.startsWith("whatsapp:")
-    ? conversation.channel.replace("whatsapp:", "")
-    : null;
+  const channelId = resolveConversationChannelId(conversation);
 
   const channel = channelId
     ? await prisma.channel.findFirst({
