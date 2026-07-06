@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
+import { buildConversationChannelWhere } from "@/lib/conversation-channel.service";
 import { prisma } from "@/lib/db";
 import { requireCompanyAdmin } from "@/lib/permissions";
 
@@ -73,11 +74,10 @@ export async function GET(request: NextRequest) {
 
     const statuses = await Promise.all(
       channels.map(async (channel) => {
-        const channelKey = `whatsapp:${channel.id}`;
         const [lastConversation, inboundCount, outboundCount, meta] = await Promise.all([
           prisma.conversation.findFirst({
             where: {
-              channel: channelKey,
+              ...buildConversationChannelWhere(channel.id),
               contact: { companyId: session.companyId }
             },
             include: {
@@ -94,7 +94,7 @@ export async function GET(request: NextRequest) {
             where: {
               direction: "inbound",
               conversation: {
-                channel: channelKey,
+                ...buildConversationChannelWhere(channel.id),
                 contact: { companyId: session.companyId }
               }
             }
@@ -103,7 +103,7 @@ export async function GET(request: NextRequest) {
             where: {
               direction: "outbound",
               conversation: {
-                channel: channelKey,
+                ...buildConversationChannelWhere(channel.id),
                 contact: { companyId: session.companyId }
               }
             }

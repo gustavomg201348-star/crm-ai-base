@@ -1,5 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
+import {
+  buildConversationChannelWhere,
+  resolveConversationChannelId
+} from "@/lib/conversation-channel.service";
 import { prisma } from "@/lib/db";
 import { requireCompanyAdmin } from "@/lib/permissions";
 
@@ -26,7 +30,7 @@ export async function GET(request: NextRequest) {
         ...(status && status !== "ALL" ? { status } : {}),
         ...(type && type !== "ALL" ? { type } : {}),
         conversation: {
-          ...(channelId ? { channel: `whatsapp:${channelId}` } : {}),
+          ...(channelId ? buildConversationChannelWhere(channelId) : {}),
           contact: { companyId: session.companyId }
         }
       },
@@ -45,16 +49,11 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       logs: messages.map((message) => {
-        const channelRaw = message.conversation.channel;
-        const resolvedChannelId = channelRaw.startsWith("whatsapp:")
-          ? channelRaw.replace("whatsapp:", "")
-          : null;
-
         return {
           id: message.id,
           conversationId: message.conversationId,
           contact: message.conversation.contact,
-          channelId: resolvedChannelId,
+          channelId: resolveConversationChannelId(message.conversation),
           type: message.type,
           status: message.status,
           body: message.body,

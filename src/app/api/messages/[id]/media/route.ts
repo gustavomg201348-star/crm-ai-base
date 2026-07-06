@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
+import { resolveConversationChannelId } from "@/lib/conversation-channel.service";
 import { prisma } from "@/lib/db";
 import { canAccessConversation } from "@/lib/permissions";
 
@@ -76,9 +77,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Mensagem sem midia vinculada." }, { status: 404 });
     }
 
-    const channelId = message.conversation.channel.startsWith("whatsapp:")
-      ? message.conversation.channel.replace("whatsapp:", "")
-      : null;
+    const channelId = resolveConversationChannelId(message.conversation);
 
     const channel = channelId
       ? await prisma.channel.findFirst({
