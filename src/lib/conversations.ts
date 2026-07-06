@@ -24,6 +24,7 @@ export const conversationInclude = {
 export const conversationListSelect = {
   id: true,
   status: true,
+  channelId: true,
   channel: true,
   summary: true,
   aiMode: true,
@@ -115,6 +116,7 @@ export function mapConversation(conversation: ConversationWithRelations) {
   return {
     id: conversation.id,
     status: conversation.status as ConversationStatus,
+    channelId: conversation.channelId,
     channel: conversation.channel,
     summary: conversation.summary,
     aiMode: conversation.aiMode,
@@ -203,6 +205,7 @@ export function mapConversationListItem(conversation: ConversationListWithRelati
   return {
     id: conversation.id,
     status: conversation.status as ConversationStatus,
+    channelId: conversation.channelId,
     channel: conversation.channel,
     summary: conversation.summary,
     aiMode: conversation.aiMode,

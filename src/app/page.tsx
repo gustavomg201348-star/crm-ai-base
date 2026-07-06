@@ -11,6 +11,7 @@ import {
   Sparkles,
   Tags
 } from "@/lib/mock-data";
+import { resolveConversationChannelId } from "@/lib/conversation-channel.service";
 import {
   ArrowRight,
   Archive,
@@ -110,6 +111,7 @@ type ContactRow = {
   conversations: Array<{
     id: string;
     status: string;
+    channelId?: string | null;
     channel: string;
     summary?: string | null;
     updatedAt: string;
@@ -199,6 +201,7 @@ type KanbanStage = {
 type ConversationRow = {
   id: string;
   status: "OPEN" | "PENDING" | "BOT" | "SOLD" | "RESOLVED";
+  channelId?: string | null;
   channel: string;
   summary?: string | null;
   aiMode?: AiMode | null;
@@ -3191,9 +3194,7 @@ export default function Home() {
 
     mergeConversation(optimisticConversation, "send-message-optimistic");
 
-    const channelId = conversation?.channel.startsWith("whatsapp:")
-      ? conversation.channel.replace("whatsapp:", "")
-      : null;
+    const channelId = conversation ? resolveConversationChannelId(conversation) : null;
     const response =
       channelId && conversation?.contact.phone
         ? await fetch(`/api/channels/${channelId}/messages`, {

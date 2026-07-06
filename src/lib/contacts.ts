@@ -204,6 +204,7 @@ export function mapContact(contact: ContactWithRelations) {
     conversations: contact.conversations.map((conversation) => ({
       id: conversation.id,
       status: conversation.status,
+      channelId: conversation.channelId,
       channel: conversation.channel,
       summary: conversation.summary,
       updatedAt: conversation.updatedAt,
