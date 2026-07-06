@@ -1,4 +1,8 @@
 import type { Conversation, Prisma, PrismaClient } from "@prisma/client";
+import {
+  buildConversationChannelWhere,
+  formatConversationChannel
+} from "@/lib/conversation-channel.service";
 import { prisma } from "@/lib/db";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
@@ -41,7 +45,7 @@ export async function findOpenConversationForContactChannel({
     where: {
       contactId,
       contact: { companyId },
-      channel: `whatsapp:${channelId}`,
+      ...buildConversationChannelWhere(channelId),
       status: { in: statuses }
     },
     ...(include ? { include } : {}),
@@ -86,8 +90,9 @@ export async function findOrCreateConversationForChannel({
     data: {
       contactId,
       agentId,
+      channelId,
       status,
-      channel: `whatsapp:${channelId}`,
+      channel: formatConversationChannel(channelId),
       summary
     },
     ...(include ? { include } : {})
