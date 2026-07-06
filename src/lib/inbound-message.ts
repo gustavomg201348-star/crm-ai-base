@@ -1,4 +1,8 @@
 import type { Conversation } from "@prisma/client";
+import {
+  conversationMatchesChannel,
+  LEGACY_WHATSAPP_CHANNEL
+} from "@/lib/conversation-channel.service";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { findOrCreateConversationForChannel } from "@/lib/conversation-lifecycle.service";
 import { prisma } from "@/lib/db";
@@ -42,7 +46,6 @@ export async function processInboundMessage({
 }) {
   const normalizedPhone = normalizeContactPhone(phone);
   const messageBody = body.trim();
-  const channelKey = channelId ? `whatsapp:${channelId}` : null;
 
   if (!normalizedPhone || !messageBody) {
     throw new Error("Mensagem invalida.");
@@ -79,7 +82,7 @@ export async function processInboundMessage({
     ? phonesMatch(referencedMessage.conversation.contact.phone, normalizedPhone)
     : false;
   const referencedChannelMatched = referencedMessage
-    ? !channelKey || referencedMessage.conversation.channel === channelKey
+    ? !channelId || conversationMatchesChannel(referencedMessage.conversation, channelId)
     : false;
 
   const [origin, stage] = await Promise.all([
@@ -221,7 +224,7 @@ export async function processInboundMessage({
       data: {
         contactId: contact.id,
         status: "PENDING",
-        channel: "whatsapp"
+        channel: LEGACY_WHATSAPP_CHANNEL
       }
     });
     conversationCreated = true;
