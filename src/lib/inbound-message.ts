@@ -1,4 +1,4 @@
-import type { Conversation } from "@prisma/client";
+import { Prisma, type Conversation } from "@prisma/client";
 import {
   conversationMatchesChannel,
   LEGACY_WHATSAPP_CHANNEL
@@ -241,19 +241,39 @@ export async function processInboundMessage({
     });
   }
 
-  await prisma.message.create({
-    data: {
-      conversationId: conversation.id,
-      direction: "inbound",
-      senderType: "customer",
-      body: messageBody,
-      type: type ?? "text",
-      mediaId: mediaId ?? null,
-      fileName: fileName ?? null,
-      mimeType: mimeType ?? null,
-      providerMessageId: providerMessageId ?? null
+  try {
+    await prisma.message.create({
+      data: {
+        conversationId: conversation.id,
+        direction: "inbound",
+        senderType: "customer",
+        body: messageBody,
+        type: type ?? "text",
+        mediaId: mediaId ?? null,
+        fileName: fileName ?? null,
+        mimeType: mimeType ?? null,
+        providerMessageId: providerMessageId ?? null
+      }
+    });
+  } catch (error) {
+    if (providerMessageId && isProviderMessageIdUniqueViolation(error)) {
+      const existingMessage = await prisma.message.findFirst({
+        where: {
+          providerMessageId,
+          conversation: { contact: { companyId } }
+        },
+        include: {
+          conversation: { include: conversationInclude }
+        }
+      });
+
+      if (existingMessage) {
+        return mapConversation(existingMessage.conversation);
+      }
     }
-  });
+
+    throw error;
+  }
 
   const receivedAt = new Date();
   const updated = await prisma.conversation.update({
@@ -331,4 +351,22 @@ function phonesMatch(storedPhone?: string | null, incomingPhone?: string | null)
     incoming.startsWith("55") && incoming.length > 11 ? incoming.slice(2) : incoming;
 
   return storedWithoutCountryCode === incomingWithoutCountryCode;
+}
+
+function isProviderMessageIdUniqueViolation(error: unknown) {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) {
+    return false;
+  }
+
+  if (error.code !== "P2002") {
+    return false;
+  }
+
+  const target = error.meta?.target;
+
+  if (Array.isArray(target)) {
+    return target.includes("providerMessageId");
+  }
+
+  return typeof target === "string" && target.includes("providerMessageId");
 }
