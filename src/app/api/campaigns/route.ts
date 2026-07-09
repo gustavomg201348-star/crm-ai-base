@@ -11,6 +11,7 @@ import {
 } from "@/lib/campaigns";
 import { prisma } from "@/lib/db";
 import { requireCompanyAdmin } from "@/lib/permissions";
+import { digitsOnlyPhone } from "@/lib/phone-normalization.service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -183,7 +184,7 @@ export async function POST(request: NextRequest) {
         recipients: {
           create: contacts.map((contact) => ({
             contactId: contact.id,
-            phone: contact.phone.replace(/\D/g, "")
+            phone: digitsOnlyPhone(contact.phone)
           }))
         }
       }

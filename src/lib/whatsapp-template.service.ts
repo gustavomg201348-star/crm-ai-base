@@ -9,6 +9,7 @@ import {
   saveOutboundMessage
 } from "@/lib/conversation-message.service";
 import { prisma } from "@/lib/db";
+import { digitsOnlyPhone } from "@/lib/phone-normalization.service";
 
 export function extractBodyText(template: MetaTemplate) {
   return template.components?.find((component) => component.type === "BODY")?.text ?? "";
@@ -237,7 +238,7 @@ export async function sendConversationTemplate({
   const metaResponse = await sendMetaTemplateMessage({
     phoneNumberId: channel.phoneNumberId!,
     accessToken: channel.accessToken!,
-    to: conversation.contact.phone.replace(/\D/g, ""),
+    to: digitsOnlyPhone(conversation.contact.phone),
     name: templateName,
     language,
     variables: cleanVariables,

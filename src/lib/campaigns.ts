@@ -17,6 +17,7 @@ import {
   renderTemplateHistoryBody,
   resolveTemplateHeaderImageUrl
 } from "@/lib/whatsapp-template.service";
+import { digitsOnlyPhone } from "@/lib/phone-normalization.service";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -86,7 +87,7 @@ export function mapCampaign(campaign: CampaignWithRelations) {
 }
 
 function normalizePhone(phone: string) {
-  return phone.replace(/\D/g, "");
+  return digitsOnlyPhone(phone);
 }
 
 function sleep(ms: number) {

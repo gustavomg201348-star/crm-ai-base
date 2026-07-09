@@ -9,6 +9,7 @@ import {
   saveOutboundMessage
 } from "@/lib/conversation-message.service";
 import { convertWebmAudioToOgg } from "@/lib/media-conversion";
+import { digitsOnlyPhone } from "@/lib/phone-normalization.service";
 
 export const allowedMediaTypes = new Set([
   "image/jpeg",
@@ -104,7 +105,7 @@ export async function sendConversationMedia({
   const metaResponse = await sendMetaMediaMessage({
     phoneNumberId: channel.phoneNumberId!,
     accessToken: channel.accessToken!,
-    to: conversation.contact.phone.replace(/\D/g, ""),
+    to: digitsOnlyPhone(conversation.contact.phone),
     mediaId: uploaded.id,
     mediaType,
     caption,

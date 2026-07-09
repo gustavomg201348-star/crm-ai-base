@@ -9,6 +9,7 @@ import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
 import { readMetaMessageId, sendMetaTextMessage } from "@/lib/meta-whatsapp";
 import { canAccessConversation } from "@/lib/permissions";
+import { digitsOnlyPhone } from "@/lib/phone-normalization.service";
 
 type RouteContext = {
   params: { id: string };
@@ -62,7 +63,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       const sent = await sendMetaTextMessage({
         phoneNumberId: channel.phoneNumberId!,
         accessToken: channel.accessToken!,
-        to: integrationConversation.contact.phone.replace(/\D/g, ""),
+        to: digitsOnlyPhone(integrationConversation.contact.phone),
         body: messageBody
       });
       const updated = await saveOutboundMessage({
