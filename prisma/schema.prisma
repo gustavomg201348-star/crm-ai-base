@@ -148,6 +148,7 @@ model Contact {
   originId           String?
   name               String
   phone              String
+  normalizedPhone    String?
   email              String?
   cpf                String?
   internalNote       String?
@@ -173,6 +174,7 @@ model Contact {
 
   @@index([companyId])
   @@index([companyId, phone])
+  @@index([companyId, normalizedPhone])
   @@index([companyId, cpf])
   @@index([companyId, updatedAt])
   @@index([companyId, createdAt])
