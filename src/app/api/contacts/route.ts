@@ -5,6 +5,7 @@ import { createActivity } from "@/lib/activities";
 import {
   contactInclude,
   findContactByNormalizedPhone,
+  getContactNormalizedPhone,
   logContactNameMutationAttempt,
   mapContact,
   normalizeContactCpf,
@@ -94,6 +95,7 @@ export async function POST(request: NextRequest) {
 
     const name = body?.name?.trim();
     const phone = normalizeContactPhone(body?.phone);
+    const normalizedPhone = getContactNormalizedPhone(phone);
     const cpf = normalizeContactCpf(body?.cpf);
 
     if (!name || !phone) {
@@ -153,6 +155,7 @@ export async function POST(request: NextRequest) {
           ownerId: owner?.id ?? session.id,
           name,
           phone,
+          normalizedPhone,
           email: body?.email?.trim() || null,
           cpf: cpf || null,
           originId: body?.originId || null,

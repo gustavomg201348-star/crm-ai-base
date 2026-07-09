@@ -4,6 +4,7 @@ import { createActivity } from "@/lib/activities";
 import {
   contactInclude,
   findContactByNormalizedPhone,
+  getContactNormalizedPhone,
   logContactNameMutationAttempt,
   mapContact,
   normalizeContactCpf,
@@ -131,6 +132,8 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         : [];
     const normalizedPhone =
       body?.phone !== undefined ? normalizeContactPhone(body.phone) : undefined;
+    const contactNormalizedPhone =
+      normalizedPhone !== undefined ? getContactNormalizedPhone(normalizedPhone) : undefined;
     const normalizedCpf =
       body?.cpf !== undefined ? normalizeContactCpf(body.cpf) : undefined;
 
@@ -242,7 +245,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         where: { id: existing.id },
         data: {
           ...(manualName !== undefined ? { name: manualName } : {}),
-          ...(normalizedPhone !== undefined ? { phone: normalizedPhone } : {}),
+          ...(normalizedPhone !== undefined
+            ? { phone: normalizedPhone, normalizedPhone: contactNormalizedPhone }
+            : {}),
           ...(body?.email !== undefined ? { email: body.email?.trim() || null } : {}),
           ...(normalizedCpf !== undefined ? { cpf: normalizedCpf || null } : {}),
           ...(body?.internalNote !== undefined

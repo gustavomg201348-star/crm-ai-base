@@ -1,4 +1,5 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
+import { classifyPhoneNormalization } from "@/lib/phone-normalization.service";
 
 export type LeadTemperature = "HOT" | "WARM" | "COLD";
 
@@ -6,6 +7,10 @@ type ContactLookupDbClient = Prisma.TransactionClient | PrismaClient;
 
 export function normalizeContactPhone(phone?: string | null) {
   return phone?.replace(/\D/g, "") ?? "";
+}
+
+export function getContactNormalizedPhone(phone?: string | null) {
+  return classifyPhoneNormalization(phone).normalizedPhone;
 }
 
 export function normalizeContactCpf(cpf?: string | null) {
@@ -74,6 +79,26 @@ export async function findContactByNormalizedPhone(
   }
 ) {
   const normalizedPhone = normalizeContactPhone(phone);
+  const contactNormalizedPhone = getContactNormalizedPhone(phone);
+
+  if (!normalizedPhone && !contactNormalizedPhone) {
+    return null;
+  }
+
+  if (contactNormalizedPhone) {
+    const contact = await db.contact.findFirst({
+      where: {
+        companyId,
+        normalizedPhone: contactNormalizedPhone,
+        ...(archived ? {} : { archivedAt: null })
+      },
+      orderBy: { updatedAt: "desc" }
+    });
+
+    if (contact) {
+      return contact;
+    }
+  }
 
   if (!normalizedPhone) {
     return null;
