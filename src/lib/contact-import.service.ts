@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { createActivity } from "@/lib/activities";
 import { getAutomaticContactNameUpdate, logContactNameMutationAttempt } from "@/lib/contacts";
 import { prisma } from "@/lib/db";
+import { classifyPhoneNormalization, type PhoneNormalizationReason } from "@/lib/phone-normalization.service";
 import { upsertRetirementLeadForContact } from "@/lib/retirement-leads";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
@@ -144,16 +145,14 @@ async function parseSpreadsheet(file: File) {
   throw new Error("Arquivo deve ser CSV ou Excel .xlsx.");
 }
 
-function normalizePhone(rawPhone: string) {
-  const digits = onlyDigits(rawPhone);
-  if (!digits) return "";
-  if (digits.startsWith("55")) return digits;
-  if (digits.length === 10 || digits.length === 11) return `55${digits}`;
-  return digits;
-}
-
-function validatePhone(whatsapp: string) {
-  return /^55\d{10,11}$/.test(whatsapp);
+function getPhoneImportError(reason: PhoneNormalizationReason) {
+  if (reason === "EMPTY") return "Telefone obrigatorio.";
+  if (reason === "TOO_SHORT") return "Telefone deve conter DDD e numero valido para WhatsApp.";
+  if (reason === "TOO_LONG") return "Telefone possui digitos demais para um numero WhatsApp valido.";
+  if (reason === "INTERNATIONAL_UNSUPPORTED") {
+    return "Telefone internacional ainda nao e suportado na importacao.";
+  }
+  return "Telefone deve conter DDD e numero valido para WhatsApp.";
 }
 
 function parseImportDate(value: string) {
@@ -246,7 +245,8 @@ export async function buildContactImportPreview({
     const name = String(line[indexes.name] ?? "").trim();
     const cpf = onlyDigits(String(line[indexes.cpf] ?? ""));
     const phone = onlyDigits(String(line[indexes.phone] ?? ""));
-    const whatsapp = normalizePhone(phone);
+    const phoneClassification = classifyPhoneNormalization(phone);
+    const whatsapp = phoneClassification.normalizedPhone ?? "";
     const grantDate =
       indexes.grantDate >= 0 ? parseImportDate(String(line[indexes.grantDate] ?? "")) : "";
     const benefitType =
@@ -257,8 +257,8 @@ export async function buildContactImportPreview({
 
     if (!name) errors.push("Nome obrigatorio.");
     if (!/^\d{11}$/.test(cpf)) errors.push("CPF deve conter 11 digitos.");
-    if (!validatePhone(whatsapp)) {
-      errors.push("Telefone deve conter DDD e numero valido para WhatsApp.");
+    if (!phoneClassification.valid) {
+      errors.push(getPhoneImportError(phoneClassification.reason));
     }
     if (grantDate && Number.isNaN(new Date(grantDate).getTime())) {
       errors.push("Data Concessao invalida.");
