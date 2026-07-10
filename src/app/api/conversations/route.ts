@@ -14,6 +14,7 @@ import { maybeAutoAssignConversation } from "@/lib/lead-assignment";
 import { conversationVisibilityWhere, isAdmin } from "@/lib/permissions";
 import {
   findContactByNormalizedPhone,
+  getContactNormalizedPhone,
   logContactNameMutationAttempt,
   normalizeContactCpf,
   normalizeContactPhone
@@ -159,6 +160,7 @@ export async function POST(request: NextRequest) {
 
     const phone = body?.phone?.trim();
     const normalizedPhone = normalizeContactPhone(phone);
+    const contactNormalizedPhone = getContactNormalizedPhone(normalizedPhone);
     const normalizedCpf = normalizeContactCpf(body?.cpf);
     const name = body?.name?.trim();
 
@@ -241,6 +243,7 @@ export async function POST(request: NextRequest) {
           ownerId: session.id,
           name: name || normalizedPhone,
           phone: normalizedPhone,
+          normalizedPhone: contactNormalizedPhone,
           cpf: normalizedCpf || null,
           originId: origin?.id ?? null,
           stageId: stage?.id ?? null,
