@@ -3,7 +3,11 @@ import { createActivity } from "@/lib/activities";
 import { getSessionFromRequest } from "@/lib/auth";
 import { createCltLog } from "@/lib/clt-logs";
 import { onlyDigits, type CltCustomerData, type CltSimulationOffer } from "@/lib/clt-integration";
-import { getAutomaticContactNameUpdate, logContactNameMutationAttempt } from "@/lib/contacts";
+import {
+  getAutomaticContactNameUpdate,
+  getContactNormalizedPhone,
+  logContactNameMutationAttempt
+} from "@/lib/contacts";
 import { prisma } from "@/lib/db";
 import { mapProposal, proposalInclude } from "@/lib/proposals";
 
@@ -33,6 +37,7 @@ export async function POST(request: NextRequest) {
     const customer = body.customer;
     const offer = body.offer;
     const phone = customer.phone?.trim();
+    const normalizedPhone = getContactNormalizedPhone(phone);
     const cpf = onlyDigits(customer.cpf);
 
     if (!phone || !cpf) {
@@ -89,6 +94,7 @@ export async function POST(request: NextRequest) {
             data: {
               ...(nameUpdate ? { name: nameUpdate.nextName } : {}),
               phone,
+              normalizedPhone,
               cpf,
               stageId: proposalStage?.id ?? existing.stageId,
               lastMessage: `Simulacao CLT ${offer.bankName}: R$ ${offer.releasedAmount.toFixed(2)} liberado.`
@@ -100,6 +106,7 @@ export async function POST(request: NextRequest) {
               ownerId: session.id,
               name: customer.name,
               phone,
+              normalizedPhone,
               cpf,
               stageId: proposalStage?.id ?? null,
               temperature: "HOT",
