@@ -15,6 +15,7 @@ import {
   formatContactDisplayName,
   findContactByNormalizedPhone,
   getAutomaticContactNameUpdate,
+  getContactNormalizedPhone,
   logContactNameMutationAttempt,
   normalizeContactPhone
 } from "@/lib/contacts";
@@ -45,6 +46,7 @@ export async function processInboundMessage({
   contextProviderMessageId?: string | null;
 }) {
   const normalizedPhone = normalizeContactPhone(phone);
+  const contactNormalizedPhone = getContactNormalizedPhone(normalizedPhone);
   const messageBody = body.trim();
 
   if (!normalizedPhone || !messageBody) {
@@ -136,6 +138,7 @@ export async function processInboundMessage({
         companyId,
         name: name?.trim().replace(/\s+/g, " ") || normalizedPhone,
         phone: normalizedPhone,
+        normalizedPhone: contactNormalizedPhone,
         originId: origin?.id ?? null,
         stageId: stage?.id ?? null,
         temperature: "WARM",
