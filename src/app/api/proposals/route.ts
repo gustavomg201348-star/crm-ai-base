@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { getSessionFromRequest } from "@/lib/auth";
 import { createActivity } from "@/lib/activities";
+import { getContactNormalizedPhone } from "@/lib/contacts";
 import { prisma } from "@/lib/db";
 import { requireCompanyAdmin } from "@/lib/permissions";
 import {
@@ -404,6 +405,7 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
+      const contactNormalizedPhone = getContactNormalizedPhone(phone);
 
       contact =
         (await prisma.contact.findFirst({
@@ -417,6 +419,7 @@ export async function POST(request: NextRequest) {
             companyId: session.companyId,
             name: multicredClient.name,
             phone,
+            normalizedPhone: contactNormalizedPhone,
             cpf: multicredClient.cpf || null,
             email: multicredClient.email ?? null
           }
