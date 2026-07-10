@@ -1,6 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
-import { contactInclude, mapContact, type LeadTemperature } from "@/lib/contacts";
+import {
+  contactInclude,
+  getContactNormalizedPhone,
+  mapContact,
+  type LeadTemperature
+} from "@/lib/contacts";
 import { prisma } from "@/lib/db";
 import { requireAdmin } from "@/lib/permissions";
 
@@ -161,6 +166,7 @@ export async function POST(request: NextRequest) {
       const cpf = readField(row, "cpf");
       const normalizedPhone = onlyDigits(phone);
       const normalizedCpf = onlyDigits(cpf);
+      const contactNormalizedPhone = getContactNormalizedPhone(phone);
 
       if (!name || !phone) {
         errors.push({ row: rowNumber, reason: "Nome e telefone sao obrigatorios." });
@@ -205,6 +211,7 @@ export async function POST(request: NextRequest) {
           ownerId: (ownerName && userMap.get(normalize(ownerName))) || body?.defaults?.ownerId || session.id,
           name,
           phone,
+          normalizedPhone: contactNormalizedPhone,
           email: email || null,
           cpf: cpf || null,
           originId: (originName && originMap.get(normalize(originName))) || body?.defaults?.originId || null,
