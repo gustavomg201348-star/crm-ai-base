@@ -373,7 +373,8 @@ export async function confirmContactImport({
           data: {
             ...(nameUpdate ? { name: nameUpdate.nextName } : {}),
             cpf: row.cpf,
-            phone: row.whatsapp
+            phone: row.whatsapp,
+            normalizedPhone: row.whatsapp
           },
           select: { id: true }
         });
@@ -416,6 +417,7 @@ export async function confirmContactImport({
             name: row.name,
             cpf: row.cpf,
             phone: row.whatsapp,
+            normalizedPhone: row.whatsapp,
             temperature: "WARM"
           },
           select: { id: true }
