@@ -188,22 +188,49 @@ async function findExistingContacts(companyId: string, rows: ImportPreviewRow[])
 
   if (!cpfs.length && !phones.length) return new Map<string, string>();
 
-  const contacts = await prisma.contact.findMany({
-    where: {
-      companyId,
-      OR: [
-        ...(cpfs.length ? [{ cpf: { in: cpfs } }] : []),
-        ...(phones.length ? [{ phone: { in: phones } }] : [])
-      ]
-    },
-    select: { id: true, cpf: true, phone: true }
+  const map = new Map<string, string>();
+
+  const contactsByCpf = cpfs.length
+    ? await prisma.contact.findMany({
+        where: {
+          companyId,
+          cpf: { in: cpfs }
+        },
+        select: { id: true, cpf: true }
+      })
+    : [];
+  contactsByCpf.forEach((contact) => {
+    if (contact.cpf) map.set(`cpf:${contact.cpf}`, contact.id);
   });
 
-  const map = new Map<string, string>();
-  contacts.forEach((contact) => {
-    if (contact.cpf) map.set(`cpf:${contact.cpf}`, contact.id);
-    if (contact.phone) map.set(`phone:${contact.phone}`, contact.id);
-  });
+  if (phones.length) {
+    const contactsByNormalizedPhone = await prisma.contact.findMany({
+      where: {
+        companyId,
+        normalizedPhone: { in: phones }
+      },
+      select: { id: true, normalizedPhone: true }
+    });
+    contactsByNormalizedPhone.forEach((contact) => {
+      if (contact.normalizedPhone) {
+        map.set(`phone:${contact.normalizedPhone}`, contact.id);
+      }
+    });
+
+    const contactsByLegacyPhone = await prisma.contact.findMany({
+      where: {
+        companyId,
+        phone: { in: phones }
+      },
+      select: { id: true, phone: true }
+    });
+    contactsByLegacyPhone.forEach((contact) => {
+      if (contact.phone && !map.has(`phone:${contact.phone}`)) {
+        map.set(`phone:${contact.phone}`, contact.id);
+      }
+    });
+  }
+
   return map;
 }
 
@@ -316,10 +343,34 @@ async function findContactForImport(
   companyId: string,
   row: ImportPreviewRow
 ) {
+  if (row.cpf) {
+    const contactByCpf = await db.contact.findFirst({
+      where: {
+        companyId,
+        cpf: row.cpf
+      },
+      select: { id: true, name: true, phone: true }
+    });
+
+    if (contactByCpf) return contactByCpf;
+  }
+
+  if (!row.whatsapp) return null;
+
+  const contactByNormalizedPhone = await db.contact.findFirst({
+    where: {
+      companyId,
+      normalizedPhone: row.whatsapp
+    },
+    select: { id: true, name: true, phone: true }
+  });
+
+  if (contactByNormalizedPhone) return contactByNormalizedPhone;
+
   return db.contact.findFirst({
     where: {
       companyId,
-      OR: [{ cpf: row.cpf }, { phone: row.whatsapp }]
+      phone: row.whatsapp
     },
     select: { id: true, name: true, phone: true }
   });
