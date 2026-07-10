@@ -7,6 +7,7 @@ import { findOrCreateConversationForChannel } from "@/lib/conversation-lifecycle
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import {
   findContactByNormalizedPhone,
+  getContactNormalizedPhone,
   logContactNameMutationAttempt,
   normalizeContactPhone
 } from "@/lib/contacts";
@@ -69,6 +70,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
 
     const normalizedPhone = normalizeContactPhone(body.to);
+    const contactNormalizedPhone = getContactNormalizedPhone(normalizedPhone);
     let conversation: ConversationWithContact | null = body.conversationId
       ? await prisma.conversation.findFirst({
           where: {
@@ -148,6 +150,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
             stageId: stage?.id,
             name: normalizedPhone,
             phone: normalizedPhone,
+            normalizedPhone: contactNormalizedPhone,
             temperature: "WARM",
             lastMessage: message
           }
