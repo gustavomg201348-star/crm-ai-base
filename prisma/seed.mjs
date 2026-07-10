@@ -9,6 +9,17 @@ function hashPassword(password) {
   return `pbkdf2$${salt}$${hash}`;
 }
 
+function normalizeSeedPhone(phone) {
+  const digits = String(phone ?? "").replace(/\D/g, "");
+
+  if (digits.length === 10 || digits.length === 11) return `55${digits}`;
+  if ((digits.length === 12 || digits.length === 13) && digits.startsWith("55")) {
+    return digits;
+  }
+
+  return null;
+}
+
 async function main() {
   const company = await prisma.company.upsert({
     where: { id: "seed-company" },
@@ -159,6 +170,7 @@ async function main() {
       (await prisma.contact.create({
         data: {
           ...contact,
+          normalizedPhone: normalizeSeedPhone(contact.phone),
           companyId: company.id,
           ownerId: admin.id
         }
