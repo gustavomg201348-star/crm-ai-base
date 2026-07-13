@@ -407,13 +407,26 @@ export async function POST(request: NextRequest) {
       }
       const contactNormalizedPhone = getContactNormalizedPhone(phone);
 
+      if (multicredClient.cpf) {
+        contact = await prisma.contact.findFirst({
+          where: { companyId: session.companyId, cpf: multicredClient.cpf }
+        });
+      }
+
+      if (!contact && contactNormalizedPhone) {
+        contact = await prisma.contact.findFirst({
+          where: { companyId: session.companyId, normalizedPhone: contactNormalizedPhone }
+        });
+      }
+
+      if (!contact) {
+        contact = await prisma.contact.findFirst({
+          where: { companyId: session.companyId, phone }
+        });
+      }
+
       contact =
-        (await prisma.contact.findFirst({
-          where: {
-            companyId: session.companyId,
-            OR: [{ phone }, ...(multicredClient.cpf ? [{ cpf: multicredClient.cpf }] : [])]
-          }
-        })) ??
+        contact ??
         (await prisma.contact.create({
           data: {
             companyId: session.companyId,
