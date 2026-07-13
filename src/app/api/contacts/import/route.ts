@@ -138,7 +138,7 @@ export async function POST(request: NextRequest) {
       prisma.tag.findMany({ where: { companyId: session.companyId } }),
       prisma.contact.findMany({
         where: { companyId: session.companyId },
-        select: { cpf: true, phone: true }
+        select: { cpf: true, phone: true, normalizedPhone: true }
       })
     ]);
 
@@ -149,7 +149,11 @@ export async function POST(request: NextRequest) {
       ...users.map((user) => [normalize(user.email), user.id] as const)
     ]);
     const tagMap = new Map(tags.map((tag) => [normalize(tag.name), tag]));
-    const knownPhones = new Set(existingContacts.map((contact) => onlyDigits(contact.phone)).filter(Boolean));
+    const knownPhones = new Set(
+      existingContacts
+        .map((contact) => contact.normalizedPhone || onlyDigits(contact.phone))
+        .filter(Boolean)
+    );
     const knownCpfs = new Set(existingContacts.map((contact) => onlyDigits(contact.cpf)).filter(Boolean));
     const seenPhones = new Set<string>();
     const seenCpfs = new Set<string>();
@@ -167,6 +171,7 @@ export async function POST(request: NextRequest) {
       const normalizedPhone = onlyDigits(phone);
       const normalizedCpf = onlyDigits(cpf);
       const contactNormalizedPhone = getContactNormalizedPhone(phone);
+      const contactLookupPhone = contactNormalizedPhone ?? normalizedPhone;
 
       if (!name || !phone) {
         errors.push({ row: rowNumber, reason: "Nome e telefone sao obrigatorios." });
@@ -174,7 +179,8 @@ export async function POST(request: NextRequest) {
       }
 
       if (
-        (normalizedPhone && (knownPhones.has(normalizedPhone) || seenPhones.has(normalizedPhone))) ||
+        ((contactLookupPhone && knownPhones.has(contactLookupPhone)) ||
+          (normalizedPhone && seenPhones.has(normalizedPhone))) ||
         (normalizedCpf && (knownCpfs.has(normalizedCpf) || seenCpfs.has(normalizedCpf)))
       ) {
         ignored.push({ row: rowNumber, reason: "Contato duplicado por telefone ou CPF." });
