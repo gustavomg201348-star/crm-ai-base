@@ -53,17 +53,29 @@ export async function POST(request: NextRequest) {
     });
 
     const proposal = await prisma.$transaction(async (tx) => {
-      const existing =
-        body.contactId
-          ? await tx.contact.findFirst({
-              where: { id: body.contactId, companyId: session.companyId }
-            })
-          : await tx.contact.findFirst({
-              where: {
-                companyId: session.companyId,
-                OR: [{ cpf }, { phone }]
-              }
-            });
+      let existing = body.contactId
+        ? await tx.contact.findFirst({
+            where: { id: body.contactId, companyId: session.companyId }
+          })
+        : null;
+
+      if (!body.contactId) {
+        existing = await tx.contact.findFirst({
+          where: { companyId: session.companyId, cpf }
+        });
+
+        if (!existing && normalizedPhone) {
+          existing = await tx.contact.findFirst({
+            where: { companyId: session.companyId, normalizedPhone }
+          });
+        }
+
+        if (!existing) {
+          existing = await tx.contact.findFirst({
+            where: { companyId: session.companyId, phone }
+          });
+        }
+      }
 
       const nameUpdate = existing
         ? getAutomaticContactNameUpdate({
