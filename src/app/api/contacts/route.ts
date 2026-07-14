@@ -13,6 +13,10 @@ import {
   type LeadTemperature
 } from "@/lib/contacts";
 import { prisma } from "@/lib/db";
+import {
+  isPrismaUniqueViolation,
+  isPrismaUniqueViolationForTarget
+} from "@/lib/prisma-errors";
 
 function buildContactWhere(
   companyId: string,
@@ -192,7 +196,18 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({ contact: mapContact(contact) }, { status: 201 });
-  } catch {
+  } catch (error) {
+    if (
+      isPrismaUniqueViolation(error) &&
+      (isPrismaUniqueViolationForTarget(error, "normalizedPhone") ||
+        isPrismaUniqueViolationForTarget(error, ["companyId", "normalizedPhone"]))
+    ) {
+      return NextResponse.json(
+        { error: "Já existe um contato com este telefone." },
+        { status: 409 }
+      );
+    }
+
     return NextResponse.json(
       { error: "Nao foi possivel salvar contato." },
       { status: 500 }

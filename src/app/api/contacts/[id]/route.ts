@@ -13,6 +13,10 @@ import {
 } from "@/lib/contacts";
 import { prisma } from "@/lib/db";
 import { forbidden, isAdmin } from "@/lib/permissions";
+import {
+  isPrismaUniqueViolation,
+  isPrismaUniqueViolationForTarget
+} from "@/lib/prisma-errors";
 
 type RouteContext = {
   params: { id: string };
@@ -287,7 +291,18 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     });
 
     return NextResponse.json({ contact: mapContact(contact) });
-  } catch {
+  } catch (error) {
+    if (
+      isPrismaUniqueViolation(error) &&
+      (isPrismaUniqueViolationForTarget(error, "normalizedPhone") ||
+        isPrismaUniqueViolationForTarget(error, ["companyId", "normalizedPhone"]))
+    ) {
+      return NextResponse.json(
+        { error: "Já existe um contato com este telefone." },
+        { status: 409 }
+      );
+    }
+
     return NextResponse.json(
       { error: "Nao foi possivel atualizar o contato." },
       { status: 500 }
