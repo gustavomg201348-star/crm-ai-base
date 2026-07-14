@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { getSessionFromRequest } from "@/lib/auth";
+import { getContactNormalizedPhone } from "@/lib/contacts";
 import { prisma } from "@/lib/db";
 import {
   buildMulticredClientData,
@@ -76,6 +77,8 @@ export async function POST(request: NextRequest) {
 
     const data = buildMulticredClientData(body);
     const contactId = readString(body.contactId);
+    const contactNormalizedPhone = getContactNormalizedPhone(data.phone);
+    const contactNormalizedWhatsapp = getContactNormalizedPhone(data.whatsapp);
 
     if (!data.name) {
       return NextResponse.json({ error: "Nome do cliente e obrigatorio." }, { status: 400 });
@@ -96,20 +99,45 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const linkedContact = contactId
+    let linkedContact = contactId
       ? await prisma.contact.findFirst({
           where: { id: contactId, companyId: session.companyId }
         })
-      : await prisma.contact.findFirst({
-          where: {
-            companyId: session.companyId,
-            OR: [
-              { cpf: data.cpf },
-              ...(data.phone ? [{ phone: data.phone }] : []),
-              ...(data.whatsapp ? [{ phone: data.whatsapp }] : [])
-            ]
-          }
+      : null;
+
+    if (!contactId) {
+      linkedContact = await prisma.contact.findFirst({
+        where: { companyId: session.companyId, cpf: data.cpf }
+      });
+
+      if (!linkedContact && contactNormalizedPhone) {
+        linkedContact = await prisma.contact.findFirst({
+          where: { companyId: session.companyId, normalizedPhone: contactNormalizedPhone }
         });
+      }
+
+      if (
+        !linkedContact &&
+        contactNormalizedWhatsapp &&
+        contactNormalizedWhatsapp !== contactNormalizedPhone
+      ) {
+        linkedContact = await prisma.contact.findFirst({
+          where: { companyId: session.companyId, normalizedPhone: contactNormalizedWhatsapp }
+        });
+      }
+
+      if (!linkedContact && data.phone) {
+        linkedContact = await prisma.contact.findFirst({
+          where: { companyId: session.companyId, phone: data.phone }
+        });
+      }
+
+      if (!linkedContact && data.whatsapp && data.whatsapp !== data.phone) {
+        linkedContact = await prisma.contact.findFirst({
+          where: { companyId: session.companyId, phone: data.whatsapp }
+        });
+      }
+    }
 
     if (contactId && !linkedContact) {
       return NextResponse.json({ error: "Contato vinculado nao encontrado." }, { status: 404 });
@@ -133,4 +161,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-
