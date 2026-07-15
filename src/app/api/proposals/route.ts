@@ -6,6 +6,10 @@ import { getContactNormalizedPhone } from "@/lib/contacts";
 import { prisma } from "@/lib/db";
 import { requireCompanyAdmin } from "@/lib/permissions";
 import {
+  isPrismaUniqueViolation,
+  isPrismaUniqueViolationForTarget
+} from "@/lib/prisma-errors";
+import {
   isProposalStatus,
   mapProposal,
   proposalInclude,
@@ -425,18 +429,54 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      contact =
-        contact ??
-        (await prisma.contact.create({
-          data: {
-            companyId: session.companyId,
-            name: multicredClient.name,
-            phone,
-            normalizedPhone: contactNormalizedPhone,
-            cpf: multicredClient.cpf || null,
-            email: multicredClient.email ?? null
+      if (!contact) {
+        try {
+          contact = await prisma.contact.create({
+            data: {
+              companyId: session.companyId,
+              name: multicredClient.name,
+              phone,
+              normalizedPhone: contactNormalizedPhone,
+              cpf: multicredClient.cpf || null,
+              email: multicredClient.email ?? null
+            }
+          });
+        } catch (error) {
+          if (
+            isPrismaUniqueViolation(error) &&
+            (isPrismaUniqueViolationForTarget(error, "normalizedPhone") ||
+              isPrismaUniqueViolationForTarget(error, [
+                "companyId",
+                "normalizedPhone"
+              ]))
+          ) {
+            if (multicredClient.cpf) {
+              contact = await prisma.contact.findFirst({
+                where: { companyId: session.companyId, cpf: multicredClient.cpf }
+              });
+            }
+
+            if (!contact && contactNormalizedPhone) {
+              contact = await prisma.contact.findFirst({
+                where: {
+                  companyId: session.companyId,
+                  normalizedPhone: contactNormalizedPhone
+                }
+              });
+            }
+
+            if (!contact) {
+              contact = await prisma.contact.findFirst({
+                where: { companyId: session.companyId, phone }
+              });
+            }
           }
-        }));
+
+          if (!contact) {
+            throw error;
+          }
+        }
+      }
     }
 
     if (!contact) {
