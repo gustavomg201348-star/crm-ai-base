@@ -19,6 +19,10 @@ import {
   logContactNameMutationAttempt,
   normalizeContactPhone
 } from "@/lib/contacts";
+import {
+  isPrismaUniqueViolation,
+  isPrismaUniqueViolationForTarget
+} from "@/lib/prisma-errors";
 
 export async function processInboundMessage({
   companyId,
@@ -105,6 +109,7 @@ export async function processInboundMessage({
           phone: normalizedPhone,
           archived: true
         });
+  let contactCreated = false;
 
   console.warn("[whatsapp-inbound-audit]", {
     rawPhone: phone,
@@ -133,19 +138,40 @@ export async function processInboundMessage({
       allowed: true
     });
 
-    contact = await prisma.contact.create({
-      data: {
-        companyId,
-        name: name?.trim().replace(/\s+/g, " ") || normalizedPhone,
-        phone: normalizedPhone,
-        normalizedPhone: contactNormalizedPhone,
-        originId: origin?.id ?? null,
-        stageId: stage?.id ?? null,
-        temperature: "WARM",
-        lastMessage: messageBody
+    try {
+      contact = await prisma.contact.create({
+        data: {
+          companyId,
+          name: name?.trim().replace(/\s+/g, " ") || normalizedPhone,
+          phone: normalizedPhone,
+          normalizedPhone: contactNormalizedPhone,
+          originId: origin?.id ?? null,
+          stageId: stage?.id ?? null,
+          temperature: "WARM",
+          lastMessage: messageBody
+        }
+      });
+      contactCreated = true;
+    } catch (error) {
+      if (
+        isPrismaUniqueViolation(error) &&
+        (isPrismaUniqueViolationForTarget(error, "normalizedPhone") ||
+          isPrismaUniqueViolationForTarget(error, ["companyId", "normalizedPhone"]))
+      ) {
+        contact = await findContactByNormalizedPhone(prisma, {
+          companyId,
+          phone: normalizedPhone,
+          archived: true
+        });
       }
-    });
-  } else {
+
+      if (!contact) {
+        throw error;
+      }
+    }
+  }
+
+  if (!contactCreated) {
     const nameUpdate = getAutomaticContactNameUpdate({
       currentName: contact.name,
       incomingName: name,
