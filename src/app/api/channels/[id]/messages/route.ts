@@ -15,6 +15,10 @@ import { prisma } from "@/lib/db";
 import { saveFailedOutboundMessage } from "@/lib/message-delivery";
 import { readMetaMessageId, sendMetaTextMessage } from "@/lib/meta-whatsapp";
 import { canAccessConversation } from "@/lib/permissions";
+import {
+  isPrismaUniqueViolation,
+  isPrismaUniqueViolationForTarget
+} from "@/lib/prisma-errors";
 
 type RouteContext = {
   params: { id: string };
@@ -140,23 +144,45 @@ export async function POST(request: NextRequest, context: RouteContext) {
         companyId: session.companyId,
         phone: normalizedPhone
       });
-      const contact =
-        existingContact ??
-        (await prisma.contact.create({
-          data: {
-            companyId: session.companyId,
-            ownerId: session.id,
-            originId: origin?.id,
-            stageId: stage?.id,
-            name: normalizedPhone,
-            phone: normalizedPhone,
-            normalizedPhone: contactNormalizedPhone,
-            temperature: "WARM",
-            lastMessage: message
-          }
-        }));
+      let contact = existingContact;
 
-      createdContactForSend = !existingContact;
+      if (!contact) {
+        try {
+          contact = await prisma.contact.create({
+            data: {
+              companyId: session.companyId,
+              ownerId: session.id,
+              originId: origin?.id,
+              stageId: stage?.id,
+              name: normalizedPhone,
+              phone: normalizedPhone,
+              normalizedPhone: contactNormalizedPhone,
+              temperature: "WARM",
+              lastMessage: message
+            }
+          });
+          createdContactForSend = true;
+        } catch (error) {
+          if (
+            isPrismaUniqueViolation(error) &&
+            (isPrismaUniqueViolationForTarget(error, "normalizedPhone") ||
+              isPrismaUniqueViolationForTarget(error, [
+                "companyId",
+                "normalizedPhone"
+              ]))
+          ) {
+            contact = await findContactByNormalizedPhone(prisma, {
+              companyId: session.companyId,
+              phone: normalizedPhone
+            });
+          }
+
+          if (!contact) {
+            throw error;
+          }
+        }
+      }
+
       if (createdContactForSend) {
         logContactNameMutationAttempt({
           origin: "envio_avulso_canal",
