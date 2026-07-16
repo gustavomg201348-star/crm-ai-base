@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import clsx from "clsx";
-import { Search, SlidersHorizontal, X } from "lucide-react";
+import { SlidersHorizontal, X } from "lucide-react";
 import { ConversationCard } from "./ConversationCard";
+import { ConversationSearch } from "./ConversationSearch";
 import type {
   AttendantRow,
   ConversationFilters,
@@ -89,7 +90,6 @@ export function ConversationList({
 }: ConversationListProps) {
   const activeTags = availableTags.filter((tag) => tag.isActive !== false);
   const [tagFilterOpen, setTagFilterOpen] = useState(false);
-  const [conversationSearchDraft, setConversationSearchDraft] = useState(filters.search);
   const selectedTagNames = activeTags
     .filter((tag) => filters.tagIds.includes(tag.id))
     .map((tag) => tag.name);
@@ -113,30 +113,6 @@ export function ConversationList({
     { value: "RESOLVED", label: "Resolvidos" },
     { value: "SOLD", label: "Vendas" }
   ];
-
-  useEffect(() => {
-    setConversationSearchDraft(filters.search);
-  }, [filters.search]);
-
-  useEffect(() => {
-    if (conversationSearchDraft === filters.search) {
-      onSearchSettlingChange?.(false);
-      return;
-    }
-
-    onSearchSettlingChange?.(true);
-
-    const timeout = window.setTimeout(() => {
-      onFiltersChange({ ...filters, search: conversationSearchDraft });
-      onSearchSettlingChange?.(false);
-    }, 400);
-
-    return () => window.clearTimeout(timeout);
-  }, [conversationSearchDraft, filters, onFiltersChange, onSearchSettlingChange]);
-
-  useEffect(() => {
-    return () => onSearchSettlingChange?.(false);
-  }, [onSearchSettlingChange]);
 
   return (
     <section className="flex min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-line/80 bg-white shadow-soft">
@@ -210,15 +186,11 @@ export function ConversationList({
             )}
           </div>
         </div>
-        <div className="mt-4 flex h-10 items-center gap-2 rounded-2xl border border-line bg-white px-3 shadow-sm transition focus-within:border-blue-200 focus-within:bg-white focus-within:ring-4 focus-within:ring-blue-50">
-          <Search className="h-4 w-4 text-slate-400" />
-          <input
-            className="w-full bg-transparent text-sm font-medium text-slate-700 outline-none placeholder:text-slate-400"
-            placeholder="Buscar conversas..."
-            value={conversationSearchDraft}
-            onChange={(event) => setConversationSearchDraft(event.target.value)}
-          />
-        </div>
+        <ConversationSearch
+          filters={filters}
+          onFiltersChange={onFiltersChange}
+          onSearchSettlingChange={onSearchSettlingChange}
+        />
         <div className="mt-3 grid grid-cols-2 gap-1.5 text-[11px] sm:grid-cols-4">
           {[
             {
