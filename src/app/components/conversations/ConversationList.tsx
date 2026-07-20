@@ -49,6 +49,8 @@ export function ConversationList({
     .map((tag) => tag.name);
   const showInitialSkeleton =
     loading && conversations.length === 0;
+  const showUpdateIndicator =
+    loading && conversations.length > 0;
 
   return (
     <section className="flex min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-line/80 bg-white shadow-soft">
@@ -56,7 +58,16 @@ export function ConversationList({
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-sm font-black uppercase tracking-wide text-slate-950">Conversas</h3>
-            <p className="mt-0.5 text-xs font-medium text-slate-500">{conversations.length} atendimentos</p>
+            <div className="mt-0.5 flex items-center gap-1.5">
+              <p className="text-xs font-medium text-slate-500">{conversations.length} atendimentos</p>
+              {showUpdateIndicator && (
+                <span
+                  aria-label="Atualizando conversas"
+                  className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-brand"
+                  role="status"
+                />
+              )}
+            </div>
           </div>
           <ConversationTagFilter
             filters={filters}
