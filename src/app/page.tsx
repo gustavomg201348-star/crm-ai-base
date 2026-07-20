@@ -1548,10 +1548,13 @@ export default function Home() {
   const [dashboard, setDashboard] = useState<DashboardData>(emptyDashboardData);
   const [selectedConversation, setSelectedConversation] =
     useState<ConversationRow | null>(null);
+  const [highlightedConversationId, setHighlightedConversationId] =
+    useState<string | null>(null);
   const [cltDraft, setCltDraft] = useState<CltSimulationDraft | null>(null);
   const selectedConversationRef = useRef<string | null>(null);
   const conversationListRef = useRef<ConversationRow[]>([]);
   const conversationRequestIdRef = useRef(0);
+  const conversationHighlightTimeoutRef = useRef<number | null>(null);
   const conversationSearchSettlingRef = useRef(false);
   const knownNotificationIdsRef = useRef<Set<string>>(new Set());
   const notificationsLoadedRef = useRef(false);
@@ -1705,6 +1708,14 @@ export default function Home() {
       canManageOperation: userCanManageOperation(session)
     };
   }, [session]);
+
+  useEffect(() => {
+    return () => {
+      if (conversationHighlightTimeoutRef.current !== null) {
+        window.clearTimeout(conversationHighlightTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -2107,6 +2118,19 @@ export default function Home() {
     return true;
   }, []);
 
+  const flashConversationHighlight = useCallback((conversationId: string) => {
+    setHighlightedConversationId(conversationId);
+
+    if (conversationHighlightTimeoutRef.current !== null) {
+      window.clearTimeout(conversationHighlightTimeoutRef.current);
+    }
+
+    conversationHighlightTimeoutRef.current = window.setTimeout(() => {
+      setHighlightedConversationId(null);
+      conversationHighlightTimeoutRef.current = null;
+    }, 700);
+  }, []);
+
   const mergeConversation = useCallback((conversation: ConversationRow, origin = "merge") => {
     setSelectedConversation((current) =>
       current?.id === conversation.id
@@ -2139,6 +2163,8 @@ export default function Home() {
         alreadyInList ||
         filters.assignedTo !== "default" ||
         canManageOperation;
+      const shouldHighlightConversation =
+        !["refresh", "click-read"].includes(origin);
 
       if (!matchesActiveFilters) {
         return alreadyInList
@@ -2148,9 +2174,13 @@ export default function Home() {
 
       if (!canInsertFromMerge) return current;
 
+      if (shouldHighlightConversation) {
+        flashConversationHighlight(conversation.id);
+      }
+
       return mergeConversationListItem({ current, conversation, origin });
     });
-  }, []);
+  }, [flashConversationHighlight]);
 
   const refreshConversation = useCallback(
     async (conversationId?: string | null) => {
@@ -4365,6 +4395,7 @@ export default function Home() {
                 isAdmin={userCanManageOperation(session)}
                 loading={conversationLoading}
                 selectedConversation={selectedConversation}
+                highlightedConversationId={highlightedConversationId}
                 onFiltersChange={setConversationFilters}
                 onSearchSettlingChange={handleConversationSearchSettlingChange}
                 onSelectConversation={(conversation) => void handleSelectConversation(conversation)}
@@ -6189,6 +6220,7 @@ function Atendimento({
   isAdmin,
   loading,
   selectedConversation,
+  highlightedConversationId,
   onFiltersChange,
   onSearchSettlingChange,
   onSelectConversation,
@@ -6220,6 +6252,7 @@ function Atendimento({
   isAdmin: boolean;
   loading: boolean;
   selectedConversation: ConversationRow | null;
+  highlightedConversationId?: string | null;
   onFiltersChange: (filters: { search: string; status: string; tagIds: string[]; assignedTo: string }) => void;
   onSearchSettlingChange?: (settling: boolean) => void;
   onSelectConversation: (conversation: ConversationRow) => void;
@@ -6787,6 +6820,7 @@ function Atendimento({
         isAdmin={isAdmin}
         loading={loading}
         selectedConversation={selectedConversation}
+        highlightedConversationId={highlightedConversationId}
         onFiltersChange={onFiltersChange}
         onSearchSettlingChange={onSearchSettlingChange}
         onSelectConversation={onSelectConversation}

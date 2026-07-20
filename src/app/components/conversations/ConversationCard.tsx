@@ -7,6 +7,7 @@ import type { ConversationRow } from "./types";
 type ConversationCardProps = {
   conversation: ConversationRow;
   selected: boolean;
+  highlighted?: boolean;
   onSelect: (conversation: ConversationRow) => void;
 };
 
@@ -245,6 +246,7 @@ function TagBadge({
 export function ConversationCard({
   conversation,
   selected,
+  highlighted,
   onSelect
 }: ConversationCardProps) {
   const unread = conversation.unreadCount ?? 0;
@@ -276,6 +278,7 @@ export function ConversationCard({
         attention.tone === "green" && "bg-emerald-50/45",
         attention.tone === "amber" && !selected && "bg-amber-50/30",
         attention.tone === "rose" && !selected && "bg-rose-50/30",
+        highlighted && !selected && !hasUnread && attention.tone === "slate" && "bg-blue-50/70 ring-2 ring-blue-200/70",
         selected && "border-blue-200 bg-blue-50/80 shadow-md ring-1 ring-inset ring-blue-100"
       )}
       onClick={() => onSelect(conversation)}

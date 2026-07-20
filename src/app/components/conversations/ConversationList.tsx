@@ -23,6 +23,7 @@ type ConversationListProps = {
   isAdmin: boolean;
   loading: boolean;
   selectedConversation: ConversationRow | null;
+  highlightedConversationId?: string | null;
   onFiltersChange: (filters: ConversationFilters) => void;
   onSearchSettlingChange?: (settling: boolean) => void;
   onSelectConversation: (conversation: ConversationRow) => void;
@@ -37,6 +38,7 @@ export function ConversationList({
   isAdmin,
   loading,
   selectedConversation,
+  highlightedConversationId,
   onFiltersChange,
   onSearchSettlingChange,
   onSelectConversation
@@ -87,6 +89,7 @@ export function ConversationList({
             key={item.id}
             conversation={item}
             selected={selectedConversation?.id === item.id}
+            highlighted={highlightedConversationId === item.id}
             onSelect={onSelectConversation}
           />
         ))}
