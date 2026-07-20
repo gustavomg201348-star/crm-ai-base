@@ -7645,34 +7645,6 @@ function getMessageTimelineEvent(message: ConversationMessageRow) {
     };
   }
 
-  if (type === "audio" || message.mimeType?.startsWith("audio/")) {
-    return {
-      label: message.direction === "outbound" ? "Audio enviado" : "Audio recebido",
-      detail: null,
-      tone: "media" as TimelineEventTone
-    };
-  }
-
-  if (type === "document" || isDocumentMimeType(message.mimeType)) {
-    return {
-      label: message.direction === "outbound" ? "Documento enviado" : "Documento recebido",
-      detail: resolveDocumentName({
-        fileName: message.fileName,
-        body: message.body,
-        mimeType: message.mimeType
-      }),
-      tone: "media" as TimelineEventTone
-    };
-  }
-
-  if (type === "image" || message.mimeType?.startsWith("image/")) {
-    return {
-      label: message.direction === "outbound" ? "Imagem enviada" : "Imagem recebida",
-      detail: cleanTimelineDetail(message.body),
-      tone: "media" as TimelineEventTone
-    };
-  }
-
   return null;
 }
 
