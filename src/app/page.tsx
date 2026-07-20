@@ -7029,6 +7029,7 @@ function Atendimento({
                   status={item.status}
                   readAt={item.readAt}
                   timestamp={formatRelativeDate(item.createdAt)}
+                  isAiMessage={item.direction === "outbound" && item.senderType === "ai"}
                 >
                   {item.type === "audio" || item.mimeType?.startsWith("audio/") ? (
                     <AudioMessage
@@ -7731,12 +7732,14 @@ function ChatBubble({
   status,
   readAt,
   timestamp,
+  isAiMessage,
   children
 }: {
   side: "left" | "right";
   status?: string;
   readAt?: string | null;
   timestamp?: string;
+  isAiMessage?: boolean;
   children: React.ReactNode;
 }) {
   const normalizedStatus = status?.toLowerCase() ?? "sent";
@@ -7789,6 +7792,16 @@ function ChatBubble({
             )}
           >
             {timestamp && <span>{timestamp}</span>}
+            {isAiMessage && (
+              <span
+                aria-label="Mensagem enviada por IA"
+                className="inline-flex items-center gap-1 font-semibold text-saffron"
+                title="Mensagem enviada por IA"
+              >
+                <Sparkles className="h-3 w-3" />
+                IA
+              </span>
+            )}
             {showDeliveryStatus && (
               <span
                 className={clsx(
