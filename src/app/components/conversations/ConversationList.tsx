@@ -47,6 +47,9 @@ export function ConversationList({
   const selectedTagNames = activeTags
     .filter((tag) => filters.tagIds.includes(tag.id))
     .map((tag) => tag.name);
+  const showInitialSkeleton =
+    loading && conversations.length === 0;
+
   return (
     <section className="flex min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-line/80 bg-white shadow-soft">
       <div className="border-b border-line/70 bg-slate-50/35 p-4">
@@ -98,7 +101,7 @@ export function ConversationList({
             Nenhuma conversa nesta fila.
           </div>
         )}
-        {loading && (
+        {showInitialSkeleton && (
           <div className="space-y-3 p-2">
             {[0, 1, 2].map((item) => (
               <div key={item} className="h-24 animate-pulse rounded-2xl bg-white shadow-sm ring-1 ring-line/70" />
