@@ -276,6 +276,12 @@ type ConversationRow = {
 
 type ConversationStatusCounts = Record<ConversationRow["status"], number>;
 type ConversationMessageRow = ConversationRow["messages"][number];
+type ConversationFilters = {
+  search: string;
+  status: string;
+  tagIds: string[];
+  assignedTo: string;
+};
 
 const emptyConversationStatusCounts: ConversationStatusCounts = {
   OPEN: 0,
@@ -1202,6 +1208,52 @@ function compareConversationsByActivity(a: ConversationRow, b: ConversationRow) 
   return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
 }
 
+function conversationMatchesActiveFilters({
+  conversation,
+  filters,
+  currentUserId,
+  canManageOperation
+}: {
+  conversation: ConversationRow;
+  filters: ConversationFilters;
+  currentUserId: string;
+  canManageOperation: boolean;
+}) {
+  if (filters.status !== "ALL" && conversation.status !== filters.status) {
+    return false;
+  }
+
+  if (filters.assignedTo === "me") {
+    if (conversation.agent?.id !== currentUserId) return false;
+  } else if (filters.assignedTo === "unassigned") {
+    if (conversation.agent !== null && conversation.assignmentStatus !== "UNASSIGNED") {
+      return false;
+    }
+  } else if (filters.assignedTo && filters.assignedTo !== "default") {
+    if (conversation.agent?.id !== filters.assignedTo) return false;
+  } else if (filters.assignedTo === "default" && !canManageOperation) {
+    // A composicao exata da fila default de atendentes comuns fica a cargo da API.
+  }
+
+  if (
+    filters.tagIds.length > 0 &&
+    !filters.tagIds.some((tagId) =>
+      conversation.tags.some((tag) => tag.id === tagId)
+    )
+  ) {
+    return false;
+  }
+
+  const search = filters.search.trim().toLocaleLowerCase("pt-BR");
+  if (!search) return true;
+
+  return [
+    conversation.contact.name,
+    conversation.contact.phone,
+    conversation.contact.cpf ?? ""
+  ].some((value) => value.toLocaleLowerCase("pt-BR").includes(search));
+}
+
 function formatCurrency(value: number | string) {
   return Number(value || 0).toLocaleString("pt-BR", {
     style: "currency",
@@ -1521,11 +1573,16 @@ export default function Home() {
   const [desktopPermission, setDesktopPermission] = useState<
     NotificationPermission | "unsupported"
   >("unsupported");
-  const [conversationFilters, setConversationFilters] = useState({
+  const [conversationFilters, setConversationFilters] = useState<ConversationFilters>({
     search: "",
     status: "OPEN",
     tagIds: [] as string[],
     assignedTo: "default"
+  });
+  const conversationFiltersRef = useRef<ConversationFilters>(conversationFilters);
+  const conversationAccessRef = useRef({
+    currentUserId: session?.user.id ?? "",
+    canManageOperation: userCanManageOperation(session)
   });
   const [aiAnalysis, setAiAnalysis] = useState<AiAnalysis | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -1637,6 +1694,17 @@ export default function Home() {
   useEffect(() => {
     conversationListRef.current = conversationList;
   }, [conversationList]);
+
+  useEffect(() => {
+    conversationFiltersRef.current = conversationFilters;
+  }, [conversationFilters]);
+
+  useEffect(() => {
+    conversationAccessRef.current = {
+      currentUserId: session?.user.id ?? "",
+      canManageOperation: userCanManageOperation(session)
+    };
+  }, [session]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -2057,9 +2125,31 @@ export default function Home() {
           })()
         : current
     );
-    setConversationList((current) =>
-      mergeConversationListItem({ current, conversation, origin })
-    );
+    setConversationList((current) => {
+      const filters = conversationFiltersRef.current;
+      const { currentUserId, canManageOperation } = conversationAccessRef.current;
+      const alreadyInList = current.some((item) => item.id === conversation.id);
+      const matchesActiveFilters = conversationMatchesActiveFilters({
+        conversation,
+        filters,
+        currentUserId,
+        canManageOperation
+      });
+      const canInsertFromMerge =
+        alreadyInList ||
+        filters.assignedTo !== "default" ||
+        canManageOperation;
+
+      if (!matchesActiveFilters) {
+        return alreadyInList
+          ? current.filter((item) => item.id !== conversation.id)
+          : current;
+      }
+
+      if (!canInsertFromMerge) return current;
+
+      return mergeConversationListItem({ current, conversation, origin });
+    });
   }, []);
 
   const refreshConversation = useCallback(
