@@ -7742,7 +7742,13 @@ function ChatBubble({
   isAiMessage?: boolean;
   children: React.ReactNode;
 }) {
-  const normalizedStatus = status?.toLowerCase() ?? "sent";
+  const rawStatus = status?.trim().toLowerCase();
+  const normalizedStatus =
+    rawStatus === undefined || rawStatus === ""
+      ? "sent"
+      : ["sending", "sent", "delivered", "read", "failed"].includes(rawStatus)
+        ? rawStatus
+        : "unavailable";
   const failed = normalizedStatus === "failed";
   const showDeliveryStatus = side === "right";
   const deliveryLabel =
@@ -7754,7 +7760,9 @@ function ChatBubble({
           ? "Visualizada"
           : normalizedStatus === "delivered"
             ? "Entregue"
-            : "Enviada";
+            : normalizedStatus === "unavailable"
+              ? "Status indisponível"
+              : "Enviada";
   const DeliveryIcon =
     normalizedStatus === "sending"
       ? Loader2
@@ -7762,7 +7770,9 @@ function ChatBubble({
         ? AlertTriangle
         : normalizedStatus === "sent"
           ? Check
-          : CheckCheck;
+          : normalizedStatus === "unavailable"
+            ? Clock3
+            : CheckCheck;
 
   return (
     <div className={clsx("flex", side === "right" && "justify-end")}>
@@ -7808,6 +7818,7 @@ function ChatBubble({
                   "inline-flex items-center gap-1 font-medium",
                   normalizedStatus === "read" && "text-sky-500",
                   normalizedStatus === "delivered" && "text-slate-500",
+                  normalizedStatus === "unavailable" && "text-slate-400",
                   failed && "text-rose-600"
                 )}
                 title={
