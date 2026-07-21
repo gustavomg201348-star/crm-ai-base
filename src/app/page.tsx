@@ -7629,14 +7629,6 @@ function getMessageTimelineEvent(message: ConversationMessageRow) {
     };
   }
 
-  if (type === "template") {
-    return {
-      label: "Template enviado",
-      detail: message.templateName ? `Modelo: ${message.templateName}` : "Mensagem aprovada pela Meta",
-      tone: "template" as TimelineEventTone
-    };
-  }
-
   if (type === "button" || type === "interactive") {
     return {
       label: "Cliente respondeu botao",
