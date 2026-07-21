@@ -3182,7 +3182,7 @@ export default function Home() {
         ? selectedConversation
         : conversationList.find((item) => item.id === conversationId);
 
-    if (!conversation || !messageBody) return;
+    if (!conversation || !messageBody) return false;
 
     const optimisticConversation: ConversationRow = {
       ...conversation,
@@ -3216,36 +3216,46 @@ export default function Home() {
 
     mergeConversation(optimisticConversation, "send-message-optimistic");
 
-    const channelId = conversation ? resolveConversationChannelId(conversation) : null;
-    const response =
-      channelId && conversation?.contact.phone
-        ? await fetch(`/api/channels/${channelId}/messages`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              conversationId,
-              to: conversation.contact.phone,
-              body: messageBody
+    try {
+      const channelId = conversation ? resolveConversationChannelId(conversation) : null;
+      const response =
+        channelId && conversation?.contact.phone
+          ? await fetch(`/api/channels/${channelId}/messages`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                conversationId,
+                to: conversation.contact.phone,
+                body: messageBody
+              })
             })
-          })
-        : await fetch(`/api/conversations/${conversationId}/messages`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ body: messageBody, direction: "outbound" })
-          });
+          : await fetch(`/api/conversations/${conversationId}/messages`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ body: messageBody, direction: "outbound" })
+            });
 
-    if (!response.ok) {
-      const data = (await response.json().catch(() => null)) as
-        | { error?: string }
-        | null;
-      setAppError(data?.error ?? "Nao foi possivel enviar mensagem.");
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        setAppError(data?.error ?? "Nao foi possivel enviar mensagem.");
+        mergeConversation(conversation, "send-message-rollback");
+        await refreshConversation(conversationId);
+        return false;
+      }
+
+      const data = (await response.json()) as { conversation: ConversationRow };
+      mergeConversation(data.conversation, "send-message-response");
+      return true;
+    } catch (error) {
+      setAppError(
+        error instanceof Error ? error.message : "Nao foi possivel enviar mensagem."
+      );
       mergeConversation(conversation, "send-message-rollback");
       await refreshConversation(conversationId);
-      return;
+      return false;
     }
-
-    const data = (await response.json()) as { conversation: ConversationRow };
-    mergeConversation(data.conversation, "send-message-response");
   }
 
   async function handleSendMedia(conversationId: string, file: File, caption?: string) {
@@ -6259,7 +6269,7 @@ function Atendimento({
   onAssignConversation: (conversationId: string, userId?: string) => Promise<void>;
   onUnassignConversation: (conversationId: string) => Promise<void>;
   onTransferConversation: (conversationId: string, userId: string) => Promise<void>;
-  onSendMessage: (conversationId: string, body: string) => Promise<void>;
+  onSendMessage: (conversationId: string, body: string) => Promise<boolean>;
   onSendMedia: (conversationId: string, file: File, caption?: string) => Promise<void>;
   onLoadTemplates: (conversationId: string) => Promise<WhatsAppTemplateRow[]>;
   onSendTemplate: (
@@ -6288,6 +6298,7 @@ function Atendimento({
 }) {
   const [message, setMessage] = useState("");
   const [composerError, setComposerError] = useState("");
+  const [sendingMessage, setSendingMessage] = useState(false);
   const [sendingAttachment, setSendingAttachment] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [quickRepliesOpen, setQuickRepliesOpen] = useState(false);
@@ -6375,10 +6386,20 @@ function Atendimento({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedConversation || !message.trim()) return;
+    if (sendingMessage || !selectedConversation || !message.trim()) return;
 
-    await onSendMessage(selectedConversation.id, message);
-    setMessage("");
+    const conversationId = selectedConversation.id;
+    const messageToSend = message;
+
+    setSendingMessage(true);
+    try {
+      const sent = await onSendMessage(conversationId, messageToSend);
+      if (sent) {
+        setMessage((current) => (current === messageToSend ? "" : current));
+      }
+    } finally {
+      setSendingMessage(false);
+    }
   }
 
   function insertEmoji(emoji: string) {
@@ -7298,10 +7319,15 @@ function Atendimento({
               onChange={(event) => setMessage(event.target.value)}
             />
             <button
+              aria-label={sendingMessage ? "Enviando mensagem" : "Enviar mensagem"}
               className="grid h-10 w-10 place-items-center rounded-full bg-brand text-white shadow-[0_8px_18px_rgba(37,99,235,0.25)] transition hover:bg-blue-700 active:scale-95 disabled:bg-slate-300 disabled:opacity-70 disabled:shadow-none"
-              disabled={!selectedConversation || !message.trim()}
+              disabled={!selectedConversation || !message.trim() || sendingMessage}
             >
-              <Send className="h-4 w-4" />
+              {sendingMessage ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
             </button>
           </div>
         </form>
