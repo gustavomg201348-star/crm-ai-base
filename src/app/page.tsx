@@ -7099,7 +7099,7 @@ function Atendimento({
 
         <form className="shrink-0 border-t border-slate-200 bg-white p-3 shadow-[0_-10px_28px_rgba(15,23,42,0.06)]" onSubmit={handleSubmit}>
           {composerError && (
-            <div className="mb-3 rounded-2xl border border-rose-100 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+            <div role="alert" className="mb-3 rounded-2xl border border-rose-100 bg-rose-50 px-3 py-2 text-sm text-rose-700">
               {composerError}
             </div>
           )}
@@ -7132,7 +7132,7 @@ function Atendimento({
                     />
                   ) : (
                     <div className="grid h-14 w-14 place-items-center rounded-xl bg-white text-slate-500">
-                      <FileIcon className="h-5 w-5" />
+                      <FileIcon aria-hidden="true" className="h-5 w-5" />
                     </div>
                   )}
                   <div className="min-w-0 flex-1">
@@ -7244,16 +7244,16 @@ function Atendimento({
 
           <div className="relative flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-3 py-2 shadow-[0_1px_0_rgba(15,23,42,0.04),0_8px_22px_rgba(15,23,42,0.07)] transition focus-within:border-brand/60 focus-within:shadow-[0_1px_0_rgba(37,99,235,0.08),0_10px_28px_rgba(37,99,235,0.10)] focus-within:ring-4 focus-within:ring-blue-50">
             <ComposerButton title="Anexar arquivo" disabled={!selectedConversation} onClick={() => fileInputRef.current?.click()}>
-              <Paperclip className="h-4 w-4" />
+              <Paperclip aria-hidden="true" className="h-4 w-4" />
             </ComposerButton>
             <ComposerButton title="Emoji" disabled={!selectedConversation} onClick={() => setEmojiOpen((current) => !current)}>
-              <Smile className="h-4 w-4" />
+              <Smile aria-hidden="true" className="h-4 w-4" />
             </ComposerButton>
             <ComposerButton title="Gravar audio" disabled={!selectedConversation || recording} onClick={() => void startRecording()}>
-              {recording ? <Square className="h-4 w-4 text-rose-500" /> : <Mic className="h-4 w-4" />}
+              {recording ? <Square aria-hidden="true" className="h-4 w-4 text-rose-500" /> : <Mic aria-hidden="true" className="h-4 w-4" />}
             </ComposerButton>
             <ComposerButton title="Templates Meta" disabled={!selectedConversation} onClick={() => void openTemplates()}>
-              <FileText className="h-4 w-4" />
+              <FileText aria-hidden="true" className="h-4 w-4" />
             </ComposerButton>
             <ComposerButton
               title="Respostas rapidas"
@@ -7264,7 +7264,7 @@ function Atendimento({
                 setTemplatesOpen(false);
               }}
             >
-              <MessageSquareText className="h-4 w-4" />
+              <MessageSquareText aria-hidden="true" className="h-4 w-4" />
             </ComposerButton>
 
             {emojiOpen && (
@@ -7312,6 +7312,7 @@ function Atendimento({
 
             <input
               ref={inputRef}
+              aria-label="Mensagem"
               className="w-full bg-transparent text-sm font-medium text-slate-800 outline-none placeholder:text-slate-500 disabled:text-slate-400 disabled:placeholder:text-slate-400"
               disabled={!selectedConversation}
               placeholder="Digite uma mensagem..."
@@ -7319,14 +7320,15 @@ function Atendimento({
               onChange={(event) => setMessage(event.target.value)}
             />
             <button
+              type="submit"
               aria-label={sendingMessage ? "Enviando mensagem" : "Enviar mensagem"}
               className="grid h-10 w-10 place-items-center rounded-full bg-brand text-white shadow-[0_8px_18px_rgba(37,99,235,0.25)] transition hover:bg-blue-700 active:scale-95 disabled:bg-slate-300 disabled:opacity-70 disabled:shadow-none"
               disabled={!selectedConversation || !message.trim() || sendingMessage}
             >
               {sendingMessage ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
               ) : (
-                <Send className="h-4 w-4" />
+                <Send aria-hidden="true" className="h-4 w-4" />
               )}
             </button>
           </div>
@@ -8254,6 +8256,7 @@ function ComposerButton({
   return (
     <button
       type="button"
+      aria-label={title}
       title={title}
       className="group relative grid h-9 w-9 shrink-0 place-items-center rounded-full text-slate-600 transition hover:bg-blue-50 hover:text-brand active:scale-95 disabled:cursor-not-allowed disabled:text-slate-300 disabled:opacity-60 disabled:hover:bg-transparent"
       disabled={disabled}
