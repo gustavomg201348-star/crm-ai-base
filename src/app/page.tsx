@@ -7753,11 +7753,6 @@ function ChatBubble({
         >
           {children}
         </div>
-        {failed && (
-          <p className="mt-1 px-1 text-[11px] font-semibold text-rose-600">
-            Falha ao enviar
-          </p>
-        )}
         {(timestamp || showDeliveryStatus) && (
           <div
             className={clsx(
