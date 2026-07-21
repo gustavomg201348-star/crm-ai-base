@@ -6341,7 +6341,7 @@ function Atendimento({
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [aiSidebarCollapsed, setAiSidebarCollapsed] = useState(false);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -7310,14 +7310,21 @@ function Atendimento({
               </div>
             )}
 
-            <input
+            <textarea
               ref={inputRef}
               aria-label="Mensagem"
-              className="w-full bg-transparent text-sm font-medium text-slate-800 outline-none placeholder:text-slate-500 disabled:text-slate-400 disabled:placeholder:text-slate-400"
+              className="max-h-32 min-h-10 w-full resize-none overflow-y-auto bg-transparent text-sm font-medium leading-5 text-slate-800 outline-none placeholder:text-slate-500 disabled:text-slate-400 disabled:placeholder:text-slate-400"
               disabled={!selectedConversation}
               placeholder="Digite uma mensagem..."
+              rows={1}
               value={message}
               onChange={(event) => setMessage(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  event.currentTarget.form?.requestSubmit();
+                }
+              }}
             />
             <button
               type="submit"
