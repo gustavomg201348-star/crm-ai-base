@@ -4397,6 +4397,7 @@ export default function Home() {
               <Atendimento
                 leftSidebarCollapsed={leftSidebarCollapsed}
                 conversations={conversationList}
+                channels={channels}
                 statusCounts={conversationStatusCounts}
                 filters={conversationFilters}
                 availableTags={reference.tags}
@@ -6222,6 +6223,7 @@ function PipelineCard({
 function Atendimento({
   leftSidebarCollapsed,
   conversations,
+  channels,
   statusCounts,
   filters,
   availableTags,
@@ -6254,6 +6256,7 @@ function Atendimento({
 }: {
   leftSidebarCollapsed: boolean;
   conversations: ConversationRow[];
+  channels: ChannelRow[];
   statusCounts: ConversationStatusCounts;
   filters: { search: string; status: string; tagIds: string[]; assignedTo: string };
   availableTags: ReferenceData["tags"];
@@ -6570,6 +6573,24 @@ function Atendimento({
   const hasPendingTemplateVariables = Boolean(
     selectedTemplate && templateValues.some((value) => !value.trim())
   );
+  const selectedConversationChannelId = selectedConversation
+    ? resolveConversationChannelId(selectedConversation)
+    : null;
+  const selectedConversationChannel = selectedConversationChannelId
+    ? channels.find((channel) => channel.id === selectedConversationChannelId) ?? null
+    : null;
+  const hasConversationChannelData = Boolean(
+    selectedConversation?.channelId || selectedConversation?.channel?.trim()
+  );
+  const conversationChannelLabel = selectedConversation
+    ? selectedConversationChannel
+      ? `${selectedConversationChannel.name.trim() || "WhatsApp"} · ${
+          selectedConversationChannel.displayPhone?.trim() || "Telefone não informado"
+        }`
+      : hasConversationChannelData
+        ? "WhatsApp · canal não identificado"
+        : "Canal não informado"
+    : null;
 
   async function submitTransfer(userId: string) {
     if (!selectedConversation) return;
@@ -6893,6 +6914,12 @@ function Atendimento({
               </p>
               {selectedConversation && (
                 <div className="flex max-w-full flex-wrap items-center gap-1.5 overflow-hidden">
+                  <span
+                    className="max-w-[13rem] truncate rounded-full border border-blue-100 bg-blue-50/70 px-2 py-0.5 text-[11px] font-semibold text-blue-700 shadow-sm"
+                    title={conversationChannelLabel ?? undefined}
+                  >
+                    {conversationChannelLabel}
+                  </span>
                   <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600 shadow-sm">
                     {conversationStatusLabels[selectedConversation.status] ?? selectedConversation.status}
                   </span>
