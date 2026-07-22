@@ -6567,6 +6567,10 @@ function Atendimento({
     }
   }
 
+  const hasPendingTemplateVariables = Boolean(
+    selectedTemplate && templateValues.some((value) => !value.trim())
+  );
+
   async function submitTransfer(userId: string) {
     if (!selectedConversation) return;
     setTransferSaving(true);
@@ -7237,11 +7241,18 @@ function Atendimento({
                   )}
                   <button
                     type="button"
-                    className="mt-3 h-9 w-full rounded-full bg-brand text-sm font-semibold text-white disabled:opacity-50"
-                    disabled={sendingAttachment}
+                    className="mt-3 inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-full bg-brand text-sm font-semibold text-white disabled:opacity-50"
+                    disabled={sendingAttachment || !selectedTemplate || hasPendingTemplateVariables}
                     onClick={() => void sendTemplate()}
                   >
-                    {sendingAttachment ? "Enviando..." : "Enviar template"}
+                    {sendingAttachment ? (
+                      <>
+                        <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
+                        Enviando...
+                      </>
+                    ) : (
+                      "Enviar template"
+                    )}
                   </button>
                 </div>
               )}
