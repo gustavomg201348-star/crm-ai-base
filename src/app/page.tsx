@@ -7142,8 +7142,15 @@ function Atendimento({
                   <button type="button" className="rounded-full px-3 py-1 text-sm text-slate-500 hover:bg-white" onClick={() => setFilePreview(null)}>
                     Remover
                   </button>
-                  <button type="button" className="rounded-full bg-brand px-3 py-1 text-sm font-semibold text-white disabled:opacity-50" disabled={sendingAttachment} onClick={() => void sendMediaPreview(filePreview, message)}>
-                    {sendingAttachment ? "Enviando..." : "Enviar"}
+                  <button type="button" className="inline-flex items-center gap-1.5 rounded-full bg-brand px-3 py-1 text-sm font-semibold text-white disabled:opacity-50" disabled={sendingAttachment} onClick={() => void sendMediaPreview(filePreview, message)}>
+                    {sendingAttachment ? (
+                      <>
+                        <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
+                        Enviando...
+                      </>
+                    ) : (
+                      "Enviar"
+                    )}
                   </button>
                 </div>
               )}
@@ -7153,8 +7160,15 @@ function Atendimento({
                   <button type="button" className="rounded-full px-3 py-1 text-sm text-slate-500 hover:bg-white" onClick={() => setAudioPreview(null)}>
                     Descartar
                   </button>
-                  <button type="button" className="rounded-full bg-brand px-3 py-1 text-sm font-semibold text-white disabled:opacity-50" disabled={sendingAttachment} onClick={() => void sendMediaPreview(audioPreview)}>
-                    {sendingAttachment ? "Enviando..." : "Enviar audio"}
+                  <button type="button" className="inline-flex items-center gap-1.5 rounded-full bg-brand px-3 py-1 text-sm font-semibold text-white disabled:opacity-50" disabled={sendingAttachment} onClick={() => void sendMediaPreview(audioPreview)}>
+                    {sendingAttachment ? (
+                      <>
+                        <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
+                        Enviando...
+                      </>
+                    ) : (
+                      "Enviar audio"
+                    )}
                   </button>
                 </div>
               )}
