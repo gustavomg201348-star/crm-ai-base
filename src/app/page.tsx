@@ -7239,7 +7239,15 @@ function Atendimento({
             className="hidden"
             type="file"
             accept="image/jpeg,image/png,application/pdf,audio/mpeg,audio/ogg,audio/webm,video/mp4,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            onChange={(event) => handleFileChange(event.target.files?.[0])}
+            onChange={(event) => {
+              const file = event.currentTarget.files?.[0];
+
+              if (file) {
+                handleFileChange(file);
+              }
+
+              event.currentTarget.value = "";
+            }}
           />
 
           <div className="relative flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-3 py-2 shadow-[0_1px_0_rgba(15,23,42,0.04),0_8px_22px_rgba(15,23,42,0.07)] transition focus-within:border-brand/60 focus-within:shadow-[0_1px_0_rgba(37,99,235,0.08),0_10px_28px_rgba(37,99,235,0.10)] focus-within:ring-4 focus-within:ring-blue-50">
