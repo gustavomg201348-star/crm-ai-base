@@ -12633,7 +12633,6 @@ function Canais({
   channelStatus,
   messageLogs,
   messageLogFilters,
-  loading,
   statusLoading,
   logsLoading,
   onCreateChannel,
@@ -12789,6 +12788,24 @@ function Canais({
     setChannelFeedback(message ?? "Nao foi possivel assinar o webhook.");
   }
 
+  function getPrimaryChannelWarning(item: ChannelStatusRow) {
+    const priority = [
+      "Canal inativo.",
+      "Token ausente.",
+      "Phone Number ID ausente.",
+      "WABA ID ausente."
+    ];
+
+    return (
+      priority.find((warning) => item.warnings.includes(warning)) ??
+      (item.meta.error && item.warnings.includes(item.meta.error) ? item.meta.error : null) ??
+      item.warnings.find((warning) => warning.includes("Meta")) ??
+      item.warnings.find((warning) => warning.includes("Webhook sem assinatura")) ??
+      item.warnings[0] ??
+      ""
+    );
+  }
+
   return (
     <div className="grid gap-4 xl:grid-cols-[1fr_420px]">
       <div className="space-y-4">
@@ -12802,13 +12819,10 @@ function Canais({
             <div>
               <div className="flex items-center gap-2">
                 <Activity className="h-5 w-5 text-brand" />
-                <h3 className="text-lg font-bold">Status WhatsApp/API</h3>
+                <h3 className="text-lg font-bold">Canais</h3>
               </div>
               <p className="mt-1 text-sm text-slate-500">
-                Monitoramento rapido dos canais, webhook, token e ultima atividade.
-              </p>
-              <p className="mt-2 break-all rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500">
-                Webhook: {channelStatus?.webhookUrl ?? "Carregando..."}
+                Acompanhe canais conectados, status e pendencias de operacao.
               </p>
             </div>
             <button
@@ -12826,169 +12840,107 @@ function Canais({
             </button>
           </div>
 
-          <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            <StatusMetric
-              label="Canais"
-              value={channelStatus?.summary.total ?? channels.length}
-            />
-            <StatusMetric
-              label="Prontos"
-              value={channelStatus?.summary.ready ?? 0}
-              tone="success"
-            />
-            <StatusMetric
-              label="Alertas"
-              value={channelStatus?.summary.withWarnings ?? 0}
-              tone={channelStatus?.summary.withWarnings ? "danger" : "neutral"}
-            />
+          <div className="mt-4 flex flex-wrap gap-2 text-xs font-bold text-slate-600">
+            <span className="rounded-full border border-line bg-slate-50 px-3 py-1">
+              {channelStatus?.summary.total ?? channels.length} canal(is)
+            </span>
+            {Boolean(channelStatus?.summary.withWarnings) && (
+              <span className="rounded-full border border-rose-100 bg-rose-50 px-3 py-1 text-rose-700">
+                {channelStatus?.summary.withWarnings} com atencao
+              </span>
+            )}
           </div>
 
           <div className="mt-5 grid gap-3">
-            {(channelStatus?.channels ?? []).map((item) => (
-              <div key={item.id} className="rounded-2xl border border-line bg-slate-50/70 p-4">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span
-                        className={clsx(
-                          "h-2.5 w-2.5 rounded-full",
-                          item.ready ? "bg-emerald-500" : "bg-rose-500"
-                        )}
-                      />
-                      <p className="font-bold text-slate-950">{item.name}</p>
-                      <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-bold text-slate-500">
-                        {item.provider === "meta" ? "Meta Cloud API" : item.provider}
-                      </span>
-                      <span
-                        className={clsx(
-                          "rounded-full px-2 py-0.5 text-[11px] font-bold",
-                          item.ready
-                            ? "bg-emerald-50 text-emerald-700"
-                            : "bg-rose-50 text-rose-700"
-                        )}
-                      >
-                        {item.ready ? "Operacional" : "Atenção"}
-                      </span>
-                    </div>
-                    <p className="mt-2 text-sm text-slate-600">
-                      {item.displayPhone ?? "Telefone nao informado"} · Phone ID{" "}
-                      <span className="font-mono text-xs">
-                        {item.phoneNumberId ?? "nao informado"}
-                      </span>
-                    </p>
-                    {item.meta.verifiedName && (
-                      <p className="mt-1 text-xs text-slate-500">
-                        Nome verificado: {item.meta.verifiedName}
-                        {item.meta.qualityRating
-                          ? ` · Qualidade: ${item.meta.qualityRating}`
-                          : ""}
+            {(channelStatus?.channels ?? []).map((item) => {
+              const primaryWarning = getPrimaryChannelWarning(item);
+              const mainStatusLabel = !item.checks.active
+                ? "Inativo"
+                : item.ready
+                  ? "Operacional"
+                  : "Atencao";
+              const needsWebhookSubscription = primaryWarning.includes("Webhook sem assinatura");
+
+              return (
+                <div key={item.id} className="rounded-2xl border border-line bg-slate-50/70 p-3">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className={clsx(
+                            "h-2.5 w-2.5 rounded-full",
+                            item.ready ? "bg-emerald-500" : "bg-rose-500"
+                          )}
+                        />
+                        <p className="font-bold text-slate-950">{item.name}</p>
+                        <span
+                          className={clsx(
+                            "rounded-full px-2 py-0.5 text-[11px] font-bold",
+                            item.ready
+                              ? "bg-emerald-50 text-emerald-700"
+                              : item.checks.active
+                                ? "bg-amber-50 text-amber-700"
+                                : "bg-rose-50 text-rose-700"
+                          )}
+                        >
+                          {mainStatusLabel}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-sm text-slate-600">
+                        {item.displayPhone ?? "Telefone nao informado"}
                       </p>
-                    )}
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="grid grid-cols-2 gap-2 text-right text-xs text-slate-500">
-                      <div className="rounded-xl bg-white px-3 py-2">
-                        <p className="font-bold text-slate-900">{item.metrics.inboundCount}</p>
-                        <p>recebidas</p>
-                      </div>
-                      <div className="rounded-xl bg-white px-3 py-2">
-                        <p className="font-bold text-slate-900">{item.metrics.outboundCount}</p>
-                        <p>enviadas</p>
-                      </div>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {item.metrics.lastActivityAt
+                          ? `Ultima atividade ${formatRelativeDate(item.metrics.lastActivityAt)}`
+                          : "Sem atividade registrada"}
+                      </p>
+                      {primaryWarning && (
+                        <p className="mt-2 inline-flex rounded-full border border-amber-100 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800">
+                          {primaryWarning}
+                        </p>
+                      )}
                     </div>
-                    <button
-                      className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl border border-line bg-white px-3 text-xs font-bold text-slate-600 hover:bg-slate-50"
-                      onClick={() => setEditingChannel(findChannel(item.id))}
-                      type="button"
-                    >
-                      <Edit3 className="h-3.5 w-3.5" />
-                      Editar
-                    </button>
-                    {item.provider === "meta" && (
-                      <button
-                        className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl bg-brand px-3 text-xs font-bold text-white hover:bg-brand-strong disabled:opacity-60"
-                        disabled={subscribingChannelId === item.id}
-                        onClick={() => void handleSubscribeWebhook(item.id)}
-                        type="button"
-                      >
-                        {subscribingChannelId === item.id ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Activity className="h-3.5 w-3.5" />
-                        )}
-                        Assinar webhook
-                      </button>
-                    )}
+
+                    <div className="flex flex-wrap gap-2 lg:justify-end">
+                      {item.provider === "meta" && needsWebhookSubscription ? (
+                        <button
+                          className="inline-flex h-9 items-center justify-center gap-2 rounded-xl bg-brand px-3 text-xs font-bold text-white hover:bg-brand-strong disabled:opacity-60"
+                          disabled={subscribingChannelId === item.id}
+                          onClick={() => void handleSubscribeWebhook(item.id)}
+                          type="button"
+                        >
+                          {subscribingChannelId === item.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Activity className="h-3.5 w-3.5" />
+                          )}
+                          Assinar webhook
+                        </button>
+                      ) : (
+                        <button
+                          className="inline-flex h-9 items-center justify-center gap-2 rounded-xl bg-brand px-3 text-xs font-bold text-white hover:bg-brand-strong"
+                          onClick={() => setEditingChannel(findChannel(item.id))}
+                          type="button"
+                        >
+                          <Edit3 className="h-3.5 w-3.5" />
+                          Configurar
+                        </button>
+                      )}
+                      {needsWebhookSubscription && (
+                        <button
+                          className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-line bg-white px-3 text-xs font-bold text-slate-600 hover:bg-slate-50"
+                          onClick={() => setEditingChannel(findChannel(item.id))}
+                          type="button"
+                        >
+                          <Edit3 className="h-3.5 w-3.5" />
+                          Editar
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
-
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {[
-                    ["Ativo", item.checks.active],
-                    ["Phone ID", item.checks.phoneNumberId],
-                    ["WABA", item.checks.wabaId],
-                    ["Token", item.checks.accessToken],
-                    ["Verify token", item.checks.verifyToken],
-                    ["Webhook assinado", item.checks.webhookSubscribed],
-                    ["Mensagem real recebida", item.checks.webhookReceived],
-                    ["Meta", item.checks.metaReachable]
-                  ].map(([label, ok]) => (
-                    <StatusPill key={String(label)} label={String(label)} ok={Boolean(ok)} />
-                  ))}
-                </div>
-
-                <div className="mt-3 rounded-xl bg-white px-3 py-2 text-xs text-slate-500">
-                  <p className="font-semibold text-slate-700">Última atividade</p>
-                  {item.metrics.lastActivityAt ? (
-                    <p className="mt-1">
-                      {formatRelativeDate(item.metrics.lastActivityAt)} ·{" "}
-                      {item.metrics.lastDirection === "inbound" ? "recebida" : "enviada"} ·{" "}
-                      {formatMessagePreview(item.metrics.lastMessagePreview)}
-                    </p>
-                  ) : (
-                    <p className="mt-1">Nenhuma mensagem registrada neste canal.</p>
-                  )}
-                </div>
-
-                <div className="mt-3 grid gap-2 rounded-xl bg-white px-3 py-2 text-xs text-slate-500 md:grid-cols-3">
-                  <div>
-                    <p className="font-semibold text-slate-700">Webhook assinado</p>
-                    <p className="mt-1">
-                      {item.lastWebhookSubscribedAt
-                        ? formatRelativeDate(item.lastWebhookSubscribedAt)
-                        : "Sem registro pelo CRM."}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="font-semibold text-slate-700">Webhook recebido</p>
-                    <p className="mt-1">
-                      {item.lastWebhookReceivedAt
-                        ? formatRelativeDate(item.lastWebhookReceivedAt)
-                        : "Nenhum recebimento real."}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="font-semibold text-slate-700">Ultima mensagem no canal</p>
-                    <p className="mt-1">
-                      {item.metrics.lastActivityAt
-                        ? `${item.metrics.lastContactName ?? "Contato"} - ${
-                            item.metrics.lastContactPhone ?? "sem telefone"
-                          }`
-                        : "Nenhuma mensagem registrada."}
-                    </p>
-                  </div>
-                </div>
-
-                {item.warnings.length > 0 && (
-                  <div className="mt-3 space-y-1 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
-                    {item.warnings.map((warning) => (
-                      <p key={warning}>{warning}</p>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
+              );
+            })}
             {!statusLoading && channelStatus?.channels.length === 0 && (
               <div className="rounded-2xl border border-dashed border-line p-4 text-sm text-slate-500">
                 Nenhum canal para monitorar.
@@ -13363,115 +13315,6 @@ function Canais({
             </div>
           </form>
         </section>
-
-        <section className="rounded border border-line bg-white p-5 shadow-soft">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-bold">Canais conectados</h3>
-            <p className="text-sm text-slate-500">
-              WhatsApp Meta, sandbox, webhooks e filas de atendimento.
-            </p>
-          </div>
-          <span className="rounded border border-line px-3 py-2 text-sm text-slate-600">
-            {loading ? "Carregando..." : `${channels.length} canal(is)`}
-          </span>
-        </div>
-        <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {channels.map((channel) => (
-            <div key={channel.id} className="rounded border border-line p-4">
-              <div className="flex items-center justify-between gap-3">
-                <p className="font-semibold">{channel.name}</p>
-                <div className="flex items-center gap-2">
-                  <span
-                    className={clsx(
-                      "rounded px-2 py-1 text-xs font-semibold",
-                      channel.status === "ACTIVE"
-                        ? "bg-emerald-50 text-emerald-700"
-                        : "bg-slate-100 text-slate-600"
-                    )}
-                  >
-                    {channel.status === "ACTIVE" ? "Ativo" : channel.status}
-                  </span>
-                  <button
-                    className="inline-flex h-8 items-center gap-1.5 rounded border border-line px-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
-                    onClick={() => setEditingChannel(channel)}
-                    title="Editar canal"
-                    type="button"
-                  >
-                    <Edit3 className="h-3.5 w-3.5" />
-                    Editar
-                  </button>
-                </div>
-              </div>
-              <p className="mt-2 text-sm text-slate-600">
-                {channel.provider === "meta" ? "Meta Cloud API" : channel.provider} -{" "}
-                {channel.type}
-              </p>
-              <p className="mt-2 text-xs text-slate-500">
-                Telefone: {channel.displayPhone ?? "nao informado"}
-              </p>
-              <p className="mt-1 break-all text-xs text-slate-500">
-                Phone ID: {channel.phoneNumberId ?? channel.externalId ?? "nao informado"}
-              </p>
-              {channel.wabaId && (
-                <p className="mt-1 break-all text-xs text-slate-500">
-                  WABA: {channel.wabaId}
-                </p>
-              )}
-              <div className="mt-3 flex flex-wrap gap-2">
-                {[
-                  ["Token", channel.hasAccessToken],
-                  ["Verify", channel.hasVerifyToken],
-                  ["App secret", channel.hasAppSecret],
-                  ["Webhook", channel.lastWebhookSubscribedAt]
-                ].map(([label, enabled]) => (
-                  <span
-                    key={String(label)}
-                    className={clsx(
-                      "rounded px-2 py-1 text-xs font-semibold",
-                      enabled
-                        ? "bg-emerald-50 text-emerald-700"
-                        : "bg-slate-100 text-slate-500"
-                    )}
-                  >
-                    {label}
-                  </span>
-                ))}
-              </div>
-              {channel.lastWebhookSubscribedAt && (
-                <p className="mt-2 text-xs text-slate-500">
-                  Webhook assinado: {formatRelativeDate(channel.lastWebhookSubscribedAt)}
-                </p>
-              )}
-              {channel.lastWebhookReceivedAt && (
-                <p className="mt-1 text-xs text-slate-500">
-                  Ultimo webhook recebido: {formatRelativeDate(channel.lastWebhookReceivedAt)}
-                </p>
-              )}
-              {channel.provider === "meta" && (
-                <button
-                  className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl bg-brand px-3 text-xs font-bold text-white hover:bg-brand-strong disabled:opacity-60"
-                  disabled={subscribingChannelId === channel.id}
-                  onClick={() => void handleSubscribeWebhook(channel.id)}
-                  type="button"
-                >
-                  {subscribingChannelId === channel.id ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Activity className="h-3.5 w-3.5" />
-                  )}
-                  Assinar webhook
-                </button>
-              )}
-            </div>
-          ))}
-          {!loading && channels.length === 0 && (
-            <div className="rounded border border-dashed border-line p-4 text-sm text-slate-500">
-              Nenhum canal configurado.
-            </div>
-          )}
-        </div>
-      </section>
       </div>
 
       <section className="rounded border border-line bg-white p-5 shadow-soft">
@@ -13777,32 +13620,6 @@ function ChannelEditModal({
           </div>
         </form>
       </div>
-    </div>
-  );
-}
-
-function StatusMetric({
-  label,
-  value,
-  tone = "neutral"
-}: {
-  label: string;
-  value: number;
-  tone?: "neutral" | "success" | "danger";
-}) {
-  return (
-    <div
-      className={clsx(
-        "rounded-2xl border px-4 py-3",
-        tone === "success"
-          ? "border-emerald-100 bg-emerald-50"
-          : tone === "danger"
-            ? "border-rose-100 bg-rose-50"
-            : "border-line bg-slate-50"
-      )}
-    >
-      <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="mt-1 text-2xl font-black text-slate-950">{value}</p>
     </div>
   );
 }
