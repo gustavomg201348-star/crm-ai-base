@@ -12701,6 +12701,7 @@ function Canais({
     appSecret: ""
   });
   const [editingChannel, setEditingChannel] = useState<ChannelRow | null>(null);
+  const [isConnectChannelOpen, setIsConnectChannelOpen] = useState(false);
   const [channelFeedback, setChannelFeedback] = useState("");
   const [channelSaving, setChannelSaving] = useState(false);
   const [channelDiagnostics, setChannelDiagnostics] =
@@ -12825,19 +12826,29 @@ function Canais({
                 Acompanhe canais conectados, status e pendencias de operacao.
               </p>
             </div>
-            <button
-              type="button"
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-line px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
-              disabled={statusLoading}
-              onClick={() => void onRefreshStatus()}
-            >
-              {statusLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <RefreshCcw className="h-4 w-4" />
-              )}
-              Atualizar status
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-brand px-4 text-sm font-bold text-white shadow-sm hover:bg-brand-strong"
+                onClick={() => setIsConnectChannelOpen(true)}
+              >
+                <Plus className="h-4 w-4" />
+                Conectar canal
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-line px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+                disabled={statusLoading}
+                onClick={() => void onRefreshStatus()}
+              >
+                {statusLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCcw className="h-4 w-4" />
+                )}
+                Atualizar status
+              </button>
+            </div>
           </div>
 
           <div className="mt-4 flex flex-wrap gap-2 text-xs font-bold text-slate-600">
@@ -13119,202 +13130,6 @@ function Canais({
           </div>
         </section>
 
-        <section className="rounded border border-line bg-white p-5 shadow-soft">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-lg font-bold">Conectar WhatsApp Meta</h3>
-              <p className="text-sm text-slate-500">
-                Valide token, WABA e numero antes de ativar uma BM no CRM.
-              </p>
-            </div>
-            <Plus className="h-5 w-5 text-slate-400" />
-          </div>
-
-          <form className="mt-5 grid gap-3 lg:grid-cols-2" onSubmit={handleCreate}>
-            <ContactInput
-              placeholder="Nome do canal"
-              required
-              value={channelForm.name}
-              onChange={(value) => updateChannelForm("name", value)}
-            />
-            <ContactInput
-              placeholder="Telefone exibido"
-              value={channelForm.displayPhone}
-              onChange={(value) => updateChannelForm("displayPhone", value)}
-            />
-            <ContactInput
-              placeholder="Phone Number ID"
-              required
-              value={channelForm.phoneNumberId}
-              onChange={(value) => updateChannelForm("phoneNumberId", value)}
-            />
-            <ContactInput
-              placeholder="WABA ID"
-              required
-              value={channelForm.wabaId}
-              onChange={(value) => updateChannelForm("wabaId", value)}
-            />
-            <ContactInput
-              placeholder="Access token"
-              required
-              value={channelForm.accessToken}
-              onChange={(value) => updateChannelForm("accessToken", value)}
-            />
-            <ContactInput
-              placeholder="Verify token"
-              required
-              value={channelForm.verifyToken}
-              onChange={(value) => updateChannelForm("verifyToken", value)}
-            />
-            <ContactInput
-              placeholder="App secret"
-              value={channelForm.appSecret}
-              onChange={(value) => updateChannelForm("appSecret", value)}
-            />
-            <div className="flex gap-2">
-              <button
-                className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded border border-line px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-                disabled={
-                  channelValidating ||
-                  !channelForm.accessToken ||
-                  !channelForm.wabaId ||
-                  !channelForm.phoneNumberId
-                }
-                onClick={() => void handleValidateChannel()}
-                type="button"
-              >
-                {channelValidating ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <ShieldCheck className="h-4 w-4" />
-                )}
-                Validar integracao
-              </button>
-              <button
-                className="h-10 flex-1 rounded bg-brand px-4 text-sm font-semibold text-white disabled:opacity-50"
-                disabled={!channelDiagnostics?.ok}
-              >
-                Cadastrar canal
-              </button>
-            </div>
-
-            <div className="lg:col-span-2 rounded-2xl border border-line bg-slate-50 p-4">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-sm font-bold text-slate-900">
-                    Checklist de validacao Meta
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    O CRM nunca mostra o token completo.{" "}
-                    {channelDiagnostics?.tokenPreview
-                      ? `Token: ${channelDiagnostics.tokenPreview}`
-                      : "Valide para ver o diagnostico."}
-                  </p>
-                </div>
-                <span
-                  className={clsx(
-                    "rounded-full px-3 py-1 text-xs font-bold",
-                    channelDiagnostics?.ok
-                      ? "bg-emerald-50 text-emerald-700"
-                      : "bg-amber-50 text-amber-700"
-                  )}
-                >
-                  {channelDiagnostics?.ok ? "Pronto para cadastrar" : "Aguardando validacao"}
-                </span>
-              </div>
-
-              <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                <StatusPill
-                  label="Token valido"
-                  ok={Boolean(channelDiagnostics?.checklist.tokenValid)}
-                />
-                <StatusPill
-                  label="Permissoes conferidas"
-                  ok={Boolean(channelDiagnostics?.checklist.permissionsChecked)}
-                />
-                <StatusPill
-                  label="WABA acessivel"
-                  ok={Boolean(channelDiagnostics?.checklist.wabaAccessible)}
-                />
-                <StatusPill
-                  label="Numero encontrado"
-                  ok={Boolean(channelDiagnostics?.checklist.phoneFound)}
-                />
-                <StatusPill
-                  label="Numero pertence a WABA"
-                  ok={Boolean(channelDiagnostics?.checklist.phoneBelongsToWaba)}
-                />
-              </div>
-
-              {channelDiagnostics && (
-                <div className="mt-3 grid gap-3 text-xs text-slate-600 md:grid-cols-3">
-                  <div className="rounded-xl bg-white p-3">
-                    <p className="font-bold text-slate-900">Permissoes</p>
-                    <p className="mt-1">
-                      Detectadas:{" "}
-                      {channelDiagnostics.permissions.detected.length
-                        ? channelDiagnostics.permissions.detected.join(", ")
-                        : "nao lidas"}
-                    </p>
-                    {channelDiagnostics.permissions.missing.length > 0 && (
-                      <p className="mt-1 font-semibold text-rose-700">
-                        Faltando: {channelDiagnostics.permissions.missing.join(", ")}
-                      </p>
-                    )}
-                    {channelDiagnostics.permissions.optionalMissing.length > 0 && (
-                      <p className="mt-1 text-amber-700">
-                        Recomendada para webhook:{" "}
-                        {channelDiagnostics.permissions.optionalMissing.join(", ")}
-                      </p>
-                    )}
-                  </div>
-                  <div className="rounded-xl bg-white p-3">
-                    <p className="font-bold text-slate-900">WABA</p>
-                    <p className="mt-1 break-all">
-                      {channelDiagnostics.waba.name ?? channelDiagnostics.waba.id ?? "-"}
-                    </p>
-                    {channelDiagnostics.waba.error && (
-                      <p className="mt-1 font-semibold text-rose-700">
-                        {channelDiagnostics.waba.error}
-                      </p>
-                    )}
-                  </div>
-                  <div className="rounded-xl bg-white p-3">
-                    <p className="font-bold text-slate-900">Numero</p>
-                    <p className="mt-1">
-                      {channelDiagnostics.phone.displayPhone ??
-                        channelDiagnostics.phone.id ??
-                        "-"}
-                    </p>
-                    {channelDiagnostics.phone.verifiedName && (
-                      <p className="mt-1">
-                        Nome: {channelDiagnostics.phone.verifiedName}
-                      </p>
-                    )}
-                    {channelDiagnostics.phone.error && (
-                      <p className="mt-1 font-semibold text-rose-700">
-                        {channelDiagnostics.phone.error}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {channelValidationFeedback && (
-                <p
-                  className={clsx(
-                    "mt-3 rounded-xl px-3 py-2 text-xs font-semibold",
-                    channelDiagnostics?.ok
-                      ? "bg-emerald-50 text-emerald-700"
-                      : "bg-amber-50 text-amber-800"
-                  )}
-                >
-                  {channelValidationFeedback}
-                </p>
-              )}
-            </div>
-          </form>
-        </section>
       </div>
 
       <section className="rounded border border-line bg-white p-5 shadow-soft">
@@ -13372,6 +13187,228 @@ function Canais({
           Webhook local: <span className="font-semibold">/api/webhooks/whatsapp</span>
         </div>
       </section>
+      {isConnectChannelOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/30 px-4 py-6 backdrop-blur-sm">
+          <div className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-[1.5rem] border border-line bg-white shadow-soft">
+            <div className="flex items-start justify-between gap-4 border-b border-line/70 p-5">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-brand">
+                  Canais
+                </p>
+                <h3 className="mt-1 text-xl font-bold text-slate-950">Conectar canal</h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  Valide token, WABA e numero antes de ativar uma BM no CRM.
+                </p>
+              </div>
+              <button
+                aria-label="Fechar formulario de conexao"
+                className="grid h-9 w-9 place-items-center rounded-full border border-line bg-white text-slate-500 hover:bg-slate-50"
+                onClick={() => setIsConnectChannelOpen(false)}
+                type="button"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto p-5">
+              <form className="grid gap-3 lg:grid-cols-2" onSubmit={handleCreate}>
+                <ContactInput
+                  placeholder="Nome do canal"
+                  required
+                  value={channelForm.name}
+                  onChange={(value) => updateChannelForm("name", value)}
+                />
+                <ContactInput
+                  placeholder="Telefone exibido"
+                  value={channelForm.displayPhone}
+                  onChange={(value) => updateChannelForm("displayPhone", value)}
+                />
+                <ContactInput
+                  placeholder="Phone Number ID"
+                  required
+                  value={channelForm.phoneNumberId}
+                  onChange={(value) => updateChannelForm("phoneNumberId", value)}
+                />
+                <ContactInput
+                  placeholder="WABA ID"
+                  required
+                  value={channelForm.wabaId}
+                  onChange={(value) => updateChannelForm("wabaId", value)}
+                />
+                <ContactInput
+                  placeholder="Access token"
+                  required
+                  value={channelForm.accessToken}
+                  onChange={(value) => updateChannelForm("accessToken", value)}
+                />
+                <ContactInput
+                  placeholder="Verify token"
+                  required
+                  value={channelForm.verifyToken}
+                  onChange={(value) => updateChannelForm("verifyToken", value)}
+                />
+                <ContactInput
+                  placeholder="App secret"
+                  value={channelForm.appSecret}
+                  onChange={(value) => updateChannelForm("appSecret", value)}
+                />
+                <div className="flex gap-2">
+                  <button
+                    className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded border border-line px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                    disabled={
+                      channelValidating ||
+                      !channelForm.accessToken ||
+                      !channelForm.wabaId ||
+                      !channelForm.phoneNumberId
+                    }
+                    onClick={() => void handleValidateChannel()}
+                    type="button"
+                  >
+                    {channelValidating ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <ShieldCheck className="h-4 w-4" />
+                    )}
+                    Validar integracao
+                  </button>
+                  <button
+                    className="h-10 flex-1 rounded bg-brand px-4 text-sm font-semibold text-white disabled:opacity-50"
+                    disabled={!channelDiagnostics?.ok}
+                  >
+                    Cadastrar canal
+                  </button>
+                </div>
+
+                <div className="lg:col-span-2 rounded-2xl border border-line bg-slate-50 p-4">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-bold text-slate-900">
+                        Checklist de validacao Meta
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        O CRM nunca mostra o token completo.{" "}
+                        {channelDiagnostics?.tokenPreview
+                          ? `Token: ${channelDiagnostics.tokenPreview}`
+                          : "Valide para ver o diagnostico."}
+                      </p>
+                    </div>
+                    <span
+                      className={clsx(
+                        "rounded-full px-3 py-1 text-xs font-bold",
+                        channelDiagnostics?.ok
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-amber-50 text-amber-700"
+                      )}
+                    >
+                      {channelDiagnostics?.ok ? "Pronto para cadastrar" : "Aguardando validacao"}
+                    </span>
+                  </div>
+
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    <StatusPill
+                      label="Token valido"
+                      ok={Boolean(channelDiagnostics?.checklist.tokenValid)}
+                    />
+                    <StatusPill
+                      label="Permissoes conferidas"
+                      ok={Boolean(channelDiagnostics?.checklist.permissionsChecked)}
+                    />
+                    <StatusPill
+                      label="WABA acessivel"
+                      ok={Boolean(channelDiagnostics?.checklist.wabaAccessible)}
+                    />
+                    <StatusPill
+                      label="Numero encontrado"
+                      ok={Boolean(channelDiagnostics?.checklist.phoneFound)}
+                    />
+                    <StatusPill
+                      label="Numero pertence a WABA"
+                      ok={Boolean(channelDiagnostics?.checklist.phoneBelongsToWaba)}
+                    />
+                  </div>
+
+                  {channelDiagnostics && (
+                    <div className="mt-3 grid gap-3 text-xs text-slate-600 md:grid-cols-3">
+                      <div className="rounded-xl bg-white p-3">
+                        <p className="font-bold text-slate-900">Permissoes</p>
+                        <p className="mt-1">
+                          Detectadas:{" "}
+                          {channelDiagnostics.permissions.detected.length
+                            ? channelDiagnostics.permissions.detected.join(", ")
+                            : "nao lidas"}
+                        </p>
+                        {channelDiagnostics.permissions.missing.length > 0 && (
+                          <p className="mt-1 font-semibold text-rose-700">
+                            Faltando: {channelDiagnostics.permissions.missing.join(", ")}
+                          </p>
+                        )}
+                        {channelDiagnostics.permissions.optionalMissing.length > 0 && (
+                          <p className="mt-1 text-amber-700">
+                            Recomendada para webhook:{" "}
+                            {channelDiagnostics.permissions.optionalMissing.join(", ")}
+                          </p>
+                        )}
+                      </div>
+                      <div className="rounded-xl bg-white p-3">
+                        <p className="font-bold text-slate-900">WABA</p>
+                        <p className="mt-1 break-all">
+                          {channelDiagnostics.waba.name ?? channelDiagnostics.waba.id ?? "-"}
+                        </p>
+                        {channelDiagnostics.waba.error && (
+                          <p className="mt-1 font-semibold text-rose-700">
+                            {channelDiagnostics.waba.error}
+                          </p>
+                        )}
+                      </div>
+                      <div className="rounded-xl bg-white p-3">
+                        <p className="font-bold text-slate-900">Numero</p>
+                        <p className="mt-1">
+                          {channelDiagnostics.phone.displayPhone ??
+                            channelDiagnostics.phone.id ??
+                            "-"}
+                        </p>
+                        {channelDiagnostics.phone.verifiedName && (
+                          <p className="mt-1">
+                            Nome: {channelDiagnostics.phone.verifiedName}
+                          </p>
+                        )}
+                        {channelDiagnostics.phone.error && (
+                          <p className="mt-1 font-semibold text-rose-700">
+                            {channelDiagnostics.phone.error}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {channelValidationFeedback && (
+                    <p
+                      className={clsx(
+                        "mt-3 rounded-xl px-3 py-2 text-xs font-semibold",
+                        channelDiagnostics?.ok
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-amber-50 text-amber-800"
+                      )}
+                    >
+                      {channelValidationFeedback}
+                    </p>
+                  )}
+                </div>
+              </form>
+            </div>
+
+            <div className="flex justify-end border-t border-line/70 p-5">
+              <button
+                className="h-10 rounded-full border border-line bg-white px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                onClick={() => setIsConnectChannelOpen(false)}
+                type="button"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {editingChannel && (
         <ChannelEditModal
           channel={editingChannel}
