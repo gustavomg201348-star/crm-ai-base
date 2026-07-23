@@ -12702,6 +12702,7 @@ function Canais({
   });
   const [editingChannel, setEditingChannel] = useState<ChannelRow | null>(null);
   const [isConnectChannelOpen, setIsConnectChannelOpen] = useState(false);
+  const [areLogsOpen, setAreLogsOpen] = useState(false);
   const [channelFeedback, setChannelFeedback] = useState("");
   const [channelSaving, setChannelSaving] = useState(false);
   const [channelDiagnostics, setChannelDiagnostics] =
@@ -12837,6 +12838,13 @@ function Canais({
               </button>
               <button
                 type="button"
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-line px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                onClick={() => setAreLogsOpen((current) => !current)}
+              >
+                {areLogsOpen ? "Ocultar logs" : "Ver logs"}
+              </button>
+              <button
+                type="button"
                 className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-line px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
                 disabled={statusLoading}
                 onClick={() => void onRefreshStatus()}
@@ -12965,170 +12973,172 @@ function Canais({
           </div>
         </section>
 
-        <section className="rounded border border-line bg-white p-5 shadow-soft">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h3 className="text-lg font-bold">Logs de mensagens WhatsApp</h3>
-              <p className="text-sm text-slate-500">
-                Últimos envios, status retornado pela Meta e falhas registradas.
-              </p>
-            </div>
-            <button
-              type="button"
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-line px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
-              disabled={logsLoading}
-              onClick={() => void onRefreshLogs()}
-            >
-              {logsLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <RefreshCcw className="h-4 w-4" />
-              )}
-              Atualizar logs
-            </button>
-          </div>
-
-          <div className="mt-4 grid gap-3 md:grid-cols-4">
-            <label className="text-xs font-bold uppercase text-slate-500">
-              Canal
-              <select
-                className="mt-2 h-10 w-full rounded-2xl border border-line bg-white px-3 text-sm font-semibold normal-case text-slate-700 outline-none focus:border-primary"
-                value={messageLogFilters.channelId}
-                onChange={(event) =>
-                  onMessageLogFiltersChange({
-                    ...messageLogFilters,
-                    channelId: event.target.value
-                  })
-                }
-              >
-                <option value="">Todos os canais</option>
-                {channels
-                  .filter((channel) => channel.type === "whatsapp")
-                  .map((channel) => (
-                    <option key={channel.id} value={channel.id}>
-                      {channel.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
-
-            <label className="text-xs font-bold uppercase text-slate-500">
-              Status
-              <select
-                className="mt-2 h-10 w-full rounded-2xl border border-line bg-white px-3 text-sm font-semibold normal-case text-slate-700 outline-none focus:border-primary"
-                value={messageLogFilters.status}
-                onChange={(event) =>
-                  onMessageLogFiltersChange({
-                    ...messageLogFilters,
-                    status: event.target.value
-                  })
-                }
-              >
-                <option value="ALL">Todos os status</option>
-                <option value="sent">Enviado</option>
-                <option value="delivered">Entregue</option>
-                <option value="read">Lido</option>
-                <option value="failed">Erro/Falha</option>
-              </select>
-            </label>
-
-            <label className="text-xs font-bold uppercase text-slate-500">
-              Tipo
-              <select
-                className="mt-2 h-10 w-full rounded-2xl border border-line bg-white px-3 text-sm font-semibold normal-case text-slate-700 outline-none focus:border-primary"
-                value={messageLogFilters.type}
-                onChange={(event) =>
-                  onMessageLogFiltersChange({
-                    ...messageLogFilters,
-                    type: event.target.value
-                  })
-                }
-              >
-                <option value="ALL">Todos os tipos</option>
-                <option value="text">Texto</option>
-                <option value="image">Imagem</option>
-                <option value="audio">Audio</option>
-                <option value="document">Documento</option>
-                <option value="video">Video</option>
-                <option value="template">Template</option>
-              </select>
-            </label>
-
-            <div className="flex items-end">
+        {areLogsOpen && (
+          <section className="rounded border border-line bg-white p-5 shadow-soft">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="text-lg font-bold">Logs de mensagens WhatsApp</h3>
+                <p className="text-sm text-slate-500">
+                  Últimos envios, status retornado pela Meta e falhas registradas.
+                </p>
+              </div>
               <button
                 type="button"
-                className="h-10 w-full rounded-2xl border border-line px-4 text-sm font-bold text-slate-600 hover:bg-slate-50"
-                onClick={() =>
-                  onMessageLogFiltersChange({
-                    channelId: "",
-                    status: "ALL",
-                    type: "ALL"
-                  })
-                }
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-line px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+                disabled={logsLoading}
+                onClick={() => void onRefreshLogs()}
               >
-                Limpar filtros
+                {logsLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCcw className="h-4 w-4" />
+                )}
+                Atualizar logs
               </button>
             </div>
-          </div>
 
-          <div className="mt-4 overflow-hidden rounded-2xl border border-line">
-            <div className="grid grid-cols-[1.3fr_0.8fr_0.8fr_0.7fr] gap-3 bg-slate-50 px-4 py-3 text-xs font-bold uppercase text-slate-500">
-              <span>Cliente</span>
-              <span>Tipo</span>
-              <span>Status</span>
-              <span className="text-right">Hora</span>
-            </div>
-            <div className="scrollbar-thin max-h-[360px] divide-y divide-line/70 overflow-y-auto overscroll-contain [scrollbar-color:#CBD5E1_transparent]">
-              {messageLogs.map((log) => (
-                <div
-                  key={log.id}
-                  className="grid grid-cols-[1.3fr_0.8fr_0.8fr_0.7fr] gap-3 px-4 py-3 text-sm"
+            <div className="mt-4 grid gap-3 md:grid-cols-4">
+              <label className="text-xs font-bold uppercase text-slate-500">
+                Canal
+                <select
+                  className="mt-2 h-10 w-full rounded-2xl border border-line bg-white px-3 text-sm font-semibold normal-case text-slate-700 outline-none focus:border-primary"
+                  value={messageLogFilters.channelId}
+                  onChange={(event) =>
+                    onMessageLogFiltersChange({
+                      ...messageLogFilters,
+                      channelId: event.target.value
+                    })
+                  }
                 >
-                  <div className="min-w-0">
-                    <p className="truncate font-semibold text-slate-900">
-                      {log.contact.name}
-                    </p>
-                    <p className="truncate text-xs text-slate-500">
-                      {log.contact.phone} · {formatMessagePreview(log.body)}
-                    </p>
-                    {log.providerMessageId && (
-                      <p className="mt-1 truncate font-mono text-[10px] text-slate-400">
-                        {log.providerMessageId}
+                  <option value="">Todos os canais</option>
+                  {channels
+                    .filter((channel) => channel.type === "whatsapp")
+                    .map((channel) => (
+                      <option key={channel.id} value={channel.id}>
+                        {channel.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+
+              <label className="text-xs font-bold uppercase text-slate-500">
+                Status
+                <select
+                  className="mt-2 h-10 w-full rounded-2xl border border-line bg-white px-3 text-sm font-semibold normal-case text-slate-700 outline-none focus:border-primary"
+                  value={messageLogFilters.status}
+                  onChange={(event) =>
+                    onMessageLogFiltersChange({
+                      ...messageLogFilters,
+                      status: event.target.value
+                    })
+                  }
+                >
+                  <option value="ALL">Todos os status</option>
+                  <option value="sent">Enviado</option>
+                  <option value="delivered">Entregue</option>
+                  <option value="read">Lido</option>
+                  <option value="failed">Erro/Falha</option>
+                </select>
+              </label>
+
+              <label className="text-xs font-bold uppercase text-slate-500">
+                Tipo
+                <select
+                  className="mt-2 h-10 w-full rounded-2xl border border-line bg-white px-3 text-sm font-semibold normal-case text-slate-700 outline-none focus:border-primary"
+                  value={messageLogFilters.type}
+                  onChange={(event) =>
+                    onMessageLogFiltersChange({
+                      ...messageLogFilters,
+                      type: event.target.value
+                    })
+                  }
+                >
+                  <option value="ALL">Todos os tipos</option>
+                  <option value="text">Texto</option>
+                  <option value="image">Imagem</option>
+                  <option value="audio">Audio</option>
+                  <option value="document">Documento</option>
+                  <option value="video">Video</option>
+                  <option value="template">Template</option>
+                </select>
+              </label>
+
+              <div className="flex items-end">
+                <button
+                  type="button"
+                  className="h-10 w-full rounded-2xl border border-line px-4 text-sm font-bold text-slate-600 hover:bg-slate-50"
+                  onClick={() =>
+                    onMessageLogFiltersChange({
+                      channelId: "",
+                      status: "ALL",
+                      type: "ALL"
+                    })
+                  }
+                >
+                  Limpar filtros
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4 overflow-hidden rounded-2xl border border-line">
+              <div className="grid grid-cols-[1.3fr_0.8fr_0.8fr_0.7fr] gap-3 bg-slate-50 px-4 py-3 text-xs font-bold uppercase text-slate-500">
+                <span>Cliente</span>
+                <span>Tipo</span>
+                <span>Status</span>
+                <span className="text-right">Hora</span>
+              </div>
+              <div className="scrollbar-thin max-h-[360px] divide-y divide-line/70 overflow-y-auto overscroll-contain [scrollbar-color:#CBD5E1_transparent]">
+                {messageLogs.map((log) => (
+                  <div
+                    key={log.id}
+                    className="grid grid-cols-[1.3fr_0.8fr_0.8fr_0.7fr] gap-3 px-4 py-3 text-sm"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold text-slate-900">
+                        {log.contact.name}
                       </p>
+                      <p className="truncate text-xs text-slate-500">
+                        {log.contact.phone} · {formatMessagePreview(log.body)}
+                      </p>
+                      {log.providerMessageId && (
+                        <p className="mt-1 truncate font-mono text-[10px] text-slate-400">
+                          {log.providerMessageId}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex items-start">
+                      <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">
+                        {messageTypeLabel(log.type)}
+                      </span>
+                    </div>
+                    <div className="flex items-start">
+                      <MessageStatusBadge status={log.status} />
+                    </div>
+                    <p className="text-right text-xs text-slate-500">
+                      {formatRelativeDate(log.createdAt)}
+                    </p>
+                    {resolveMessageLogError(log) && (
+                      <div className="col-span-full rounded-2xl border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">
+                        <span className="font-bold">Erro:</span>{" "}
+                        {resolveMessageLogError(log)}
+                      </div>
                     )}
                   </div>
-                  <div className="flex items-start">
-                    <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">
-                      {messageTypeLabel(log.type)}
-                    </span>
+                ))}
+                {!logsLoading && messageLogs.length === 0 && (
+                  <div className="px-4 py-8 text-center text-sm text-slate-500">
+                    Nenhum envio registrado ainda.
                   </div>
-                  <div className="flex items-start">
-                    <MessageStatusBadge status={log.status} />
+                )}
+                {logsLoading && (
+                  <div className="px-4 py-8 text-center text-sm text-slate-500">
+                    Carregando logs...
                   </div>
-                  <p className="text-right text-xs text-slate-500">
-                    {formatRelativeDate(log.createdAt)}
-                  </p>
-                  {resolveMessageLogError(log) && (
-                    <div className="col-span-full rounded-2xl border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">
-                      <span className="font-bold">Erro:</span>{" "}
-                      {resolveMessageLogError(log)}
-                    </div>
-                  )}
-                </div>
-              ))}
-              {!logsLoading && messageLogs.length === 0 && (
-                <div className="px-4 py-8 text-center text-sm text-slate-500">
-                  Nenhum envio registrado ainda.
-                </div>
-              )}
-              {logsLoading && (
-                <div className="px-4 py-8 text-center text-sm text-slate-500">
-                  Carregando logs...
-                </div>
-              )}
+                )}
+              </div>
             </div>
-          </div>
-        </section>
+          </section>
+        )}
 
       </div>
 
