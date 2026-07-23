@@ -6303,6 +6303,7 @@ function Atendimento({
   const [composerError, setComposerError] = useState("");
   const [sendingMessage, setSendingMessage] = useState(false);
   const [sendingAttachment, setSendingAttachment] = useState(false);
+  const [retryingMessageId, setRetryingMessageId] = useState<string | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [quickRepliesOpen, setQuickRepliesOpen] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
@@ -6435,6 +6436,38 @@ function Atendimento({
 
       return next;
     });
+  }
+
+  function getRetryableFailedTextBody(message: ConversationMessageRow) {
+    const type = message.type?.trim().toLowerCase() ?? "text";
+    const status = message.status?.trim().toLowerCase();
+
+    if (message.direction !== "outbound" || status !== "failed" || type !== "text") {
+      return null;
+    }
+
+    const failureSuffixIndex = message.body.lastIndexOf("\n\nFalha:");
+    const originalBody =
+      failureSuffixIndex >= 0 ? message.body.slice(0, failureSuffixIndex) : message.body;
+    const trimmedBody = originalBody.trim();
+
+    return trimmedBody || null;
+  }
+
+  async function retryFailedTextMessage(message: ConversationMessageRow) {
+    if (!selectedConversation || retryingMessageId) return;
+
+    const conversationId = selectedConversation.id;
+    const originalBody = getRetryableFailedTextBody(message);
+
+    if (!originalBody) return;
+
+    setRetryingMessageId(message.id);
+    try {
+      await onSendMessage(conversationId, originalBody);
+    } finally {
+      setRetryingMessageId((current) => (current === message.id ? null : current));
+    }
   }
 
   function insertEmoji(emoji: string) {
@@ -7095,6 +7128,8 @@ function Atendimento({
             const side = item.direction === "outbound" ? "right" : "left";
             const timelineEvent = getMessageTimelineEvent(item);
             const previousMessage = messages[index - 1] ?? null;
+            const retryableTextBody = getRetryableFailedTextBody(item);
+            const isRetryingMessage = retryingMessageId === item.id;
 
             return (
               <div key={item.id} className="space-y-3">
@@ -7154,6 +7189,22 @@ function Atendimento({
                     item.body
                   )}
                 </ChatBubble>
+                {retryableTextBody && (
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      aria-label="Tentar enviar novamente esta mensagem"
+                      className="inline-flex items-center gap-1.5 rounded-full border border-rose-100 bg-white px-3 py-1 text-[11px] font-bold text-rose-600 shadow-sm transition hover:border-rose-200 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={isRetryingMessage}
+                      onClick={() => void retryFailedTextMessage(item)}
+                    >
+                      {isRetryingMessage && (
+                        <Loader2 aria-hidden="true" className="h-3 w-3 animate-spin" />
+                      )}
+                      {isRetryingMessage ? "Tentando..." : "Tentar novamente"}
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })}
