@@ -12703,6 +12703,7 @@ function Canais({
   const [editingChannel, setEditingChannel] = useState<ChannelRow | null>(null);
   const [isConnectChannelOpen, setIsConnectChannelOpen] = useState(false);
   const [areLogsOpen, setAreLogsOpen] = useState(false);
+  const [areTechnicalToolsOpen, setAreTechnicalToolsOpen] = useState(false);
   const [channelFeedback, setChannelFeedback] = useState("");
   const [channelSaving, setChannelSaving] = useState(false);
   const [channelDiagnostics, setChannelDiagnostics] =
@@ -12842,6 +12843,13 @@ function Canais({
                 onClick={() => setAreLogsOpen((current) => !current)}
               >
                 {areLogsOpen ? "Ocultar logs" : "Ver logs"}
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-line px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                onClick={() => setAreTechnicalToolsOpen((current) => !current)}
+              >
+                {areTechnicalToolsOpen ? "Ocultar ferramentas" : "Ferramentas tecnicas"}
               </button>
               <button
                 type="button"
@@ -13142,61 +13150,63 @@ function Canais({
 
       </div>
 
-      <section className="rounded border border-line bg-white p-5 shadow-soft">
-        <div className="flex items-center gap-2">
-          <MessageSquareText className="h-5 w-5 text-brand" />
-          <h3 className="font-bold">Simular WhatsApp recebido</h3>
-        </div>
-        <p className="mt-2 text-sm text-slate-500">
-          A mensagem entra pelo mesmo fluxo do webhook e aparece no Atendimento.
-        </p>
+      {areTechnicalToolsOpen && (
+        <section className="rounded border border-line bg-white p-5 shadow-soft">
+          <div className="flex items-center gap-2">
+            <MessageSquareText className="h-5 w-5 text-brand" />
+            <h3 className="font-bold">Simular WhatsApp recebido</h3>
+          </div>
+          <p className="mt-2 text-sm text-slate-500">
+            A mensagem entra pelo mesmo fluxo do webhook e aparece no Atendimento.
+          </p>
 
-        <form className="mt-5 space-y-3" onSubmit={handleSubmit}>
-          <select
-            className="h-10 w-full rounded border border-line px-3 outline-none"
-            value={selectedChannelId}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, channelId: event.target.value }))
-            }
-          >
-            {channels.map((channel) => (
-              <option key={channel.id} value={channel.id}>
-                {channel.name}
-              </option>
-            ))}
-          </select>
-          <ContactInput
-            placeholder="Nome"
-            value={form.name}
-            onChange={(value) => setForm((current) => ({ ...current, name: value }))}
-          />
-          <ContactInput
-            placeholder="Telefone"
-            required
-            value={form.phone}
-            onChange={(value) => setForm((current) => ({ ...current, phone: value }))}
-          />
-          <textarea
-            className="min-h-28 w-full rounded border border-line p-3 text-sm outline-none"
-            required
-            value={form.message}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, message: event.target.value }))
-            }
-            placeholder="Mensagem recebida"
-          />
-          <button
-            className="h-10 w-full rounded bg-brand px-4 text-sm font-semibold text-white disabled:opacity-50"
-            disabled={!selectedChannelId}
-          >
-            Receber mensagem sandbox
-          </button>
-        </form>
+          <form className="mt-5 space-y-3" onSubmit={handleSubmit}>
+            <select
+              className="h-10 w-full rounded border border-line px-3 outline-none"
+              value={selectedChannelId}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, channelId: event.target.value }))
+              }
+            >
+              {channels.map((channel) => (
+                <option key={channel.id} value={channel.id}>
+                  {channel.name}
+                </option>
+              ))}
+            </select>
+            <ContactInput
+              placeholder="Nome"
+              value={form.name}
+              onChange={(value) => setForm((current) => ({ ...current, name: value }))}
+            />
+            <ContactInput
+              placeholder="Telefone"
+              required
+              value={form.phone}
+              onChange={(value) => setForm((current) => ({ ...current, phone: value }))}
+            />
+            <textarea
+              className="min-h-28 w-full rounded border border-line p-3 text-sm outline-none"
+              required
+              value={form.message}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, message: event.target.value }))
+              }
+              placeholder="Mensagem recebida"
+            />
+            <button
+              className="h-10 w-full rounded bg-brand px-4 text-sm font-semibold text-white disabled:opacity-50"
+              disabled={!selectedChannelId}
+            >
+              Receber mensagem sandbox
+            </button>
+          </form>
 
-        <div className="mt-5 rounded border border-line bg-slate-50 p-3 text-xs text-slate-600">
-          Webhook local: <span className="font-semibold">/api/webhooks/whatsapp</span>
-        </div>
-      </section>
+          <div className="mt-5 rounded border border-line bg-slate-50 p-3 text-xs text-slate-600">
+            Webhook local: <span className="font-semibold">/api/webhooks/whatsapp</span>
+          </div>
+        </section>
+      )}
       {isConnectChannelOpen && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/30 px-4 py-6 backdrop-blur-sm">
           <div className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-[1.5rem] border border-line bg-white shadow-soft">
