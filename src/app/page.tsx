@@ -1689,6 +1689,7 @@ export default function Home() {
   const [retirementLoading, setRetirementLoading] = useState(false);
   const [appError, setAppError] = useState("");
   const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   useEffect(() => {
     selectedConversationRef.current = selectedConversation?.id ?? null;
@@ -1732,6 +1733,22 @@ export default function Home() {
       String(leftSidebarCollapsed)
     );
   }, [leftSidebarCollapsed]);
+
+  useEffect(() => {
+    if (!mobileSidebarOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMobileSidebarOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [mobileSidebarOpen]);
 
   const pageTitle = useMemo(() => {
     return navItems.find((item) => item.id === active)?.label ?? "Dashboard";
@@ -4223,6 +4240,148 @@ export default function Home() {
         </div>
       </aside>
 
+      {mobileSidebarOpen && (
+        <div className="fixed inset-0 z-50 xl:hidden">
+          <button
+            type="button"
+            aria-label="Fechar menu"
+            className="absolute inset-0 bg-slate-950/40 backdrop-blur-sm"
+            onClick={() => setMobileSidebarOpen(false)}
+          />
+          <aside className="relative z-10 flex h-[100dvh] w-72 max-w-[85vw] flex-col border-r border-line/80 bg-white shadow-soft">
+            <div className="flex h-20 shrink-0 items-center gap-3 px-5">
+              <div className="grid h-10 w-10 place-items-center rounded-2xl bg-brand text-sm font-bold text-white shadow-soft">
+                AI
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-brand">
+                  CRM
+                </p>
+                <h1 className="truncate text-[15px] font-bold text-slate-950">
+                  Operacao Inteligente
+                </h1>
+              </div>
+              <button
+                type="button"
+                aria-label="Fechar menu"
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-line text-slate-500 transition hover:bg-slate-50 hover:text-slate-800"
+                onClick={() => setMobileSidebarOpen(false)}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mx-4 shrink-0 rounded-2xl border border-line/80 bg-slate-50/80 p-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                Workspace
+              </p>
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-slate-900">
+                    {session.company.name}
+                  </p>
+                  <p className="truncate text-xs text-slate-500">
+                    {session.company.segment ?? "Credito consignado"}
+                  </p>
+                </div>
+                <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
+              </div>
+            </div>
+
+            <nav className="mt-5 min-h-0 flex-1 space-y-1 overflow-y-auto px-3 pr-2 pb-4 [scrollbar-color:#CBD5E1_transparent] [scrollbar-width:thin]">
+              <p className="px-3 pb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">
+                Navegacao
+              </p>
+              {visibleNavItems.map((item) => {
+                const Icon = item.icon;
+                const itemCount =
+                  item.id === "atendimento"
+                    ? atendimentoUnread
+                    : "count" in item && typeof item.count === "number"
+                      ? item.count
+                      : 0;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={clsx(
+                      "group relative flex h-10 w-full items-center justify-between rounded-xl px-3 text-left text-sm font-medium transition-colors",
+                      active === item.id
+                        ? "bg-blue-50 text-brand shadow-[inset_0_0_0_1px_rgba(37,99,235,0.10)]"
+                        : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"
+                    )}
+                    onClick={() => {
+                      setActive(item.id);
+                      setMobileSidebarOpen(false);
+                    }}
+                  >
+                    <span className="flex items-center gap-3">
+                      <Icon
+                        className={clsx(
+                          "h-4 w-4",
+                          active === item.id
+                            ? "text-brand"
+                            : "text-slate-400 group-hover:text-slate-600"
+                        )}
+                      />
+                      {item.label}
+                    </span>
+                    {itemCount > 0 && (
+                      <span className="rounded-full bg-rose-500 px-2 py-0.5 text-[11px] font-bold text-white">
+                        {itemCount > 99 ? "99+" : itemCount}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </nav>
+
+            <div className="shrink-0 space-y-3 border-t border-line/70 p-4">
+              {userCanManageOperation(session) && (
+                <button
+                  className={clsx(
+                    "flex h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-semibold transition-colors",
+                    active === "tags"
+                      ? "bg-blue-50 text-brand shadow-[inset_0_0_0_1px_rgba(37,99,235,0.10)]"
+                      : "bg-white text-slate-600 ring-1 ring-line hover:bg-slate-50 hover:text-slate-950"
+                  )}
+                  onClick={() => {
+                    setActive("tags");
+                    setMobileSidebarOpen(false);
+                  }}
+                  type="button"
+                >
+                  <Tags className={clsx("h-4 w-4", active === "tags" ? "text-brand" : "text-slate-400")} />
+                  Gerenciar tags
+                </button>
+              )}
+              <div className="rounded-2xl bg-gradient-to-br from-blue-50 to-white p-3 ring-1 ring-blue-100">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-brand" />
+                  <p className="text-xs font-bold uppercase tracking-wide text-brand">
+                    IA ativa
+                  </p>
+                </div>
+                <p className="mt-2 text-sm leading-5 text-slate-600">
+                  Correspondente bancario com foco em FGTS, CLT e INSS.
+                </p>
+              </div>
+              <div className="flex items-center gap-3 rounded-2xl p-2 hover:bg-slate-50">
+                <div className="grid h-9 w-9 place-items-center rounded-full bg-slate-900 text-xs font-bold text-white">
+                  {session.user.name.slice(0, 1).toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-slate-900">
+                    {session.user.name}
+                  </p>
+                  <p className="truncate text-xs text-slate-500">{session.user.role}</p>
+                </div>
+              </div>
+            </div>
+          </aside>
+        </div>
+      )}
+
       <section
         className={clsx(
           "transition-[padding-left] duration-300 ease-out",
@@ -4232,7 +4391,12 @@ export default function Home() {
       >
         <header className="sticky top-0 z-10 flex min-h-20 shrink-0 items-center justify-between border-b border-line/70 bg-white/90 px-4 backdrop-blur-xl md:px-8">
           <div className="flex min-w-0 items-center gap-4">
-            <button className="grid h-10 w-10 place-items-center rounded-xl border border-line bg-white text-slate-600 shadow-sm xl:hidden">
+            <button
+              type="button"
+              aria-label="Abrir menu"
+              className="grid h-10 w-10 place-items-center rounded-xl border border-line bg-white text-slate-600 shadow-sm xl:hidden"
+              onClick={() => setMobileSidebarOpen(true)}
+            >
               <Menu className="h-5 w-5" />
             </button>
             <div className="min-w-0">
