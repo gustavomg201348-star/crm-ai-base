@@ -6508,6 +6508,7 @@ function Atendimento({
   const [recording, setRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [aiSidebarCollapsed, setAiSidebarCollapsed] = useState(false);
+  const [mobileConversationOpen, setMobileConversationOpen] = useState(false);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -6524,6 +6525,12 @@ function Atendimento({
   useEffect(() => {
     setFollowUpSuccess("");
   }, [selectedConversation?.id]);
+
+  useEffect(() => {
+    if (!selectedConversation) {
+      setMobileConversationOpen(false);
+    }
+  }, [selectedConversation]);
 
   useEffect(() => {
     const conversationId = selectedConversation?.id ?? null;
@@ -6821,6 +6828,13 @@ function Atendimento({
         : "Canal não informado"
     : null;
 
+  const showMobileConversationDetail = mobileConversationOpen && Boolean(selectedConversation);
+
+  function selectConversation(conversation: ConversationRow) {
+    onSelectConversation(conversation);
+    setMobileConversationOpen(true);
+  }
+
   async function submitTransfer(userId: string) {
     if (!selectedConversation) return;
     setTransferSaving(true);
@@ -7086,24 +7100,41 @@ function Atendimento({
           }
         />
       )}
-      <ConversationList
-        conversations={conversations}
-        statusCounts={statusCounts}
-        filters={filters}
-        availableTags={availableTags}
-        attendants={attendants}
-        isAdmin={isAdmin}
-        loading={loading}
-        selectedConversation={selectedConversation}
-        highlightedConversationId={highlightedConversationId}
-        onFiltersChange={onFiltersChange}
-        onSearchSettlingChange={onSearchSettlingChange}
-        onSelectConversation={onSelectConversation}
-      />
+      <div className={clsx(showMobileConversationDetail ? "hidden xl:contents" : "contents")}>
+        <ConversationList
+          conversations={conversations}
+          statusCounts={statusCounts}
+          filters={filters}
+          availableTags={availableTags}
+          attendants={attendants}
+          isAdmin={isAdmin}
+          loading={loading}
+          selectedConversation={selectedConversation}
+          highlightedConversationId={highlightedConversationId}
+          onFiltersChange={onFiltersChange}
+          onSearchSettlingChange={onSearchSettlingChange}
+          onSelectConversation={selectConversation}
+        />
+      </div>
 
-      <section className="flex min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-line/80 bg-white shadow-soft">
+      <section
+        className={clsx(
+          "min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-line/80 bg-white shadow-soft",
+          showMobileConversationDetail ? "flex" : "hidden xl:flex"
+        )}
+      >
         <div className="flex min-h-16 shrink-0 flex-col gap-2 border-b border-line/70 px-4 py-2 md:px-5">
           <div className="flex min-w-0 items-center gap-2">
+            {selectedConversation && (
+              <button
+                type="button"
+                className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-line bg-white px-3 text-sm font-semibold text-slate-600 shadow-sm hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 xl:hidden"
+                onClick={() => setMobileConversationOpen(false)}
+              >
+                <ArrowRight className="h-4 w-4 rotate-180" />
+                Voltar
+              </button>
+            )}
             <div className="relative grid h-10 w-10 place-items-center rounded-full bg-slate-50 text-sm font-black text-slate-700 shadow-sm ring-1 ring-slate-200">
               {formatContactNameForUi(selectedConversation?.contact.name)
                 .slice(0, 1)
@@ -7651,7 +7682,7 @@ function Atendimento({
 
       <section
         className={clsx(
-          "min-h-0 overflow-hidden transition-all duration-300 ease-out",
+          "hidden min-h-0 overflow-hidden transition-all duration-300 ease-out xl:block",
           aiSidebarCollapsed
             ? "rounded-[1.5rem] border border-line/80 bg-white p-2 shadow-soft"
             : "space-y-4 overflow-y-auto overscroll-contain pr-1"
