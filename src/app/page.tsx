@@ -6349,6 +6349,8 @@ function Atendimento({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<number | null>(null);
+  const draftsByConversationRef = useRef<Record<string, string>>({});
+  const selectedConversationIdRef = useRef<string | null>(selectedConversation?.id ?? null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ block: "end" });
@@ -6356,6 +6358,12 @@ function Atendimento({
 
   useEffect(() => {
     setFollowUpSuccess("");
+  }, [selectedConversation?.id]);
+
+  useEffect(() => {
+    const conversationId = selectedConversation?.id ?? null;
+    selectedConversationIdRef.current = conversationId;
+    setMessage(conversationId ? draftsByConversationRef.current[conversationId] ?? "" : "");
   }, [selectedConversation?.id]);
 
   useEffect(() => {
@@ -6398,22 +6406,46 @@ function Atendimento({
     try {
       const sent = await onSendMessage(conversationId, messageToSend);
       if (sent) {
-        setMessage((current) => (current === messageToSend ? "" : current));
+        if (draftsByConversationRef.current[conversationId] === messageToSend) {
+          delete draftsByConversationRef.current[conversationId];
+        }
+        setMessage((current) =>
+          selectedConversationIdRef.current === conversationId && current === messageToSend
+            ? ""
+            : current
+        );
       }
     } finally {
       setSendingMessage(false);
     }
   }
 
+  function updateComposerMessage(value: string | ((current: string) => string)) {
+    setMessage((current) => {
+      const next = typeof value === "function" ? value(current) : value;
+      const conversationId = selectedConversationIdRef.current;
+
+      if (conversationId) {
+        if (next) {
+          draftsByConversationRef.current[conversationId] = next;
+        } else {
+          delete draftsByConversationRef.current[conversationId];
+        }
+      }
+
+      return next;
+    });
+  }
+
   function insertEmoji(emoji: string) {
-    setMessage((current) => `${current}${emoji}`);
+    updateComposerMessage((current) => `${current}${emoji}`);
     setEmojiOpen(false);
     setQuickRepliesOpen(false);
     window.setTimeout(() => inputRef.current?.focus(), 0);
   }
 
   function insertQuickReply(body: string) {
-    setMessage((current) => {
+    updateComposerMessage((current) => {
       const trimmed = current.trim();
       return trimmed ? `${trimmed}\n${body}` : body;
     });
@@ -7378,7 +7410,7 @@ function Atendimento({
               placeholder="Digite uma mensagem..."
               rows={1}
               value={message}
-              onChange={(event) => setMessage(event.target.value)}
+              onChange={(event) => updateComposerMessage(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
@@ -7452,7 +7484,7 @@ function Atendimento({
               <button
                 className="flex h-10 w-full items-center justify-center gap-2 rounded bg-brand px-3 text-sm font-semibold text-white"
                 disabled={!selectedConversation}
-                onClick={() => setMessage(aiAnalysis.suggestedReply)}
+                onClick={() => updateComposerMessage(aiAnalysis.suggestedReply)}
               >
                 <Send className="h-4 w-4" />
                 Usar sugestao
