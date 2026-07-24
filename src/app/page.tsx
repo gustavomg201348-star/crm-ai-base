@@ -6510,6 +6510,7 @@ function Atendimento({
   const [aiSidebarCollapsed, setAiSidebarCollapsed] = useState(false);
   const [mobileConversationOpen, setMobileConversationOpen] = useState(false);
   const [mobileDetailsOpen, setMobileDetailsOpen] = useState(false);
+  const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -6531,15 +6532,17 @@ function Atendimento({
     if (!selectedConversation) {
       setMobileConversationOpen(false);
       setMobileDetailsOpen(false);
+      setMobileActionsOpen(false);
     }
   }, [selectedConversation]);
 
   useEffect(() => {
-    if (!mobileDetailsOpen) return;
+    if (!mobileDetailsOpen && !mobileActionsOpen) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setMobileDetailsOpen(false);
+        setMobileActionsOpen(false);
       }
     };
 
@@ -6548,7 +6551,7 @@ function Atendimento({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [mobileDetailsOpen]);
+  }, [mobileActionsOpen, mobileDetailsOpen]);
 
   useEffect(() => {
     const conversationId = selectedConversation?.id ?? null;
@@ -7257,7 +7260,65 @@ function Atendimento({
           showMobileConversationDetail ? "flex" : "hidden xl:flex"
         )}
       >
-        <div className="flex min-h-16 shrink-0 flex-col gap-2 border-b border-line/70 px-4 py-2 md:px-5">
+        {selectedConversation && (
+          <div className="flex shrink-0 flex-col gap-2 border-b border-line/70 px-3 py-2 xl:hidden">
+            <div className="flex min-w-0 items-center gap-2">
+              <button
+                type="button"
+                className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-line bg-white px-3 text-sm font-semibold text-slate-600 shadow-sm hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800"
+                onClick={() => {
+                  setMobileConversationOpen(false);
+                  setMobileDetailsOpen(false);
+                  setMobileActionsOpen(false);
+                }}
+              >
+                <ArrowRight className="h-4 w-4 rotate-180" />
+                Voltar
+              </button>
+              <div className="relative grid h-9 w-9 shrink-0 place-items-center rounded-full bg-slate-50 text-sm font-black text-slate-700 shadow-sm ring-1 ring-slate-200">
+                {formatContactNameForUi(selectedConversation.contact.name)
+                  .slice(0, 1)
+                  .toUpperCase() || "C"}
+                <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-emerald-500 ring-1 ring-emerald-100" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="truncate text-sm font-black leading-5 text-slate-950">
+                  {formatContactNameForUi(selectedConversation.contact.name)}
+                </h3>
+                <p className="truncate text-xs font-medium text-slate-500">
+                  {selectedConversation.contact.phone}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="inline-flex h-9 shrink-0 items-center rounded-full border border-line bg-white px-3 text-sm font-semibold text-slate-600 shadow-sm hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800"
+                onClick={() => setMobileActionsOpen(true)}
+              >
+                Ações
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-9 shrink-0 items-center rounded-full border border-line bg-white px-3 text-sm font-semibold text-slate-600 shadow-sm hover:border-blue-200 hover:bg-blue-50 hover:text-brand"
+                onClick={() => setMobileDetailsOpen(true)}
+              >
+                Detalhes
+              </button>
+            </div>
+            <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+              <span className="shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600 shadow-sm">
+                {conversationStatusLabels[selectedConversation.status] ?? selectedConversation.status}
+              </span>
+              <span
+                className="min-w-0 truncate rounded-full border border-blue-100 bg-blue-50/70 px-2 py-0.5 text-[11px] font-semibold text-blue-700 shadow-sm"
+                title={conversationChannelLabel ?? undefined}
+              >
+                {conversationChannelLabel}
+              </span>
+            </div>
+          </div>
+        )}
+
+        <div className="hidden min-h-16 shrink-0 flex-col gap-2 border-b border-line/70 px-4 py-2 md:px-5 xl:flex">
           <div className="flex min-w-0 items-center gap-2">
             {selectedConversation && (
               <button
@@ -7266,6 +7327,7 @@ function Atendimento({
                 onClick={() => {
                   setMobileConversationOpen(false);
                   setMobileDetailsOpen(false);
+                  setMobileActionsOpen(false);
                 }}
               >
                 <ArrowRight className="h-4 w-4 rotate-180" />
@@ -7441,7 +7503,7 @@ function Atendimento({
         </div>
 
         {selectedConversation && selectedConversation.tags.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5 border-b border-line/60 bg-slate-50/30 px-5 py-2">
+          <div className="hidden flex-wrap items-center gap-1.5 border-b border-line/60 bg-slate-50/30 px-5 py-2 xl:flex">
             {selectedConversation.tags.map((tag) => (
               <TagBadge
                 key={tag.id}
@@ -7825,6 +7887,166 @@ function Atendimento({
           </div>
         </form>
       </section>
+
+      {mobileActionsOpen && selectedConversation && (
+        <div className="fixed inset-0 z-50 xl:hidden">
+          <button
+            type="button"
+            aria-label="Fechar ações"
+            className="absolute inset-0 bg-slate-950/40 backdrop-blur-sm"
+            onClick={() => setMobileActionsOpen(false)}
+          />
+          <section className="absolute inset-x-0 bottom-0 flex max-h-[85dvh] flex-col overflow-hidden rounded-t-[1.75rem] border border-line/80 bg-white shadow-lift">
+            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-line/70 px-4 py-3">
+              <h3 className="text-base font-black text-slate-950">Ações</h3>
+              <button
+                type="button"
+                aria-label="Fechar ações"
+                className="grid h-9 w-9 place-items-center rounded-full border border-line bg-white text-slate-500 transition hover:bg-slate-50 hover:text-slate-800"
+                onClick={() => setMobileActionsOpen(false)}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+              {followUpSuccess && (
+                <span className="inline-flex h-9 items-center rounded-full bg-emerald-50 px-3 text-xs font-bold text-emerald-700 ring-1 ring-emerald-100">
+                  {followUpSuccess}
+                </span>
+              )}
+              <div className="grid gap-2">
+                <button
+                  type="button"
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-line bg-white px-3 text-sm font-semibold text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800"
+                  onClick={() => {
+                    setMobileActionsOpen(false);
+                    openScheduledReturns();
+                  }}
+                >
+                  <Clock3 className="h-4 w-4" />
+                  Retorno
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-line bg-white px-3 text-sm font-semibold text-slate-600 hover:border-amber-200 hover:bg-amber-50 hover:text-amber-700"
+                  onClick={() => {
+                    setMobileActionsOpen(false);
+                    openFollowUp();
+                  }}
+                >
+                  <CalendarClock className="h-4 w-4" />
+                  Agendar
+                </button>
+                {!selectedConversation.agent && (
+                  <button
+                    type="button"
+                    className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-3 text-sm font-bold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
+                    disabled={assigningConversationId === selectedConversation.id}
+                    onClick={() => void submitAssign(selectedConversation.id)}
+                  >
+                    {assigningConversationId === selectedConversation.id && (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    )}
+                    {assigningConversationId === selectedConversation.id ? "Assumindo..." : "Assumir"}
+                  </button>
+                )}
+                {isAdmin && selectedConversation.agent && (
+                  <button
+                    type="button"
+                    className="inline-flex h-11 items-center justify-center rounded-2xl border border-line bg-white px-3 text-sm font-semibold text-slate-500 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700"
+                    onClick={() => {
+                      setMobileActionsOpen(false);
+                      setUnassignOpen(true);
+                    }}
+                  >
+                    Devolver
+                  </button>
+                )}
+                {isAdmin && (
+                  <button
+                    type="button"
+                    className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-line bg-white px-3 text-sm font-semibold text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800"
+                    onClick={() => {
+                      setMobileActionsOpen(false);
+                      setTransferOpen(true);
+                    }}
+                  >
+                    <ArrowRight className="h-4 w-4" />
+                    Transferir
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-line bg-white px-3 text-sm font-semibold text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-primary"
+                  onClick={() => {
+                    setMobileActionsOpen(false);
+                    onOpenCltSimulation(selectedConversation);
+                  }}
+                >
+                  <BriefcaseBusiness className="h-4 w-4" />
+                  Simular CLT
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-line bg-white px-3 text-sm font-semibold text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-brand"
+                  onClick={() => {
+                    setMobileActionsOpen(false);
+                    openContactEdit();
+                  }}
+                >
+                  <Edit3 className="h-4 w-4" />
+                  Editar contato
+                </button>
+              </div>
+
+              <div className="rounded-2xl border border-line/70 bg-slate-50/60 p-3">
+                <p className="mb-2 text-xs font-bold uppercase tracking-[0.12em] text-slate-500">
+                  Etapa
+                </p>
+                <select
+                  className="h-10 w-full rounded-full border border-line bg-white px-3 text-sm font-medium text-slate-700 outline-none hover:bg-white focus:border-blue-200 focus:bg-white"
+                  value={selectedConversation.status}
+                  onChange={(event) =>
+                    void onUpdateStatus(
+                      selectedConversation.id,
+                      event.target.value as ConversationRow["status"]
+                    )
+                  }
+                >
+                  <option value="OPEN">Aberto</option>
+                  <option value="PENDING">Pendente</option>
+                  <option value="BOT">Robo</option>
+                  <option value="SOLD">Vendas</option>
+                  <option value="RESOLVED">Resolvido</option>
+                </select>
+              </div>
+
+              <div className="rounded-2xl border border-line/70 bg-slate-50/60 p-3">
+                <p className="mb-2 text-xs font-bold uppercase tracking-[0.12em] text-slate-500">
+                  Tags
+                </p>
+                <ConversationTagSelector
+                  availableTags={availableTags}
+                  selectedTags={selectedConversation.tags}
+                  onAdd={(tagIds) => onAddTags(selectedConversation.id, tagIds)}
+                  onRemove={(tagId) => onRemoveTag(selectedConversation.id, tagId)}
+                />
+                {selectedConversation.tags.length > 0 && (
+                  <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                    {selectedConversation.tags.map((tag) => (
+                      <TagBadge
+                        key={tag.id}
+                        tag={tag}
+                        onRemove={() => onRemoveTag(selectedConversation.id, tag.id)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
 
       {mobileDetailsOpen && selectedConversation && (
         <div className="fixed inset-0 z-50 xl:hidden">
