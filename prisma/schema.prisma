@@ -36,6 +36,8 @@ model Company {
   userAvailabilities UserAvailability[]
   leadAssignmentSetting LeadAssignmentSetting?
   leadAssignmentHistory LeadAssignmentHistory[]
+  metaTemplates MetaTemplate[]
+  mediaAssets   MediaAsset[]
 }
 
 model Channel {
@@ -61,6 +63,69 @@ model Channel {
   conversations Conversation[] @relation("ConversationChannel")
 
   @@index([companyId])
+}
+
+model MetaTemplate {
+  id                        String      @id @default(cuid())
+  companyId                 String
+  wabaId                    String
+  metaTemplateId            String?
+  name                      String
+  language                  String
+  category                  String?
+  metaStatus                String?
+  operationalStatus         String
+  requiresHeaderMedia       Boolean     @default(false)
+  headerFormat              String?
+  components                String
+  rawPayload                String?
+  supportFlags              String?
+  defaultHeaderMediaAssetId String?
+  lastSyncedAt              DateTime?
+  lastSeenAt                DateTime?
+  syncError                 String?
+  isActive                  Boolean     @default(true)
+  createdAt                 DateTime    @default(now())
+  updatedAt                 DateTime    @updatedAt
+  company                   Company     @relation(fields: [companyId], references: [id])
+  defaultHeaderMediaAsset   MediaAsset? @relation("MetaTemplateDefaultHeaderMedia", fields: [companyId, defaultHeaderMediaAssetId], references: [companyId, id])
+
+  @@unique([companyId, wabaId, name, language])
+  @@unique([companyId, wabaId, metaTemplateId])
+  @@index([companyId])
+  @@index([companyId, wabaId])
+  @@index([companyId, operationalStatus])
+  @@index([companyId, defaultHeaderMediaAssetId])
+}
+
+model MediaAsset {
+  id                      String         @id @default(cuid())
+  companyId               String
+  type                    String
+  mimeType                String
+  fileName                String
+  sizeBytes               Int
+  storageProvider         String?
+  storageKey              String?
+  publicUrl               String?
+  metaMediaId             String?
+  headerHandle            String?
+  metaExpiresAt           DateTime?
+  status                  String
+  checksum                String?
+  metadata                String?
+  lastValidatedAt         DateTime?
+  validationError         String?
+  createdAt               DateTime       @default(now())
+  updatedAt               DateTime       @updatedAt
+  company                 Company        @relation(fields: [companyId], references: [id])
+  defaultForMetaTemplates MetaTemplate[] @relation("MetaTemplateDefaultHeaderMedia")
+
+  @@unique([companyId, id])
+  @@index([companyId])
+  @@index([companyId, type])
+  @@index([companyId, status])
+  @@index([companyId, metaMediaId])
 }
 
 model User {
