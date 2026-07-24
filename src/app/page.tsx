@@ -6509,6 +6509,7 @@ function Atendimento({
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [aiSidebarCollapsed, setAiSidebarCollapsed] = useState(false);
   const [mobileConversationOpen, setMobileConversationOpen] = useState(false);
+  const [mobileDetailsOpen, setMobileDetailsOpen] = useState(false);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -6529,8 +6530,25 @@ function Atendimento({
   useEffect(() => {
     if (!selectedConversation) {
       setMobileConversationOpen(false);
+      setMobileDetailsOpen(false);
     }
   }, [selectedConversation]);
+
+  useEffect(() => {
+    if (!mobileDetailsOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMobileDetailsOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [mobileDetailsOpen]);
 
   useEffect(() => {
     const conversationId = selectedConversation?.id ?? null;
@@ -7025,6 +7043,122 @@ function Atendimento({
     }
   }
 
+  function renderDetailsPanelContent({ allowCollapse }: { allowCollapse: boolean }) {
+    return (
+      <>
+        <AiPanel
+          compact
+          analysis={aiAnalysis}
+          companyMode={aiSettings.mode}
+          conversation={selectedConversation}
+          loading={aiLoading}
+          disabled={!selectedConversation}
+          onAnalyze={() =>
+            selectedConversation
+              ? void onAnalyzeConversation(selectedConversation.id)
+              : undefined
+          }
+          onModeChange={(mode) =>
+            selectedConversation
+              ? void onUpdateConversationAiMode(selectedConversation.id, { mode })
+              : undefined
+          }
+          onPauseChange={(paused) =>
+            selectedConversation
+              ? void onUpdateConversationAiMode(selectedConversation.id, { paused })
+              : undefined
+          }
+          onCollapse={allowCollapse ? () => setAiSidebarCollapsed(true) : undefined}
+        />
+        {aiAnalysis && (
+          <button
+            className="flex h-10 w-full items-center justify-center gap-2 rounded bg-brand px-3 text-sm font-semibold text-white"
+            disabled={!selectedConversation}
+            onClick={() => updateComposerMessage(aiAnalysis.suggestedReply)}
+          >
+            <Send className="h-4 w-4" />
+            Usar sugestao
+          </button>
+        )}
+        <button
+          type="button"
+          className="flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-blue-100 bg-blue-50 px-3 text-sm font-bold text-primary hover:bg-blue-100 disabled:opacity-50"
+          disabled={!selectedConversation}
+          onClick={() =>
+            selectedConversation
+              ? onOpenCltSimulation(selectedConversation)
+              : undefined
+          }
+        >
+          <BriefcaseBusiness className="h-4 w-4" />
+          Simular CLT deste lead
+        </button>
+        <div className="rounded border border-line bg-white p-4 shadow-soft">
+          <h3 className="font-bold">Ficha rapida</h3>
+          <dl className="mt-4 space-y-3 text-sm">
+            <Info label="Origem" value={selectedConversation?.contact.origin ?? "-"} />
+            <Info label="Etapa" value={selectedConversation?.contact.stage ?? "-"} />
+            <Info label="Responsavel" value={selectedConversation?.contact.owner ?? "-"} />
+            <Info
+              label="Temperatura"
+              value={
+                selectedConversation?.contact.temperature
+                  ? temperatureLabels[
+                      selectedConversation.contact
+                        .temperature as keyof typeof temperatureLabels
+                    ]
+                  : "-"
+              }
+            />
+          </dl>
+        </div>
+        <div className="rounded border border-line bg-white p-4 shadow-soft">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="font-bold">Observacao interna</h3>
+            {internalNoteStatus && (
+              <span className="text-xs font-semibold text-emerald-600">
+                {internalNoteStatus}
+              </span>
+            )}
+          </div>
+          <textarea
+            className="mt-3 min-h-[104px] w-full resize-y rounded-2xl border border-line bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-brand focus:bg-white focus:ring-2 focus:ring-blue-100"
+            disabled={!selectedConversation || internalNoteSaving}
+            maxLength={2000}
+            placeholder="Anotacoes internas sobre este cliente."
+            value={internalNote}
+            onChange={(event) => {
+              setInternalNote(event.target.value);
+              setInternalNoteStatus("");
+              setInternalNoteError("");
+            }}
+          />
+          {internalNoteError && (
+            <p className="mt-2 text-xs font-semibold text-rose-600">
+              {internalNoteError}
+            </p>
+          )}
+          <button
+            type="button"
+            className="mt-3 flex h-10 w-full items-center justify-center rounded-2xl bg-brand px-3 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={!selectedConversation || internalNoteSaving}
+            onClick={() => void submitInternalNote()}
+          >
+            {internalNoteSaving ? "Salvando..." : "Salvar"}
+          </button>
+        </div>
+        {selectedConversation?.summary && (
+          <div className="rounded border border-line bg-white p-4 shadow-soft">
+            <h3 className="font-bold">Resumo salvo</h3>
+            <p className="mt-2 whitespace-pre-line text-sm text-slate-600">
+              {selectedConversation.summary}
+            </p>
+          </div>
+        )}
+      </>
+    );
+  }
+
   return (
     <div
       className={clsx(
@@ -7129,10 +7263,22 @@ function Atendimento({
               <button
                 type="button"
                 className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-line bg-white px-3 text-sm font-semibold text-slate-600 shadow-sm hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 xl:hidden"
-                onClick={() => setMobileConversationOpen(false)}
+                onClick={() => {
+                  setMobileConversationOpen(false);
+                  setMobileDetailsOpen(false);
+                }}
               >
                 <ArrowRight className="h-4 w-4 rotate-180" />
                 Voltar
+              </button>
+            )}
+            {selectedConversation && (
+              <button
+                type="button"
+                className="inline-flex h-9 shrink-0 items-center rounded-full border border-line bg-white px-3 text-sm font-semibold text-slate-600 shadow-sm hover:border-blue-200 hover:bg-blue-50 hover:text-brand xl:hidden"
+                onClick={() => setMobileDetailsOpen(true)}
+              >
+                Detalhes
               </button>
             )}
             <div className="relative grid h-10 w-10 place-items-center rounded-full bg-slate-50 text-sm font-black text-slate-700 shadow-sm ring-1 ring-slate-200">
@@ -7680,6 +7826,33 @@ function Atendimento({
         </form>
       </section>
 
+      {mobileDetailsOpen && selectedConversation && (
+        <div className="fixed inset-0 z-50 xl:hidden">
+          <button
+            type="button"
+            aria-label="Fechar detalhes"
+            className="absolute inset-0 bg-slate-950/40 backdrop-blur-sm"
+            onClick={() => setMobileDetailsOpen(false)}
+          />
+          <section className="absolute inset-x-0 bottom-0 flex max-h-[85dvh] flex-col overflow-hidden rounded-t-[1.75rem] border border-line/80 bg-white shadow-lift">
+            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-line/70 px-4 py-3">
+              <h3 className="text-base font-black text-slate-950">Detalhes</h3>
+              <button
+                type="button"
+                aria-label="Fechar detalhes"
+                className="grid h-9 w-9 place-items-center rounded-full border border-line bg-white text-slate-500 transition hover:bg-slate-50 hover:text-slate-800"
+                onClick={() => setMobileDetailsOpen(false)}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+              {renderDetailsPanelContent({ allowCollapse: false })}
+            </div>
+          </section>
+        </div>
+      )}
+
       <section
         className={clsx(
           "hidden min-h-0 overflow-hidden transition-all duration-300 ease-out xl:block",
@@ -7701,117 +7874,7 @@ function Atendimento({
             loading={aiLoading}
           />
         ) : (
-          <>
-            <AiPanel
-              compact
-              analysis={aiAnalysis}
-              companyMode={aiSettings.mode}
-              conversation={selectedConversation}
-              loading={aiLoading}
-              disabled={!selectedConversation}
-              onAnalyze={() =>
-                selectedConversation
-                  ? void onAnalyzeConversation(selectedConversation.id)
-                  : undefined
-              }
-              onModeChange={(mode) =>
-                selectedConversation
-                  ? void onUpdateConversationAiMode(selectedConversation.id, { mode })
-                  : undefined
-              }
-              onPauseChange={(paused) =>
-                selectedConversation
-                  ? void onUpdateConversationAiMode(selectedConversation.id, { paused })
-                  : undefined
-              }
-              onCollapse={() => setAiSidebarCollapsed(true)}
-            />
-            {aiAnalysis && (
-              <button
-                className="flex h-10 w-full items-center justify-center gap-2 rounded bg-brand px-3 text-sm font-semibold text-white"
-                disabled={!selectedConversation}
-                onClick={() => updateComposerMessage(aiAnalysis.suggestedReply)}
-              >
-                <Send className="h-4 w-4" />
-                Usar sugestao
-              </button>
-            )}
-            <button
-              type="button"
-              className="flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-blue-100 bg-blue-50 px-3 text-sm font-bold text-primary hover:bg-blue-100 disabled:opacity-50"
-              disabled={!selectedConversation}
-              onClick={() =>
-                selectedConversation
-                  ? onOpenCltSimulation(selectedConversation)
-                  : undefined
-              }
-            >
-              <BriefcaseBusiness className="h-4 w-4" />
-              Simular CLT deste lead
-            </button>
-            <div className="rounded border border-line bg-white p-4 shadow-soft">
-              <h3 className="font-bold">Ficha rapida</h3>
-              <dl className="mt-4 space-y-3 text-sm">
-                <Info label="Origem" value={selectedConversation?.contact.origin ?? "-"} />
-                <Info label="Etapa" value={selectedConversation?.contact.stage ?? "-"} />
-                <Info label="Responsavel" value={selectedConversation?.contact.owner ?? "-"} />
-                <Info
-                  label="Temperatura"
-                  value={
-                    selectedConversation?.contact.temperature
-                      ? temperatureLabels[
-                          selectedConversation.contact
-                            .temperature as keyof typeof temperatureLabels
-                        ]
-                      : "-"
-                  }
-                />
-              </dl>
-            </div>
-            <div className="rounded border border-line bg-white p-4 shadow-soft">
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="font-bold">Observacao interna</h3>
-                {internalNoteStatus && (
-                  <span className="text-xs font-semibold text-emerald-600">
-                    {internalNoteStatus}
-                  </span>
-                )}
-              </div>
-              <textarea
-                className="mt-3 min-h-[104px] w-full resize-y rounded-2xl border border-line bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-brand focus:bg-white focus:ring-2 focus:ring-blue-100"
-                disabled={!selectedConversation || internalNoteSaving}
-                maxLength={2000}
-                placeholder="Anotacoes internas sobre este cliente."
-                value={internalNote}
-                onChange={(event) => {
-                  setInternalNote(event.target.value);
-                  setInternalNoteStatus("");
-                  setInternalNoteError("");
-                }}
-              />
-              {internalNoteError && (
-                <p className="mt-2 text-xs font-semibold text-rose-600">
-                  {internalNoteError}
-                </p>
-              )}
-              <button
-                type="button"
-                className="mt-3 flex h-10 w-full items-center justify-center rounded-2xl bg-brand px-3 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={!selectedConversation || internalNoteSaving}
-                onClick={() => void submitInternalNote()}
-              >
-                {internalNoteSaving ? "Salvando..." : "Salvar"}
-              </button>
-            </div>
-            {selectedConversation?.summary && (
-              <div className="rounded border border-line bg-white p-4 shadow-soft">
-                <h3 className="font-bold">Resumo salvo</h3>
-                <p className="mt-2 whitespace-pre-line text-sm text-slate-600">
-                  {selectedConversation.summary}
-                </p>
-              </div>
-            )}
-          </>
+          renderDetailsPanelContent({ allowCollapse: true })
         )}
       </section>
     </div>
