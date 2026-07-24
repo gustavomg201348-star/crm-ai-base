@@ -9,10 +9,14 @@ import {
   saveOutboundMessage
 } from "@/lib/conversation-message.service";
 import { prisma } from "@/lib/db";
+import {
+  extractMetaTemplateVariables,
+  normalizeMetaTemplate
+} from "@/lib/meta-template-normalizer";
 import { digitsOnlyPhone } from "@/lib/phone-normalization.service";
 
 export function extractBodyText(template: MetaTemplate) {
-  return template.components?.find((component) => component.type === "BODY")?.text ?? "";
+  return normalizeMetaTemplate(template).body.text;
 }
 
 export function extractTemplateButtons(template: MetaTemplate) {
@@ -30,9 +34,7 @@ export function extractTemplateButtons(template: MetaTemplate) {
 }
 
 export function templateHasHeaderImage(template: MetaTemplate) {
-  return template.components?.some(
-    (component) => component.type === "HEADER" && component.format === "IMAGE"
-  ) ?? false;
+  return normalizeMetaTemplate(template).header.format === "IMAGE";
 }
 
 function normalizeTemplateEnvName(templateName: string) {
@@ -103,8 +105,7 @@ export function resolveTemplateHeaderImageUrl(template: MetaTemplate) {
 }
 
 export function extractVariableCount(text: string) {
-  const matches = text.match(/\{\{\d+\}\}/g) ?? [];
-  return new Set(matches).size;
+  return extractMetaTemplateVariables(text).length;
 }
 
 export function renderTemplateBody(template: MetaTemplate, variables: string[]) {
@@ -136,16 +137,16 @@ export function renderTemplateHistoryBody({
 }
 
 export function mapApprovedTemplate(template: MetaTemplate) {
-  const body = extractBodyText(template);
+  const normalized = normalizeMetaTemplate(template);
 
   return {
-    id: template.id ?? template.name,
-    name: template.name,
-    category: template.category ?? "UTILITY",
-    language: template.language,
-    status: template.status,
-    preview: body,
-    variableCount: extractVariableCount(body)
+    id: normalized.metaId ?? normalized.name,
+    name: normalized.name,
+    category: normalized.category,
+    language: normalized.language,
+    status: normalized.status,
+    preview: normalized.body.text,
+    variableCount: normalized.bodyVariableCount
   };
 }
 
