@@ -7406,7 +7406,7 @@ function Atendimento({
           <div ref={chatEndRef} />
         </div>
 
-        <form className="shrink-0 border-t border-slate-200 bg-white p-3 shadow-[0_-10px_28px_rgba(15,23,42,0.06)]" onSubmit={handleSubmit}>
+        <form className="shrink-0 border-t border-slate-200 bg-white px-2 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-[0_-10px_28px_rgba(15,23,42,0.06)] sm:px-3" onSubmit={handleSubmit}>
           {composerError && (
             <div role="alert" className="mb-3 rounded-2xl border border-rose-100 bg-rose-50 px-3 py-2 text-sm text-rose-700">
               {composerError}
@@ -7580,7 +7580,7 @@ function Atendimento({
             }}
           />
 
-          <div className="relative flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-3 py-2 shadow-[0_1px_0_rgba(15,23,42,0.04),0_8px_22px_rgba(15,23,42,0.07)] transition focus-within:border-brand/60 focus-within:shadow-[0_1px_0_rgba(37,99,235,0.08),0_10px_28px_rgba(37,99,235,0.10)] focus-within:ring-4 focus-within:ring-blue-50">
+          <div className="relative flex items-center gap-1.5 rounded-2xl border border-slate-300 bg-white px-2 py-2 shadow-[0_1px_0_rgba(15,23,42,0.04),0_8px_22px_rgba(15,23,42,0.07)] transition focus-within:border-brand/60 focus-within:shadow-[0_1px_0_rgba(37,99,235,0.08),0_10px_28px_rgba(37,99,235,0.10)] focus-within:ring-4 focus-within:ring-blue-50 sm:gap-2 sm:px-3">
             <ComposerButton title="Anexar arquivo" disabled={!selectedConversation} onClick={() => fileInputRef.current?.click()}>
               <Paperclip aria-hidden="true" className="h-4 w-4" />
             </ComposerButton>
@@ -7606,7 +7606,7 @@ function Atendimento({
             </ComposerButton>
 
             {emojiOpen && (
-              <div className="absolute bottom-14 left-12 z-20 grid grid-cols-8 gap-1 rounded-2xl border border-line bg-white p-2 shadow-lift">
+              <div className="absolute bottom-14 left-12 z-20 grid max-w-[calc(100vw-2rem)] grid-cols-8 gap-1 rounded-2xl border border-line bg-white p-2 shadow-lift">
                 {commonEmojis.map((emoji) => (
                   <button key={emoji} type="button" className="grid h-8 w-8 place-items-center rounded-lg hover:bg-slate-50" onClick={() => insertEmoji(emoji)}>
                     {emoji}
@@ -7616,7 +7616,7 @@ function Atendimento({
             )}
 
             {quickRepliesOpen && (
-              <div className="absolute bottom-14 left-2 z-30 w-[min(520px,calc(100vw-2rem))] min-w-[320px] rounded-2xl border border-line bg-white p-3 shadow-lift">
+              <div className="absolute bottom-14 left-2 z-30 w-[min(520px,calc(100vw-2rem))] min-w-0 rounded-2xl border border-line bg-white p-3 shadow-lift">
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-black text-slate-900">Respostas rapidas</p>
