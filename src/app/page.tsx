@@ -12,6 +12,7 @@ import {
   Tags
 } from "@/lib/mock-data";
 import { ConversationList } from "@/app/components/conversations/ConversationList";
+import { TemplateLibraryPage } from "@/app/components/templates/TemplateLibraryPage";
 import { resolveConversationChannelId } from "@/lib/conversation-channel.service";
 import {
   ArrowRight,
@@ -4687,6 +4688,7 @@ export default function Home() {
               onSimulateInbound={handleSimulateInboundMessage}
             />
           )}
+          {active === "templates" && userIsAdmin(session) && <TemplateLibraryPage />}
           {active === "disparos" && userIsAdmin(session) && (
             <Disparos
               campaigns={campaigns}
