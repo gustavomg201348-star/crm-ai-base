@@ -35,6 +35,22 @@ export type UpdateMediaAssetStatusInput = {
   metaExpiresAt?: Date | null;
 };
 
+export type UpdateMediaAssetStorageDetailsInput = Partial<
+  Pick<
+    CreateMediaAssetInput,
+    | "type"
+    | "mimeType"
+    | "fileName"
+    | "sizeBytes"
+    | "status"
+    | "storageProvider"
+    | "storageKey"
+    | "publicUrl"
+    | "checksum"
+    | "metadata"
+  >
+>;
+
 export function findMediaAssetById(companyId: string, id: string, db: DbClient = prisma) {
   return db.mediaAsset.findFirst({
     where: {
@@ -65,6 +81,62 @@ export function createMediaAsset(input: CreateMediaAssetInput, db: DbClient = pr
   };
 
   return db.mediaAsset.create({ data });
+}
+
+export function findMediaAssetByStorageIdentity(
+  companyId: string,
+  storageProvider: string,
+  checksum: string,
+  db: DbClient = prisma
+) {
+  return db.mediaAsset.findFirst({
+    where: {
+      companyId,
+      storageProvider,
+      checksum
+    },
+    orderBy: {
+      createdAt: "asc"
+    }
+  });
+}
+
+export function updateMediaAssetStorageDetails(
+  companyId: string,
+  id: string,
+  input: UpdateMediaAssetStorageDetailsInput,
+  db: DbClient = prisma
+): Promise<MediaAsset | null> {
+  const data: Prisma.MediaAssetUncheckedUpdateInput = {
+    type: input.type,
+    mimeType: input.mimeType,
+    fileName: input.fileName,
+    sizeBytes: input.sizeBytes,
+    status: input.status,
+    storageProvider: input.storageProvider,
+    storageKey: input.storageKey,
+    publicUrl: input.publicUrl,
+    checksum: input.checksum,
+    metadata: input.metadata
+  };
+
+  return db.mediaAsset
+    .update({
+      where: {
+        companyId_id: {
+          companyId,
+          id
+        }
+      },
+      data
+    })
+    .catch((error: unknown) => {
+      if (isPrismaRecordNotFoundError(error)) {
+        return null;
+      }
+
+      throw error;
+    });
 }
 
 export function updateMediaAssetStatus(

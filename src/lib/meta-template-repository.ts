@@ -107,6 +107,22 @@ export type UpsertMetaTemplateFromMetaInput = {
   isActive: boolean;
 };
 
+export type PersistCreatedMetaTemplateRepositoryInput = {
+  companyId: string;
+  wabaId: string;
+  name: string;
+  language: string;
+  metaTemplateId: string | null;
+  category: string | null;
+  metaStatus: string | null;
+  operationalStatus: string;
+  components: string;
+  rawPayload: string | null;
+  supportFlags: string | null;
+  defaultHeaderMediaAssetId: string;
+  lastSeenAt: Date | null;
+};
+
 export function findMetaTemplateById(companyId: string, id: string, db: DbClient = prisma) {
   return db.metaTemplate.findFirst({
     where: {
@@ -301,6 +317,103 @@ export async function upsertMetaTemplateFromMeta(
     }
 
     throw error;
+  }
+}
+
+export async function persistCreatedMetaTemplateRecord(
+  input: PersistCreatedMetaTemplateRepositoryInput,
+  db: DbClient = prisma
+) {
+  if (input.metaTemplateId) {
+    const existingByMetaId = await findMetaTemplateByMetaTemplateId(
+      input.companyId,
+      input.wabaId,
+      input.metaTemplateId,
+      db
+    );
+
+    if (existingByMetaId && isDifferentTemplateIdentity(existingByMetaId, input)) {
+      throw new MetaTemplateRepositoryError(
+        "META_TEMPLATE_ID_CONFLICT",
+        "Identificador Meta do template conflita com outro template da mesma WABA."
+      );
+    }
+  }
+
+  const data = {
+    metaTemplateId: input.metaTemplateId,
+    category: input.category,
+    metaStatus: input.metaStatus,
+    operationalStatus: input.operationalStatus,
+    requiresHeaderMedia: true,
+    headerFormat: "IMAGE",
+    components: input.components,
+    rawPayload: input.rawPayload,
+    supportFlags: input.supportFlags,
+    defaultHeaderMediaAssetId: input.defaultHeaderMediaAssetId,
+    lastSyncedAt: null,
+    lastSeenAt: input.lastSeenAt,
+    syncError: null,
+    isActive: true
+  } satisfies Prisma.MetaTemplateUncheckedUpdateInput;
+
+  try {
+    return await db.metaTemplate.upsert({
+      where: {
+        companyId_wabaId_name_language: {
+          companyId: input.companyId,
+          wabaId: input.wabaId,
+          name: input.name,
+          language: input.language
+        }
+      },
+      update: data,
+      create: {
+        companyId: input.companyId,
+        wabaId: input.wabaId,
+        name: input.name,
+        language: input.language,
+        ...data
+      }
+    });
+  } catch (error) {
+    if (!isPrismaUniqueConstraintError(error)) {
+      throw error;
+    }
+
+    const existingByIdentity = await findMetaTemplateByIdentity(
+      input.companyId,
+      input.wabaId,
+      input.name,
+      input.language,
+      db
+    );
+
+    if (!existingByIdentity) {
+      throw new MetaTemplateRepositoryError(
+        "META_TEMPLATE_ID_CONFLICT",
+        "Identificador Meta do template conflita com outro template da mesma WABA."
+      );
+    }
+
+    if (
+      existingByIdentity.metaTemplateId &&
+      input.metaTemplateId &&
+      existingByIdentity.metaTemplateId !== input.metaTemplateId
+    ) {
+      throw new MetaTemplateRepositoryError(
+        "META_TEMPLATE_ID_CONFLICT",
+        "Identificador Meta do template conflita com outro template da mesma WABA."
+      );
+    }
+
+    return db.metaTemplate.update({
+      where: {
+        id: existingByIdentity.id,
+        companyId: input.companyId
+      },
+      data
+    });
   }
 }
 

@@ -1,11 +1,20 @@
 import type { MediaAsset, MetaTemplate } from "@prisma/client";
+import type { MetaTemplateApiComponent } from "@/lib/meta-template-client";
 import type { NormalizedMetaTemplate } from "@/lib/meta-template-normalizer";
-import { findMediaAssetById, type CreateMediaAssetInput } from "@/lib/media-asset-repository";
+import {
+  createMediaAsset,
+  findMediaAssetById,
+  findMediaAssetByStorageIdentity,
+  updateMediaAssetStatus,
+  updateMediaAssetStorageDetails,
+  type CreateMediaAssetInput
+} from "@/lib/media-asset-repository";
 import {
   createMetaTemplate,
   findMetaTemplateById,
   markMetaTemplateNotReturned,
   MetaTemplateRepositoryError,
+  persistCreatedMetaTemplateRecord,
   setMetaTemplateDefaultHeaderMediaAndStatus,
   upsertMetaTemplateFromMeta
 } from "@/lib/meta-template-repository";
@@ -17,6 +26,15 @@ import {
   isValidMetaTemplateSupportFlagsField,
   supportFlagsIndicateSupportedComponents
 } from "@/lib/meta-template-status";
+import { type StoredTemplateMedia } from "@/lib/template-media-storage";
+
+const TEMPLATE_HEADER_MEDIA_ASSET_TYPE = "TEMPLATE_HEADER_IMAGE";
+const TEMPLATE_MEDIA_ASSET_STORED_STATUS = "STORED";
+const TEMPLATE_MEDIA_ASSET_READY_STATUS = "READY";
+const CREATED_TEMPLATE_SUPPORT_FLAGS = {
+  canSendWithCurrentBuilder: true,
+  unsupportedReasons: []
+};
 
 export type MetaTemplateServiceErrorCode =
   | "INVALID_INPUT"
@@ -56,6 +74,34 @@ export type UpsertNormalizedMetaTemplateInput = {
   rawPayload?: unknown;
   now?: Date;
   existingDefaultHeaderMediaAssetId?: string | null;
+};
+
+export type PersistTemplateHeaderMediaAssetInput = {
+  companyId: string;
+  channelId?: string | null;
+  storedMedia: StoredTemplateMedia;
+  now?: Date;
+};
+
+export type UpdateTemplateHeaderMediaHandleInput = {
+  companyId: string;
+  mediaAssetId: string;
+  headerHandle: string;
+  now?: Date;
+};
+
+export type PersistCreatedMetaTemplateInput = {
+  companyId: string;
+  wabaId: string;
+  metaTemplateId: string | null;
+  name: string;
+  language: string;
+  category: string | null;
+  metaStatus: string | null;
+  components: MetaTemplateApiComponent[];
+  rawPayload?: unknown;
+  defaultHeaderMediaAssetId: string;
+  now?: Date;
 };
 
 function normalizeRequiredString(value: string, fieldName: string) {
@@ -252,6 +298,190 @@ export async function upsertNormalizedMetaTemplate({
   }).catch(mapRepositoryError);
 
   return deserializeMetaTemplate(upserted);
+}
+
+function buildTemplateMediaMetadata({
+  channelId,
+  storedMedia
+}: {
+  channelId?: string | null;
+  storedMedia: StoredTemplateMedia;
+}) {
+  return {
+    scope: "META_TEMPLATE_HEADER",
+    ...(channelId?.trim() ? { channelId: channelId.trim() } : {}),
+    originalFileName: storedMedia.originalFileName,
+    storedFileName: storedMedia.storedFileName,
+    checksumAlgorithm: storedMedia.checksumAlgorithm
+  };
+}
+
+function mediaNeedsStorageRefresh(
+  mediaAsset: MediaAsset,
+  storedMedia: StoredTemplateMedia,
+  metadata: string | null
+) {
+  return (
+    mediaAsset.type !== TEMPLATE_HEADER_MEDIA_ASSET_TYPE ||
+    mediaAsset.mimeType !== storedMedia.mimeType ||
+    mediaAsset.fileName !== storedMedia.originalFileName ||
+    mediaAsset.sizeBytes !== storedMedia.sizeBytes ||
+    mediaAsset.storageKey !== storedMedia.storageKey ||
+    mediaAsset.publicUrl !== storedMedia.publicUrl ||
+    mediaAsset.metadata !== metadata
+  );
+}
+
+export async function persistTemplateHeaderMediaAsset({
+  companyId,
+  channelId,
+  storedMedia
+}: PersistTemplateHeaderMediaAssetInput) {
+  const safeCompanyId = normalizeRequiredString(companyId, "companyId");
+  const storageProvider = normalizeRequiredString(
+    storedMedia.storageProvider,
+    "storageProvider"
+  );
+  const checksum = normalizeRequiredString(storedMedia.checksum, "checksum");
+  const metadata = serializeJsonField(
+    buildTemplateMediaMetadata({ channelId, storedMedia }),
+    "MediaAsset.metadata"
+  );
+  const existing = await findMediaAssetByStorageIdentity(
+    safeCompanyId,
+    storageProvider,
+    checksum
+  );
+
+  if (existing) {
+    if (existing.companyId !== safeCompanyId) {
+      throw new MetaTemplateServiceError(
+        "COMPANY_ISOLATION_VIOLATION",
+        "Midia nao pertence a empresa informada."
+      );
+    }
+
+    if (!mediaNeedsStorageRefresh(existing, storedMedia, metadata)) {
+      return deserializeMediaAsset(existing);
+    }
+
+    const updated = await updateMediaAssetStorageDetails(safeCompanyId, existing.id, {
+      type: TEMPLATE_HEADER_MEDIA_ASSET_TYPE,
+      mimeType: storedMedia.mimeType,
+      fileName: storedMedia.originalFileName,
+      sizeBytes: storedMedia.sizeBytes,
+      storageProvider,
+      storageKey: storedMedia.storageKey,
+      publicUrl: storedMedia.publicUrl,
+      checksum,
+      metadata
+    });
+
+    if (!updated) {
+      throw new MetaTemplateServiceError("MEDIA_ASSET_NOT_FOUND", "Midia nao encontrada.");
+    }
+
+    return deserializeMediaAsset(updated);
+  }
+
+  const created = await createMediaAsset(
+    buildCreateMediaAssetInput({
+      companyId: safeCompanyId,
+      type: TEMPLATE_HEADER_MEDIA_ASSET_TYPE,
+      mimeType: storedMedia.mimeType,
+      fileName: storedMedia.originalFileName,
+      sizeBytes: storedMedia.sizeBytes,
+      status: TEMPLATE_MEDIA_ASSET_STORED_STATUS,
+      storageProvider,
+      storageKey: storedMedia.storageKey,
+      publicUrl: storedMedia.publicUrl,
+      checksum,
+      metadata
+    })
+  );
+
+  return deserializeMediaAsset(created);
+}
+
+export async function updateTemplateHeaderMediaHandle({
+  companyId,
+  mediaAssetId,
+  headerHandle,
+  now = new Date()
+}: UpdateTemplateHeaderMediaHandleInput) {
+  const safeCompanyId = normalizeRequiredString(companyId, "companyId");
+  const updated = await updateMediaAssetStatus(
+    safeCompanyId,
+    normalizeRequiredString(mediaAssetId, "mediaAssetId"),
+    {
+      status: TEMPLATE_MEDIA_ASSET_READY_STATUS,
+      headerHandle: normalizeRequiredString(headerHandle, "headerHandle"),
+      lastValidatedAt: now,
+      validationError: null
+    }
+  );
+
+  if (!updated) {
+    throw new MetaTemplateServiceError("MEDIA_ASSET_NOT_FOUND", "Midia nao encontrada.");
+  }
+
+  return deserializeMediaAsset(updated);
+}
+
+export async function persistCreatedMetaTemplate({
+  companyId,
+  wabaId,
+  metaTemplateId,
+  name,
+  language,
+  category,
+  metaStatus,
+  components,
+  rawPayload,
+  defaultHeaderMediaAssetId,
+  now = new Date()
+}: PersistCreatedMetaTemplateInput) {
+  const safeCompanyId = normalizeRequiredString(companyId, "companyId");
+  const safeDefaultHeaderMediaAssetId = normalizeRequiredString(
+    defaultHeaderMediaAssetId,
+    "defaultHeaderMediaAssetId"
+  );
+  const mediaAsset = await findMediaAssetById(safeCompanyId, safeDefaultHeaderMediaAssetId);
+
+  if (!mediaAsset) {
+    throw new MetaTemplateServiceError("MEDIA_ASSET_NOT_FOUND", "Midia nao encontrada.");
+  }
+
+  const safeComponents = assertComponentsField(components, "MetaTemplate.components");
+  const supportFlags = assertSupportFlagsField(
+    CREATED_TEMPLATE_SUPPORT_FLAGS,
+    "MetaTemplate.supportFlags"
+  );
+  const operationalStatus = calculateMetaTemplateOperationalStatus({
+    metaStatus,
+    requiresHeaderMedia: true,
+    defaultHeaderMediaAssetId: mediaAsset.id,
+    componentsSupported: supportFlagsIndicateSupportedComponents(supportFlags),
+    syncError: null,
+    isActive: true
+  });
+  const persisted = await persistCreatedMetaTemplateRecord({
+    companyId: safeCompanyId,
+    wabaId: normalizeRequiredString(wabaId, "wabaId"),
+    name: normalizeRequiredString(name, "name"),
+    language: normalizeRequiredString(language, "language"),
+    metaTemplateId: normalizeOptionalString(metaTemplateId),
+    category: normalizeOptionalString(category),
+    metaStatus: normalizeOptionalString(metaStatus),
+    operationalStatus,
+    components: serializeJsonField(safeComponents, "MetaTemplate.components") ?? "[]",
+    rawPayload: serializeJsonField(rawPayload, "MetaTemplate.rawPayload"),
+    supportFlags: serializeJsonField(supportFlags, "MetaTemplate.supportFlags"),
+    defaultHeaderMediaAssetId: mediaAsset.id,
+    lastSeenAt: now
+  });
+
+  return deserializeMetaTemplate(persisted);
 }
 
 export async function setDefaultHeaderMediaForTemplate({

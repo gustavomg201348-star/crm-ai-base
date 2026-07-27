@@ -108,6 +108,17 @@ export type NormalizedMetaTemplate = {
   unknownButtonTypes: string[];
 };
 
+export type MetaTemplateHeaderMediaReference = {
+  requiresMedia: boolean;
+  format: "IMAGE" | "VIDEO" | "DOCUMENT" | "LOCATION" | null;
+  mediaType: "image" | "video" | "document" | "location" | null;
+  headerHandles: string[];
+  primaryHeaderHandle: string | null;
+  mediaId: string | null;
+  link: string | null;
+  headerUrl: string | null;
+};
+
 const KNOWN_COMPONENT_TYPES = new Set(["HEADER", "BODY", "FOOTER", "BUTTONS"]);
 const KNOWN_BUTTON_TYPES = new Set([
   "QUICK_REPLY",
@@ -117,6 +128,7 @@ const KNOWN_BUTTON_TYPES = new Set([
   "FLOW",
   "OTP"
 ]);
+const MEDIA_HEADER_FORMATS = new Set(["IMAGE", "VIDEO", "DOCUMENT", "LOCATION"]);
 
 function normalizeUpper(value?: string | null) {
   return value?.trim().toUpperCase() ?? "";
@@ -140,6 +152,100 @@ function readStringMatrix(value: unknown) {
     : [];
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readOptionalString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readUniqueStringList(value: unknown) {
+  const values =
+    typeof value === "string"
+      ? [value]
+      : Array.isArray(value)
+        ? value
+        : [];
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const item of values) {
+    const clean = readOptionalString(item);
+    if (!clean || seen.has(clean)) continue;
+
+    seen.add(clean);
+    normalized.push(clean);
+  }
+
+  return normalized;
+}
+
+function readHeaderMediaType(format: string | null) {
+  if (format === "IMAGE") return "image";
+  if (format === "VIDEO") return "video";
+  if (format === "DOCUMENT") return "document";
+  if (format === "LOCATION") return "location";
+
+  return null;
+}
+
+function emptyHeaderMediaReference(): MetaTemplateHeaderMediaReference {
+  return {
+    requiresMedia: false,
+    format: null,
+    mediaType: null,
+    headerHandles: [],
+    primaryHeaderHandle: null,
+    mediaId: null,
+    link: null,
+    headerUrl: null
+  };
+}
+
+export function extractMetaTemplateHeaderMediaReferenceFromComponent(
+  component: unknown
+): MetaTemplateHeaderMediaReference {
+  if (!isRecord(component) || normalizeUpper(readOptionalString(component.type)) !== "HEADER") {
+    return emptyHeaderMediaReference();
+  }
+
+  const format = normalizeUpper(readOptionalString(component.format));
+  if (!MEDIA_HEADER_FORMATS.has(format)) {
+    return emptyHeaderMediaReference();
+  }
+
+  const example = isRecord(component.example) ? component.example : {};
+  const headerHandles = readUniqueStringList(
+    example.header_handle ?? component.header_handle
+  );
+
+  return {
+    requiresMedia: true,
+    format: format as MetaTemplateHeaderMediaReference["format"],
+    mediaType: readHeaderMediaType(format),
+    headerHandles,
+    primaryHeaderHandle: headerHandles[0] ?? null,
+    mediaId: readOptionalString(component.media_id ?? example.media_id),
+    link: readOptionalString(component.link ?? example.link),
+    headerUrl: readOptionalString(component.header_url ?? example.header_url)
+  };
+}
+
+export function extractMetaTemplateHeaderMediaReference(
+  components: unknown
+): MetaTemplateHeaderMediaReference {
+  if (!Array.isArray(components)) {
+    return emptyHeaderMediaReference();
+  }
+
+  const header = components.find(
+    (component) => isRecord(component) && normalizeUpper(readOptionalString(component.type)) === "HEADER"
+  );
+
+  return extractMetaTemplateHeaderMediaReferenceFromComponent(header);
+}
+
 export function extractMetaTemplateVariables(text?: string | null) {
   const matches = text?.match(/\{\{\d+\}\}/g) ?? [];
   return uniqueSorted(
@@ -153,6 +259,7 @@ export function normalizeMetaTemplate(template: MetaTemplate): NormalizedMetaTem
   const rawComponents = Array.isArray(template.components) ? template.components : [];
   const header =
     rawComponents.find((component) => normalizeUpper(component.type) === "HEADER") ?? null;
+  const headerMediaReference = extractMetaTemplateHeaderMediaReference(rawComponents);
   const body =
     rawComponents.find((component) => normalizeUpper(component.type) === "BODY") ?? null;
   const footer =
@@ -165,19 +272,8 @@ export function normalizeMetaTemplate(template: MetaTemplate): NormalizedMetaTem
   const bodyText = body?.text ?? "";
   const headerVariables = extractMetaTemplateVariables(headerText);
   const bodyVariables = extractMetaTemplateVariables(bodyText);
-  const requiresHeaderMedia = ["IMAGE", "VIDEO", "DOCUMENT", "LOCATION"].includes(
-    headerFormat ?? ""
-  );
-  const headerMediaType =
-    headerFormat === "IMAGE"
-      ? "image"
-      : headerFormat === "VIDEO"
-        ? "video"
-        : headerFormat === "DOCUMENT"
-          ? "document"
-          : headerFormat === "LOCATION"
-            ? "location"
-            : null;
+  const requiresHeaderMedia = headerMediaReference.requiresMedia;
+  const headerMediaType = headerMediaReference.mediaType;
 
   const buttons = (buttonsComponent?.buttons ?? []).map((button) => {
     const type = normalizeUpper(button.type) || "UNKNOWN";
@@ -244,7 +340,7 @@ export function normalizeMetaTemplate(template: MetaTemplate): NormalizedMetaTem
       text: headerText,
       variables: headerVariables,
       exampleText: readStringArray(header?.example?.header_text),
-      exampleHandles: readStringArray(header?.example?.header_handle),
+      exampleHandles: headerMediaReference.headerHandles,
       requiresMedia: requiresHeaderMedia
     },
     body: {
