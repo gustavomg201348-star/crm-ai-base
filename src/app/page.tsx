@@ -1048,11 +1048,11 @@ const conversationStatusLabels: Record<ConversationRow["status"], string> = {
 };
 
 const conversationStatusIndicatorClasses: Record<ConversationRow["status"], string> = {
-  OPEN: "bg-emerald-500 ring-emerald-100",
-  PENDING: "bg-amber-500 ring-amber-100",
-  BOT: "bg-blue-500 ring-blue-100",
-  SOLD: "bg-violet-500 ring-violet-100",
-  RESOLVED: "bg-slate-400 ring-slate-100"
+  OPEN: "bg-emerald-500",
+  PENDING: "bg-amber-500",
+  BOT: "bg-blue-500",
+  SOLD: "bg-violet-500",
+  RESOLVED: "bg-slate-400"
 };
 
 const proposalStatusLabels: Record<ProposalStatus, string> = {
@@ -7502,7 +7502,7 @@ function Atendimento({
                 onRemove={(tagId) => onRemoveTag(selectedConversation.id, tagId)}
               />
               <div
-                className="relative grid h-7 w-7 shrink-0 place-items-center rounded-full border border-line bg-white shadow-sm hover:border-slate-300 hover:bg-slate-50 2xl:h-8 2xl:w-8"
+                className="relative grid h-7 w-7 shrink-0 place-items-center rounded-full border border-line bg-white text-slate-600 shadow-sm hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 focus-within:border-slate-300 focus-within:bg-slate-50 2xl:h-8 2xl:w-8"
                 title={`Status: ${
                   conversationStatusLabels[selectedConversation.status] ??
                   selectedConversation.status
@@ -7510,7 +7510,7 @@ function Atendimento({
               >
                 <span
                   className={clsx(
-                    "h-3.5 w-3.5 rounded-full ring-4",
+                    "h-2.5 w-2.5 rounded-full",
                     conversationStatusIndicatorClasses[selectedConversation.status]
                   )}
                 />
