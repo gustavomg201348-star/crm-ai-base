@@ -1047,6 +1047,14 @@ const conversationStatusLabels: Record<ConversationRow["status"], string> = {
   RESOLVED: "Resolvido"
 };
 
+const conversationStatusIndicatorClasses: Record<ConversationRow["status"], string> = {
+  OPEN: "bg-emerald-500",
+  PENDING: "bg-amber-500",
+  BOT: "bg-blue-500",
+  SOLD: "bg-violet-500",
+  RESOLVED: "bg-slate-400"
+};
+
 const proposalStatusLabels: Record<ProposalStatus, string> = {
   NEW: "Novo",
   TYPED: "Digitado",
@@ -7327,8 +7335,8 @@ function Atendimento({
           </div>
         )}
 
-        <div className="hidden min-h-16 shrink-0 flex-col gap-2 border-b border-line/70 px-4 py-2 md:px-5 xl:flex">
-          <div className="flex min-w-0 items-center gap-2">
+        <div className="hidden shrink-0 items-center gap-1 border-b border-line/70 px-2 py-1.5 md:px-3 xl:flex 2xl:gap-1.5 2xl:px-4">
+          <div className="flex min-w-0 w-[8rem] shrink-0 items-center gap-1 xl:w-[8.75rem] 2xl:w-[13rem] 2xl:gap-1.5">
             {selectedConversation && (
               <button
                 type="button"
@@ -7352,21 +7360,28 @@ function Atendimento({
                 Detalhes
               </button>
             )}
-            <div className="relative grid h-10 w-10 place-items-center rounded-full bg-slate-50 text-sm font-black text-slate-700 shadow-sm ring-1 ring-slate-200">
+            <div className="relative grid h-9 w-9 shrink-0 place-items-center rounded-full bg-slate-50 text-sm font-black text-slate-700 shadow-sm ring-1 ring-slate-200 2xl:h-10 2xl:w-10">
               {formatContactNameForUi(selectedConversation?.contact.name)
                 .slice(0, 1)
                 .toUpperCase() ?? "C"}
               <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-emerald-500 ring-1 ring-emerald-100" />
             </div>
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <h3 className="truncate text-base font-black leading-5 text-slate-950">
+            <div className="flex min-w-0 flex-1 items-center gap-1">
+              <h3
+                className="min-w-0 truncate text-sm font-black leading-5 text-slate-950 2xl:text-base"
+                title={
+                  selectedConversation
+                    ? formatContactNameForUi(selectedConversation.contact.name)
+                    : undefined
+                }
+              >
                 {selectedConversation
                   ? formatContactNameForUi(selectedConversation.contact.name)
                   : "Selecione uma conversa"}
               </h3>
               {selectedConversation && (
                 <button
-                  className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-line bg-white text-slate-500 hover:border-blue-200 hover:bg-blue-50 hover:text-brand"
+                  className="grid h-6 w-6 shrink-0 place-items-center rounded-full border border-line bg-white text-slate-500 hover:border-blue-200 hover:bg-blue-50 hover:text-brand 2xl:h-7 2xl:w-7"
                   onClick={openContactEdit}
                   title="Editar contato"
                   type="button"
@@ -7376,137 +7391,147 @@ function Atendimento({
               )}
             </div>
           </div>
-          <div className="flex max-w-full flex-wrap items-center gap-1.5 overflow-hidden">
-            <p className="min-w-0 max-w-full truncate text-[13px] font-medium text-slate-500">
+          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden 2xl:gap-1.5">
+            <p
+              className="w-[4.75rem] shrink-0 truncate text-xs font-semibold text-slate-600 xl:w-[5.25rem] 2xl:w-[8.5rem]"
+              title={selectedConversation?.contact.phone || undefined}
+            >
                 {selectedConversation
-                  ? [
-                      selectedConversation.contact.phone,
-                      selectedConversation.contact.cpf
-                        ? `CPF: ${formatCpf(selectedConversation.contact.cpf)}`
-                        : null
-                    ]
-                      .filter(Boolean)
-                      .join(" • ")
-                  : "Inbox interno"}
+                  ? selectedConversation.contact.phone || "Tel -"
+                  : "Inbox"}
               </p>
               {selectedConversation && (
-                <div className="flex max-w-full flex-wrap items-center gap-1.5 overflow-hidden">
+                <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden 2xl:gap-1.5">
                   <span
-                    className="max-w-[13rem] truncate rounded-full border border-blue-100 bg-blue-50/70 px-2 py-0.5 text-[11px] font-semibold text-blue-700 shadow-sm"
+                    className="w-[3.75rem] shrink-0 truncate text-xs font-semibold text-slate-600 xl:w-[4.25rem] 2xl:w-[7rem]"
+                    title={
+                      selectedConversation.contact.cpf
+                        ? formatCpf(selectedConversation.contact.cpf)
+                        : "CPF nao informado"
+                    }
+                  >
+                    {selectedConversation.contact.cpf
+                      ? `CPF: ${formatCpf(selectedConversation.contact.cpf)}`
+                      : "CPF -"}
+                  </span>
+                  <span
+                    className="min-w-[5.5rem] flex-1 truncate rounded-full border border-blue-100 bg-blue-50/80 px-2 py-1 text-xs font-bold text-blue-700 shadow-sm xl:min-w-[6.25rem] 2xl:min-w-[10rem] 2xl:px-2.5"
                     title={conversationChannelLabel ?? undefined}
                   >
                     {conversationChannelLabel}
                   </span>
-                  <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600 shadow-sm">
-                    {conversationStatusLabels[selectedConversation.status] ?? selectedConversation.status}
-                  </span>
                   <span
                     className={clsx(
-                      "max-w-[9rem] truncate rounded-full border px-2 py-0.5 text-[11px] font-semibold shadow-sm",
+                      "w-[4.25rem] shrink-0 truncate rounded-full border px-2 py-1 text-xs font-bold shadow-sm xl:w-[4.75rem] 2xl:w-[8rem] 2xl:px-2.5",
                       selectedConversation.agent
                         ? "border-emerald-100 bg-emerald-50/80 text-emerald-700"
                         : "border-amber-100 bg-amber-50/80 text-amber-700"
                     )}
                     title={selectedConversation.agent?.name ?? "Sem responsavel"}
                   >
-                    {selectedConversation.agent?.name ?? "Sem responsavel"}
-                  </span>
-                  <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-500 shadow-sm">
-                    Ultima:{" "}
-                    {formatRelativeDate(
-                      selectedConversation.lastMessageAt ??
-                        selectedConversation.lastMessage?.createdAt ??
-                        selectedConversation.updatedAt
-                    )}
+                    {selectedConversation.agent?.name
+                      ? selectedConversation.agent.name.split(" ")[0]
+                      : "Sem resp."}
                   </span>
                 </div>
               )}
           </div>
           {selectedConversation && (
-            <div className="flex flex-wrap items-center gap-1.5 rounded-2xl border border-line/60 bg-white/70 p-1">
+            <div className="ml-auto flex shrink-0 items-center gap-1 2xl:gap-1.5">
               {followUpSuccess && (
-                <span className="inline-flex h-9 items-center rounded-full bg-emerald-50 px-3 text-xs font-bold text-emerald-700 ring-1 ring-emerald-100">
+                  <span className="inline-flex h-8 items-center rounded-full bg-emerald-50 px-2.5 text-xs font-bold text-emerald-700 ring-1 ring-emerald-100">
                   {followUpSuccess}
                 </span>
               )}
               <button
                 type="button"
-                className="inline-flex h-9 items-center gap-2 rounded-full border border-line bg-white px-3 text-sm font-semibold text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800"
+                className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-line bg-white text-slate-600 shadow-sm hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 2xl:h-8 2xl:w-8"
                 onClick={openScheduledReturns}
+                title="Retorno"
               >
                 <Clock3 className="h-4 w-4" />
-                Retorno
               </button>
               <button
                 type="button"
-                className="inline-flex h-9 items-center gap-2 rounded-full border border-line bg-white px-3 text-sm font-semibold text-slate-600 hover:border-amber-200 hover:bg-amber-50 hover:text-amber-700"
+                className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-line bg-white text-slate-600 shadow-sm hover:border-amber-200 hover:bg-amber-50 hover:text-amber-700 2xl:h-8 2xl:w-8"
                 onClick={openFollowUp}
+                title="Agendar"
               >
                 <CalendarClock className="h-4 w-4" />
-                Agendar
               </button>
               {!selectedConversation.agent && (
                 <button
                   type="button"
-                  className="inline-flex h-9 items-center gap-2 rounded-full bg-emerald-600 px-3 text-sm font-bold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
+                  className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-emerald-600 text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70 2xl:h-8 2xl:w-8"
                   disabled={assigningConversationId === selectedConversation.id}
                   onClick={() => void submitAssign(selectedConversation.id)}
+                  title="Assumir"
                 >
-                  {assigningConversationId === selectedConversation.id && (
+                  {assigningConversationId === selectedConversation.id ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Check className="h-4 w-4" />
                   )}
-                  {assigningConversationId === selectedConversation.id ? "Assumindo..." : "Assumir"}
                 </button>
               )}
               {isAdmin && selectedConversation.agent && (
                 <button
                   type="button"
-                  className="hidden h-9 rounded-full border border-line bg-white px-3 text-sm font-semibold text-slate-500 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 lg:inline-flex"
+                  className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-line bg-white text-slate-500 shadow-sm hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 2xl:h-8 2xl:w-8"
                   onClick={() => setUnassignOpen(true)}
+                  title="Devolver"
                 >
-                  Devolver
+                  <RotateCcw className="h-4 w-4" />
                 </button>
               )}
               {isAdmin && (
                 <button
                   type="button"
-                  className="inline-flex h-9 items-center gap-2 rounded-full border border-line bg-white px-3 text-sm font-semibold text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800"
+                  className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-line bg-white text-slate-600 shadow-sm hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 2xl:h-8 2xl:w-8"
                   onClick={() => setTransferOpen(true)}
+                  title="Transferir"
                 >
                   <ArrowRight className="h-4 w-4" />
-                  Transferir
                 </button>
               )}
-              <button
-                type="button"
-                className="hidden h-9 items-center gap-2 rounded-full border border-line bg-white px-3 text-sm font-semibold text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-primary lg:inline-flex"
-                onClick={() => onOpenCltSimulation(selectedConversation)}
-              >
-                <BriefcaseBusiness className="h-4 w-4" />
-                CLT
-              </button>
               <ConversationTagSelector
+                iconOnly
                 availableTags={availableTags}
                 selectedTags={selectedConversation.tags}
                 onAdd={(tagIds) => onAddTags(selectedConversation.id, tagIds)}
                 onRemove={(tagId) => onRemoveTag(selectedConversation.id, tagId)}
               />
-              <select
-                className="h-9 rounded-full border border-line bg-white px-3 text-sm font-medium text-slate-700 outline-none hover:bg-white focus:border-blue-200 focus:bg-white"
-                value={selectedConversation.status}
-                onChange={(event) =>
-                  void onUpdateStatus(
-                    selectedConversation.id,
-                    event.target.value as ConversationRow["status"]
-                  )
-                }
+              <div
+                className="relative grid h-7 w-7 shrink-0 place-items-center rounded-full border border-line bg-white text-slate-600 shadow-sm hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 focus-within:border-slate-300 focus-within:bg-slate-50 2xl:h-8 2xl:w-8"
+                title={`Status: ${
+                  conversationStatusLabels[selectedConversation.status] ??
+                  selectedConversation.status
+                }`}
               >
-                <option value="OPEN">Aberto</option>
-                <option value="PENDING">Pendente</option>
-                <option value="BOT">Robo</option>
-                <option value="SOLD">Vendas</option>
-                <option value="RESOLVED">Resolvido</option>
-              </select>
+                <span
+                  className={clsx(
+                    "h-2.5 w-2.5 rounded-full",
+                    conversationStatusIndicatorClasses[selectedConversation.status]
+                  )}
+                />
+                <select
+                  aria-label="Alterar status da conversa"
+                  className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                  value={selectedConversation.status}
+                  onChange={(event) =>
+                    void onUpdateStatus(
+                      selectedConversation.id,
+                      event.target.value as ConversationRow["status"]
+                    )
+                  }
+                >
+                  <option value="OPEN">Aberto</option>
+                  <option value="PENDING">Pendente</option>
+                  <option value="BOT">Robo</option>
+                  <option value="SOLD">Vendas</option>
+                  <option value="RESOLVED">Resolvido</option>
+                </select>
+              </div>
             </div>
           )}
         </div>
@@ -8097,17 +8122,6 @@ function Atendimento({
                 )}
                 <button
                   type="button"
-                  className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-line bg-white px-3 text-sm font-semibold text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-primary"
-                  onClick={() => {
-                    setMobileActionsOpen(false);
-                    onOpenCltSimulation(selectedConversation);
-                  }}
-                >
-                  <BriefcaseBusiness className="h-4 w-4" />
-                  Simular CLT
-                </button>
-                <button
-                  type="button"
                   className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-line bg-white px-3 text-sm font-semibold text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-brand"
                   onClick={() => {
                     setMobileActionsOpen(false);
@@ -8271,11 +8285,13 @@ function TagBadge({
 }
 
 function ConversationTagSelector({
+  iconOnly,
   availableTags,
   selectedTags,
   onAdd,
   onRemove
 }: {
+  iconOnly?: boolean;
   availableTags: ReferenceData["tags"];
   selectedTags: ConversationRow["tags"];
   onAdd: (tagIds: string[]) => Promise<void>;
@@ -8302,12 +8318,16 @@ function ConversationTagSelector({
   return (
     <div className="relative">
       <button
-        className="inline-flex h-10 items-center gap-2 rounded-full border border-line bg-white px-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+        className={clsx(
+          "inline-flex items-center rounded-full border border-line bg-white text-sm font-semibold text-slate-600 hover:bg-slate-50",
+          iconOnly ? "h-7 w-7 shrink-0 justify-center shadow-sm 2xl:h-8 2xl:w-8" : "h-10 gap-2 px-3"
+        )}
         onClick={() => setOpen((current) => !current)}
+        title="Tags"
         type="button"
       >
         <Tags className="h-4 w-4" />
-        Tags
+        {!iconOnly && "Tags"}
       </button>
       {open && (
         <div className="absolute right-0 top-12 z-30 w-72 rounded-2xl border border-line bg-white p-3 shadow-soft">
