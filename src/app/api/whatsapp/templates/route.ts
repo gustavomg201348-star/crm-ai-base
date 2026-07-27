@@ -21,13 +21,13 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const templates = channelId
-      ? await getApprovedTemplatesForChannel({
-          channelId,
+    const templates = conversationId
+      ? await getApprovedTemplatesForConversation({
+          conversationId: conversationId!,
           companyId: session.companyId
         })
-      : await getApprovedTemplatesForConversation({
-          conversationId: conversationId!,
+      : await getApprovedTemplatesForChannel({
+          channelId: channelId!,
           companyId: session.companyId
         });
 

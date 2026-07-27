@@ -9,10 +9,20 @@ import {
   saveOutboundMessage
 } from "@/lib/conversation-message.service";
 import { prisma } from "@/lib/db";
+import { findMediaAssetById } from "@/lib/media-asset-repository";
 import {
   extractMetaTemplateVariables,
-  normalizeMetaTemplate
+  normalizeMetaTemplate,
+  type MetaTemplateComponent
 } from "@/lib/meta-template-normalizer";
+import {
+  findMetaTemplateByIdentity,
+  listMetaTemplatesByWaba
+} from "@/lib/meta-template-repository";
+import {
+  deserializeMetaTemplate,
+  type MetaTemplateLibraryEntry
+} from "@/lib/meta-template-service";
 import { digitsOnlyPhone } from "@/lib/phone-normalization.service";
 
 export function extractBodyText(template: MetaTemplate) {
@@ -150,6 +160,70 @@ export function mapApprovedTemplate(template: MetaTemplate) {
   };
 }
 
+function isMetaTemplateComponent(value: unknown): value is MetaTemplateComponent {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function mapLocalTemplateToMetaTemplate(template: MetaTemplateLibraryEntry): MetaTemplate | null {
+  if (!Array.isArray(template.components)) return null;
+
+  const components = template.components.filter(isMetaTemplateComponent);
+  if (!components.length) return null;
+
+  return {
+    id: template.metaTemplateId ?? template.id,
+    name: template.name,
+    status: template.metaStatus ?? "",
+    category: template.category ?? "",
+    language: template.language,
+    components
+  } satisfies MetaTemplate;
+}
+
+function isUsableLocalTemplate(template: MetaTemplateLibraryEntry) {
+  return (
+    template.isActive &&
+    template.metaStatus === "APPROVED" &&
+    template.operationalStatus === "READY"
+  );
+}
+
+async function resolveLocalTemplateHeaderImageUrl({
+  companyId,
+  localTemplate,
+  template
+}: {
+  companyId: string;
+  localTemplate: MetaTemplateLibraryEntry;
+  template: MetaTemplate;
+}) {
+  if (!templateHasHeaderImage(template)) return null;
+
+  if (!localTemplate.defaultHeaderMediaAssetId) {
+    return resolveTemplateHeaderImageUrl(template);
+  }
+
+  const mediaAsset = await findMediaAssetById(
+    companyId,
+    localTemplate.defaultHeaderMediaAssetId
+  );
+
+  if (!mediaAsset) {
+    throw new Error("Midia padrao do template nao encontrada.");
+  }
+
+  const publicUrl = mediaAsset.publicUrl?.trim();
+  if (!publicUrl) {
+    throw new Error("Midia padrao do template sem URL publica.");
+  }
+
+  if (!/^https:\/\//i.test(publicUrl)) {
+    throw new Error("Midia padrao do template precisa conter uma URL publica HTTPS.");
+  }
+
+  return publicUrl;
+}
+
 export async function getApprovedTemplatesForConversation({
   conversationId,
   companyId
@@ -160,12 +234,18 @@ export async function getApprovedTemplatesForConversation({
   const { channel } = await getConversationIntegration({ conversationId, companyId });
   if (!channel.wabaId) throw new Error("Canal Meta sem WABA ID.");
 
-  const templates = await getMetaApprovedTemplates({
-    wabaId: channel.wabaId,
-    accessToken: channel.accessToken!
+  const templates = await listMetaTemplatesByWaba(companyId, channel.wabaId, {
+    isActive: true,
+    metaStatus: "APPROVED",
+    operationalStatus: "READY"
   });
 
-  return templates.map(mapApprovedTemplate);
+  return templates
+    .map(deserializeMetaTemplate)
+    .filter(isUsableLocalTemplate)
+    .map(mapLocalTemplateToMetaTemplate)
+    .filter((template): template is MetaTemplate => template !== null)
+    .map(mapApprovedTemplate);
 }
 
 export async function getApprovedTemplatesForChannel({
@@ -218,15 +298,20 @@ export async function sendConversationTemplate({
   });
   if (!channel.wabaId) throw new Error("Canal Meta sem WABA ID.");
 
-  const templates = await getMetaApprovedTemplates({
-    wabaId: channel.wabaId,
-    accessToken: channel.accessToken!
-  });
-  const template = templates.find(
-    (item) => item.name === templateName && item.language === language
+  const localTemplateRecord = await findMetaTemplateByIdentity(
+    companyId,
+    channel.wabaId,
+    templateName,
+    language
   );
+  const localTemplate = localTemplateRecord
+    ? deserializeMetaTemplate(localTemplateRecord)
+    : null;
+  const template = localTemplate ? mapLocalTemplateToMetaTemplate(localTemplate) : null;
 
-  if (!template) throw new Error("Template aprovado nao encontrado.");
+  if (!localTemplate || !isUsableLocalTemplate(localTemplate) || !template) {
+    throw new Error("Template aprovado nao encontrado.");
+  }
 
   const requiredVariables = extractVariableCount(extractBodyText(template));
   const cleanVariables = variables.map((value) => value.trim());
@@ -235,7 +320,11 @@ export async function sendConversationTemplate({
     throw new Error("Preencha todas as variaveis obrigatorias do template.");
   }
 
-  const headerImageUrl = resolveTemplateHeaderImageUrl(template);
+  const headerImageUrl = await resolveLocalTemplateHeaderImageUrl({
+    companyId,
+    localTemplate,
+    template
+  });
   const metaResponse = await sendMetaTemplateMessage({
     phoneNumberId: channel.phoneNumberId!,
     accessToken: channel.accessToken!,
