@@ -3,11 +3,19 @@ import {
   type MetaTemplate,
   type NormalizedMetaTemplate
 } from "@/lib/meta-template-normalizer";
+import {
+  MetaTemplateClient,
+  type MetaTemplateClientInput,
+  type MetaTemplateClientResult
+} from "@/lib/meta-template-client";
 
 export type SyncMetaTemplatesForWabaInput = {
   companyId: string;
   wabaId: string;
+  accessToken: string;
   channelId?: string | null;
+  signal?: AbortSignal;
+  pageLimit?: number;
   reason: string;
 };
 
@@ -20,13 +28,6 @@ export type MetaTemplateSyncError = {
     language?: string;
     metaTemplateId?: string | null;
   };
-};
-
-export type MetaTemplateFetchResult = {
-  complete: boolean;
-  templates: unknown[];
-  warnings?: string[];
-  errors?: MetaTemplateSyncError[];
 };
 
 export type MetaTemplateSyncResult = {
@@ -70,10 +71,14 @@ export type MetaTemplateSyncUpsertInput = {
   existingDefaultHeaderMediaAssetId?: string | null;
 };
 
+type MetaTemplateClientPort = {
+  fetchAllMetaTemplates: (
+    input: MetaTemplateClientInput
+  ) => Promise<MetaTemplateClientResult>;
+};
+
 export type MetaTemplateSyncDependencies = {
-  fetchTemplates: (
-    input: SyncMetaTemplatesForWabaInput
-  ) => Promise<MetaTemplateFetchResult>;
+  metaTemplateClient?: MetaTemplateClientPort;
   findExistingTemplate: (input: {
     companyId: string;
     wabaId: string;
@@ -130,24 +135,6 @@ function readOptionalString(value: unknown) {
 
 function readOptionalNullableString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function readLimitedOptionalString(value: unknown) {
-  return typeof value === "string" && value.trim() ? limitMessage(value) : undefined;
-}
-
-function readLimitedOptionalNullableString(value: unknown) {
-  return typeof value === "string" && value.trim() ? limitMessage(value) : null;
-}
-
-function readExternalErrorCode(value: unknown) {
-  const code = readLimitedOptionalString(value);
-
-  if (!code || code.length > 80 || !/^[A-Za-z0-9_.:-]+$/.test(code)) {
-    return "FETCH_ERROR";
-  }
-
-  return code;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -258,86 +245,6 @@ export function sanitizeMetaTemplateSyncError(
     message: domainMessage ?? defaultMessageForErrorCode(code),
     retryable,
     ...(template ? { template } : {})
-  };
-}
-
-function sanitizeExternalWarning(value: unknown) {
-  return typeof value === "string" && value.trim() ? limitMessage(value) : null;
-}
-
-function sanitizeExternalWarnings(values: unknown[]) {
-  return values
-    .map(sanitizeExternalWarning)
-    .filter((warning): warning is string => Boolean(warning));
-}
-
-function sanitizeExternalSyncError(value: unknown): MetaTemplateSyncError {
-  if (!isRecord(value)) {
-    return {
-      code: "FETCH_ERROR",
-      message: defaultMessageForErrorCode("FETCH_ERROR"),
-      retryable: false
-    };
-  }
-
-  const template = isRecord(value.template)
-    ? {
-        name: readLimitedOptionalString(value.template.name),
-        language: readLimitedOptionalString(value.template.language),
-        metaTemplateId: readLimitedOptionalNullableString(value.template.metaTemplateId)
-      }
-    : undefined;
-  const sanitizedTemplate =
-    template && (template.name || template.language || template.metaTemplateId !== null)
-      ? template
-      : undefined;
-
-  return {
-    code: readExternalErrorCode(value.code),
-    message: defaultMessageForErrorCode("FETCH_ERROR"),
-    retryable: typeof value.retryable === "boolean" ? value.retryable : false,
-    ...(sanitizedTemplate ? { template: sanitizedTemplate } : {})
-  };
-}
-
-function validateMetaTemplateFetchResult(value: unknown):
-  | { ok: true; value: Required<MetaTemplateFetchResult> }
-  | { ok: false; error: MetaTemplateSyncError } {
-  if (!isRecord(value)) {
-    return {
-      ok: false,
-      error: {
-        code: "FETCH_INVALID_RESULT",
-        message: defaultMessageForErrorCode("FETCH_INVALID_RESULT"),
-        retryable: true
-      }
-    };
-  }
-
-  if (
-    typeof value.complete !== "boolean" ||
-    !Array.isArray(value.templates) ||
-    (value.warnings !== undefined && !Array.isArray(value.warnings)) ||
-    (value.errors !== undefined && !Array.isArray(value.errors))
-  ) {
-    return {
-      ok: false,
-      error: {
-        code: "FETCH_INVALID_RESULT",
-        message: defaultMessageForErrorCode("FETCH_INVALID_RESULT"),
-        retryable: true
-      }
-    };
-  }
-
-  return {
-    ok: true,
-    value: {
-      complete: value.complete,
-      templates: value.templates,
-      warnings: sanitizeExternalWarnings(value.warnings ?? []),
-      errors: (value.errors ?? []).map(sanitizeExternalSyncError)
-    }
   };
 }
 
@@ -470,7 +377,10 @@ async function markNotReturnedTemplates({
   seenKeys,
   result
 }: {
-  input: SyncMetaTemplatesForWabaInput;
+  input: {
+    companyId: string;
+    wabaId: string;
+  };
   dependencies: MetaTemplateSyncDependencies;
   seenKeys: Set<string>;
   result: MetaTemplateSyncResult;
@@ -537,21 +447,17 @@ export async function syncMetaTemplatesForWaba(
     ...input,
     startedAt: now()
   });
-  let fetchResult: Required<MetaTemplateFetchResult>;
+  const metaTemplateClient = dependencies.metaTemplateClient ?? new MetaTemplateClient();
+  let fetchResult: MetaTemplateClientResult;
 
   try {
-    const rawFetchResult = await dependencies.fetchTemplates(input);
-    const validatedFetchResult = validateMetaTemplateFetchResult(rawFetchResult);
-
-    if (!validatedFetchResult.ok) {
-      result.failed += 1;
-      result.errors.push(validatedFetchResult.error);
-      markIncomplete(result);
-      result.finishedAt = now();
-      return result;
-    }
-
-    fetchResult = validatedFetchResult.value;
+    fetchResult = await metaTemplateClient.fetchAllMetaTemplates({
+      companyId: input.companyId,
+      wabaId: input.wabaId,
+      accessToken: rawInput.accessToken,
+      signal: rawInput.signal,
+      pageLimit: rawInput.pageLimit
+    });
   } catch (error) {
     result.failed += 1;
     result.errors.push(sanitizeMetaTemplateSyncError(error, "FETCH_FAILED", true));
