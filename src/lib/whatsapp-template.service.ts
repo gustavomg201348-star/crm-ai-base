@@ -1,5 +1,4 @@
 import {
-  getMetaApprovedTemplates,
   readMetaMessageId,
   sendMetaTemplateMessage,
   type MetaTemplate
@@ -188,7 +187,7 @@ function isUsableLocalTemplate(template: MetaTemplateLibraryEntry) {
   );
 }
 
-async function resolveLocalTemplateHeaderImageUrl({
+export async function resolveLocalTemplateHeaderImageUrl({
   companyId,
   localTemplate,
   template
@@ -212,6 +211,10 @@ async function resolveLocalTemplateHeaderImageUrl({
     throw new Error("Midia padrao do template nao encontrada.");
   }
 
+  if (mediaAsset.companyId !== companyId) {
+    throw new Error("Midia padrao do template nao pertence a empresa.");
+  }
+
   const publicUrl = mediaAsset.publicUrl?.trim();
   if (!publicUrl) {
     throw new Error("Midia padrao do template sem URL publica.");
@@ -222,6 +225,35 @@ async function resolveLocalTemplateHeaderImageUrl({
   }
 
   return publicUrl;
+}
+
+export async function findReadyLocalMetaTemplate({
+  companyId,
+  wabaId,
+  templateName,
+  language
+}: {
+  companyId: string;
+  wabaId: string;
+  templateName: string;
+  language: string;
+}) {
+  const localTemplateRecord = await findMetaTemplateByIdentity(
+    companyId,
+    wabaId,
+    templateName,
+    language
+  );
+  const localTemplate = localTemplateRecord
+    ? deserializeMetaTemplate(localTemplateRecord)
+    : null;
+  const template = localTemplate ? mapLocalTemplateToMetaTemplate(localTemplate) : null;
+
+  if (!localTemplate || !isUsableLocalTemplate(localTemplate) || !template) {
+    return null;
+  }
+
+  return { localTemplate, template };
 }
 
 export async function getApprovedTemplatesForConversation({
@@ -267,14 +299,19 @@ export async function getApprovedTemplatesForChannel({
 
   if (!channel) throw new Error("Canal Meta nao encontrado.");
   if (!channel.wabaId) throw new Error("Canal Meta sem WABA ID.");
-  if (!channel.accessToken) throw new Error("Canal Meta sem token.");
 
-  const templates = await getMetaApprovedTemplates({
-    wabaId: channel.wabaId,
-    accessToken: channel.accessToken
+  const templates = await listMetaTemplatesByWaba(companyId, channel.wabaId, {
+    isActive: true,
+    metaStatus: "APPROVED",
+    operationalStatus: "READY"
   });
 
-  return templates.map(mapApprovedTemplate);
+  return templates
+    .map(deserializeMetaTemplate)
+    .filter(isUsableLocalTemplate)
+    .map(mapLocalTemplateToMetaTemplate)
+    .filter((template): template is MetaTemplate => template !== null)
+    .map(mapApprovedTemplate);
 }
 
 export async function sendConversationTemplate({
@@ -298,20 +335,17 @@ export async function sendConversationTemplate({
   });
   if (!channel.wabaId) throw new Error("Canal Meta sem WABA ID.");
 
-  const localTemplateRecord = await findMetaTemplateByIdentity(
+  const localTemplateContext = await findReadyLocalMetaTemplate({
     companyId,
-    channel.wabaId,
     templateName,
+    wabaId: channel.wabaId,
     language
-  );
-  const localTemplate = localTemplateRecord
-    ? deserializeMetaTemplate(localTemplateRecord)
-    : null;
-  const template = localTemplate ? mapLocalTemplateToMetaTemplate(localTemplate) : null;
+  });
 
-  if (!localTemplate || !isUsableLocalTemplate(localTemplate) || !template) {
+  if (!localTemplateContext) {
     throw new Error("Template aprovado nao encontrado.");
   }
+  const { localTemplate, template } = localTemplateContext;
 
   const requiredVariables = extractVariableCount(extractBodyText(template));
   const cleanVariables = variables.map((value) => value.trim());
