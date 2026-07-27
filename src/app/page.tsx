@@ -34,6 +34,7 @@ import {
   File as FileIcon,
   FileText,
   Filter,
+  IdCard,
   Image as ImageIcon,
   Loader2,
   Menu,
@@ -44,6 +45,7 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Paperclip,
+  Phone,
   Plus,
   RefreshCcw,
   RotateCcw,
@@ -1274,6 +1276,42 @@ function formatCpf(value?: string | null) {
   const digits = value?.replace(/\D/g, "").slice(0, 11) ?? "";
   if (digits.length !== 11) return value?.trim() ?? "";
   return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+}
+
+function formatPhoneForHeader(value?: string | null) {
+  const raw = value?.trim() ?? "";
+  if (!raw) return "";
+
+  const digits = raw.replace(/\D/g, "");
+  const nationalDigits =
+    digits.length === 13 && digits.startsWith("55") ? digits.slice(2) : digits;
+
+  if (nationalDigits.length === 11) {
+    return nationalDigits.replace(/(\d{2})(\d{5})(\d{4})/, "($1) $2-$3");
+  }
+
+  if (nationalDigits.length === 10) {
+    return nationalDigits.replace(/(\d{2})(\d{4})(\d{4})/, "($1) $2-$3");
+  }
+
+  return raw;
+}
+
+function buildShortChannelLabel(name?: string | null) {
+  const compactName = name?.trim().replace(/\s+/g, " ") ?? "";
+  if (!compactName) return "WhatsApp";
+
+  const whatsappMatch = compactName.match(/\bWhatsApp\s+\d{2,}\b/i);
+  if (whatsappMatch?.[0]) return whatsappMatch[0].replace(/^whatsapp/i, "WhatsApp");
+
+  const whatsappSegment = compactName
+    .split(/\s*[-–—•·]\s*/)
+    .map((part) => part.trim())
+    .find((part) => /^WhatsApp\b/i.test(part));
+
+  if (whatsappSegment) return whatsappSegment.replace(/^whatsapp/i, "WhatsApp");
+
+  return compactName;
 }
 
 function formatContactNameForUi(name?: string | null) {
@@ -6867,6 +6905,24 @@ function Atendimento({
         ? "WhatsApp · canal não identificado"
         : "Canal não informado"
     : null;
+  const conversationHeaderChannelLabel = selectedConversation
+    ? selectedConversationChannel
+      ? buildShortChannelLabel(selectedConversationChannel.name)
+      : hasConversationChannelData
+        ? "WhatsApp"
+        : "Canal -"
+    : null;
+  const selectedContactPhoneTitle = selectedConversation?.contact.phone?.trim() || undefined;
+  const selectedContactPhoneLabel = selectedConversation
+    ? formatPhoneForHeader(selectedConversation.contact.phone) || "Tel -"
+    : "Inbox";
+  const selectedContactCpfLabel = selectedConversation?.contact.cpf
+    ? formatCpf(selectedConversation.contact.cpf)
+    : "CPF -";
+  const selectedAgentFullName = selectedConversation?.agent?.name?.trim() || "";
+  const selectedAgentHeaderName = selectedAgentFullName
+    ? selectedAgentFullName.split(/\s+/)[0]
+    : "Sem resp.";
 
   const showMobileConversationDetail = mobileConversationOpen && Boolean(selectedConversation);
 
@@ -7337,8 +7393,8 @@ function Atendimento({
           </div>
         )}
 
-        <div className="hidden shrink-0 items-center gap-1 border-b border-line/70 px-2 py-1.5 md:px-3 xl:flex 2xl:gap-1.5 2xl:px-4">
-          <div className="flex min-w-0 w-[8rem] shrink-0 items-center gap-1 xl:w-[8.75rem] 2xl:w-[13rem] 2xl:gap-1.5">
+        <div className="hidden shrink-0 items-center gap-1 border-b border-line/70 px-2 py-1.5 md:px-3 xl:flex 2xl:gap-2 2xl:px-4">
+          <div className="flex min-w-0 w-[6rem] shrink-0 items-center gap-1 xl:w-[6.5rem] 2xl:w-[13rem] 2xl:gap-1.5">
             {selectedConversation && (
               <button
                 type="button"
@@ -7393,53 +7449,57 @@ function Atendimento({
               )}
             </div>
           </div>
-          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden 2xl:gap-1.5">
+          {selectedConversation && (
+            <span className="h-5 w-px shrink-0 bg-slate-200/80" aria-hidden="true" />
+          )}
+          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden 2xl:gap-2">
             <p
-              className="w-[4.75rem] shrink-0 truncate text-xs font-semibold text-slate-600 xl:w-[5.25rem] 2xl:w-[8.5rem]"
-              title={selectedConversation?.contact.phone || undefined}
+              className="inline-flex min-w-0 basis-[6.25rem] items-center gap-1 truncate text-xs font-semibold text-slate-700 2xl:basis-[8.75rem]"
+              title={selectedContactPhoneTitle}
             >
-                {selectedConversation
-                  ? selectedConversation.contact.phone || "Tel -"
-                  : "Inbox"}
+                {selectedConversation && <Phone className="h-3.5 w-3.5 shrink-0 text-slate-500" />}
+                <span className="min-w-0 truncate">{selectedContactPhoneLabel}</span>
               </p>
               {selectedConversation && (
-                <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden 2xl:gap-1.5">
+                <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden 2xl:gap-2">
+                  <span className="h-5 w-px shrink-0 bg-slate-200/80" aria-hidden="true" />
                   <span
-                    className="w-[3.75rem] shrink-0 truncate text-xs font-semibold text-slate-600 xl:w-[4.25rem] 2xl:w-[7rem]"
+                    className="inline-flex min-w-[2rem] basis-[6rem] items-center gap-1 truncate text-xs font-semibold text-slate-700 2xl:basis-[7.75rem]"
                     title={
                       selectedConversation.contact.cpf
                         ? formatCpf(selectedConversation.contact.cpf)
                         : "CPF nao informado"
                     }
                   >
-                    {selectedConversation.contact.cpf
-                      ? `CPF: ${formatCpf(selectedConversation.contact.cpf)}`
-                      : "CPF -"}
+                    <IdCard className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+                    <span className="min-w-0 truncate">{selectedContactCpfLabel}</span>
                   </span>
+                  <span className="h-5 w-px shrink-0 bg-slate-200/80" aria-hidden="true" />
                   <span
-                    className="min-w-[5.5rem] flex-1 truncate rounded-full border border-blue-100 bg-blue-50/80 px-2 py-1 text-xs font-bold text-blue-700 shadow-sm xl:min-w-[6.25rem] 2xl:min-w-[10rem] 2xl:px-2.5"
+                    className="inline-flex min-w-[3rem] flex-1 items-center gap-1 truncate text-xs font-bold text-slate-800 2xl:min-w-[8rem]"
                     title={conversationChannelLabel ?? undefined}
                   >
-                    {conversationChannelLabel}
+                    <MessageCircle className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                    <span className="min-w-0 truncate">{conversationHeaderChannelLabel}</span>
                   </span>
+                  <span className="h-5 w-px shrink-0 bg-slate-200/80" aria-hidden="true" />
                   <span
                     className={clsx(
-                      "w-[4.25rem] shrink-0 truncate rounded-full border px-2 py-1 text-xs font-bold shadow-sm xl:w-[4.75rem] 2xl:w-[8rem] 2xl:px-2.5",
+                      "inline-flex min-w-[3rem] basis-[4.75rem] items-center gap-1 truncate text-xs font-semibold 2xl:basis-[8rem]",
                       selectedConversation.agent
-                        ? "border-emerald-100 bg-emerald-50/80 text-emerald-700"
-                        : "border-amber-100 bg-amber-50/80 text-amber-700"
+                        ? "text-slate-800"
+                        : "text-slate-600"
                     )}
-                    title={selectedConversation.agent?.name ?? "Sem responsavel"}
+                    title={selectedAgentFullName || "Sem responsavel"}
                   >
-                    {selectedConversation.agent?.name
-                      ? selectedConversation.agent.name.split(" ")[0]
-                      : "Sem resp."}
+                    <UserRound className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+                    <span className="min-w-0 truncate">{selectedAgentHeaderName}</span>
                   </span>
                 </div>
               )}
           </div>
           {selectedConversation && (
-            <div className="ml-auto flex shrink-0 items-center gap-1 2xl:gap-1.5">
+            <div className="ml-auto flex shrink-0 items-center gap-0.5 2xl:gap-2">
               {followUpSuccess && (
                   <span className="inline-flex h-8 items-center rounded-full bg-emerald-50 px-2.5 text-xs font-bold text-emerald-700 ring-1 ring-emerald-100">
                   {followUpSuccess}
@@ -7447,7 +7507,7 @@ function Atendimento({
               )}
               <button
                 type="button"
-                className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-line bg-white text-slate-600 shadow-sm hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 2xl:h-8 2xl:w-8"
+                className="grid h-5 w-5 shrink-0 place-items-center rounded-full border border-line/80 bg-white text-slate-700 shadow-sm hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-100 2xl:h-8 2xl:w-8"
                 onClick={openScheduledReturns}
                 title="Retorno"
               >
@@ -7455,7 +7515,7 @@ function Atendimento({
               </button>
               <button
                 type="button"
-                className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-line bg-white text-slate-600 shadow-sm hover:border-amber-200 hover:bg-amber-50 hover:text-amber-700 2xl:h-8 2xl:w-8"
+                className="grid h-5 w-5 shrink-0 place-items-center rounded-full border border-line/80 bg-white text-slate-700 shadow-sm hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-100 2xl:h-8 2xl:w-8"
                 onClick={openFollowUp}
                 title="Agendar"
               >
@@ -7464,7 +7524,7 @@ function Atendimento({
               {!selectedConversation.agent && (
                 <button
                   type="button"
-                  className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-emerald-600 text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70 2xl:h-8 2xl:w-8"
+                  className="grid h-5 w-5 shrink-0 place-items-center rounded-full border border-line/80 bg-white text-slate-700 shadow-sm hover:border-slate-300 hover:bg-slate-50 hover:text-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-70 2xl:h-8 2xl:w-8"
                   disabled={assigningConversationId === selectedConversation.id}
                   onClick={() => void submitAssign(selectedConversation.id)}
                   title="Assumir"
@@ -7479,7 +7539,7 @@ function Atendimento({
               {isAdmin && selectedConversation.agent && (
                 <button
                   type="button"
-                  className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-line bg-white text-slate-500 shadow-sm hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 2xl:h-8 2xl:w-8"
+                  className="grid h-5 w-5 shrink-0 place-items-center rounded-full border border-line/80 bg-white text-slate-700 shadow-sm hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-100 2xl:h-8 2xl:w-8"
                   onClick={() => setUnassignOpen(true)}
                   title="Devolver"
                 >
@@ -7489,7 +7549,7 @@ function Atendimento({
               {isAdmin && (
                 <button
                   type="button"
-                  className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-line bg-white text-slate-600 shadow-sm hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 2xl:h-8 2xl:w-8"
+                  className="grid h-5 w-5 shrink-0 place-items-center rounded-full border border-line/80 bg-white text-slate-700 shadow-sm hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-100 2xl:h-8 2xl:w-8"
                   onClick={() => setTransferOpen(true)}
                   title="Transferir"
                 >
@@ -7504,7 +7564,7 @@ function Atendimento({
                 onRemove={(tagId) => onRemoveTag(selectedConversation.id, tagId)}
               />
               <div
-                className="relative grid h-7 w-7 shrink-0 place-items-center rounded-full border border-line bg-white text-slate-600 shadow-sm hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 focus-within:border-slate-300 focus-within:bg-slate-50 2xl:h-8 2xl:w-8"
+                className="relative grid h-5 w-5 shrink-0 place-items-center rounded-full border border-line/80 bg-white text-slate-700 shadow-sm hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 focus-within:border-slate-300 focus-within:bg-slate-50 focus-within:ring-2 focus-within:ring-blue-100 2xl:h-8 2xl:w-8"
                 title={`Status: ${
                   conversationStatusLabels[selectedConversation.status] ??
                   selectedConversation.status
@@ -8322,7 +8382,9 @@ function ConversationTagSelector({
       <button
         className={clsx(
           "inline-flex items-center rounded-full border border-line bg-white text-sm font-semibold text-slate-600 hover:bg-slate-50",
-          iconOnly ? "h-7 w-7 shrink-0 justify-center shadow-sm 2xl:h-8 2xl:w-8" : "h-10 gap-2 px-3"
+          iconOnly
+            ? "h-5 w-5 shrink-0 justify-center border-line/80 text-slate-700 shadow-sm hover:border-slate-300 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-100 2xl:h-8 2xl:w-8"
+            : "h-10 gap-2 px-3"
         )}
         onClick={() => setOpen((current) => !current)}
         title="Tags"
