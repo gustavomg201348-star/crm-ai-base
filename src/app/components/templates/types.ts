@@ -83,6 +83,42 @@ export type TemplateDetailResponse = {
   template: TemplateDetail;
 };
 
+export type TemplateChannelOption = {
+  id: string;
+  name: string;
+  type: string;
+  provider: string;
+  wabaId: string | null;
+  displayPhone: string | null;
+  hasAccessToken: boolean;
+  status: string;
+};
+
+export type TemplateChannelsResponse = {
+  channels: TemplateChannelOption[];
+};
+
+export type TemplateSyncError = {
+  code: string;
+  message: string;
+  retryable: boolean;
+};
+
+export type TemplateSyncResult = {
+  complete: boolean;
+  totalFetched: number;
+  totalDeduplicated: number;
+  totalNormalized: number;
+  created: number;
+  updated: number;
+  reactivated: number;
+  markedNotReturned: number;
+  skipped: number;
+  failed: number;
+  warnings: string[];
+  errors: TemplateSyncError[];
+};
+
 export type TemplateLibraryFilters = {
   q: string;
   category: string;

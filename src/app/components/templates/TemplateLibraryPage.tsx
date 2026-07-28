@@ -8,12 +8,15 @@ import { TemplateLoading } from "./TemplateLoading";
 import { TemplateTable } from "./TemplateTable";
 import { TemplateToolbar } from "./TemplateToolbar";
 import type {
+  TemplateChannelOption,
+  TemplateChannelsResponse,
   TemplateDetail,
   TemplateDetailResponse,
   TemplateLibraryFilters,
   TemplateListItem,
   TemplateListResponse,
-  TemplatePagination
+  TemplatePagination,
+  TemplateSyncResult
 } from "./types";
 
 const initialFilters: TemplateLibraryFilters = {
@@ -48,6 +51,25 @@ function isTemplateDetailResponse(value: unknown): value is TemplateDetailRespon
   return Boolean(candidate.template && typeof candidate.template.id === "string");
 }
 
+function isTemplateChannelsResponse(value: unknown): value is TemplateChannelsResponse {
+  if (!value || typeof value !== "object") return false;
+
+  const candidate = value as Partial<TemplateChannelsResponse>;
+  return Array.isArray(candidate.channels);
+}
+
+function isTemplateSyncResult(value: unknown): value is TemplateSyncResult {
+  if (!value || typeof value !== "object") return false;
+
+  const candidate = value as Partial<TemplateSyncResult>;
+  return (
+    typeof candidate.complete === "boolean" &&
+    typeof candidate.totalFetched === "number" &&
+    typeof candidate.created === "number" &&
+    typeof candidate.updated === "number"
+  );
+}
+
 async function readTemplateError(response: Response) {
   const data = (await response.json().catch(() => null)) as { error?: unknown } | null;
   return typeof data?.error === "string"
@@ -57,6 +79,28 @@ async function readTemplateError(response: Response) {
 
 function hasFilters(filters: TemplateLibraryFilters) {
   return Object.values(filters).some((value) => value.trim() !== "");
+}
+
+function isSyncableMetaChannel(channel: TemplateChannelOption) {
+  return (
+    channel.type === "whatsapp" &&
+    channel.provider === "meta" &&
+    Boolean(channel.wabaId) &&
+    channel.hasAccessToken
+  );
+}
+
+function formatSyncSummary(result: TemplateSyncResult) {
+  const base = `Sincronização concluída. ${result.totalFetched} templates encontrados, ${result.created} criados e ${result.updated} atualizados.`;
+  const extras = [
+    result.reactivated > 0 ? `${result.reactivated} reativados` : null,
+    result.markedNotReturned > 0 ? `${result.markedNotReturned} marcados como não retornados` : null,
+    result.skipped > 0 ? `${result.skipped} ignorados` : null,
+    result.failed > 0 ? `${result.failed} falharam` : null
+  ].filter(Boolean);
+  const status = result.complete ? "" : " Sincronização incompleta.";
+
+  return extras.length > 0 ? `${base} ${extras.join(", ")}.${status}` : `${base}${status}`;
 }
 
 export function TemplateLibraryPage() {
@@ -74,7 +118,18 @@ export function TemplateLibraryPage() {
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [detailsRefreshKey, setDetailsRefreshKey] = useState(0);
+  const [channels, setChannels] = useState<TemplateChannelOption[]>([]);
+  const [channelsLoading, setChannelsLoading] = useState(true);
+  const [channelsError, setChannelsError] = useState<string | null>(null);
+  const [selectedSyncChannelId, setSelectedSyncChannelId] = useState("");
+  const [syncing, setSyncing] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState<{
+    type: "success" | "error";
+    message: string;
+    warnings?: string[];
+  } | null>(null);
   const drawerTriggerRef = useRef<HTMLElement | null>(null);
+  const syncInFlightRef = useRef(false);
 
   const activeFilters = useMemo(
     () => ({
@@ -95,6 +150,66 @@ export function TemplateLibraryPage() {
     ]
   );
   const hasActiveFilters = hasFilters(activeFilters);
+  const syncableChannels = useMemo(
+    () => channels.filter(isSyncableMetaChannel),
+    [channels]
+  );
+  const selectedSyncChannel = useMemo(() => {
+    if (syncableChannels.length === 0) return null;
+    return (
+      syncableChannels.find((channel) => channel.id === selectedSyncChannelId) ??
+      syncableChannels[0]
+    );
+  }, [selectedSyncChannelId, syncableChannels]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadChannels() {
+      setChannelsLoading(true);
+      setChannelsError(null);
+
+      try {
+        const response = await fetch("/api/channels", {
+          credentials: "same-origin",
+          signal: controller.signal
+        });
+
+        if (!response.ok) {
+          throw new Error(await readTemplateError(response));
+        }
+
+        const data = (await response.json()) as unknown;
+        if (!isTemplateChannelsResponse(data)) {
+          throw new Error("Nao foi possivel carregar os canais Meta.");
+        }
+
+        if (controller.signal.aborted) return;
+
+        setChannels(data.channels);
+        const syncable = data.channels.filter(isSyncableMetaChannel);
+        setSelectedSyncChannelId((current) =>
+          current && syncable.some((channel) => channel.id === current)
+            ? current
+            : syncable[0]?.id ?? ""
+        );
+      } catch (loadError) {
+        if (controller.signal.aborted) return;
+
+        setChannelsError(
+          loadError instanceof Error
+            ? loadError.message
+            : "Nao foi possivel carregar os canais Meta."
+        );
+      } finally {
+        if (!controller.signal.aborted) setChannelsLoading(false);
+      }
+    }
+
+    void loadChannels();
+
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -175,6 +290,61 @@ export function TemplateLibraryPage() {
   const refreshTemplates = useCallback(() => {
     setRefreshKey((current) => current + 1);
   }, []);
+
+  const syncTemplates = useCallback(async () => {
+    if (syncInFlightRef.current) return;
+
+    if (!selectedSyncChannel) {
+      setSyncFeedback({
+        type: "error",
+        message: "Selecione um canal Meta com WABA e token configurados para sincronizar."
+      });
+      return;
+    }
+
+    syncInFlightRef.current = true;
+    setSyncing(true);
+    setSyncFeedback(null);
+
+    try {
+      const response = await fetch(
+        `/api/channels/${encodeURIComponent(selectedSyncChannel.id)}/templates/sync`,
+        {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({})
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(await readTemplateError(response));
+      }
+
+      const data = (await response.json()) as unknown;
+      if (!isTemplateSyncResult(data)) {
+        throw new Error("A sincronização terminou com resposta inesperada.");
+      }
+
+      setSyncFeedback({
+        type: data.complete && data.failed === 0 ? "success" : "error",
+        message: formatSyncSummary(data),
+        warnings: [...data.warnings, ...data.errors.map((error) => error.message)]
+      });
+      refreshTemplates();
+    } catch (syncError) {
+      setSyncFeedback({
+        type: "error",
+        message:
+          syncError instanceof Error
+            ? syncError.message
+            : "Nao foi possivel sincronizar os templates. Tente novamente."
+      });
+    } finally {
+      syncInFlightRef.current = false;
+      setSyncing(false);
+    }
+  }, [refreshTemplates, selectedSyncChannel]);
 
   const closeTemplateDetails = useCallback(() => {
     setDrawerOpen(false);
@@ -282,12 +452,20 @@ export function TemplateLibraryPage() {
       </section>
 
       <TemplateToolbar
+        channelsError={channelsError}
+        channelsLoading={channelsLoading}
         filters={filters}
         hasActiveFilters={hasActiveFilters}
         loading={loading}
         onClearFilters={clearFilters}
         onFilterChange={updateFilter}
         onRefresh={refreshTemplates}
+        onSelectSyncChannel={setSelectedSyncChannelId}
+        onSyncTemplates={syncTemplates}
+        selectedSyncChannelId={selectedSyncChannel?.id ?? ""}
+        syncFeedback={syncFeedback}
+        syncableChannels={syncableChannels}
+        syncing={syncing}
       />
 
       {loading && templates.length === 0 && <TemplateLoading />}
@@ -311,7 +489,13 @@ export function TemplateLibraryPage() {
         </section>
       )}
       {!error && !loading && templates.length === 0 && (
-        <TemplateEmptyState hasActiveFilters={hasActiveFilters} onClearFilters={clearFilters} />
+        <TemplateEmptyState
+          hasActiveFilters={hasActiveFilters}
+          onClearFilters={clearFilters}
+          onSyncTemplates={syncTemplates}
+          syncDisabled={!selectedSyncChannel || syncing || channelsLoading}
+          syncing={syncing}
+        />
       )}
       {!error && templates.length > 0 && (
         <section aria-busy={loading} className="space-y-3">
