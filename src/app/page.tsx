@@ -13,6 +13,7 @@ import {
 } from "@/lib/mock-data";
 import { ConversationList } from "@/app/components/conversations/ConversationList";
 import { TemplateLibraryPage } from "@/app/components/templates/TemplateLibraryPage";
+import { useNewMessageSound } from "@/app/hooks/use-new-message-sound";
 import { resolveConversationChannelId } from "@/lib/conversation-channel.service";
 import {
   ArrowRight,
@@ -62,6 +63,8 @@ import {
 } from "lucide-react";
 
 type Section = (typeof navItems)[number]["id"];
+
+const INBOUND_MESSAGE_NOTIFICATION_TYPE = "NEW_INBOUND_MESSAGE";
 
 type Session = {
   user: {
@@ -1556,6 +1559,7 @@ function emptyDashboardData(): DashboardData {
 }
 
 export default function Home() {
+  const { playNewMessageSound } = useNewMessageSound();
   const [active, setActive] = useState<Section>("dashboard");
   const [session, setSession] = useState<Session | null>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
@@ -2339,11 +2343,22 @@ export default function Home() {
     };
   }, [openConversationById]);
 
+  const playInboundNotificationSound = useCallback(
+    (notification: NotificationRow) => {
+      if (!notificationsLoadedRef.current) return;
+      if (notification.type !== INBOUND_MESSAGE_NOTIFICATION_TYPE) return;
+
+      playNewMessageSound();
+    },
+    [playNewMessageSound]
+  );
+
   const handleIncomingNotification = useCallback(
     (notification: NotificationRow) => {
       if (knownNotificationIdsRef.current.has(notification.id)) return;
 
       knownNotificationIdsRef.current.add(notification.id);
+      playInboundNotificationSound(notification);
 
       if (notification.conversationId === selectedConversationRef.current) {
         void markNotificationsRead({ conversationId: notification.conversationId });
@@ -2362,6 +2377,7 @@ export default function Home() {
       loadConversations,
       markConversationRead,
       markNotificationsRead,
+      playInboundNotificationSound,
       showDesktopNotification
     ]
   );
@@ -2394,6 +2410,8 @@ export default function Home() {
       }
 
       for (const notification of unreadNewNotifications) {
+        playInboundNotificationSound(notification);
+
         if (notification.conversationId === activeConversationId) {
           void markNotificationsRead({ conversationId: notification.conversationId });
           void markConversationRead(notification.conversationId);
@@ -2405,7 +2423,12 @@ export default function Home() {
         }
       }
     },
-    [markConversationRead, markNotificationsRead, showDesktopNotification]
+    [
+      markConversationRead,
+      markNotificationsRead,
+      playInboundNotificationSound,
+      showDesktopNotification
+    ]
   );
 
   async function requestDesktopNotifications() {
