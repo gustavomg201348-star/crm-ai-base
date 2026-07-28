@@ -1,6 +1,10 @@
 import type { MediaAsset, MetaTemplate } from "@prisma/client";
 import type { MetaTemplateApiComponent } from "@/lib/meta-template-client";
-import type { NormalizedMetaTemplate } from "@/lib/meta-template-normalizer";
+import {
+  normalizeMetaTemplate,
+  type MetaTemplate as MetaTemplatePayload,
+  type NormalizedMetaTemplate
+} from "@/lib/meta-template-normalizer";
 import { prisma } from "@/lib/db";
 import {
   createMediaAsset,
@@ -147,6 +151,52 @@ export type AdminTemplateListResponse = {
   pagination: AdminTemplateListPagination;
 };
 
+export type AdminTemplateDetail = AdminTemplateListItem & {
+  headerFormat: string | null;
+  content: {
+    header: {
+      present: boolean;
+      format: string | null;
+      text: string;
+      variables: number[];
+      exampleText: string[];
+      requiresMedia: boolean;
+      mediaType: "image" | "video" | "document" | "location" | null;
+    };
+    body: {
+      text: string;
+      variables: number[];
+      exampleValues: string[][];
+    };
+    footer: {
+      text: string;
+    };
+    buttons: Array<{
+      type: string;
+      text: string;
+      url: string | null;
+      phoneNumber: string | null;
+      variables: number[];
+      exampleValues: string[];
+      isDynamicUrl: boolean;
+    }>;
+    totalVariables: number;
+    unknownComponents: string[];
+    unknownButtonTypes: string[];
+    compatibility: {
+      canSendWithCurrentBuilder: boolean;
+      requiresHeaderMediaConfiguration: boolean;
+      hasUnsupportedDynamicHeader: boolean;
+      hasUnsupportedDynamicButtons: boolean;
+      unsupportedReasons: string[];
+    };
+  };
+};
+
+export type AdminTemplateDetailResponse = {
+  template: AdminTemplateDetail;
+};
+
 export type ListAdminTemplateLibraryInput = AdminTemplateListFilters & {
   companyId: string;
   page: number;
@@ -173,6 +223,13 @@ function normalizeRequiredString(value: string, fieldName: string) {
 function normalizeOptionalString(value?: string | null) {
   const normalized = value?.trim();
   return normalized ? normalized : null;
+}
+
+function normalizeSafeDisplayUrl(value: string | null) {
+  const normalized = value?.trim();
+  if (!normalized) return null;
+
+  return /^https?:\/\//i.test(normalized) ? normalized : null;
 }
 
 function buildAdminTemplatePagination({
@@ -230,6 +287,79 @@ function mapAdminTemplateListItem({
     isActive: template.isActive,
     createdAt: template.createdAt.toISOString(),
     updatedAt: template.updatedAt.toISOString()
+  };
+}
+
+function mapAdminTemplateDetail({
+  template,
+  channelsByWaba
+}: {
+  template: MetaTemplateLibraryEntry;
+  channelsByWaba: Map<string, AdminTemplateChannelRecord[]>;
+}): AdminTemplateDetail {
+  const components = Array.isArray(template.components) ? template.components : [];
+  const normalized = normalizeMetaTemplate({
+    id: template.metaTemplateId ?? template.id,
+    name: template.name,
+    status: template.metaStatus ?? "",
+    category: template.category ?? undefined,
+    language: template.language,
+    components
+  } satisfies MetaTemplatePayload);
+
+  return {
+    id: template.id,
+    name: template.name,
+    category: template.category,
+    language: template.language,
+    metaStatus: template.metaStatus,
+    operationalStatus: template.operationalStatus,
+    channelLabel: buildChannelLabel(channelsByWaba.get(template.wabaId)),
+    hasImage: Boolean(template.defaultHeaderMediaAssetId),
+    requiresHeaderMedia: template.requiresHeaderMedia,
+    headerFormat: template.headerFormat,
+    isActive: template.isActive,
+    createdAt: template.createdAt.toISOString(),
+    updatedAt: template.updatedAt.toISOString(),
+    content: {
+      header: {
+        present: normalized.header.present,
+        format: normalized.header.format,
+        text: normalized.header.text,
+        variables: normalized.header.variables,
+        exampleText: normalized.header.exampleText,
+        requiresMedia: normalized.header.requiresMedia,
+        mediaType: normalized.headerMediaType
+      },
+      body: {
+        text: normalized.body.text,
+        variables: normalized.body.variables,
+        exampleValues: normalized.body.exampleValues
+      },
+      footer: {
+        text: normalized.footer.text
+      },
+      buttons: normalized.buttons.map((button) => ({
+        type: button.type,
+        text: button.text,
+        url: normalizeSafeDisplayUrl(button.url),
+        phoneNumber: button.phoneNumber,
+        variables: button.variables,
+        exampleValues: button.exampleValues,
+        isDynamicUrl: button.isDynamicUrl
+      })),
+      totalVariables: normalized.totalVariables,
+      unknownComponents: normalized.unknownComponents,
+      unknownButtonTypes: normalized.unknownButtonTypes,
+      compatibility: {
+        canSendWithCurrentBuilder: normalized.compatibility.canSendWithCurrentBuilder,
+        requiresHeaderMediaConfiguration:
+          normalized.compatibility.requiresHeaderMediaConfiguration,
+        hasUnsupportedDynamicHeader: normalized.compatibility.hasUnsupportedDynamicHeader,
+        hasUnsupportedDynamicButtons: normalized.compatibility.hasUnsupportedDynamicButtons,
+        unsupportedReasons: normalized.compatibility.unsupportedReasons
+      }
+    }
   };
 }
 
@@ -388,6 +518,49 @@ export async function listAdminTemplateLibrary({
       mapAdminTemplateListItem({ template, channelsByWaba })
     ),
     pagination: buildAdminTemplatePagination({ page, pageSize, total })
+  };
+}
+
+export async function getAdminTemplateDetail({
+  companyId,
+  templateId
+}: {
+  companyId: string;
+  templateId: string;
+}): Promise<AdminTemplateDetailResponse> {
+  const safeCompanyId = normalizeRequiredString(companyId, "companyId");
+  const safeTemplateId = normalizeRequiredString(templateId, "templateId");
+  const templateRecord = await findMetaTemplateById(safeCompanyId, safeTemplateId);
+
+  if (!templateRecord) {
+    throw new MetaTemplateServiceError("TEMPLATE_NOT_FOUND", "Template nao encontrado.");
+  }
+
+  const template = deserializeMetaTemplate(templateRecord);
+  const channels = await prisma.channel.findMany({
+    where: {
+      companyId: safeCompanyId,
+      provider: "meta",
+      type: "whatsapp",
+      wabaId: template.wabaId
+    },
+    select: {
+      id: true,
+      name: true,
+      displayPhone: true,
+      wabaId: true
+    },
+    orderBy: [{ name: "asc" }, { id: "asc" }]
+  });
+  const channelsByWaba = new Map<string, AdminTemplateChannelRecord[]>();
+  const safeWabaId = template.wabaId.trim();
+
+  if (safeWabaId) {
+    channelsByWaba.set(safeWabaId, channels);
+  }
+
+  return {
+    template: mapAdminTemplateDetail({ template, channelsByWaba })
   };
 }
 

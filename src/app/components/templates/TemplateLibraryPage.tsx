@@ -8,6 +8,8 @@ import { TemplateLoading } from "./TemplateLoading";
 import { TemplateTable } from "./TemplateTable";
 import { TemplateToolbar } from "./TemplateToolbar";
 import type {
+  TemplateDetail,
+  TemplateDetailResponse,
   TemplateLibraryFilters,
   TemplateListItem,
   TemplateListResponse,
@@ -39,6 +41,13 @@ function isTemplateListResponse(value: unknown): value is TemplateListResponse {
   return Array.isArray(candidate.templates) && Boolean(candidate.pagination);
 }
 
+function isTemplateDetailResponse(value: unknown): value is TemplateDetailResponse {
+  if (!value || typeof value !== "object") return false;
+
+  const candidate = value as Partial<TemplateDetailResponse>;
+  return Boolean(candidate.template && typeof candidate.template.id === "string");
+}
+
 async function readTemplateError(response: Response) {
   const data = (await response.json().catch(() => null)) as { error?: unknown } | null;
   return typeof data?.error === "string"
@@ -61,6 +70,10 @@ export function TemplateLibraryPage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateListItem | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [templateDetails, setTemplateDetails] = useState<TemplateDetail | null>(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [detailsError, setDetailsError] = useState<string | null>(null);
+  const [detailsRefreshKey, setDetailsRefreshKey] = useState(0);
   const drawerTriggerRef = useRef<HTMLElement | null>(null);
 
   const activeFilters = useMemo(
@@ -166,6 +179,9 @@ export function TemplateLibraryPage() {
   const closeTemplateDetails = useCallback(() => {
     setDrawerOpen(false);
     setSelectedTemplate(null);
+    setTemplateDetails(null);
+    setDetailsError(null);
+    setDetailsLoading(false);
 
     const trigger = drawerTriggerRef.current;
     drawerTriggerRef.current = null;
@@ -179,7 +195,13 @@ export function TemplateLibraryPage() {
     drawerTriggerRef.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setSelectedTemplate(template);
+    setTemplateDetails(null);
+    setDetailsError(null);
     setDrawerOpen(true);
+  }, []);
+
+  const retryTemplateDetails = useCallback(() => {
+    setDetailsRefreshKey((current) => current + 1);
   }, []);
 
   useEffect(() => {
@@ -189,6 +211,53 @@ export function TemplateLibraryPage() {
       closeTemplateDetails();
     }
   }, [closeTemplateDetails, drawerOpen, selectedTemplate, templates]);
+
+  useEffect(() => {
+    if (!drawerOpen || !selectedTemplate) return;
+
+    const templateId = selectedTemplate.id;
+    const controller = new AbortController();
+
+    setDetailsLoading(true);
+    setDetailsError(null);
+    setTemplateDetails(null);
+
+    async function loadTemplateDetails() {
+      try {
+        const response = await fetch(`/api/templates/${encodeURIComponent(templateId)}`, {
+          credentials: "same-origin",
+          signal: controller.signal
+        });
+
+        if (!response.ok) {
+          throw new Error(await readTemplateError(response));
+        }
+
+        const data = (await response.json()) as unknown;
+        if (!isTemplateDetailResponse(data)) {
+          throw new Error("Nao foi possivel carregar os detalhes do template.");
+        }
+
+        if (controller.signal.aborted || data.template.id !== templateId) return;
+
+        setTemplateDetails(data.template);
+      } catch (loadError) {
+        if (controller.signal.aborted) return;
+
+        setDetailsError(
+          loadError instanceof Error
+            ? loadError.message
+            : "Nao foi possivel carregar os detalhes do template."
+        );
+      } finally {
+        if (!controller.signal.aborted) setDetailsLoading(false);
+      }
+    }
+
+    void loadTemplateDetails();
+
+    return () => controller.abort();
+  }, [detailsRefreshKey, drawerOpen, selectedTemplate]);
 
   return (
     <div className="space-y-4">
@@ -290,8 +359,12 @@ export function TemplateLibraryPage() {
         </section>
       )}
       <TemplateDetailsDrawer
+        detail={templateDetails}
+        error={detailsError}
         isOpen={drawerOpen}
+        loading={detailsLoading}
         onClose={closeTemplateDetails}
+        onRetry={retryTemplateDetails}
         template={selectedTemplate}
       />
     </div>

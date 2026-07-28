@@ -27,6 +27,62 @@ export type TemplateListResponse = {
   pagination: TemplatePagination;
 };
 
+export type TemplateHeaderContent = {
+  present: boolean;
+  format: string | null;
+  text: string;
+  variables: number[];
+  exampleText: string[];
+  requiresMedia: boolean;
+  mediaType: "image" | "video" | "document" | "location" | null;
+};
+
+export type TemplateBodyContent = {
+  text: string;
+  variables: number[];
+  exampleValues: string[][];
+};
+
+export type TemplateFooterContent = {
+  text: string;
+};
+
+export type TemplateButtonContent = {
+  type: string;
+  text: string;
+  url: string | null;
+  phoneNumber: string | null;
+  variables: number[];
+  exampleValues: string[];
+  isDynamicUrl: boolean;
+};
+
+export type TemplateCompatibility = {
+  canSendWithCurrentBuilder: boolean;
+  requiresHeaderMediaConfiguration: boolean;
+  hasUnsupportedDynamicHeader: boolean;
+  hasUnsupportedDynamicButtons: boolean;
+  unsupportedReasons: string[];
+};
+
+export type TemplateDetail = TemplateListItem & {
+  headerFormat: string | null;
+  content: {
+    header: TemplateHeaderContent;
+    body: TemplateBodyContent;
+    footer: TemplateFooterContent;
+    buttons: TemplateButtonContent[];
+    totalVariables: number;
+    unknownComponents: string[];
+    unknownButtonTypes: string[];
+    compatibility: TemplateCompatibility;
+  };
+};
+
+export type TemplateDetailResponse = {
+  template: TemplateDetail;
+};
+
 export type TemplateLibraryFilters = {
   q: string;
   category: string;
