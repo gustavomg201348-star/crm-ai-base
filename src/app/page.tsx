@@ -12,6 +12,7 @@ import {
   Tags
 } from "@/lib/mock-data";
 import { ConversationList } from "@/app/components/conversations/ConversationList";
+import { TemplateLibraryPage } from "@/app/components/templates/TemplateLibraryPage";
 import { useNewMessageSound } from "@/app/hooks/use-new-message-sound";
 import { resolveConversationChannelId } from "@/lib/conversation-channel.service";
 import {
@@ -4748,6 +4749,7 @@ export default function Home() {
               onSimulateInbound={handleSimulateInboundMessage}
             />
           )}
+          {active === "templates" && userIsAdmin(session) && <TemplateLibraryPage />}
           {active === "disparos" && userIsAdmin(session) && (
             <Disparos
               campaigns={campaigns}

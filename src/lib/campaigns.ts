@@ -4,7 +4,6 @@ import { findOrCreateConversationForChannel } from "@/lib/conversation-lifecycle
 import { renderCampaignMessage } from "@/lib/contact-import.service";
 import { prisma } from "@/lib/db";
 import {
-  getMetaApprovedTemplates,
   readMetaMessageId,
   sendMetaImageMessage,
   sendMetaTemplateMessage,
@@ -14,8 +13,9 @@ import {
 } from "@/lib/meta-whatsapp";
 import {
   extractTemplateButtons,
+  findReadyLocalMetaTemplate,
+  resolveLocalTemplateHeaderImageUrl,
   renderTemplateHistoryBody,
-  resolveTemplateHeaderImageUrl
 } from "@/lib/whatsapp-template.service";
 import { digitsOnlyPhone } from "@/lib/phone-normalization.service";
 
@@ -197,6 +197,7 @@ export async function processCampaign(campaignId: string) {
 
   let mediaId: string | null = null;
   let campaignTemplate: MetaTemplate | null = null;
+  let campaignTemplateHeaderImageUrl: string | null = null;
   if (campaign.imagePath && campaign.imageMime && campaign.imageName) {
     const { readFile } = await import("node:fs/promises");
     const bytes = await readFile(campaign.imagePath);
@@ -217,20 +218,25 @@ export async function processCampaign(campaignId: string) {
   ) {
     if (!campaign.channel.wabaId) throw new Error("Canal Meta sem WABA ID.");
 
-    const templates = await getMetaApprovedTemplates({
+    const localTemplateContext = await findReadyLocalMetaTemplate({
+      companyId: campaign.companyId,
       wabaId: campaign.channel.wabaId,
-      accessToken: campaign.channel.accessToken
+      templateName: campaign.templateName,
+      language: campaign.templateLanguage
     });
-    campaignTemplate =
-      templates.find(
-        (template) =>
-          template.name === campaign.templateName &&
-          template.language === campaign.templateLanguage
-      ) ?? null;
 
-    if (!campaignTemplate) {
+    if (!localTemplateContext) {
       throw new Error("Template aprovado nao encontrado para o disparo.");
     }
+
+    campaignTemplate = localTemplateContext.template;
+    // Imagem anexada na campanha continua exclusiva do envio de imagem;
+    // templates usam primeiro a midia padrao local do proprio template.
+    campaignTemplateHeaderImageUrl = await resolveLocalTemplateHeaderImageUrl({
+      companyId: campaign.companyId,
+      localTemplate: localTemplateContext.localTemplate,
+      template: localTemplateContext.template
+    });
   }
 
   for (const recipient of campaign.recipients) {
@@ -268,7 +274,7 @@ export async function processCampaign(campaignId: string) {
         })
       );
       const templateHeaderImageUrl = campaignTemplate
-        ? resolveTemplateHeaderImageUrl(campaignTemplate)
+        ? campaignTemplateHeaderImageUrl
         : null;
       const metaResponse =
         campaign.messageType === "TEMPLATE" &&

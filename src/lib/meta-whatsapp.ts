@@ -1,4 +1,10 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import {
+  extractMetaTemplateVariables,
+  type MetaTemplate
+} from "@/lib/meta-template-normalizer";
+
+export type { MetaTemplate } from "@/lib/meta-template-normalizer";
 
 type MetaTextMessage = {
   from?: string;
@@ -447,30 +453,6 @@ export async function sendMetaMediaMessage({
   return data;
 }
 
-export type MetaTemplate = {
-  id?: string;
-  name: string;
-  status: string;
-  category?: string;
-  language: string;
-  components?: Array<{
-    type?: string;
-    format?: string;
-    text?: string;
-    example?: {
-      header_handle?: string[];
-      header_text?: string[];
-      body_text?: string[][];
-    };
-    buttons?: Array<{
-      type?: string;
-      text?: string;
-      url?: string;
-      phone_number?: string;
-    }>;
-  }>;
-};
-
 type MetaTemplateSendComponent =
   | {
       type: "header";
@@ -503,8 +485,7 @@ type MetaTemplateSendComponent =
     };
 
 function countTemplateVariables(text?: string | null) {
-  const matches = text?.match(/\{\{\d+\}\}/g) ?? [];
-  return new Set(matches).size;
+  return extractMetaTemplateVariables(text).length;
 }
 
 function normalizeButtonPayload(value: string | null | undefined, index: number) {

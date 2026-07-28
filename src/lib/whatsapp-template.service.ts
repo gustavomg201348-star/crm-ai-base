@@ -1,5 +1,4 @@
 import {
-  getMetaApprovedTemplates,
   readMetaMessageId,
   sendMetaTemplateMessage,
   type MetaTemplate
@@ -9,10 +8,24 @@ import {
   saveOutboundMessage
 } from "@/lib/conversation-message.service";
 import { prisma } from "@/lib/db";
+import { findMediaAssetById } from "@/lib/media-asset-repository";
+import {
+  extractMetaTemplateVariables,
+  normalizeMetaTemplate,
+  type MetaTemplateComponent
+} from "@/lib/meta-template-normalizer";
+import {
+  findMetaTemplateByIdentity,
+  listMetaTemplatesByWaba
+} from "@/lib/meta-template-repository";
+import {
+  deserializeMetaTemplate,
+  type MetaTemplateLibraryEntry
+} from "@/lib/meta-template-service";
 import { digitsOnlyPhone } from "@/lib/phone-normalization.service";
 
 export function extractBodyText(template: MetaTemplate) {
-  return template.components?.find((component) => component.type === "BODY")?.text ?? "";
+  return normalizeMetaTemplate(template).body.text;
 }
 
 export function extractTemplateButtons(template: MetaTemplate) {
@@ -30,9 +43,7 @@ export function extractTemplateButtons(template: MetaTemplate) {
 }
 
 export function templateHasHeaderImage(template: MetaTemplate) {
-  return template.components?.some(
-    (component) => component.type === "HEADER" && component.format === "IMAGE"
-  ) ?? false;
+  return normalizeMetaTemplate(template).header.format === "IMAGE";
 }
 
 function normalizeTemplateEnvName(templateName: string) {
@@ -103,8 +114,7 @@ export function resolveTemplateHeaderImageUrl(template: MetaTemplate) {
 }
 
 export function extractVariableCount(text: string) {
-  const matches = text.match(/\{\{\d+\}\}/g) ?? [];
-  return new Set(matches).size;
+  return extractMetaTemplateVariables(text).length;
 }
 
 export function renderTemplateBody(template: MetaTemplate, variables: string[]) {
@@ -136,17 +146,114 @@ export function renderTemplateHistoryBody({
 }
 
 export function mapApprovedTemplate(template: MetaTemplate) {
-  const body = extractBodyText(template);
+  const normalized = normalizeMetaTemplate(template);
 
   return {
-    id: template.id ?? template.name,
-    name: template.name,
-    category: template.category ?? "UTILITY",
-    language: template.language,
-    status: template.status,
-    preview: body,
-    variableCount: extractVariableCount(body)
+    id: normalized.metaId ?? normalized.name,
+    name: normalized.name,
+    category: normalized.category,
+    language: normalized.language,
+    status: normalized.status,
+    preview: normalized.body.text,
+    variableCount: normalized.bodyVariableCount
   };
+}
+
+function isMetaTemplateComponent(value: unknown): value is MetaTemplateComponent {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function mapLocalTemplateToMetaTemplate(template: MetaTemplateLibraryEntry): MetaTemplate | null {
+  if (!Array.isArray(template.components)) return null;
+
+  const components = template.components.filter(isMetaTemplateComponent);
+  if (!components.length) return null;
+
+  return {
+    id: template.metaTemplateId ?? template.id,
+    name: template.name,
+    status: template.metaStatus ?? "",
+    category: template.category ?? "",
+    language: template.language,
+    components
+  } satisfies MetaTemplate;
+}
+
+function isUsableLocalTemplate(template: MetaTemplateLibraryEntry) {
+  return (
+    template.isActive &&
+    template.metaStatus === "APPROVED" &&
+    template.operationalStatus === "READY"
+  );
+}
+
+export async function resolveLocalTemplateHeaderImageUrl({
+  companyId,
+  localTemplate,
+  template
+}: {
+  companyId: string;
+  localTemplate: MetaTemplateLibraryEntry;
+  template: MetaTemplate;
+}) {
+  if (!templateHasHeaderImage(template)) return null;
+
+  if (!localTemplate.defaultHeaderMediaAssetId) {
+    return resolveTemplateHeaderImageUrl(template);
+  }
+
+  const mediaAsset = await findMediaAssetById(
+    companyId,
+    localTemplate.defaultHeaderMediaAssetId
+  );
+
+  if (!mediaAsset) {
+    throw new Error("Midia padrao do template nao encontrada.");
+  }
+
+  if (mediaAsset.companyId !== companyId) {
+    throw new Error("Midia padrao do template nao pertence a empresa.");
+  }
+
+  const publicUrl = mediaAsset.publicUrl?.trim();
+  if (!publicUrl) {
+    throw new Error("Midia padrao do template sem URL publica.");
+  }
+
+  if (!/^https:\/\//i.test(publicUrl)) {
+    throw new Error("Midia padrao do template precisa conter uma URL publica HTTPS.");
+  }
+
+  return publicUrl;
+}
+
+export async function findReadyLocalMetaTemplate({
+  companyId,
+  wabaId,
+  templateName,
+  language
+}: {
+  companyId: string;
+  wabaId: string;
+  templateName: string;
+  language: string;
+}) {
+  const localTemplateRecord = await findMetaTemplateByIdentity(
+    companyId,
+    wabaId,
+    templateName,
+    language
+  );
+  const localTemplate = localTemplateRecord
+    ? deserializeMetaTemplate(localTemplateRecord)
+    : null;
+  const template = localTemplate ? mapLocalTemplateToMetaTemplate(localTemplate) : null;
+
+  if (!localTemplate || !isUsableLocalTemplate(localTemplate) || !template) {
+    return null;
+  }
+
+  return { localTemplate, template };
 }
 
 export async function getApprovedTemplatesForConversation({
@@ -159,12 +266,18 @@ export async function getApprovedTemplatesForConversation({
   const { channel } = await getConversationIntegration({ conversationId, companyId });
   if (!channel.wabaId) throw new Error("Canal Meta sem WABA ID.");
 
-  const templates = await getMetaApprovedTemplates({
-    wabaId: channel.wabaId,
-    accessToken: channel.accessToken!
+  const templates = await listMetaTemplatesByWaba(companyId, channel.wabaId, {
+    isActive: true,
+    metaStatus: "APPROVED",
+    operationalStatus: "READY"
   });
 
-  return templates.map(mapApprovedTemplate);
+  return templates
+    .map(deserializeMetaTemplate)
+    .filter(isUsableLocalTemplate)
+    .map(mapLocalTemplateToMetaTemplate)
+    .filter((template): template is MetaTemplate => template !== null)
+    .map(mapApprovedTemplate);
 }
 
 export async function getApprovedTemplatesForChannel({
@@ -186,14 +299,19 @@ export async function getApprovedTemplatesForChannel({
 
   if (!channel) throw new Error("Canal Meta nao encontrado.");
   if (!channel.wabaId) throw new Error("Canal Meta sem WABA ID.");
-  if (!channel.accessToken) throw new Error("Canal Meta sem token.");
 
-  const templates = await getMetaApprovedTemplates({
-    wabaId: channel.wabaId,
-    accessToken: channel.accessToken
+  const templates = await listMetaTemplatesByWaba(companyId, channel.wabaId, {
+    isActive: true,
+    metaStatus: "APPROVED",
+    operationalStatus: "READY"
   });
 
-  return templates.map(mapApprovedTemplate);
+  return templates
+    .map(deserializeMetaTemplate)
+    .filter(isUsableLocalTemplate)
+    .map(mapLocalTemplateToMetaTemplate)
+    .filter((template): template is MetaTemplate => template !== null)
+    .map(mapApprovedTemplate);
 }
 
 export async function sendConversationTemplate({
@@ -217,15 +335,17 @@ export async function sendConversationTemplate({
   });
   if (!channel.wabaId) throw new Error("Canal Meta sem WABA ID.");
 
-  const templates = await getMetaApprovedTemplates({
+  const localTemplateContext = await findReadyLocalMetaTemplate({
+    companyId,
+    templateName,
     wabaId: channel.wabaId,
-    accessToken: channel.accessToken!
+    language
   });
-  const template = templates.find(
-    (item) => item.name === templateName && item.language === language
-  );
 
-  if (!template) throw new Error("Template aprovado nao encontrado.");
+  if (!localTemplateContext) {
+    throw new Error("Template aprovado nao encontrado.");
+  }
+  const { localTemplate, template } = localTemplateContext;
 
   const requiredVariables = extractVariableCount(extractBodyText(template));
   const cleanVariables = variables.map((value) => value.trim());
@@ -234,7 +354,11 @@ export async function sendConversationTemplate({
     throw new Error("Preencha todas as variaveis obrigatorias do template.");
   }
 
-  const headerImageUrl = resolveTemplateHeaderImageUrl(template);
+  const headerImageUrl = await resolveLocalTemplateHeaderImageUrl({
+    companyId,
+    localTemplate,
+    template
+  });
   const metaResponse = await sendMetaTemplateMessage({
     phoneNumberId: channel.phoneNumberId!,
     accessToken: channel.accessToken!,
