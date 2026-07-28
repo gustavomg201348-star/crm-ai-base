@@ -1,6 +1,14 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  FormEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
 import NextImage from "next/image";
 import clsx from "clsx";
 import {
@@ -6700,6 +6708,35 @@ function Atendimento({
     });
   }
 
+  function insertComposerLineBreak(target: HTMLTextAreaElement) {
+    const selectionStart = target.selectionStart;
+    const selectionEnd = target.selectionEnd;
+    const nextCursorPosition = selectionStart + 1;
+
+    updateComposerMessage((current) =>
+      `${current.slice(0, selectionStart)}\n${current.slice(selectionEnd)}`
+    );
+
+    window.requestAnimationFrame(() => {
+      target.selectionStart = nextCursorPosition;
+      target.selectionEnd = nextCursorPosition;
+    });
+  }
+
+  function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (event.nativeEvent.isComposing || event.key !== "Enter") return;
+
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault();
+      insertComposerLineBreak(event.currentTarget);
+      return;
+    }
+
+    if (!event.shiftKey) {
+      event.preventDefault();
+      event.currentTarget.form?.requestSubmit();
+    }
+  }
   function focusComposerInput() {
     const shouldUseMobileInput =
       typeof window !== "undefined" && window.matchMedia("(max-width: 1279px)").matches;
@@ -7930,12 +7967,7 @@ function Atendimento({
                 rows={1}
                 value={message}
                 onChange={(event) => updateComposerMessage(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault();
-                    event.currentTarget.form?.requestSubmit();
-                  }
-                }}
+                onKeyDown={handleComposerKeyDown}
               />
               <ComposerButton title="Anexar arquivo" disabled={!selectedConversation} onClick={() => fileInputRef.current?.click()}>
                 <Paperclip aria-hidden="true" className="h-4 w-4" />
@@ -8093,12 +8125,7 @@ function Atendimento({
               rows={1}
               value={message}
               onChange={(event) => updateComposerMessage(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  event.currentTarget.form?.requestSubmit();
-                }
-              }}
+              onKeyDown={handleComposerKeyDown}
             />
             <button
               type="submit"
