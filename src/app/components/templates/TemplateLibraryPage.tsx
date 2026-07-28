@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ChevronLeft, ChevronRight, Library, Loader2 } from "lucide-react";
+import { TemplateDetailsDrawer } from "./TemplateDetailsDrawer";
 import { TemplateEmptyState } from "./TemplateEmptyState";
 import { TemplateLoading } from "./TemplateLoading";
 import { TemplateTable } from "./TemplateTable";
@@ -58,6 +59,9 @@ export function TemplateLibraryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [selectedTemplate, setSelectedTemplate] = useState<TemplateListItem | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const drawerTriggerRef = useRef<HTMLElement | null>(null);
 
   const activeFilters = useMemo(
     () => ({
@@ -159,6 +163,33 @@ export function TemplateLibraryPage() {
     setRefreshKey((current) => current + 1);
   }, []);
 
+  const closeTemplateDetails = useCallback(() => {
+    setDrawerOpen(false);
+    setSelectedTemplate(null);
+
+    const trigger = drawerTriggerRef.current;
+    drawerTriggerRef.current = null;
+
+    if (trigger?.isConnected) {
+      window.setTimeout(() => trigger.focus(), 0);
+    }
+  }, []);
+
+  const openTemplateDetails = useCallback((template: TemplateListItem) => {
+    drawerTriggerRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setSelectedTemplate(template);
+    setDrawerOpen(true);
+  }, []);
+
+  useEffect(() => {
+    if (!drawerOpen || !selectedTemplate) return;
+
+    if (!templates.some((template) => template.id === selectedTemplate.id)) {
+      closeTemplateDetails();
+    }
+  }, [closeTemplateDetails, drawerOpen, selectedTemplate, templates]);
+
   return (
     <div className="space-y-4">
       <section className="rounded border border-line bg-white p-5 shadow-soft">
@@ -221,7 +252,11 @@ export function TemplateLibraryPage() {
               Atualizando...
             </div>
           )}
-          <TemplateTable templates={templates} />
+          <TemplateTable
+            onSelectTemplate={openTemplateDetails}
+            selectedTemplateId={selectedTemplate?.id ?? null}
+            templates={templates}
+          />
           <div className="flex flex-col gap-3 rounded border border-line bg-white px-4 py-3 text-sm text-slate-600 shadow-soft sm:flex-row sm:items-center sm:justify-between">
             <span className="font-semibold">
               {pagination.total} template(s)
@@ -254,6 +289,11 @@ export function TemplateLibraryPage() {
           </div>
         </section>
       )}
+      <TemplateDetailsDrawer
+        isOpen={drawerOpen}
+        onClose={closeTemplateDetails}
+        template={selectedTemplate}
+      />
     </div>
   );
 }
