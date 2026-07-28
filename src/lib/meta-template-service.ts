@@ -1,6 +1,7 @@
 import type { MediaAsset, MetaTemplate } from "@prisma/client";
 import type { MetaTemplateApiComponent } from "@/lib/meta-template-client";
 import type { NormalizedMetaTemplate } from "@/lib/meta-template-normalizer";
+import { prisma } from "@/lib/db";
 import {
   createMediaAsset,
   findMediaAssetById,
@@ -12,11 +13,13 @@ import {
 import {
   createMetaTemplate,
   findMetaTemplateById,
+  listMetaTemplatesForAdmin,
   markMetaTemplateNotReturned,
   MetaTemplateRepositoryError,
   persistCreatedMetaTemplateRecord,
   setMetaTemplateDefaultHeaderMediaAndStatus,
-  upsertMetaTemplateFromMeta
+  upsertMetaTemplateFromMeta,
+  type AdminMetaTemplateListRecord
 } from "@/lib/meta-template-repository";
 import { parseJsonField, serializeJsonField } from "@/lib/json-storage";
 import {
@@ -42,6 +45,7 @@ export type MetaTemplateServiceErrorCode =
   | "MEDIA_ASSET_NOT_FOUND"
   | "INVALID_STORED_JSON"
   | "COMPANY_ISOLATION_VIOLATION"
+  | "CHANNEL_NOT_FOUND"
   | "META_TEMPLATE_ID_CONFLICT";
 
 export class MetaTemplateServiceError extends Error {
@@ -104,6 +108,58 @@ export type PersistCreatedMetaTemplateInput = {
   now?: Date;
 };
 
+export type AdminTemplateListFilters = {
+  q?: string;
+  channelId?: string;
+  category?: string;
+  language?: string;
+  metaStatus?: string;
+  operationalStatus?: string;
+  hasImage?: boolean;
+};
+
+export type AdminTemplateListPagination = {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPreviousPage: boolean;
+};
+
+export type AdminTemplateListItem = {
+  id: string;
+  name: string;
+  category: string | null;
+  language: string;
+  metaStatus: string | null;
+  operationalStatus: string;
+  channelLabel: string;
+  hasImage: boolean;
+  requiresHeaderMedia: boolean;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AdminTemplateListResponse = {
+  templates: AdminTemplateListItem[];
+  pagination: AdminTemplateListPagination;
+};
+
+export type ListAdminTemplateLibraryInput = AdminTemplateListFilters & {
+  companyId: string;
+  page: number;
+  pageSize: number;
+};
+
+type AdminTemplateChannelRecord = {
+  id: string;
+  name: string;
+  displayPhone: string | null;
+  wabaId: string | null;
+};
+
 function normalizeRequiredString(value: string, fieldName: string) {
   const normalized = value.trim();
 
@@ -117,6 +173,64 @@ function normalizeRequiredString(value: string, fieldName: string) {
 function normalizeOptionalString(value?: string | null) {
   const normalized = value?.trim();
   return normalized ? normalized : null;
+}
+
+function buildAdminTemplatePagination({
+  page,
+  pageSize,
+  total
+}: {
+  page: number;
+  pageSize: number;
+  total: number;
+}): AdminTemplateListPagination {
+  const totalPages = total === 0 ? 0 : Math.ceil(total / pageSize);
+
+  return {
+    page,
+    pageSize,
+    total,
+    totalPages,
+    hasNextPage: totalPages > 0 && page < totalPages,
+    hasPreviousPage: totalPages > 0 && page > 1
+  };
+}
+
+function buildChannelLabel(channels: AdminTemplateChannelRecord[] | undefined) {
+  if (!channels?.length) return "Canal nao identificado";
+  if (channels.length > 1) return `${channels.length} canais`;
+
+  const [channel] = channels;
+  const name = channel.name.trim();
+  const displayPhone = channel.displayPhone?.trim();
+
+  if (name && displayPhone) return `${name} · ${displayPhone}`;
+  if (name) return name;
+  if (displayPhone) return displayPhone;
+  return "Canal WhatsApp";
+}
+
+function mapAdminTemplateListItem({
+  template,
+  channelsByWaba
+}: {
+  template: AdminMetaTemplateListRecord;
+  channelsByWaba: Map<string, AdminTemplateChannelRecord[]>;
+}): AdminTemplateListItem {
+  return {
+    id: template.id,
+    name: template.name,
+    category: template.category,
+    language: template.language,
+    metaStatus: template.metaStatus,
+    operationalStatus: template.operationalStatus,
+    channelLabel: buildChannelLabel(channelsByWaba.get(template.wabaId)),
+    hasImage: Boolean(template.defaultHeaderMediaAssetId),
+    requiresHeaderMedia: template.requiresHeaderMedia,
+    isActive: template.isActive,
+    createdAt: template.createdAt.toISOString(),
+    updatedAt: template.updatedAt.toISOString()
+  };
 }
 
 function assertComponentsField(value: unknown, fieldName: string) {
@@ -182,6 +296,99 @@ export function deserializeMediaAsset(mediaAsset: MediaAsset): MediaAssetLibrary
 
     throw error;
   }
+}
+
+export async function listAdminTemplateLibrary({
+  companyId,
+  q,
+  channelId,
+  category,
+  language,
+  metaStatus,
+  operationalStatus,
+  hasImage,
+  page,
+  pageSize
+}: ListAdminTemplateLibraryInput): Promise<AdminTemplateListResponse> {
+  const safeCompanyId = normalizeRequiredString(companyId, "companyId");
+  let wabaId: string | undefined;
+
+  if (channelId) {
+    const channel = await prisma.channel.findFirst({
+      where: {
+        id: normalizeRequiredString(channelId, "channelId"),
+        companyId: safeCompanyId,
+        type: "whatsapp",
+        provider: "meta"
+      },
+      select: {
+        id: true,
+        wabaId: true
+      }
+    });
+
+    if (!channel) {
+      throw new MetaTemplateServiceError("CHANNEL_NOT_FOUND", "Canal nao encontrado.");
+    }
+
+    if (!channel.wabaId?.trim()) {
+      return {
+        templates: [],
+        pagination: buildAdminTemplatePagination({ page, pageSize, total: 0 })
+      };
+    }
+
+    wabaId = channel.wabaId.trim();
+  }
+
+  const { templates, total } = await listMetaTemplatesForAdmin({
+    companyId: safeCompanyId,
+    q: normalizeOptionalString(q) ?? undefined,
+    wabaId,
+    category: normalizeOptionalString(category) ?? undefined,
+    language: normalizeOptionalString(language) ?? undefined,
+    metaStatus: normalizeOptionalString(metaStatus) ?? undefined,
+    operationalStatus: normalizeOptionalString(operationalStatus) ?? undefined,
+    hasImage,
+    page,
+    pageSize
+  });
+  const wabaIds = Array.from(new Set(templates.map((template) => template.wabaId)));
+  const channels =
+    wabaIds.length > 0
+      ? await prisma.channel.findMany({
+          where: {
+            companyId: safeCompanyId,
+            provider: "meta",
+            type: "whatsapp",
+            wabaId: { in: wabaIds }
+          },
+          select: {
+            id: true,
+            name: true,
+            displayPhone: true,
+            wabaId: true
+          },
+          orderBy: [{ name: "asc" }, { id: "asc" }]
+        })
+      : [];
+  const channelsByWaba = new Map<string, AdminTemplateChannelRecord[]>();
+
+  for (const channel of channels) {
+    const safeWabaId = channel.wabaId?.trim();
+    if (!safeWabaId) continue;
+
+    const current = channelsByWaba.get(safeWabaId) ?? [];
+    current.push(channel);
+    channelsByWaba.set(safeWabaId, current);
+  }
+
+  return {
+    templates: templates.map((template) =>
+      mapAdminTemplateListItem({ template, channelsByWaba })
+    ),
+    pagination: buildAdminTemplatePagination({ page, pageSize, total })
+  };
 }
 
 function calculateStatusForTemplateRecord(template: MetaTemplate) {

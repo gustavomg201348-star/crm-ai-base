@@ -123,6 +123,62 @@ export type PersistCreatedMetaTemplateRepositoryInput = {
   lastSeenAt: Date | null;
 };
 
+export type AdminMetaTemplateListFilters = {
+  q?: string;
+  wabaId?: string;
+  category?: string;
+  language?: string;
+  metaStatus?: string;
+  operationalStatus?: string;
+  hasImage?: boolean;
+};
+
+export type AdminMetaTemplateListInput = AdminMetaTemplateListFilters & {
+  companyId: string;
+  page: number;
+  pageSize: number;
+};
+
+const adminMetaTemplateListSelect = {
+  id: true,
+  wabaId: true,
+  name: true,
+  category: true,
+  language: true,
+  metaStatus: true,
+  operationalStatus: true,
+  requiresHeaderMedia: true,
+  defaultHeaderMediaAssetId: true,
+  isActive: true,
+  createdAt: true,
+  updatedAt: true
+} satisfies Prisma.MetaTemplateSelect;
+
+export type AdminMetaTemplateListRecord = Prisma.MetaTemplateGetPayload<{
+  select: typeof adminMetaTemplateListSelect;
+}>;
+
+export type AdminMetaTemplateListResult = {
+  templates: AdminMetaTemplateListRecord[];
+  total: number;
+};
+
+function buildAdminMetaTemplateWhere(
+  input: AdminMetaTemplateListInput
+): Prisma.MetaTemplateWhereInput {
+  return {
+    companyId: input.companyId,
+    ...(input.q ? { name: { contains: input.q } } : {}),
+    ...(input.wabaId ? { wabaId: input.wabaId } : {}),
+    ...(input.category ? { category: input.category } : {}),
+    ...(input.language ? { language: input.language } : {}),
+    ...(input.metaStatus ? { metaStatus: input.metaStatus } : {}),
+    ...(input.operationalStatus ? { operationalStatus: input.operationalStatus } : {}),
+    ...(input.hasImage === true ? { defaultHeaderMediaAssetId: { not: null } } : {}),
+    ...(input.hasImage === false ? { defaultHeaderMediaAssetId: null } : {})
+  };
+}
+
 export function findMetaTemplateById(companyId: string, id: string, db: DbClient = prisma) {
   return db.metaTemplate.findFirst({
     where: {
@@ -187,6 +243,27 @@ export function listMetaTemplatesByWaba(
     },
     orderBy: [{ name: "asc" }, { language: "asc" }]
   });
+}
+
+export async function listMetaTemplatesForAdmin(
+  input: AdminMetaTemplateListInput,
+  db: DbClient = prisma
+): Promise<AdminMetaTemplateListResult> {
+  const where = buildAdminMetaTemplateWhere(input);
+  const skip = (input.page - 1) * input.pageSize;
+
+  const [total, templates] = await Promise.all([
+    db.metaTemplate.count({ where }),
+    db.metaTemplate.findMany({
+      where,
+      select: adminMetaTemplateListSelect,
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      skip,
+      take: input.pageSize
+    })
+  ]);
+
+  return { templates, total };
 }
 
 export function createMetaTemplate(input: CreateMetaTemplateInput, db: DbClient = prisma) {
