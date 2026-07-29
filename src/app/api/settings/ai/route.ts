@@ -2,14 +2,16 @@ import { NextResponse, type NextRequest } from "next/server";
 import { normalizeAiMode } from "@/lib/ai-attendant.service";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 
 export async function GET(request: NextRequest) {
   try {
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
 
     const company = await prisma.company.findUnique({
@@ -23,11 +25,19 @@ export async function GET(request: NextRequest) {
         instructions: company?.aiInstructions ?? ""
       }
     });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel carregar configuracoes da IA." },
-      { status: 500 }
-    );
+  } catch (error) {
+    const session = getSessionFromRequest(request);
+
+    safeLogError("http-api", error, {
+      route: "/api/settings/ai",
+      method: "GET",
+      companyId: session?.companyId,
+      currentUserId: session?.id,
+      publicErrorCode: "INTERNAL_ERROR",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "INTERNAL_ERROR", status: 500 });
   }
 }
 
@@ -36,7 +46,7 @@ export async function PATCH(request: NextRequest) {
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
 
     const denied = requireCompanyAdmin(session);
@@ -61,10 +71,18 @@ export async function PATCH(request: NextRequest) {
         instructions: company.aiInstructions ?? ""
       }
     });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel salvar configuracoes da IA." },
-      { status: 500 }
-    );
+  } catch (error) {
+    const session = getSessionFromRequest(request);
+
+    safeLogError("http-api", error, {
+      route: "/api/settings/ai",
+      method: "PATCH",
+      companyId: session?.companyId,
+      currentUserId: session?.id,
+      publicErrorCode: "USER_SETTINGS_UPDATE_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "USER_SETTINGS_UPDATE_FAILED", status: 500 });
   }
 }

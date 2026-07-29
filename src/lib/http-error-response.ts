@@ -21,6 +21,25 @@ export type PublicErrorCode =
   | "CONTACT_IMPORT_FAILED"
   | "CONTACT_IMPORT_INVALID_FILE"
   | "CONTACT_EXPORT_FAILED"
+  | "USER_NOT_FOUND"
+  | "USER_CREATE_FAILED"
+  | "USER_UPDATE_FAILED"
+  | "USER_DELETE_FAILED"
+  | "USER_DUPLICATE"
+  | "USER_INVALID_ROLE"
+  | "USER_PERMISSION_DENIED"
+  | "USER_SETTINGS_UPDATE_FAILED"
+  | "TASK_NOT_FOUND"
+  | "TASK_CREATE_FAILED"
+  | "TASK_UPDATE_FAILED"
+  | "TASK_DELETE_FAILED"
+  | "TASK_ASSIGN_FAILED"
+  | "TASK_INVALID_STATE"
+  | "PROPOSAL_NOT_FOUND"
+  | "PROPOSAL_CREATE_FAILED"
+  | "PROPOSAL_UPDATE_FAILED"
+  | "PROPOSAL_DELETE_FAILED"
+  | "PROPOSAL_INVALID_STATE"
   | "META_PROVIDER_ERROR"
   | "MEDIA_FETCH_FAILED"
   | "TEMPLATE_CREATE_FAILED"
@@ -50,6 +69,25 @@ const DEFAULT_PUBLIC_MESSAGES: Record<PublicErrorCode, string> = {
   CONTACT_IMPORT_FAILED: "Nao foi possivel importar contatos.",
   CONTACT_IMPORT_INVALID_FILE: "Arquivo de importacao invalido.",
   CONTACT_EXPORT_FAILED: "Nao foi possivel exportar contatos.",
+  USER_NOT_FOUND: "Usuario nao encontrado.",
+  USER_CREATE_FAILED: "Nao foi possivel criar usuario.",
+  USER_UPDATE_FAILED: "Nao foi possivel atualizar usuario.",
+  USER_DELETE_FAILED: "Nao foi possivel remover usuario.",
+  USER_DUPLICATE: "Ja existe um usuario com estes dados.",
+  USER_INVALID_ROLE: "Funcao invalida.",
+  USER_PERMISSION_DENIED: "Voce nao tem permissao para alterar este usuario.",
+  USER_SETTINGS_UPDATE_FAILED: "Nao foi possivel salvar configuracoes de usuario.",
+  TASK_NOT_FOUND: "Tarefa nao encontrada.",
+  TASK_CREATE_FAILED: "Nao foi possivel criar tarefa.",
+  TASK_UPDATE_FAILED: "Nao foi possivel atualizar tarefa.",
+  TASK_DELETE_FAILED: "Nao foi possivel remover tarefa.",
+  TASK_ASSIGN_FAILED: "Nao foi possivel atribuir tarefa.",
+  TASK_INVALID_STATE: "Nao foi possivel alterar tarefa neste estado.",
+  PROPOSAL_NOT_FOUND: "Proposta nao encontrada.",
+  PROPOSAL_CREATE_FAILED: "Nao foi possivel criar proposta.",
+  PROPOSAL_UPDATE_FAILED: "Nao foi possivel atualizar proposta.",
+  PROPOSAL_DELETE_FAILED: "Nao foi possivel remover proposta.",
+  PROPOSAL_INVALID_STATE: "Nao foi possivel alterar proposta neste estado.",
   META_PROVIDER_ERROR: "Nao foi possivel concluir a operacao na Meta.",
   MEDIA_FETCH_FAILED: "Nao foi possivel carregar a midia.",
   TEMPLATE_CREATE_FAILED: "Nao foi possivel criar template.",

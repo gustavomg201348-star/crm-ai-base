@@ -3,7 +3,9 @@ import {
   normalizeAvailabilityStatus,
   setAttendantStatus
 } from "@/lib/lead-assignment";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { getSessionOrUnauthorized } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 
 export async function PATCH(request: NextRequest) {
   try {
@@ -21,10 +23,18 @@ export async function PATCH(request: NextRequest) {
     });
 
     return NextResponse.json({ status: result });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel atualizar disponibilidade." },
-      { status: 500 }
-    );
+  } catch (error) {
+    const { session } = getSessionOrUnauthorized(request);
+
+    safeLogError("http-api", error, {
+      route: "/api/users/me/status",
+      method: "PATCH",
+      companyId: session?.companyId,
+      currentUserId: session?.id,
+      publicErrorCode: "USER_SETTINGS_UPDATE_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "USER_SETTINGS_UPDATE_FAILED", status: 500 });
   }
 }

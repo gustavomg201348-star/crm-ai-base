@@ -3,8 +3,10 @@ import {
   normalizeAvailabilityStatus,
   setAttendantStatus
 } from "@/lib/lead-assignment";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { getSessionOrUnauthorized, requireAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
+import { safeLogError } from "@/lib/safe-logger";
 
 type RouteContext = {
   params: { id: string };
@@ -24,7 +26,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     });
 
     if (!user) {
-      return NextResponse.json({ error: "Usuario nao encontrado." }, { status: 404 });
+      return publicErrorResponse({ code: "USER_NOT_FOUND", status: 404 });
     }
 
     const body = (await request.json().catch(() => null)) as
@@ -37,10 +39,19 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     });
 
     return NextResponse.json({ status: result });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel atualizar disponibilidade." },
-      { status: 500 }
-    );
+  } catch (error) {
+    const { session } = getSessionOrUnauthorized(request);
+
+    safeLogError("http-api", error, {
+      route: "/api/users/[id]/status",
+      method: "PATCH",
+      companyId: session?.companyId,
+      currentUserId: session?.id,
+      targetUserId: context.params.id,
+      publicErrorCode: "USER_SETTINGS_UPDATE_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "USER_SETTINGS_UPDATE_FAILED", status: 500 });
   }
 }

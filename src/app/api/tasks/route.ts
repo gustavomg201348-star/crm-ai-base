@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { createActivity } from "@/lib/activities";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
+import { safeLogError } from "@/lib/safe-logger";
 import { mapTask, taskInclude } from "@/lib/tasks";
 
 export async function GET(request: NextRequest) {
@@ -9,7 +11,7 @@ export async function GET(request: NextRequest) {
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
 
     const contactId = request.nextUrl.searchParams.get("contactId") ?? "";
@@ -29,11 +31,15 @@ export async function GET(request: NextRequest) {
     });
 
     return NextResponse.json({ tasks: tasks.map(mapTask) });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel carregar tarefas." },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      route: "/api/tasks",
+      method: "GET",
+      publicErrorCode: "INTERNAL_ERROR",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "INTERNAL_ERROR", status: 500 });
   }
 }
 
@@ -42,7 +48,7 @@ export async function POST(request: NextRequest) {
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
 
     const body = (await request.json().catch(() => null)) as
@@ -58,10 +64,7 @@ export async function POST(request: NextRequest) {
     const dueAt = body?.dueAt ? new Date(body.dueAt) : null;
 
     if (!body?.contactId || !title || !dueAt || Number.isNaN(dueAt.getTime())) {
-      return NextResponse.json(
-        { error: "Contato, titulo e prazo sao obrigatorios." },
-        { status: 400 }
-      );
+      return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
     }
 
     const contact = await prisma.contact.findFirst({
@@ -70,7 +73,7 @@ export async function POST(request: NextRequest) {
     });
 
     if (!contact) {
-      return NextResponse.json({ error: "Contato nao encontrado." }, { status: 404 });
+      return publicErrorResponse({ code: "CONTACT_NOT_FOUND", status: 404 });
     }
 
     const assignee = body.assigneeId
@@ -106,10 +109,16 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({ task: mapTask(task) }, { status: 201 });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel criar tarefa." },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      route: "/api/tasks",
+      method: "POST",
+      companyId: getSessionFromRequest(request)?.companyId,
+      currentUserId: getSessionFromRequest(request)?.id,
+      publicErrorCode: "TASK_CREATE_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "TASK_CREATE_FAILED", status: 500 });
   }
 }

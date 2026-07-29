@@ -2,8 +2,14 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { createActivity } from "@/lib/activities";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
+import { safeLogError } from "@/lib/safe-logger";
 import { mapTask, taskInclude } from "@/lib/tasks";
-import { forbidden, isAdmin } from "@/lib/permissions";
+import { isAdmin } from "@/lib/permissions";
+
+function isTaskStatus(value: unknown): value is "PENDING" | "DONE" {
+  return value === "PENDING" || value === "DONE";
+}
 
 export async function PATCH(
   request: NextRequest,
@@ -13,7 +19,7 @@ export async function PATCH(
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
 
     const { id } = await params;
@@ -22,12 +28,12 @@ export async function PATCH(
     });
 
     if (!current) {
-      return NextResponse.json({ error: "Tarefa nao encontrada." }, { status: 404 });
+      return publicErrorResponse({ code: "TASK_NOT_FOUND", status: 404 });
     }
 
     const canManageAnyTask = isAdmin(session);
     if (!canManageAnyTask && current.assigneeId !== session.id) {
-      return forbidden("Voce nao tem permissao para alterar esta tarefa.");
+      return publicErrorResponse({ code: "USER_PERMISSION_DENIED", status: 403 });
     }
 
     const body = (await request.json().catch(() => null)) as
@@ -42,11 +48,15 @@ export async function PATCH(
     const dueAt = body?.dueAt ? new Date(body.dueAt) : undefined;
 
     if (dueAt && Number.isNaN(dueAt.getTime())) {
-      return NextResponse.json({ error: "Prazo invalido." }, { status: 400 });
+      return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
+    }
+
+    if (body?.status !== undefined && !isTaskStatus(body.status)) {
+      return publicErrorResponse({ code: "TASK_INVALID_STATE", status: 409 });
     }
 
     if (!canManageAnyTask && body?.assigneeId !== undefined) {
-      return forbidden("Voce nao tem permissao para transferir esta tarefa.");
+      return publicErrorResponse({ code: "TASK_ASSIGN_FAILED", status: 403 });
     }
 
     const assignee =
@@ -89,10 +99,20 @@ export async function PATCH(
     });
 
     return NextResponse.json({ task: mapTask(task) });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel atualizar tarefa." },
-      { status: 500 }
-    );
+  } catch (error) {
+    const session = getSessionFromRequest(request);
+    const { id } = await params;
+
+    safeLogError("http-api", error, {
+      route: "/api/tasks/[id]",
+      method: "PATCH",
+      companyId: session?.companyId,
+      currentUserId: session?.id,
+      taskId: id,
+      publicErrorCode: "TASK_UPDATE_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "TASK_UPDATE_FAILED", status: 500 });
   }
 }
