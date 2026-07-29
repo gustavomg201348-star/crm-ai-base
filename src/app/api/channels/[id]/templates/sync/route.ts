@@ -1,10 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
 import { markTemplateNotReturned, upsertNormalizedMetaTemplate } from "@/lib/meta-template-service";
 import { findMetaTemplateByIdentity, listMetaTemplatesByWaba } from "@/lib/meta-template-repository";
 import { syncMetaTemplatesForWaba } from "@/lib/meta-template-sync";
+import { safeLogError } from "@/lib/safe-logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -86,10 +88,18 @@ export async function POST(
     );
 
     return NextResponse.json(result);
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel sincronizar templates da Meta." },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      operation: "admin-template-sync",
+      route: "/api/channels/[id]/templates/sync",
+      publicErrorCode: "TEMPLATE_FETCH_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({
+      code: "TEMPLATE_FETCH_FAILED",
+      status: 500,
+      message: "Nao foi possivel sincronizar templates da Meta."
+    });
   }
 }

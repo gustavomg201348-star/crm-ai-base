@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { requireCompanyAdmin } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 import {
   createMetaTemplate,
   MetaTemplateCreationServiceError,
@@ -43,8 +44,28 @@ class HeaderInputError extends Error {
 
 type SafeRecoveryContext = Pick<
   MetaTemplateCreationRecoveryContext,
-  "mediaAssetId" | "metaTemplateId" | "name" | "language" | "wabaId"
+  "mediaAssetId" | "metaTemplateId" | "name" | "language"
 >;
+
+const PUBLIC_SERVICE_ERROR_MESSAGES: Partial<
+  Record<MetaTemplateCreationServiceErrorCode, string>
+> = {
+  INVALID_TEMPLATE_NAME: "Nome do template invalido.",
+  INVALID_LANGUAGE: "Idioma do template invalido.",
+  INVALID_CATEGORY: "Categoria do template invalida.",
+  EMPTY_BODY: "Body do template obrigatorio.",
+  INVALID_PLACEHOLDERS: "Variaveis do template invalidas.",
+  INVALID_BODY_EXAMPLES: "Exemplos do body invalidos.",
+  INVALID_FOOTER: "Footer do template invalido.",
+  INVALID_BUTTONS: "Botoes do template invalidos.",
+  STORAGE_FAILED: "Nao foi possivel preparar a midia do template.",
+  MEDIA_ASSET_PERSIST_FAILED: "Nao foi possivel registrar a midia do template.",
+  META_UPLOAD_SESSION_FAILED: "Nao foi possivel iniciar o envio da midia para a Meta.",
+  META_FILE_UPLOAD_FAILED: "Nao foi possivel enviar a midia para a Meta.",
+  MEDIA_ASSET_UPDATE_FAILED: "Nao foi possivel atualizar a midia do template.",
+  META_TEMPLATE_PERSIST_FAILED: "Nao foi possivel registrar o template localmente.",
+  META_TEMPLATE_CREATION_FAILED: "Nao foi possivel criar o template na Meta."
+};
 
 function errorResponse({
   code,
@@ -288,7 +309,6 @@ function sanitizeRecoveryContext(
   if (recoveryContext.metaTemplateId) safe.metaTemplateId = recoveryContext.metaTemplateId;
   if (recoveryContext.name) safe.name = recoveryContext.name;
   if (recoveryContext.language) safe.language = recoveryContext.language;
-  if (recoveryContext.wabaId) safe.wabaId = recoveryContext.wabaId;
 
   return Object.keys(safe).length ? safe : undefined;
 }
@@ -323,7 +343,9 @@ function mapServiceError(error: MetaTemplateCreationServiceError) {
   if (error.stage === "VALIDATION" || error.stage === "STORAGE") {
     return errorResponse({
       code: error.code,
-      message: error.message,
+      message:
+        PUBLIC_SERVICE_ERROR_MESSAGES[error.code] ??
+        "Nao foi possivel validar os dados do template.",
       status: 400
     });
   }
@@ -380,6 +402,8 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  let requestedChannelId: string | null = null;
+
   try {
     const session = getSessionFromRequest(request);
 
@@ -401,6 +425,7 @@ export async function POST(
     }
 
     const { id } = await params;
+    requestedChannelId = id;
     const channel = await prisma.channel.findFirst({
       where: {
         id,
@@ -451,13 +476,10 @@ export async function POST(
 
     try {
       header = await buildHeaderInput(formData);
-    } catch (error) {
+    } catch {
       return errorResponse({
         code: "INVALID_HEADER",
-        message:
-          error instanceof HeaderInputError
-            ? error.message
-            : "HEADER invalido. Verifique headerType, headerText e o arquivo enviado.",
+        message: "HEADER invalido. Verifique headerType, headerText e o arquivo enviado.",
         status: 400
       });
     }
@@ -513,8 +535,25 @@ export async function POST(
     return NextResponse.json(mapSuccess(result), { status: 201 });
   } catch (error) {
     if (error instanceof MetaTemplateCreationServiceError) {
+      safeLogError("http-api", error, {
+        operation: "admin-template-create",
+        route: "/api/channels/[id]/templates",
+        publicErrorCode: error.code,
+        status: error.retryable ? 503 : 502,
+        channelId: requestedChannelId,
+        stage: error.stage
+      });
+
       return mapServiceError(error);
     }
+
+    safeLogError("http-api", error, {
+      operation: "admin-template-create",
+      route: "/api/channels/[id]/templates",
+      publicErrorCode: "INTERNAL_ERROR",
+      status: 500,
+      channelId: requestedChannelId
+    });
 
     return errorResponse({
       code: "INTERNAL_ERROR",

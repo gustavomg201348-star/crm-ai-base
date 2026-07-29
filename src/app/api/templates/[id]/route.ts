@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 import {
   getAdminTemplateDetail,
   MetaTemplateServiceError
@@ -18,8 +20,11 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id?: string }> }
 ) {
+  let requestedTemplateId: string | null = null;
+
   try {
     const resolvedParams = await params;
+    requestedTemplateId = resolvedParams.id ?? null;
     const session = getSessionFromRequest(request);
 
     if (!session) {
@@ -43,24 +48,49 @@ export async function GET(
   } catch (error) {
     if (error instanceof MetaTemplateServiceError) {
       if (error.code === "TEMPLATE_NOT_FOUND") {
-        return NextResponse.json({ error: "Template nao encontrado." }, { status: 404 });
+        return publicErrorResponse({
+          code: "NOT_FOUND",
+          status: 404,
+          message: "Template nao encontrado."
+        });
       }
 
       if (error.code === "INVALID_INPUT") {
-        return NextResponse.json({ error: "Parametros invalidos." }, { status: 400 });
+        return publicErrorResponse({
+          code: "TEMPLATE_INVALID_INPUT",
+          status: 400
+        });
       }
 
       if (error.code === "INVALID_STORED_JSON") {
-        return NextResponse.json(
-          { error: "Nao foi possivel interpretar os dados do template." },
-          { status: 500 }
-        );
+        safeLogError("http-api", error, {
+          operation: "admin-template-detail",
+          route: "/api/templates/[id]",
+          publicErrorCode: "TEMPLATE_FETCH_FAILED",
+          status: 500,
+          templateId: requestedTemplateId
+        });
+
+        return publicErrorResponse({
+          code: "TEMPLATE_FETCH_FAILED",
+          status: 500,
+          message: "Nao foi possivel interpretar os dados do template."
+        });
       }
     }
 
-    return NextResponse.json(
-      { error: "Nao foi possivel carregar o template." },
-      { status: 500 }
-    );
+    safeLogError("http-api", error, {
+      operation: "admin-template-detail",
+      route: "/api/templates/[id]",
+      publicErrorCode: "TEMPLATE_FETCH_FAILED",
+      status: 500,
+      templateId: requestedTemplateId
+    });
+
+    return publicErrorResponse({
+      code: "TEMPLATE_FETCH_FAILED",
+      status: 500,
+      message: "Nao foi possivel carregar o template."
+    });
   }
 }

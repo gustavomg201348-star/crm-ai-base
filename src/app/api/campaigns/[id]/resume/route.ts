@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { mapCampaign, processCampaign } from "@/lib/campaigns";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { getSessionOrUnauthorized, requireCompanyAdmin } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,14 +31,18 @@ export async function PATCH(
     const processed = await processCampaign(campaign.id);
     return NextResponse.json({ campaign: mapCampaign(processed) });
   } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Nao foi possivel retomar campanha."
-      },
-      { status: 500 }
-    );
+    safeLogError("http-api", error, {
+      operation: "campaign-resume",
+      route: "/api/campaigns/[id]/resume",
+      publicErrorCode: "CAMPAIGN_RESUME_FAILED",
+      status: 500,
+      campaignId: params.id
+    });
+
+    return publicErrorResponse({
+      code: "CAMPAIGN_RESUME_FAILED",
+      status: 500,
+      message: "Nao foi possivel retomar campanha."
+    });
   }
 }

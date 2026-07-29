@@ -1,8 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { campaignInclude, mapCampaign } from "@/lib/campaigns";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { getSessionOrUnauthorized, requireCompanyAdmin } from "@/lib/permissions";
 import { digitsOnlyPhone } from "@/lib/phone-normalization.service";
+import { safeLogError } from "@/lib/safe-logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -118,14 +120,17 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ campaign: mapCampaign(campaign) }, { status: 201 });
   } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Nao foi possivel criar campanha da importacao."
-      },
-      { status: 500 }
-    );
+    safeLogError("http-api", error, {
+      operation: "campaign-create-from-import",
+      route: "/api/campaigns/from-import",
+      publicErrorCode: "CAMPAIGN_CREATE_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({
+      code: "CAMPAIGN_CREATE_FAILED",
+      status: 500,
+      message: "Nao foi possivel criar campanha da importacao."
+    });
   }
 }
