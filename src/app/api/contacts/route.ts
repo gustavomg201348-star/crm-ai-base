@@ -13,10 +13,12 @@ import {
   type LeadTemperature
 } from "@/lib/contacts";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import {
   isPrismaUniqueViolation,
   isPrismaUniqueViolationForTarget
 } from "@/lib/prisma-errors";
+import { safeLogError } from "@/lib/safe-logger";
 
 function buildContactWhere(
   companyId: string,
@@ -67,11 +69,19 @@ export async function GET(request: NextRequest) {
     });
 
     return NextResponse.json({ contacts: contacts.map(mapContact) });
-  } catch {
-    return NextResponse.json(
-      { error: "Banco nao configurado. Confira DATABASE_URL." },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      operation: "contacts-list",
+      route: "/api/contacts",
+      publicErrorCode: "INTERNAL_ERROR",
+      status: 500
+    });
+
+    return publicErrorResponse({
+      code: "INTERNAL_ERROR",
+      status: 500,
+      message: "Nao foi possivel carregar contatos."
+    });
   }
 }
 
@@ -202,15 +212,23 @@ export async function POST(request: NextRequest) {
       (isPrismaUniqueViolationForTarget(error, "normalizedPhone") ||
         isPrismaUniqueViolationForTarget(error, ["companyId", "normalizedPhone"]))
     ) {
-      return NextResponse.json(
-        { error: "Já existe um contato com este telefone." },
-        { status: 409 }
-      );
+      return publicErrorResponse({
+        code: "CONTACT_DUPLICATE",
+        status: 409
+      });
     }
 
-    return NextResponse.json(
-      { error: "Nao foi possivel salvar contato." },
-      { status: 500 }
-    );
+    safeLogError("http-api", error, {
+      operation: "contact-create",
+      route: "/api/contacts",
+      publicErrorCode: "CONTACT_CREATE_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({
+      code: "CONTACT_CREATE_FAILED",
+      status: 500,
+      message: "Nao foi possivel salvar contato."
+    });
   }
 }

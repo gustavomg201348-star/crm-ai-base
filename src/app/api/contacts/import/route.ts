@@ -7,7 +7,9 @@ import {
   type LeadTemperature
 } from "@/lib/contacts";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireAdmin } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 
 type CsvRow = Record<string, string>;
 
@@ -174,7 +176,7 @@ export async function POST(request: NextRequest) {
       const contactLookupPhone = contactNormalizedPhone ?? normalizedPhone;
 
       if (!name || !phone) {
-        errors.push({ row: rowNumber, reason: "Nome e telefone sao obrigatorios." });
+        errors.push({ row: rowNumber, reason: "Dados obrigatorios ausentes." });
         continue;
       }
 
@@ -183,7 +185,7 @@ export async function POST(request: NextRequest) {
           (normalizedPhone && seenPhones.has(normalizedPhone))) ||
         (normalizedCpf && (knownCpfs.has(normalizedCpf) || seenCpfs.has(normalizedCpf)))
       ) {
-        ignored.push({ row: rowNumber, reason: "Contato duplicado por telefone ou CPF." });
+        ignored.push({ row: rowNumber, reason: "Registro duplicado." });
         continue;
       }
 
@@ -246,10 +248,18 @@ export async function POST(request: NextRequest) {
       ignored,
       errors
     });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel importar contatos." },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      operation: "contacts-import-legacy",
+      route: "/api/contacts/import",
+      publicErrorCode: "CONTACT_IMPORT_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({
+      code: "CONTACT_IMPORT_FAILED",
+      status: 500,
+      message: "Nao foi possivel importar contatos."
+    });
   }
 }

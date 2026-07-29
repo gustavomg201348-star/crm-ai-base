@@ -3,7 +3,9 @@ import {
   confirmContactImport,
   type ImportPreviewRow
 } from "@/lib/contact-import.service";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { getSessionOrUnauthorized, requireCompanyAdmin } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,14 +37,17 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(result);
   } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Nao foi possivel importar os contatos."
-      },
-      { status: 500 }
-    );
+    safeLogError("http-api", error, {
+      operation: "contact-import-confirm",
+      route: "/api/imports/contacts/confirm",
+      publicErrorCode: "CONTACT_IMPORT_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({
+      code: "CONTACT_IMPORT_FAILED",
+      status: 500,
+      message: "Nao foi possivel importar os contatos."
+    });
   }
 }

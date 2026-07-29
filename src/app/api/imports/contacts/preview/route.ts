@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { buildContactImportPreview } from "@/lib/contact-import.service";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { getSessionOrUnauthorized, requireCompanyAdmin } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,14 +32,17 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(preview);
   } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Nao foi possivel validar a planilha."
-      },
-      { status: 400 }
-    );
+    safeLogError("http-api", error, {
+      operation: "contact-import-preview",
+      route: "/api/imports/contacts/preview",
+      publicErrorCode: "CONTACT_IMPORT_INVALID_FILE",
+      status: 400
+    });
+
+    return publicErrorResponse({
+      code: "CONTACT_IMPORT_INVALID_FILE",
+      status: 400,
+      message: "Nao foi possivel validar a planilha."
+    });
   }
 }
