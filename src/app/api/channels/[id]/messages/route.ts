@@ -12,6 +12,7 @@ import {
   normalizeContactPhone
 } from "@/lib/contacts";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { saveFailedOutboundMessage } from "@/lib/message-delivery";
 import { readMetaMessageId, sendMetaTextMessage } from "@/lib/meta-whatsapp";
 import { canAccessConversation } from "@/lib/permissions";
@@ -19,6 +20,7 @@ import {
   isPrismaUniqueViolation,
   isPrismaUniqueViolationForTarget
 } from "@/lib/prisma-errors";
+import { safeLogError } from "@/lib/safe-logger";
 
 type RouteContext = {
   params: { id: string };
@@ -68,7 +70,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     if (!channel.phoneNumberId || !channel.accessToken) {
       return NextResponse.json(
-        { error: "Canal sem phoneNumberId ou accessToken." },
+        { error: "Canal Meta com configuracao incompleta." },
         { status: 400 }
       );
     }
@@ -252,10 +254,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       conversation: mapConversation(updated)
     });
   } catch (error) {
-    const errorMessage =
-      error instanceof Error
-        ? error.message
-        : "Nao foi possivel enviar mensagem.";
+    const errorMessage = "Falha ao enviar mensagem.";
 
     if (!metaAcceptedMessage && failedConversationId && failedMessageBody) {
       await saveFailedOutboundMessage({
@@ -265,11 +264,19 @@ export async function POST(request: NextRequest, context: RouteContext) {
       });
     }
 
-    return NextResponse.json(
-      {
-        error: errorMessage
-      },
-      { status: 500 }
-    );
+    safeLogError("http-api", error, {
+      operation: "channel-message-send",
+      route: "/api/channels/[id]/messages",
+      publicErrorCode: "MESSAGE_SEND_FAILED",
+      status: 500,
+      channelId: context.params.id,
+      conversationId: failedConversationId ?? null,
+      metaAcceptedMessage
+    });
+
+    return publicErrorResponse({
+      code: "MESSAGE_SEND_FAILED",
+      status: 500
+    });
   }
 }

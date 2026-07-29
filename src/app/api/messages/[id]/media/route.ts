@@ -2,7 +2,9 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { resolveConversationChannelId } from "@/lib/conversation-channel.service";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { canAccessConversation } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 
 type RouteContext = {
   params: { id: string };
@@ -28,11 +30,7 @@ async function getMetaMediaUrl({
   const data = await response.json().catch(() => null);
 
   if (!response.ok || !data?.url) {
-    throw new Error(
-      typeof data?.error?.message === "string"
-        ? data.error.message
-        : "Nao foi possivel obter a midia na Meta."
-    );
+    throw new Error("META_MEDIA_URL_FAILED");
   }
 
   return {
@@ -146,9 +144,17 @@ export async function GET(request: NextRequest, context: RouteContext) {
       }
     });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Nao foi possivel carregar a midia.";
+    safeLogError("http-api", error, {
+      operation: "message-media-fetch",
+      route: "/api/messages/[id]/media",
+      publicErrorCode: "MEDIA_FETCH_FAILED",
+      status: 500,
+      messageId: context.params.id
+    });
 
-    return NextResponse.json({ error: message }, { status: 500 });
+    return publicErrorResponse({
+      code: "MEDIA_FETCH_FAILED",
+      status: 500
+    });
   }
 }

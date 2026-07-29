@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
+import { publicErrorResponse } from "@/lib/http-error-response";
+import { safeLogError } from "@/lib/safe-logger";
 import {
   getApprovedTemplatesForChannel,
   getApprovedTemplatesForConversation
@@ -33,14 +35,16 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ templates });
   } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Nao foi possivel buscar templates."
-      },
-      { status: 500 }
-    );
+    safeLogError("http-api", error, {
+      operation: "whatsapp-templates-list",
+      route: "/api/whatsapp/templates",
+      publicErrorCode: "TEMPLATE_FETCH_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({
+      code: "TEMPLATE_FETCH_FAILED",
+      status: 500
+    });
   }
 }
