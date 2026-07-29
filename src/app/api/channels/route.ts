@@ -3,6 +3,7 @@ import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { requireCompanyAdmin } from "@/lib/permissions";
 import { validateMetaWhatsAppCredentials } from "@/lib/meta-whatsapp-diagnostics";
+import { sanitizeMetaDiagnostics } from "@/lib/meta-diagnostics-sanitizer";
 
 function mapChannel(channel: {
   id: string;
@@ -85,10 +86,12 @@ export async function GET(request: NextRequest) {
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
     }
     const blocked = requireCompanyAdmin(session);
-    if (blocked) return blocked;
+    if (blocked) {
+      return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
+    }
 
     const channels = await prisma.channel.findMany({
       where: { companyId: session.companyId },
@@ -98,7 +101,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ channels: channels.map(mapChannel) });
   } catch {
     return NextResponse.json(
-      { error: "Nao foi possivel carregar canais." },
+      { error: "CHANNELS_LIST_FAILED" },
       { status: 500 }
     );
   }
@@ -109,10 +112,12 @@ export async function POST(request: NextRequest) {
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
     }
     const blocked = requireCompanyAdmin(session);
-    if (blocked) return blocked;
+    if (blocked) {
+      return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
+    }
 
     const body = (await request.json().catch(() => null)) as
       | {
@@ -153,14 +158,18 @@ export async function POST(request: NextRequest) {
       });
 
       if (!diagnostics.ok) {
+        const publicDiagnostics = sanitizeMetaDiagnostics(diagnostics);
         const reason =
-          diagnostics.token.error ||
-          diagnostics.waba.error ||
-          diagnostics.phone.error ||
-          (diagnostics.permissions.missing.length
-            ? `Permissoes ausentes: ${diagnostics.permissions.missing.join(", ")}.`
+          publicDiagnostics.token.error ||
+          publicDiagnostics.waba.error ||
+          publicDiagnostics.phone.error ||
+          (publicDiagnostics.permissions.missing.length
+            ? `Permissoes ausentes: ${publicDiagnostics.permissions.missing.join(", ")}.`
             : "Validacao Meta incompleta.");
-        return NextResponse.json({ error: reason, diagnostics }, { status: 400 });
+        return NextResponse.json(
+          { error: reason, diagnostics: publicDiagnostics },
+          { status: 400 }
+        );
       }
     }
 
@@ -184,7 +193,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ channel: mapChannel(channel) }, { status: 201 });
   } catch {
     return NextResponse.json(
-      { error: "Nao foi possivel criar canal." },
+      { error: "CHANNEL_CREATE_FAILED" },
       { status: 500 }
     );
   }
