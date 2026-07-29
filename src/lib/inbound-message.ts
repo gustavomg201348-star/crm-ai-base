@@ -23,6 +23,7 @@ import {
   isPrismaUniqueViolation,
   isPrismaUniqueViolationForTarget
 } from "@/lib/prisma-errors";
+import { safeLogError, safeLogWarn } from "@/lib/safe-logger";
 
 export async function processInboundMessage({
   companyId,
@@ -111,18 +112,19 @@ export async function processInboundMessage({
         });
   let contactCreated = false;
 
-  console.warn("[whatsapp-inbound-audit]", {
-    rawPhone: phone,
-    normalizedPhone,
+  safeLogWarn("whatsapp-inbound-audit", "inbound message contact resolution", {
     contactId: contact?.id ?? null,
     conversationId: referencedMessage?.conversationId ?? null,
     referencedProviderMessageId: contextProviderMessageId ?? null,
     referencedMessageFound: Boolean(referencedMessage),
     referencedPhoneMatched,
-    oldName: contact?.name ?? null,
-    incomingWhatsappName: name?.trim() || null,
-    cpfBefore: contact?.cpf ?? null,
-    messageType: type ?? "text"
+    hasExistingContact: Boolean(contact),
+    hasIncomingWhatsappName: Boolean(name?.trim()),
+    hadDocumentBefore: Boolean(contact?.cpf),
+    messageType: type ?? "text",
+    hasMedia: Boolean(mediaId),
+    hasFileName: Boolean(fileName),
+    hasMimeType: Boolean(mimeType)
   });
 
   if (!contact) {
@@ -318,18 +320,17 @@ export async function processInboundMessage({
     include: conversationInclude
   });
 
-  console.warn("[whatsapp-inbound-audit-result]", {
-    rawPhone: phone,
-    normalizedPhone,
+  safeLogWarn("whatsapp-inbound-audit-result", "inbound message persisted", {
     contactId: updated.contact.id,
     conversationId: updated.id,
-    oldName: contact.name,
-    finalName: updated.contact.name,
-    incomingWhatsappName: name?.trim() || null,
-    cpfBefore: contact.cpf ?? null,
-    cpfAfter: updated.contact.cpf ?? null,
+    contactNameChanged: contact.name !== updated.contact.name,
+    hasIncomingWhatsappName: Boolean(name?.trim()),
+    hadDocumentBefore: Boolean(contact.cpf),
+    hasDocumentAfter: Boolean(updated.contact.cpf),
     messageType: type ?? "text",
-    status: updated.status
+    status: updated.status,
+    hasMedia: Boolean(mediaId),
+    hasProviderMessageId: Boolean(providerMessageId)
   });
 
   const channel = channelId
@@ -361,7 +362,11 @@ export async function processInboundMessage({
     companyId,
     conversationId: updated.id
   }).catch((error) => {
-    console.error("Falha ao enviar resposta automatica IA", error);
+    safeLogError("whatsapp-inbound-audit", error, {
+      operation: "automatic-ai-reply",
+      companyId,
+      conversationId: updated.id
+    });
   });
 
   return mapConversation(updated);
