@@ -119,7 +119,9 @@ export type PersistCreatedMetaTemplateRepositoryInput = {
   components: string;
   rawPayload: string | null;
   supportFlags: string | null;
-  defaultHeaderMediaAssetId: string;
+  requiresHeaderMedia: boolean;
+  headerFormat: string | null;
+  defaultHeaderMediaAssetId: string | null;
   lastSeenAt: Date | null;
 };
 
@@ -422,8 +424,8 @@ export async function persistCreatedMetaTemplateRecord(
     category: input.category,
     metaStatus: input.metaStatus,
     operationalStatus: input.operationalStatus,
-    requiresHeaderMedia: true,
-    headerFormat: "IMAGE",
+    requiresHeaderMedia: input.requiresHeaderMedia,
+    headerFormat: input.headerFormat,
     components: input.components,
     rawPayload: input.rawPayload,
     supportFlags: input.supportFlags,

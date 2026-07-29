@@ -3,33 +3,59 @@ import { constants as fsConstants } from "node:fs";
 import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-export const TEMPLATE_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+const megabyte = 1024 * 1024;
+
+export const TEMPLATE_IMAGE_MAX_BYTES = 5 * megabyte;
+export const TEMPLATE_DOCUMENT_MAX_BYTES = 10 * megabyte;
+export const TEMPLATE_VIDEO_MAX_BYTES = 16 * megabyte;
 export const TEMPLATE_IMAGE_MIME_TYPES = ["image/jpeg", "image/png"] as const;
+export const TEMPLATE_DOCUMENT_MIME_TYPES = ["application/pdf"] as const;
+export const TEMPLATE_VIDEO_MIME_TYPES = ["video/mp4"] as const;
+export const TEMPLATE_HEADER_MEDIA_MIME_TYPES = [
+  ...TEMPLATE_IMAGE_MIME_TYPES,
+  ...TEMPLATE_DOCUMENT_MIME_TYPES,
+  ...TEMPLATE_VIDEO_MIME_TYPES
+] as const;
 export const TEMPLATE_MEDIA_STORAGE_PROVIDER = "local-public";
 export const TEMPLATE_MEDIA_STORAGE_PREFIX = "uploads/templates";
 
 export type TemplateImageMimeType = (typeof TEMPLATE_IMAGE_MIME_TYPES)[number];
+export type TemplateDocumentMimeType = (typeof TEMPLATE_DOCUMENT_MIME_TYPES)[number];
+export type TemplateVideoMimeType = (typeof TEMPLATE_VIDEO_MIME_TYPES)[number];
+export type TemplateHeaderMediaMimeType = (typeof TEMPLATE_HEADER_MEDIA_MIME_TYPES)[number];
 export type TemplateImageExtension = ".jpg" | ".png";
+export type TemplateDocumentExtension = ".pdf";
+export type TemplateVideoExtension = ".mp4";
+type TemplateHeaderMediaInputExtension = TemplateHeaderMediaExtension | ".jpeg";
+export type TemplateHeaderMediaExtension =
+  | TemplateImageExtension
+  | TemplateDocumentExtension
+  | TemplateVideoExtension;
 export type TemplateMediaChecksumAlgorithm = "sha256";
 
-export type SaveTemplateImageInput = {
+export type SaveTemplateHeaderMediaInput = {
   fileName: string;
   mimeType: string;
   bytes: Buffer | Uint8Array;
   namespace?: string;
 };
 
-export type StoredTemplateMedia = {
+export type SaveTemplateImageInput = SaveTemplateHeaderMediaInput;
+
+export type StoredTemplateMedia<
+  TMimeType extends TemplateHeaderMediaMimeType = TemplateImageMimeType,
+  TExtension extends TemplateHeaderMediaExtension = TemplateImageExtension
+> = {
   storageProvider: typeof TEMPLATE_MEDIA_STORAGE_PROVIDER;
   storageKey: string;
   publicUrl: string;
   checksum: string;
   checksumAlgorithm: TemplateMediaChecksumAlgorithm;
-  mimeType: TemplateImageMimeType;
+  mimeType: TMimeType;
   sizeBytes: number;
   originalFileName: string;
   storedFileName: string;
-  extension: TemplateImageExtension;
+  extension: TExtension;
 };
 
 export type DeleteStoredTemplateMediaResult = {
@@ -70,7 +96,52 @@ type TemplateMediaStorageOptions = {
   publicBaseUrl?: string | null;
 };
 
+type TemplateHeaderMediaConfig = {
+  extensions: readonly TemplateHeaderMediaInputExtension[];
+  maxBytes: number;
+  mimeType: TemplateHeaderMediaMimeType;
+  signature: readonly number[] | "jpeg" | "mp4" | null;
+  tooLargeMessage: string;
+  typeLabel: string;
+};
+
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+const PDF_SIGNATURE = [0x25, 0x50, 0x44, 0x46, 0x2d];
+
+const TEMPLATE_HEADER_MEDIA_CONFIG = {
+  "image/jpeg": {
+    extensions: [".jpg", ".jpeg"],
+    maxBytes: TEMPLATE_IMAGE_MAX_BYTES,
+    mimeType: "image/jpeg",
+    signature: "jpeg",
+    tooLargeMessage: "Imagem acima do limite de 5 MB.",
+    typeLabel: "imagem JPEG"
+  },
+  "image/png": {
+    extensions: [".png"],
+    maxBytes: TEMPLATE_IMAGE_MAX_BYTES,
+    mimeType: "image/png",
+    signature: PNG_SIGNATURE,
+    tooLargeMessage: "Imagem acima do limite de 5 MB.",
+    typeLabel: "imagem PNG"
+  },
+  "application/pdf": {
+    extensions: [".pdf"],
+    maxBytes: TEMPLATE_DOCUMENT_MAX_BYTES,
+    mimeType: "application/pdf",
+    signature: PDF_SIGNATURE,
+    tooLargeMessage: "Documento acima do limite de 10 MB.",
+    typeLabel: "documento PDF"
+  },
+  "video/mp4": {
+    extensions: [".mp4"],
+    maxBytes: TEMPLATE_VIDEO_MAX_BYTES,
+    mimeType: "video/mp4",
+    signature: "mp4",
+    tooLargeMessage: "Video acima do limite de 16 MB.",
+    typeLabel: "video MP4"
+  }
+} satisfies Record<TemplateHeaderMediaMimeType, TemplateHeaderMediaConfig>;
 
 function normalizeMimeType(mimeType: string) {
   return mimeType.split(";")[0]?.trim().toLowerCase() ?? "";
@@ -78,6 +149,12 @@ function normalizeMimeType(mimeType: string) {
 
 function isTemplateImageMimeType(mimeType: string): mimeType is TemplateImageMimeType {
   return (TEMPLATE_IMAGE_MIME_TYPES as readonly string[]).includes(mimeType);
+}
+
+function isTemplateHeaderMediaMimeType(
+  mimeType: string
+): mimeType is TemplateHeaderMediaMimeType {
+  return (TEMPLATE_HEADER_MEDIA_MIME_TYPES as readonly string[]).includes(mimeType);
 }
 
 function readOriginalFileName(fileName: string) {
@@ -105,32 +182,27 @@ function readSafeNamespace(namespace?: string) {
   return normalized || "default";
 }
 
-function readExtension(fileName: string, mimeType: TemplateImageMimeType): TemplateImageExtension {
+function readExtension(
+  fileName: string,
+  config: TemplateHeaderMediaConfig
+): TemplateHeaderMediaExtension {
   const extension = path.extname(fileName).toLowerCase();
 
-  if (mimeType === "image/png") {
-    if (extension !== ".png") {
-      throw new TemplateMediaStorageError(
-        "UNSUPPORTED_MIME_TYPE",
-        "Extensao do arquivo nao corresponde ao MIME image/png."
-      );
-    }
-
-    return ".png";
-  }
-
-  if (extension !== ".jpg" && extension !== ".jpeg") {
+  if (!config.extensions.includes(extension as TemplateHeaderMediaExtension)) {
     throw new TemplateMediaStorageError(
       "UNSUPPORTED_MIME_TYPE",
-      "Extensao do arquivo nao corresponde ao MIME image/jpeg."
+      `Extensao do arquivo nao corresponde ao MIME ${config.mimeType}.`
     );
   }
 
-  return ".jpg";
+  if (extension === ".jpeg") return ".jpg";
+  return extension as TemplateHeaderMediaExtension;
 }
 
-function assertValidSignature(bytes: Buffer, mimeType: TemplateImageMimeType) {
-  if (mimeType === "image/jpeg") {
+function assertValidSignature(bytes: Buffer, config: TemplateHeaderMediaConfig) {
+  if (config.signature === null) return;
+
+  if (config.signature === "jpeg") {
     if (bytes.length < 3 || bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff) {
       throw new TemplateMediaStorageError(
         "INVALID_FILE_SIGNATURE",
@@ -141,13 +213,35 @@ function assertValidSignature(bytes: Buffer, mimeType: TemplateImageMimeType) {
     return;
   }
 
-  if (
-    bytes.length < PNG_SIGNATURE.length ||
-    !PNG_SIGNATURE.every((value, index) => bytes[index] === value)
-  ) {
+  if (config.signature === "mp4") {
+    if (
+      bytes.length < 12 ||
+      bytes[4] !== 0x66 ||
+      bytes[5] !== 0x74 ||
+      bytes[6] !== 0x79 ||
+      bytes[7] !== 0x70
+    ) {
+      throw new TemplateMediaStorageError(
+        "INVALID_FILE_SIGNATURE",
+        "Assinatura do arquivo nao corresponde a um video MP4."
+      );
+    }
+
+    return;
+  }
+
+  if (bytes.length < config.signature.length) {
     throw new TemplateMediaStorageError(
       "INVALID_FILE_SIGNATURE",
-      "Assinatura do arquivo nao corresponde a uma imagem PNG."
+      `Assinatura do arquivo nao corresponde a ${config.typeLabel}.`
+    );
+  }
+
+  const signatureMatches = config.signature.every((value, index) => bytes[index] === value);
+  if (!signatureMatches) {
+    throw new TemplateMediaStorageError(
+      "INVALID_FILE_SIGNATURE",
+      `Assinatura do arquivo nao corresponde a ${config.typeLabel}.`
     );
   }
 }
@@ -218,34 +312,35 @@ async function fileExists(filePath: string) {
     .catch(() => false);
 }
 
-export async function saveTemplateImage(
-  input: SaveTemplateImageInput,
+export async function saveTemplateHeaderMedia(
+  input: SaveTemplateHeaderMediaInput,
   options: TemplateMediaStorageOptions = {}
-): Promise<StoredTemplateMedia> {
+): Promise<StoredTemplateMedia<TemplateHeaderMediaMimeType, TemplateHeaderMediaExtension>> {
   const originalFileName = readOriginalFileName(input.fileName);
   const mimeType = normalizeMimeType(input.mimeType);
 
-  if (!isTemplateImageMimeType(mimeType)) {
+  if (!isTemplateHeaderMediaMimeType(mimeType)) {
     throw new TemplateMediaStorageError(
       "UNSUPPORTED_MIME_TYPE",
-      "Formato de imagem nao suportado para template."
+      "Formato de midia nao suportado para template."
     );
   }
 
+  const config = TEMPLATE_HEADER_MEDIA_CONFIG[mimeType];
   const bytes = Buffer.from(input.bytes);
   if (bytes.byteLength === 0) {
     throw new TemplateMediaStorageError("EMPTY_FILE", "Arquivo vazio.");
   }
 
-  if (bytes.byteLength > TEMPLATE_IMAGE_MAX_BYTES) {
+  if (bytes.byteLength > config.maxBytes) {
     throw new TemplateMediaStorageError(
       "FILE_TOO_LARGE",
-      "Imagem acima do limite de 5 MB."
+      config.tooLargeMessage
     );
   }
 
-  assertValidSignature(bytes, mimeType);
-  const extension = readExtension(originalFileName, mimeType);
+  assertValidSignature(bytes, config);
+  const extension = readExtension(originalFileName, config);
   const checksum = calculateSha256(bytes);
   const namespace = readSafeNamespace(input.namespace);
   const storedFileName = `${checksum}${extension}`;
@@ -286,6 +381,22 @@ export async function saveTemplateImage(
     storedFileName,
     extension
   };
+}
+
+export async function saveTemplateImage(
+  input: SaveTemplateImageInput,
+  options: TemplateMediaStorageOptions = {}
+): Promise<StoredTemplateMedia> {
+  const storedMedia = await saveTemplateHeaderMedia(input, options);
+
+  if (!isTemplateImageMimeType(storedMedia.mimeType)) {
+    throw new TemplateMediaStorageError(
+      "UNSUPPORTED_MIME_TYPE",
+      "Formato de imagem nao suportado para template."
+    );
+  }
+
+  return storedMedia as StoredTemplateMedia;
 }
 
 export async function deleteStoredTemplateMedia(

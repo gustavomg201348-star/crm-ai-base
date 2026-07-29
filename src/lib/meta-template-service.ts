@@ -33,15 +33,20 @@ import {
   isValidMetaTemplateSupportFlagsField,
   supportFlagsIndicateSupportedComponents
 } from "@/lib/meta-template-status";
-import { type StoredTemplateMedia } from "@/lib/template-media-storage";
+import {
+  type StoredTemplateMedia,
+  type TemplateHeaderMediaExtension,
+  type TemplateHeaderMediaMimeType
+} from "@/lib/template-media-storage";
 
-const TEMPLATE_HEADER_MEDIA_ASSET_TYPE = "TEMPLATE_HEADER_IMAGE";
+type TemplateHeaderMediaHeaderType = "IMAGE" | "DOCUMENT" | "VIDEO";
+type TemplateHeaderMediaAssetType =
+  | "TEMPLATE_HEADER_IMAGE"
+  | "TEMPLATE_HEADER_DOCUMENT"
+  | "TEMPLATE_HEADER_VIDEO";
+
 const TEMPLATE_MEDIA_ASSET_STORED_STATUS = "STORED";
 const TEMPLATE_MEDIA_ASSET_READY_STATUS = "READY";
-const CREATED_TEMPLATE_SUPPORT_FLAGS = {
-  canSendWithCurrentBuilder: true,
-  unsupportedReasons: []
-};
 
 export type MetaTemplateServiceErrorCode =
   | "INVALID_INPUT"
@@ -87,7 +92,8 @@ export type UpsertNormalizedMetaTemplateInput = {
 export type PersistTemplateHeaderMediaAssetInput = {
   companyId: string;
   channelId?: string | null;
-  storedMedia: StoredTemplateMedia;
+  headerType: TemplateHeaderMediaHeaderType;
+  storedMedia: StoredTemplateMedia<TemplateHeaderMediaMimeType, TemplateHeaderMediaExtension>;
   now?: Date;
 };
 
@@ -108,7 +114,7 @@ export type PersistCreatedMetaTemplateInput = {
   metaStatus: string | null;
   components: MetaTemplateApiComponent[];
   rawPayload?: unknown;
-  defaultHeaderMediaAssetId: string;
+  defaultHeaderMediaAssetId?: string | null;
   now?: Date;
 };
 
@@ -369,6 +375,48 @@ function assertComponentsField(value: unknown, fieldName: string) {
   }
 
   return value;
+}
+
+function readComponentType(component: unknown) {
+  if (!component || typeof component !== "object" || Array.isArray(component)) return null;
+  const type = (component as { type?: unknown }).type;
+  return typeof type === "string" ? type.trim().toUpperCase() : null;
+}
+
+function readComponentFormat(component: unknown) {
+  if (!component || typeof component !== "object" || Array.isArray(component)) return null;
+  const format = (component as { format?: unknown }).format;
+  return typeof format === "string" ? format.trim().toUpperCase() : null;
+}
+
+function readHeaderFormatFromComponents(components: unknown[]) {
+  const header = components.find((component) => readComponentType(component) === "HEADER");
+  return header ? readComponentFormat(header) : null;
+}
+
+function requiresHeaderMediaFromFormat(headerFormat: string | null) {
+  return headerFormat === "IMAGE" || headerFormat === "DOCUMENT" || headerFormat === "VIDEO";
+}
+
+function buildCreatedTemplateSupportFlags(headerFormat: string | null) {
+  if (headerFormat === "DOCUMENT") {
+    return {
+      canSendWithCurrentBuilder: false,
+      unsupportedReasons: ["HEADER_DOCUMENT_UNSUPPORTED"]
+    };
+  }
+
+  if (headerFormat === "VIDEO") {
+    return {
+      canSendWithCurrentBuilder: false,
+      unsupportedReasons: ["HEADER_VIDEO_UNSUPPORTED"]
+    };
+  }
+
+  return {
+    canSendWithCurrentBuilder: true,
+    unsupportedReasons: []
+  };
 }
 
 function assertSupportFlagsField(value: unknown, fieldName: string) {
@@ -685,7 +733,7 @@ function buildTemplateMediaMetadata({
   storedMedia
 }: {
   channelId?: string | null;
-  storedMedia: StoredTemplateMedia;
+  storedMedia: StoredTemplateMedia<TemplateHeaderMediaMimeType, TemplateHeaderMediaExtension>;
 }) {
   return {
     scope: "META_TEMPLATE_HEADER",
@@ -696,13 +744,27 @@ function buildTemplateMediaMetadata({
   };
 }
 
+function getTemplateHeaderMediaAssetType(
+  headerType: TemplateHeaderMediaHeaderType
+): TemplateHeaderMediaAssetType {
+  switch (headerType) {
+    case "IMAGE":
+      return "TEMPLATE_HEADER_IMAGE";
+    case "DOCUMENT":
+      return "TEMPLATE_HEADER_DOCUMENT";
+    case "VIDEO":
+      return "TEMPLATE_HEADER_VIDEO";
+  }
+}
+
 function mediaNeedsStorageRefresh(
   mediaAsset: MediaAsset,
-  storedMedia: StoredTemplateMedia,
+  mediaAssetType: TemplateHeaderMediaAssetType,
+  storedMedia: StoredTemplateMedia<TemplateHeaderMediaMimeType, TemplateHeaderMediaExtension>,
   metadata: string | null
 ) {
   return (
-    mediaAsset.type !== TEMPLATE_HEADER_MEDIA_ASSET_TYPE ||
+    mediaAsset.type !== mediaAssetType ||
     mediaAsset.mimeType !== storedMedia.mimeType ||
     mediaAsset.fileName !== storedMedia.originalFileName ||
     mediaAsset.sizeBytes !== storedMedia.sizeBytes ||
@@ -715,9 +777,11 @@ function mediaNeedsStorageRefresh(
 export async function persistTemplateHeaderMediaAsset({
   companyId,
   channelId,
+  headerType,
   storedMedia
 }: PersistTemplateHeaderMediaAssetInput) {
   const safeCompanyId = normalizeRequiredString(companyId, "companyId");
+  const mediaAssetType = getTemplateHeaderMediaAssetType(headerType);
   const storageProvider = normalizeRequiredString(
     storedMedia.storageProvider,
     "storageProvider"
@@ -741,12 +805,12 @@ export async function persistTemplateHeaderMediaAsset({
       );
     }
 
-    if (!mediaNeedsStorageRefresh(existing, storedMedia, metadata)) {
+    if (!mediaNeedsStorageRefresh(existing, mediaAssetType, storedMedia, metadata)) {
       return deserializeMediaAsset(existing);
     }
 
     const updated = await updateMediaAssetStorageDetails(safeCompanyId, existing.id, {
-      type: TEMPLATE_HEADER_MEDIA_ASSET_TYPE,
+      type: mediaAssetType,
       mimeType: storedMedia.mimeType,
       fileName: storedMedia.originalFileName,
       sizeBytes: storedMedia.sizeBytes,
@@ -767,7 +831,7 @@ export async function persistTemplateHeaderMediaAsset({
   const created = await createMediaAsset(
     buildCreateMediaAssetInput({
       companyId: safeCompanyId,
-      type: TEMPLATE_HEADER_MEDIA_ASSET_TYPE,
+      type: mediaAssetType,
       mimeType: storedMedia.mimeType,
       fileName: storedMedia.originalFileName,
       sizeBytes: storedMedia.sizeBytes,
@@ -822,25 +886,27 @@ export async function persistCreatedMetaTemplate({
   now = new Date()
 }: PersistCreatedMetaTemplateInput) {
   const safeCompanyId = normalizeRequiredString(companyId, "companyId");
-  const safeDefaultHeaderMediaAssetId = normalizeRequiredString(
-    defaultHeaderMediaAssetId,
-    "defaultHeaderMediaAssetId"
-  );
-  const mediaAsset = await findMediaAssetById(safeCompanyId, safeDefaultHeaderMediaAssetId);
+  const safeDefaultHeaderMediaAssetId = normalizeOptionalString(defaultHeaderMediaAssetId);
+  const safeComponents = assertComponentsField(components, "MetaTemplate.components");
+  const headerFormat = readHeaderFormatFromComponents(safeComponents);
+  const requiresHeaderMedia = requiresHeaderMediaFromFormat(headerFormat);
 
-  if (!mediaAsset) {
-    throw new MetaTemplateServiceError("MEDIA_ASSET_NOT_FOUND", "Midia nao encontrada.");
+  if (safeDefaultHeaderMediaAssetId) {
+    const mediaAsset = await findMediaAssetById(safeCompanyId, safeDefaultHeaderMediaAssetId);
+
+    if (!mediaAsset) {
+      throw new MetaTemplateServiceError("MEDIA_ASSET_NOT_FOUND", "Midia nao encontrada.");
+    }
   }
 
-  const safeComponents = assertComponentsField(components, "MetaTemplate.components");
   const supportFlags = assertSupportFlagsField(
-    CREATED_TEMPLATE_SUPPORT_FLAGS,
+    buildCreatedTemplateSupportFlags(headerFormat),
     "MetaTemplate.supportFlags"
   );
   const operationalStatus = calculateMetaTemplateOperationalStatus({
     metaStatus,
-    requiresHeaderMedia: true,
-    defaultHeaderMediaAssetId: mediaAsset.id,
+    requiresHeaderMedia,
+    defaultHeaderMediaAssetId: safeDefaultHeaderMediaAssetId,
     componentsSupported: supportFlagsIndicateSupportedComponents(supportFlags),
     syncError: null,
     isActive: true
@@ -854,10 +920,12 @@ export async function persistCreatedMetaTemplate({
     category: normalizeOptionalString(category),
     metaStatus: normalizeOptionalString(metaStatus),
     operationalStatus,
+    requiresHeaderMedia,
+    headerFormat,
     components: serializeJsonField(safeComponents, "MetaTemplate.components") ?? "[]",
     rawPayload: serializeJsonField(rawPayload, "MetaTemplate.rawPayload"),
     supportFlags: serializeJsonField(supportFlags, "MetaTemplate.supportFlags"),
-    defaultHeaderMediaAssetId: mediaAsset.id,
+    defaultHeaderMediaAssetId: safeDefaultHeaderMediaAssetId,
     lastSeenAt: now
   });
 

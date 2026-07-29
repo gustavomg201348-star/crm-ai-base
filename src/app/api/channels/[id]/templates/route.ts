@@ -3,12 +3,13 @@ import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { requireCompanyAdmin } from "@/lib/permissions";
 import {
-  createImageHeaderTemplate,
+  createMetaTemplate,
   MetaTemplateCreationServiceError,
   type MetaTemplateButtonInput,
   type MetaTemplateCreationRecoveryContext,
   type MetaTemplateCreationServiceErrorCode
 } from "@/lib/meta-template-creation-service";
+import { type CreateMetaTemplateHeaderInput } from "@/lib/meta-template-creation-types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,6 +20,7 @@ type ErrorCode =
   | "CHANNEL_NOT_FOUND"
   | "MISSING_META_CREDENTIALS"
   | "INVALID_MULTIPART"
+  | "INVALID_HEADER"
   | "INVALID_UPLOAD"
   | "INVALID_BODY_EXAMPLES"
   | "INVALID_BUTTONS"
@@ -29,6 +31,15 @@ type ErrorCode =
   | MetaTemplateCreationServiceErrorCode;
 
 type TemplateCategory = "UTILITY" | "MARKETING" | "AUTHENTICATION";
+type HeaderType = "NONE" | "TEXT" | "IMAGE" | "DOCUMENT" | "VIDEO";
+type MediaHeaderType = Extract<HeaderType, "IMAGE" | "DOCUMENT" | "VIDEO">;
+
+class HeaderInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "HeaderInputError";
+  }
+}
 
 type SafeRecoveryContext = Pick<
   MetaTemplateCreationRecoveryContext,
@@ -86,6 +97,103 @@ function readCategory(formData: FormData): TemplateCategory | null {
   }
 
   return null;
+}
+
+function readHeaderType(formData: FormData, hasLegacyImage: boolean) {
+  const rawHeaderType = readOptionalText(formData, "headerType");
+
+  if (!rawHeaderType) {
+    return hasLegacyImage ? "IMAGE" : null;
+  }
+
+  const normalized = rawHeaderType.toUpperCase();
+  if (
+    normalized === "NONE" ||
+    normalized === "TEXT" ||
+    normalized === "IMAGE" ||
+    normalized === "DOCUMENT" ||
+    normalized === "VIDEO"
+  ) {
+    return normalized;
+  }
+
+  return null;
+}
+
+function readSingleUpload(formData: FormData, fieldName: "media" | "image") {
+  const files = formData
+    .getAll(fieldName)
+    .filter((value): value is File => value instanceof File && value.size > 0);
+
+  if (files.length > 1) {
+    throw new HeaderInputError(`Envie apenas um arquivo no campo ${fieldName}.`);
+  }
+
+  return files[0] ?? null;
+}
+
+async function buildMediaHeaderInput(headerType: MediaHeaderType, file: File) {
+  return {
+    type: headerType,
+    media: {
+      fileName: file.name,
+      mimeType: file.type,
+      bytes: Buffer.from(await file.arrayBuffer())
+    }
+  } satisfies CreateMetaTemplateHeaderInput;
+}
+
+async function buildHeaderInput(formData: FormData) {
+  const media = readSingleUpload(formData, "media");
+  const legacyImage = readSingleUpload(formData, "image");
+  const headerType = readHeaderType(formData, Boolean(legacyImage));
+
+  if (!headerType) {
+    throw new HeaderInputError("headerType deve ser NONE, TEXT, IMAGE, DOCUMENT ou VIDEO.");
+  }
+
+  if (headerType === "NONE") {
+    if (media || legacyImage) {
+      throw new HeaderInputError("HEADER NONE nao aceita arquivo.");
+    }
+
+    return { type: "NONE" } satisfies CreateMetaTemplateHeaderInput;
+  }
+
+  if (headerType === "TEXT") {
+    if (media || legacyImage) {
+      throw new HeaderInputError("HEADER TEXT nao aceita arquivo.");
+    }
+
+    const text = readRequiredText(formData, "headerText");
+    if (!text) {
+      throw new HeaderInputError("headerText obrigatorio para HEADER TEXT.");
+    }
+
+    return {
+      type: "TEXT",
+      text
+    } satisfies CreateMetaTemplateHeaderInput;
+  }
+
+  if (headerType === "IMAGE") {
+    const file = media ?? legacyImage;
+    if (!file) {
+      throw new HeaderInputError("Arquivo obrigatorio para HEADER IMAGE.");
+    }
+
+    return buildMediaHeaderInput("IMAGE", file);
+  }
+
+  if (legacyImage) {
+    throw new HeaderInputError("O campo legado image so pode ser usado com HEADER IMAGE.");
+  }
+
+  if (!media) {
+    throw new HeaderInputError(`Arquivo media obrigatorio para HEADER ${headerType}.`);
+  }
+
+  return buildMediaHeaderInput(headerType, media);
 }
 
 function readOptionalJsonField(formData: FormData, fieldName: string) {
@@ -243,7 +351,7 @@ function mapServiceError(error: MetaTemplateCreationServiceError) {
   });
 }
 
-function mapSuccess(result: Awaited<ReturnType<typeof createImageHeaderTemplate>>) {
+function mapSuccess(result: Awaited<ReturnType<typeof createMetaTemplate>>) {
   return {
     template: {
       id: result.metaTemplateLocalId,
@@ -255,12 +363,16 @@ function mapSuccess(result: Awaited<ReturnType<typeof createImageHeaderTemplate>
       operationalStatus: result.operationalStatus,
       defaultHeaderMediaAssetId: result.defaultHeaderMediaAssetId
     },
-    media: {
-      id: result.mediaAssetId,
-      fileName: result.media.originalFileName,
-      mimeType: result.media.mimeType,
-      sizeBytes: result.media.sizeBytes
-    }
+    ...(result.media
+      ? {
+          media: {
+            id: result.media.id,
+            fileName: result.media.originalFileName,
+            mimeType: result.media.mimeType,
+            sizeBytes: result.media.sizeBytes
+          }
+        }
+      : {})
   };
 }
 
@@ -335,11 +447,17 @@ export async function POST(
       });
     }
 
-    const image = formData.get("image");
-    if (!(image instanceof File) || image.size === 0) {
+    let header: CreateMetaTemplateHeaderInput;
+
+    try {
+      header = await buildHeaderInput(formData);
+    } catch (error) {
       return errorResponse({
-        code: "INVALID_UPLOAD",
-        message: "Imagem obrigatoria.",
+        code: "INVALID_HEADER",
+        message:
+          error instanceof HeaderInputError
+            ? error.message
+            : "HEADER invalido. Verifique headerType, headerText e o arquivo enviado.",
         status: 400
       });
     }
@@ -376,8 +494,7 @@ export async function POST(
       });
     }
 
-    const bytes = Buffer.from(await image.arrayBuffer());
-    const result = await createImageHeaderTemplate({
+    const result = await createMetaTemplate({
       companyId: session.companyId,
       channelId: channel.id,
       appId,
@@ -390,11 +507,7 @@ export async function POST(
       footerText: readOptionalText(formData, "footerText"),
       bodyExamples,
       buttons,
-      image: {
-        fileName: image.name,
-        mimeType: image.type,
-        bytes
-      }
+      header
     });
 
     return NextResponse.json(mapSuccess(result), { status: 201 });
