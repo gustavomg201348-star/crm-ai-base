@@ -548,3 +548,29 @@ export function setMetaTemplateDefaultHeaderMediaAndStatus(
     }
   });
 }
+
+export async function setMetaTemplateDefaultHeaderMediaAndStatusIfUnset(
+  companyId: string,
+  templateId: string,
+  mediaAssetId: string,
+  operationalStatus: string,
+  db: DbClient = prisma
+) {
+  const updated = await db.metaTemplate.updateMany({
+    where: {
+      id: templateId,
+      companyId,
+      defaultHeaderMediaAssetId: null
+    },
+    data: {
+      defaultHeaderMediaAssetId: mediaAssetId,
+      operationalStatus
+    }
+  });
+
+  if (updated.count === 0) {
+    return null;
+  }
+
+  return findMetaTemplateById(companyId, templateId, db);
+}

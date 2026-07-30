@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ChevronLeft, ChevronRight, Library, Loader2 } from "lucide-react";
+import { TemplateCreatePanel } from "./TemplateCreatePanel";
 import { TemplateDetailsDrawer } from "./TemplateDetailsDrawer";
 import { TemplateEmptyState } from "./TemplateEmptyState";
 import { TemplateLoading } from "./TemplateLoading";
@@ -12,6 +13,7 @@ import type {
   TemplateChannelsResponse,
   TemplateDetail,
   TemplateDetailResponse,
+  TemplateHeaderImageAssociationResponse,
   TemplateLibraryFilters,
   TemplateListItem,
   TemplateListResponse,
@@ -114,6 +116,7 @@ export function TemplateLibraryPage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateListItem | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [createPanelOpen, setCreatePanelOpen] = useState(false);
   const [templateDetails, setTemplateDetails] = useState<TemplateDetail | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
@@ -374,6 +377,33 @@ export function TemplateLibraryPage() {
     setDetailsRefreshKey((current) => current + 1);
   }, []);
 
+  const handleTemplateMediaAssociated = useCallback(
+    (result: TemplateHeaderImageAssociationResponse) => {
+      setTemplateDetails(result.template);
+      setSelectedTemplate(result.template);
+      setTemplates((current) =>
+        current.map((template) =>
+          template.id === result.template.id ? result.template : template
+        )
+      );
+      setSyncFeedback({
+        type: "success",
+        message: "Imagem associada. O template foi atualizado na Biblioteca Local."
+      });
+      refreshTemplates();
+    },
+    [refreshTemplates]
+  );
+
+  const openCreatePanel = useCallback(() => {
+    closeTemplateDetails();
+    setCreatePanelOpen(true);
+  }, [closeTemplateDetails]);
+
+  const closeCreatePanel = useCallback(() => {
+    setCreatePanelOpen(false);
+  }, []);
+
   useEffect(() => {
     if (!drawerOpen || !selectedTemplate) return;
 
@@ -458,6 +488,7 @@ export function TemplateLibraryPage() {
         hasActiveFilters={hasActiveFilters}
         loading={loading}
         onClearFilters={clearFilters}
+        onCreateTemplate={openCreatePanel}
         onFilterChange={updateFilter}
         onRefresh={refreshTemplates}
         onSelectSyncChannel={setSelectedSyncChannelId}
@@ -467,6 +498,15 @@ export function TemplateLibraryPage() {
         syncableChannels={syncableChannels}
         syncing={syncing}
       />
+
+      {createPanelOpen && (
+        <TemplateCreatePanel
+          channels={syncableChannels}
+          channelsLoading={channelsLoading}
+          onCreated={refreshTemplates}
+          onClose={closeCreatePanel}
+        />
+      )}
 
       {loading && templates.length === 0 && <TemplateLoading />}
       {error && (
@@ -548,6 +588,7 @@ export function TemplateLibraryPage() {
         isOpen={drawerOpen}
         loading={detailsLoading}
         onClose={closeTemplateDetails}
+        onMediaAssociated={handleTemplateMediaAssociated}
         onRetry={retryTemplateDetails}
         template={selectedTemplate}
       />

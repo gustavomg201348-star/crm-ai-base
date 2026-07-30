@@ -83,6 +83,25 @@ export type TemplateDetailResponse = {
   template: TemplateDetail;
 };
 
+export type TemplateHeaderImageMediaAsset = {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  publicUrl: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TemplateHeaderImageMediaAssetsResponse = {
+  mediaAssets: TemplateHeaderImageMediaAsset[];
+};
+
+export type TemplateHeaderImageAssociationResponse = {
+  template: TemplateDetail;
+  mediaAsset: TemplateHeaderImageMediaAsset;
+};
+
 export type TemplateChannelOption = {
   id: string;
   name: string;

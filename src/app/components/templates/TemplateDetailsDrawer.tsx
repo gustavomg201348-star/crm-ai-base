@@ -1,8 +1,15 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
-import { AlertTriangle, Loader2, RefreshCcw, X } from "lucide-react";
-import type { TemplateButtonContent, TemplateDetail, TemplateListItem } from "./types";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { AlertTriangle, CheckCircle2, ImagePlus, Loader2, RefreshCcw, Upload, X } from "lucide-react";
+import type {
+  TemplateButtonContent,
+  TemplateDetail,
+  TemplateHeaderImageAssociationResponse,
+  TemplateHeaderImageMediaAsset,
+  TemplateHeaderImageMediaAssetsResponse,
+  TemplateListItem
+} from "./types";
 
 function formatDate(value: string) {
   const date = new Date(value);
@@ -33,6 +40,54 @@ function formatPlaceholder(value: number) {
 function safeText(value: string | null | undefined, fallback: string) {
   const normalized = value?.trim();
   return normalized ? normalized : fallback;
+}
+
+function formatFileSize(sizeBytes: number) {
+  if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) return "Tamanho indisponivel";
+  const megabytes = sizeBytes / (1024 * 1024);
+  if (megabytes >= 1) return `${megabytes.toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(sizeBytes / 1024))} KB`;
+}
+
+function isTemplateHeaderImageAssociationResponse(
+  value: unknown
+): value is TemplateHeaderImageAssociationResponse {
+  if (!value || typeof value !== "object") return false;
+
+  const candidate = value as Partial<TemplateHeaderImageAssociationResponse>;
+  return Boolean(
+    candidate.template &&
+      typeof candidate.template.id === "string" &&
+      candidate.mediaAsset &&
+      typeof candidate.mediaAsset.id === "string"
+  );
+}
+
+function isTemplateHeaderImageMediaAssetsResponse(
+  value: unknown
+): value is TemplateHeaderImageMediaAssetsResponse {
+  if (!value || typeof value !== "object") return false;
+
+  const candidate = value as Partial<TemplateHeaderImageMediaAssetsResponse>;
+  return Array.isArray(candidate.mediaAssets);
+}
+
+async function readTemplateActionError(response: Response) {
+  const data = (await response.json().catch(() => null)) as
+    | {
+        error?: unknown;
+        message?: unknown;
+      }
+    | null;
+
+  if (data?.error && typeof data.error === "object" && "message" in data.error) {
+    const message = (data.error as { message?: unknown }).message;
+    if (typeof message === "string") return message;
+  }
+
+  if (typeof data?.message === "string") return data.message;
+  if (typeof data?.error === "string") return data.error;
+  return "Nao foi possivel concluir a operacao. Tente novamente.";
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) {
@@ -171,6 +226,41 @@ function ButtonDetail({ button, index }: { button: TemplateButtonContent; index:
   );
 }
 
+function EligibleMediaAssetCard({
+  mediaAsset,
+  disabled,
+  onSelect
+}: {
+  mediaAsset: TemplateHeaderImageMediaAsset;
+  disabled: boolean;
+  onSelect: (mediaAsset: TemplateHeaderImageMediaAsset) => void;
+}) {
+  return (
+    <div className="flex gap-3 rounded-2xl border border-line bg-white p-3">
+      <div
+        aria-label={`Preview de ${mediaAsset.fileName}`}
+        className="h-16 w-16 shrink-0 rounded-xl border border-line bg-cover bg-center"
+        role="img"
+        style={{ backgroundImage: `url("${mediaAsset.publicUrl.replace(/"/g, "%22")}")` }}
+      />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-bold text-slate-800">{mediaAsset.fileName}</p>
+        <p className="mt-1 text-xs font-semibold text-slate-500">
+          {mediaAsset.mimeType} · {formatFileSize(mediaAsset.sizeBytes)}
+        </p>
+        <button
+          className="mt-2 inline-flex h-8 items-center justify-center rounded-full bg-brand px-3 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={disabled}
+          onClick={() => onSelect(mediaAsset)}
+          type="button"
+        >
+          Usar esta imagem
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function TemplateDetailsDrawer({
   template,
   detail,
@@ -178,7 +268,8 @@ export function TemplateDetailsDrawer({
   error,
   isOpen,
   onClose,
-  onRetry
+  onRetry,
+  onMediaAssociated
 }: {
   template: TemplateListItem | null;
   detail: TemplateDetail | null;
@@ -187,9 +278,34 @@ export function TemplateDetailsDrawer({
   isOpen: boolean;
   onClose: () => void;
   onRetry: () => void;
+  onMediaAssociated: (result: TemplateHeaderImageAssociationResponse) => void;
 }) {
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const summary = detail ?? template;
+  const [associationOpen, setAssociationOpen] = useState(false);
+  const [eligibleMediaAssets, setEligibleMediaAssets] = useState<TemplateHeaderImageMediaAsset[]>([]);
+  const [eligibleMediaLoading, setEligibleMediaLoading] = useState(false);
+  const [associationError, setAssociationError] = useState<string | null>(null);
+  const [associationSuccess, setAssociationSuccess] = useState<string | null>(null);
+  const [associating, setAssociating] = useState(false);
+  const [selectedUploadFile, setSelectedUploadFile] = useState<File | null>(null);
+  const [selectedUploadPreviewUrl, setSelectedUploadPreviewUrl] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const header = detail?.content.header ?? null;
+  const canAssociateHeaderImage = Boolean(
+    summary &&
+      header?.format === "IMAGE" &&
+      header.requiresMedia &&
+      summary.operationalStatus === "NEEDS_MEDIA" &&
+      !summary.hasImage
+  );
+  const selectedUploadFileLabel = useMemo(
+    () =>
+      selectedUploadFile
+        ? `${selectedUploadFile.name} · ${formatFileSize(selectedUploadFile.size)}`
+        : "Nenhum arquivo selecionado.",
+    [selectedUploadFile]
+  );
 
   useEffect(() => {
     if (!isOpen || !template) return;
@@ -217,9 +333,169 @@ export function TemplateDetailsDrawer({
     };
   }, [isOpen, onClose, template]);
 
+  useEffect(() => {
+    if (!isOpen || canAssociateHeaderImage) return;
+
+    setAssociationOpen(false);
+    setAssociationError(null);
+    setAssociationSuccess(null);
+    setSelectedUploadFile(null);
+  }, [canAssociateHeaderImage, isOpen]);
+
+  useEffect(() => {
+    if (!selectedUploadFile || !selectedUploadFile.type.startsWith("image/")) {
+      setSelectedUploadPreviewUrl(null);
+      return;
+    }
+
+    const previewUrl = URL.createObjectURL(selectedUploadFile);
+    setSelectedUploadPreviewUrl(previewUrl);
+
+    return () => {
+      URL.revokeObjectURL(previewUrl);
+    };
+  }, [selectedUploadFile]);
+
+  const loadEligibleMediaAssets = useCallback(async () => {
+    if (!summary) return;
+
+    setEligibleMediaLoading(true);
+    setAssociationError(null);
+
+    try {
+      const response = await fetch(
+        `/api/templates/${encodeURIComponent(summary.id)}/media-assets`,
+        {
+          credentials: "same-origin"
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(await readTemplateActionError(response));
+      }
+
+      const data = (await response.json()) as unknown;
+      if (!isTemplateHeaderImageMediaAssetsResponse(data)) {
+        throw new Error("Nao foi possivel carregar imagens elegiveis.");
+      }
+
+      setEligibleMediaAssets(data.mediaAssets);
+    } catch (loadError) {
+      setAssociationError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Nao foi possivel carregar imagens elegiveis."
+      );
+    } finally {
+      setEligibleMediaLoading(false);
+    }
+  }, [summary]);
+
+  const openAssociation = useCallback(() => {
+    setAssociationOpen(true);
+    setAssociationSuccess(null);
+    setAssociationError(null);
+    setSelectedUploadFile(null);
+    void loadEligibleMediaAssets();
+  }, [loadEligibleMediaAssets]);
+
+  const completeAssociation = useCallback(
+    (result: TemplateHeaderImageAssociationResponse) => {
+      setAssociationSuccess("Imagem associada com sucesso.");
+      setAssociationError(null);
+      setAssociationOpen(false);
+      setSelectedUploadFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      onMediaAssociated(result);
+    },
+    [onMediaAssociated]
+  );
+
+  const associateExistingMediaAsset = useCallback(
+    async (mediaAsset: TemplateHeaderImageMediaAsset) => {
+      if (!summary || associating) return;
+
+      setAssociating(true);
+      setAssociationError(null);
+      setAssociationSuccess(null);
+
+      try {
+        const response = await fetch(
+          `/api/templates/${encodeURIComponent(summary.id)}/associate-media`,
+          {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mediaAssetId: mediaAsset.id })
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(await readTemplateActionError(response));
+        }
+
+        const data = (await response.json()) as unknown;
+        if (!isTemplateHeaderImageAssociationResponse(data)) {
+          throw new Error("A associacao retornou uma resposta inesperada.");
+        }
+
+        completeAssociation(data);
+      } catch (associateError) {
+        setAssociationError(
+          associateError instanceof Error
+            ? associateError.message
+            : "Nao foi possivel associar a imagem."
+        );
+      } finally {
+        setAssociating(false);
+      }
+    },
+    [associating, completeAssociation, summary]
+  );
+
+  const uploadAndAssociateMedia = useCallback(async () => {
+    if (!summary || !selectedUploadFile || associating) return;
+
+    setAssociating(true);
+    setAssociationError(null);
+    setAssociationSuccess(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("media", selectedUploadFile);
+
+      const response = await fetch(
+        `/api/templates/${encodeURIComponent(summary.id)}/header-media`,
+        {
+          method: "POST",
+          credentials: "same-origin",
+          body: formData
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(await readTemplateActionError(response));
+      }
+
+      const data = (await response.json()) as unknown;
+      if (!isTemplateHeaderImageAssociationResponse(data)) {
+        throw new Error("O upload retornou uma resposta inesperada.");
+      }
+
+      completeAssociation(data);
+    } catch (uploadError) {
+      setAssociationError(
+        uploadError instanceof Error
+          ? uploadError.message
+          : "Nao foi possivel enviar a imagem."
+      );
+    } finally {
+      setAssociating(false);
+    }
+  }, [associating, completeAssociation, selectedUploadFile, summary]);
+
   if (!isOpen || !template || !summary) return null;
 
-  const header = detail?.content.header ?? null;
   const body = detail?.content.body ?? null;
   const footer = detail?.content.footer ?? null;
   const buttons = detail?.content.buttons ?? [];
@@ -329,6 +605,149 @@ export function TemplateDetailsDrawer({
                       <DetailRow label="Exige mídia" value={formatBoolean(header.requiresMedia)} />
                       <DetailRow label="Mídia padrão configurada" value={formatBoolean(summary.hasImage)} />
                     </div>
+                    {canAssociateHeaderImage && (
+                      <div className="rounded-2xl border border-amber-100 bg-amber-50/80 p-4">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <p className="inline-flex items-center gap-2 text-sm font-black text-amber-900">
+                              <ImagePlus aria-hidden="true" className="h-4 w-4" />
+                              Midia pendente
+                            </p>
+                            <p className="mt-1 text-sm font-semibold text-amber-800">
+                              Associe uma imagem uma unica vez para liberar este template em
+                              campanhas e conversas.
+                            </p>
+                          </div>
+                          <button
+                            className="inline-flex h-9 items-center justify-center gap-2 rounded-full bg-brand px-4 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                            disabled={eligibleMediaLoading || associating}
+                            onClick={openAssociation}
+                            type="button"
+                          >
+                            {eligibleMediaLoading ? (
+                              <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <ImagePlus aria-hidden="true" className="h-3.5 w-3.5" />
+                            )}
+                            Associar imagem
+                          </button>
+                        </div>
+
+                        {associationOpen && (
+                          <div className="mt-4 space-y-4 rounded-2xl border border-amber-100 bg-white p-4">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="text-sm font-black text-slate-900">
+                                  Escolha uma imagem
+                                </p>
+                                <p className="mt-1 text-xs font-semibold text-slate-500">
+                                  Use uma imagem ja cadastrada ou envie uma nova imagem PNG/JPEG.
+                                </p>
+                              </div>
+                              <button
+                                aria-label="Fechar associacao de imagem"
+                                className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-line text-slate-500"
+                                disabled={associating}
+                                onClick={() => setAssociationOpen(false)}
+                                type="button"
+                              >
+                                <X aria-hidden="true" className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+
+                            {associationError && (
+                              <div
+                                className="rounded-xl border border-rose-100 bg-rose-50 p-3 text-sm font-semibold text-rose-700"
+                                role="alert"
+                              >
+                                {associationError}
+                              </div>
+                            )}
+
+                            {eligibleMediaLoading && (
+                              <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-brand">
+                                <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
+                                Carregando imagens elegiveis...
+                              </div>
+                            )}
+
+                            {!eligibleMediaLoading && eligibleMediaAssets.length > 0 && (
+                              <div className="space-y-2">
+                                <p className="text-xs font-bold uppercase tracking-[0.12em] text-slate-400">
+                                  Imagens existentes
+                                </p>
+                                <div className="grid gap-2">
+                                  {eligibleMediaAssets.map((mediaAsset) => (
+                                    <EligibleMediaAssetCard
+                                      disabled={associating}
+                                      key={mediaAsset.id}
+                                      mediaAsset={mediaAsset}
+                                      onSelect={associateExistingMediaAsset}
+                                    />
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {!eligibleMediaLoading && eligibleMediaAssets.length === 0 && (
+                              <p className="rounded-xl bg-slate-50 p-3 text-sm font-semibold text-slate-600">
+                                Nenhuma imagem elegivel encontrada. Envie a imagem correta abaixo.
+                              </p>
+                            )}
+
+                            <div className="space-y-3 rounded-2xl border border-line bg-slate-50 p-3">
+                              <div>
+                                <p className="text-xs font-bold uppercase tracking-[0.12em] text-slate-400">
+                                  Enviar nova imagem
+                                </p>
+                                <p className="mt-1 text-sm font-semibold text-slate-600">
+                                  {selectedUploadFileLabel}
+                                </p>
+                              </div>
+                              <input
+                                ref={fileInputRef}
+                                accept="image/jpeg,image/png"
+                                className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-full file:border-0 file:bg-white file:px-3 file:py-2 file:text-xs file:font-bold file:text-brand"
+                                disabled={associating}
+                                onChange={(event) =>
+                                  setSelectedUploadFile(event.target.files?.[0] ?? null)
+                                }
+                                type="file"
+                              />
+                              {selectedUploadPreviewUrl && (
+                                <div
+                                  aria-label={`Preview de ${selectedUploadFile?.name ?? "imagem selecionada"}`}
+                                  className="h-32 w-full rounded-2xl border border-line bg-slate-100 bg-cover bg-center"
+                                  role="img"
+                                  style={{
+                                    backgroundImage: `url("${selectedUploadPreviewUrl.replaceAll('"', "%22")}")`
+                                  }}
+                                />
+                              )}
+                              <button
+                                className="inline-flex h-9 items-center justify-center gap-2 rounded-full bg-brand px-4 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                disabled={!selectedUploadFile || associating}
+                                onClick={uploadAndAssociateMedia}
+                                type="button"
+                              >
+                                {associating ? (
+                                  <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Upload aria-hidden="true" className="h-3.5 w-3.5" />
+                                )}
+                                Enviar e associar
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {associationSuccess && (
+                      <p className="inline-flex items-center gap-2 rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-sm font-semibold text-emerald-800">
+                        <CheckCircle2 aria-hidden="true" className="h-4 w-4" />
+                        {associationSuccess}
+                      </p>
+                    )}
                     {mediaMissing && (
                       <p className="rounded-xl border border-amber-100 bg-amber-50 p-3 text-sm font-semibold text-amber-800">
                         Este header exige mídia, mas a mídia padrão ainda não está configurada.

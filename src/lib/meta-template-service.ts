@@ -11,6 +11,7 @@ import {
   findMediaAssetByHeaderHandle,
   findMediaAssetById,
   findMediaAssetByStorageIdentity,
+  listEligibleTemplateHeaderImageMediaAssets,
   updateMediaAssetStatus,
   updateMediaAssetStorageDetails,
   type CreateMediaAssetInput
@@ -23,6 +24,7 @@ import {
   MetaTemplateRepositoryError,
   persistCreatedMetaTemplateRecord,
   setMetaTemplateDefaultHeaderMediaAndStatus,
+  setMetaTemplateDefaultHeaderMediaAndStatusIfUnset,
   upsertMetaTemplateFromMeta,
   type AdminMetaTemplateListRecord
 } from "@/lib/meta-template-repository";
@@ -35,6 +37,8 @@ import {
   supportFlagsIndicateSupportedComponents
 } from "@/lib/meta-template-status";
 import {
+  saveTemplateImage,
+  TemplateMediaStorageError,
   type StoredTemplateMedia,
   type TemplateHeaderMediaExtension,
   type TemplateHeaderMediaMimeType
@@ -60,6 +64,10 @@ export type MetaTemplateServiceErrorCode =
   | "INVALID_STORED_JSON"
   | "COMPANY_ISOLATION_VIOLATION"
   | "CHANNEL_NOT_FOUND"
+  | "TEMPLATE_MEDIA_ALREADY_CONFIGURED"
+  | "TEMPLATE_HEADER_UNSUPPORTED"
+  | "MEDIA_ASSET_INCOMPATIBLE"
+  | "MEDIA_STORAGE_FAILED"
   | "META_TEMPLATE_ID_CONFLICT";
 
 export class MetaTemplateServiceError extends Error {
@@ -206,6 +214,34 @@ export type AdminTemplateDetail = AdminTemplateListItem & {
 
 export type AdminTemplateDetailResponse = {
   template: AdminTemplateDetail;
+};
+
+export type AdminTemplateHeaderImageMediaAsset = {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  publicUrl: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AdminTemplateHeaderImageMediaAssetsResponse = {
+  mediaAssets: AdminTemplateHeaderImageMediaAsset[];
+};
+
+export type AdminTemplateHeaderImageAssociationResponse = {
+  template: AdminTemplateDetail;
+  mediaAsset: AdminTemplateHeaderImageMediaAsset;
+};
+
+export type UploadAndAssociateTemplateHeaderImageInput = {
+  companyId: string;
+  templateId: string;
+  fileName: string;
+  mimeType: string;
+  bytes: Buffer | Uint8Array;
+  now?: Date;
 };
 
 export type ListAdminTemplateLibraryInput = AdminTemplateListFilters & {
@@ -479,6 +515,81 @@ export function deserializeMediaAsset(mediaAsset: MediaAsset): MediaAssetLibrary
 
     throw error;
   }
+}
+
+function mapAdminTemplateHeaderImageMediaAsset(
+  mediaAsset: MediaAsset | MediaAssetLibraryEntry
+): AdminTemplateHeaderImageMediaAsset {
+  const publicUrl = mediaAsset.publicUrl?.trim();
+
+  if (!publicUrl) {
+    throw new MetaTemplateServiceError("MEDIA_ASSET_INCOMPATIBLE", "Midia sem URL publica.");
+  }
+
+  return {
+    id: mediaAsset.id,
+    fileName: mediaAsset.fileName,
+    mimeType: mediaAsset.mimeType,
+    sizeBytes: mediaAsset.sizeBytes,
+    publicUrl,
+    createdAt: mediaAsset.createdAt.toISOString(),
+    updatedAt: mediaAsset.updatedAt.toISOString()
+  };
+}
+
+function assertTemplateAcceptsHeaderImageAssociation(template: MetaTemplate) {
+  if (template.defaultHeaderMediaAssetId) {
+    throw new MetaTemplateServiceError(
+      "TEMPLATE_MEDIA_ALREADY_CONFIGURED",
+      "Template ja possui midia padrao configurada."
+    );
+  }
+
+  if (
+    !template.isActive ||
+    template.headerFormat !== "IMAGE" ||
+    !template.requiresHeaderMedia ||
+    template.operationalStatus !== "NEEDS_MEDIA"
+  ) {
+    throw new MetaTemplateServiceError(
+      "TEMPLATE_HEADER_UNSUPPORTED",
+      "Template nao esta elegivel para associacao de imagem."
+    );
+  }
+}
+
+function assertUsableTemplateHeaderImageAsset(mediaAsset: MediaAsset) {
+  if (
+    !isUsableTemplateHeaderImageAsset(mediaAsset) ||
+    mediaAsset.status !== TEMPLATE_MEDIA_ASSET_READY_STATUS
+  ) {
+    throw new MetaTemplateServiceError(
+      "MEDIA_ASSET_INCOMPATIBLE",
+      "Midia incompativel com header IMAGE."
+    );
+  }
+}
+
+async function setReadyStatusForHeaderImageAsset({
+  companyId,
+  mediaAssetId,
+  now
+}: {
+  companyId: string;
+  mediaAssetId: string;
+  now: Date;
+}) {
+  const updated = await updateMediaAssetStatus(companyId, mediaAssetId, {
+    status: TEMPLATE_MEDIA_ASSET_READY_STATUS,
+    lastValidatedAt: now,
+    validationError: null
+  });
+
+  if (!updated) {
+    throw new MetaTemplateServiceError("MEDIA_ASSET_NOT_FOUND", "Midia nao encontrada.");
+  }
+
+  return updated;
 }
 
 export async function listAdminTemplateLibrary({
@@ -919,6 +1030,189 @@ export async function updateTemplateHeaderMediaHandle({
   }
 
   return deserializeMediaAsset(updated);
+}
+
+export async function listAdminTemplateHeaderImageMediaAssets({
+  companyId,
+  templateId
+}: {
+  companyId: string;
+  templateId: string;
+}): Promise<AdminTemplateHeaderImageMediaAssetsResponse> {
+  const safeCompanyId = normalizeRequiredString(companyId, "companyId");
+  const template = await findMetaTemplateById(
+    safeCompanyId,
+    normalizeRequiredString(templateId, "templateId")
+  );
+
+  if (!template) {
+    throw new MetaTemplateServiceError("TEMPLATE_NOT_FOUND", "Template nao encontrado.");
+  }
+
+  assertTemplateAcceptsHeaderImageAssociation(template);
+
+  const mediaAssets = await listEligibleTemplateHeaderImageMediaAssets(safeCompanyId);
+
+  return {
+    mediaAssets: mediaAssets
+      .filter((mediaAsset) => {
+        try {
+          assertUsableTemplateHeaderImageAsset(mediaAsset);
+          return true;
+        } catch {
+          return false;
+        }
+      })
+      .map(mapAdminTemplateHeaderImageMediaAsset)
+  };
+}
+
+async function associateHeaderImageMediaAsset({
+  companyId,
+  templateId,
+  mediaAsset
+}: {
+  companyId: string;
+  templateId: string;
+  mediaAsset: MediaAsset;
+}): Promise<AdminTemplateHeaderImageAssociationResponse> {
+  const safeCompanyId = normalizeRequiredString(companyId, "companyId");
+  const safeTemplateId = normalizeRequiredString(templateId, "templateId");
+  const template = await findMetaTemplateById(safeCompanyId, safeTemplateId);
+
+  if (!template) {
+    throw new MetaTemplateServiceError("TEMPLATE_NOT_FOUND", "Template nao encontrado.");
+  }
+
+  assertTemplateAcceptsHeaderImageAssociation(template);
+  assertUsableTemplateHeaderImageAsset(mediaAsset);
+
+  if (mediaAsset.companyId !== safeCompanyId) {
+    throw new MetaTemplateServiceError(
+      "COMPANY_ISOLATION_VIOLATION",
+      "Midia nao pertence a empresa do template."
+    );
+  }
+
+  const operationalStatus = calculateMetaTemplateOperationalStatus({
+    metaStatus: template.metaStatus,
+    requiresHeaderMedia: template.requiresHeaderMedia,
+    defaultHeaderMediaAssetId: mediaAsset.id,
+    componentsSupported: supportFlagsIndicateSupportedComponents(
+      parseJsonField<unknown>(template.supportFlags, "MetaTemplate.supportFlags")
+    ),
+    syncError: template.syncError,
+    isActive: template.isActive
+  });
+  const updated = await setMetaTemplateDefaultHeaderMediaAndStatusIfUnset(
+    safeCompanyId,
+    template.id,
+    mediaAsset.id,
+    operationalStatus
+  );
+
+  if (!updated) {
+    throw new MetaTemplateServiceError(
+      "TEMPLATE_MEDIA_ALREADY_CONFIGURED",
+      "Template ja possui midia padrao configurada."
+    );
+  }
+
+  return {
+    template: (
+      await getAdminTemplateDetail({
+        companyId: safeCompanyId,
+        templateId: updated.id
+      })
+    ).template,
+    mediaAsset: mapAdminTemplateHeaderImageMediaAsset(mediaAsset)
+  };
+}
+
+export async function associateExistingTemplateHeaderImageMediaAsset({
+  companyId,
+  templateId,
+  mediaAssetId
+}: {
+  companyId: string;
+  templateId: string;
+  mediaAssetId: string;
+}): Promise<AdminTemplateHeaderImageAssociationResponse> {
+  const safeCompanyId = normalizeRequiredString(companyId, "companyId");
+  const mediaAsset = await findMediaAssetById(
+    safeCompanyId,
+    normalizeRequiredString(mediaAssetId, "mediaAssetId")
+  );
+
+  if (!mediaAsset) {
+    throw new MetaTemplateServiceError("MEDIA_ASSET_NOT_FOUND", "Midia nao encontrada.");
+  }
+
+  return associateHeaderImageMediaAsset({
+    companyId: safeCompanyId,
+    templateId,
+    mediaAsset
+  });
+}
+
+export async function uploadAndAssociateTemplateHeaderImage({
+  companyId,
+  templateId,
+  fileName,
+  mimeType,
+  bytes,
+  now = new Date()
+}: UploadAndAssociateTemplateHeaderImageInput): Promise<AdminTemplateHeaderImageAssociationResponse> {
+  const safeCompanyId = normalizeRequiredString(companyId, "companyId");
+  const safeTemplateId = normalizeRequiredString(templateId, "templateId");
+  const template = await findMetaTemplateById(safeCompanyId, safeTemplateId);
+
+  if (!template) {
+    throw new MetaTemplateServiceError("TEMPLATE_NOT_FOUND", "Template nao encontrado.");
+  }
+
+  assertTemplateAcceptsHeaderImageAssociation(template);
+
+  let storedMedia: StoredTemplateMedia;
+  try {
+    storedMedia = await saveTemplateImage({
+      fileName,
+      mimeType,
+      bytes,
+      namespace: safeCompanyId
+    });
+  } catch (error) {
+    if (error instanceof TemplateMediaStorageError) {
+      throw new MetaTemplateServiceError("MEDIA_STORAGE_FAILED", error.message);
+    }
+
+    throw error;
+  }
+
+  if (!storedMedia.publicUrl.trim().match(/^https:\/\//i)) {
+    throw new MetaTemplateServiceError(
+      "MEDIA_STORAGE_FAILED",
+      "URL publica da midia precisa ser HTTPS."
+    );
+  }
+
+  const persistedMediaAsset = await persistTemplateHeaderMediaAsset({
+    companyId: safeCompanyId,
+    headerType: "IMAGE",
+    storedMedia,
+    now
+  });
+  const readyMediaAsset = await setReadyStatusForHeaderImageAsset({
+    companyId: safeCompanyId,
+    mediaAssetId: persistedMediaAsset.id,
+    now
+  });
+
+  return associateHeaderImageMediaAsset({
+    companyId: safeCompanyId,
+    templateId: safeTemplateId,
+    mediaAsset: readyMediaAsset
+  });
 }
 
 export async function persistCreatedMetaTemplate({

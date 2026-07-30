@@ -3,6 +3,8 @@ import { prisma } from "@/lib/db";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
+const ELIGIBLE_TEMPLATE_HEADER_IMAGE_MEDIA_ASSET_LIMIT = 50;
+
 function isPrismaRecordNotFoundError(error: unknown) {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025";
 }
@@ -57,6 +59,27 @@ export function findMediaAssetById(companyId: string, id: string, db: DbClient =
       companyId,
       id
     }
+  });
+}
+
+export function listEligibleTemplateHeaderImageMediaAssets(
+  companyId: string,
+  db: DbClient = prisma
+) {
+  return db.mediaAsset.findMany({
+    where: {
+      companyId,
+      type: "TEMPLATE_HEADER_IMAGE",
+      mimeType: {
+        startsWith: "image/"
+      },
+      publicUrl: {
+        startsWith: "https://"
+      },
+      status: "READY"
+    },
+    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+    take: ELIGIBLE_TEMPLATE_HEADER_IMAGE_MEDIA_ASSET_LIMIT
   });
 }
 
