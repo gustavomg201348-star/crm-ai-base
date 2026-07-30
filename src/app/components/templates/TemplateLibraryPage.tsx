@@ -17,6 +17,7 @@ import type {
   TemplateLibraryFilters,
   TemplateListItem,
   TemplateListResponse,
+  TemplateListSummary,
   TemplatePagination,
   TemplateSyncResult
 } from "./types";
@@ -27,6 +28,7 @@ const initialFilters: TemplateLibraryFilters = {
   language: "",
   metaStatus: "",
   operationalStatus: "",
+  headerFormat: "",
   hasImage: ""
 };
 
@@ -39,11 +41,24 @@ const initialPagination: TemplatePagination = {
   hasPreviousPage: false
 };
 
+const initialSummary: TemplateListSummary = {
+  total: 0,
+  ready: 0,
+  waiting: 0,
+  pending: 0,
+  needsMedia: 0,
+  rejected: 0
+};
+
 function isTemplateListResponse(value: unknown): value is TemplateListResponse {
   if (!value || typeof value !== "object") return false;
 
   const candidate = value as Partial<TemplateListResponse>;
-  return Array.isArray(candidate.templates) && Boolean(candidate.pagination);
+  return (
+    Array.isArray(candidate.templates) &&
+    Boolean(candidate.pagination) &&
+    Boolean(candidate.summary)
+  );
 }
 
 function isTemplateDetailResponse(value: unknown): value is TemplateDetailResponse {
@@ -108,6 +123,7 @@ function formatSyncSummary(result: TemplateSyncResult) {
 export function TemplateLibraryPage() {
   const [templates, setTemplates] = useState<TemplateListItem[]>([]);
   const [pagination, setPagination] = useState<TemplatePagination>(initialPagination);
+  const [summary, setSummary] = useState<TemplateListSummary>(initialSummary);
   const [filters, setFilters] = useState<TemplateLibraryFilters>(initialFilters);
   const [appliedQuery, setAppliedQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -141,6 +157,7 @@ export function TemplateLibraryPage() {
       language: filters.language,
       metaStatus: filters.metaStatus,
       operationalStatus: filters.operationalStatus,
+      headerFormat: filters.headerFormat,
       hasImage: filters.hasImage
     }),
     [
@@ -149,6 +166,7 @@ export function TemplateLibraryPage() {
       filters.language,
       filters.metaStatus,
       filters.operationalStatus,
+      filters.headerFormat,
       filters.hasImage
     ]
   );
@@ -164,7 +182,6 @@ export function TemplateLibraryPage() {
       syncableChannels[0]
     );
   }, [selectedSyncChannelId, syncableChannels]);
-
   useEffect(() => {
     const controller = new AbortController();
 
@@ -258,6 +275,7 @@ export function TemplateLibraryPage() {
 
         setTemplates(data.templates);
         setPagination(data.pagination);
+        setSummary(data.summary);
       } catch (loadError) {
         if (controller.signal.aborted) return;
 
@@ -300,7 +318,7 @@ export function TemplateLibraryPage() {
     if (!selectedSyncChannel) {
       setSyncFeedback({
         type: "error",
-        message: "Selecione um canal Meta com WABA e token configurados para sincronizar."
+        message: "Selecione um canal do WhatsApp pronto para atualizar templates."
       });
       return;
     }
@@ -349,6 +367,55 @@ export function TemplateLibraryPage() {
     }
   }, [refreshTemplates, selectedSyncChannel]);
 
+  const pendingNotice = useMemo(() => {
+    const needsMedia = summary.needsMedia;
+    const rejected = summary.rejected;
+    const waiting = summary.waiting;
+
+    if (needsMedia > 0) {
+      return {
+        tone: "amber" as const,
+        message:
+          needsMedia === 1
+            ? "1 template precisa de uma imagem para ser utilizado."
+            : `${needsMedia} templates precisam de imagem para serem utilizados.`,
+        actionLabel: "Resolver",
+        action: () => updateFilter("operationalStatus", "NEEDS_MEDIA")
+      };
+    }
+
+    if (rejected > 0) {
+      return {
+        tone: "rose" as const,
+        message:
+          rejected === 1
+            ? "1 template foi rejeitado e precisa de revisão."
+            : `${rejected} templates foram rejeitados e precisam de revisão.`,
+        actionLabel: "Ver templates",
+        action: () => updateFilter("metaStatus", "REJECTED")
+      };
+    }
+
+    if (waiting > 0) {
+      return {
+        tone: "blue" as const,
+        message:
+          waiting === 1
+            ? "1 template está aguardando aprovação."
+            : `${waiting} templates estão aguardando aprovação.`,
+        actionLabel: "Atualizar",
+        action: syncTemplates
+      };
+    }
+
+    return {
+      tone: "emerald" as const,
+      message: "Todos os templates estão prontos para uso.",
+      actionLabel: null,
+      action: null
+    };
+  }, [summary.needsMedia, summary.rejected, summary.waiting, syncTemplates, updateFilter]);
+
   const closeTemplateDetails = useCallback(() => {
     setDrawerOpen(false);
     setSelectedTemplate(null);
@@ -388,7 +455,7 @@ export function TemplateLibraryPage() {
       );
       setSyncFeedback({
         type: "success",
-        message: "Imagem associada. O template foi atualizado na Biblioteca Local."
+        message: "Imagem associada. O template foi atualizado na biblioteca."
       });
       refreshTemplates();
     },
@@ -470,15 +537,54 @@ export function TemplateLibraryPage() {
             <div>
               <h2 className="text-2xl font-bold text-slate-950">Templates</h2>
               <p className="mt-1 max-w-2xl text-sm text-slate-500">
-                Gerencie os templates aprovados da Meta utilizados em campanhas e conversas.
+                Gerencie os templates utilizados nas campanhas e conversas.
               </p>
             </div>
           </div>
-
-          <div className="rounded-2xl border border-amber-100 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
-            Biblioteca administrativa
-          </div>
         </div>
+      </section>
+
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {[
+          ["Total", summary.total],
+          ["Prontos", summary.ready],
+          ["Aguardando", summary.waiting],
+          ["Pendências", summary.pending]
+        ].map(([label, value]) => (
+          <div
+            className="rounded-2xl border border-line bg-white p-4 shadow-soft"
+            key={label}
+          >
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">
+              {label}
+            </p>
+            <p className="mt-2 text-2xl font-black text-slate-950">{value}</p>
+          </div>
+        ))}
+      </section>
+
+      <section
+        className={`flex flex-col gap-3 rounded-2xl border p-4 text-sm font-semibold sm:flex-row sm:items-center sm:justify-between ${
+          pendingNotice.tone === "rose"
+            ? "border-rose-100 bg-rose-50 text-rose-800"
+            : pendingNotice.tone === "amber"
+              ? "border-amber-100 bg-amber-50 text-amber-800"
+              : pendingNotice.tone === "blue"
+                ? "border-blue-100 bg-blue-50 text-brand"
+                : "border-emerald-100 bg-emerald-50 text-emerald-800"
+        }`}
+      >
+        <span>{pendingNotice.message}</span>
+        {pendingNotice.action && pendingNotice.actionLabel && (
+          <button
+            className="inline-flex h-9 items-center justify-center rounded-full bg-white px-4 text-xs font-bold text-slate-700 shadow-sm disabled:opacity-60"
+            disabled={syncing && pendingNotice.actionLabel === "Atualizar"}
+            onClick={pendingNotice.action}
+            type="button"
+          >
+            {pendingNotice.actionLabel}
+          </button>
+        )}
       </section>
 
       <TemplateToolbar
@@ -532,6 +638,7 @@ export function TemplateLibraryPage() {
         <TemplateEmptyState
           hasActiveFilters={hasActiveFilters}
           onClearFilters={clearFilters}
+          onCreateTemplate={openCreatePanel}
           onSyncTemplates={syncTemplates}
           syncDisabled={!selectedSyncChannel || syncing || channelsLoading}
           syncing={syncing}

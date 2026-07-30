@@ -8,6 +8,7 @@ export type TemplateListItem = {
   channelLabel: string;
   hasImage: boolean;
   requiresHeaderMedia: boolean;
+  headerFormat: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -25,6 +26,16 @@ export type TemplatePagination = {
 export type TemplateListResponse = {
   templates: TemplateListItem[];
   pagination: TemplatePagination;
+  summary: TemplateListSummary;
+};
+
+export type TemplateListSummary = {
+  total: number;
+  ready: number;
+  waiting: number;
+  pending: number;
+  needsMedia: number;
+  rejected: number;
 };
 
 export type TemplateHeaderContent = {
@@ -144,5 +155,6 @@ export type TemplateLibraryFilters = {
   language: string;
   metaStatus: string;
   operationalStatus: string;
+  headerFormat: string;
   hasImage: "" | "true" | "false";
 };

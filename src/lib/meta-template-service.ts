@@ -1,4 +1,4 @@
-import type { MediaAsset, MetaTemplate } from "@prisma/client";
+import type { MediaAsset, MetaTemplate, Prisma } from "@prisma/client";
 import type { MetaTemplateApiComponent } from "@/lib/meta-template-client";
 import {
   normalizeMetaTemplate,
@@ -139,6 +139,7 @@ export type AdminTemplateListFilters = {
   metaStatus?: string;
   operationalStatus?: string;
   hasImage?: boolean;
+  headerFormat?: string;
 };
 
 export type AdminTemplateListPagination = {
@@ -148,6 +149,15 @@ export type AdminTemplateListPagination = {
   totalPages: number;
   hasNextPage: boolean;
   hasPreviousPage: boolean;
+};
+
+export type AdminTemplateListSummary = {
+  total: number;
+  ready: number;
+  waiting: number;
+  pending: number;
+  needsMedia: number;
+  rejected: number;
 };
 
 export type AdminTemplateListItem = {
@@ -160,6 +170,7 @@ export type AdminTemplateListItem = {
   channelLabel: string;
   hasImage: boolean;
   requiresHeaderMedia: boolean;
+  headerFormat: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -168,6 +179,7 @@ export type AdminTemplateListItem = {
 export type AdminTemplateListResponse = {
   templates: AdminTemplateListItem[];
   pagination: AdminTemplateListPagination;
+  summary: AdminTemplateListSummary;
 };
 
 export type AdminTemplateDetail = AdminTemplateListItem & {
@@ -300,6 +312,91 @@ function buildAdminTemplatePagination({
   };
 }
 
+function buildAdminTemplateSummaryWhere({
+  companyId,
+  q,
+  wabaId,
+  category,
+  language,
+  headerFormat,
+  hasImage
+}: {
+  companyId: string;
+  q?: string;
+  wabaId?: string;
+  category?: string;
+  language?: string;
+  headerFormat?: string;
+  hasImage?: boolean;
+}): Prisma.MetaTemplateWhereInput {
+  return {
+    companyId,
+    ...(q ? { name: { contains: q } } : {}),
+    ...(wabaId ? { wabaId } : {}),
+    ...(category ? { category } : {}),
+    ...(language ? { language } : {}),
+    ...(headerFormat ? { headerFormat } : {}),
+    ...(hasImage === true ? { defaultHeaderMediaAssetId: { not: null } } : {}),
+    ...(hasImage === false ? { defaultHeaderMediaAssetId: null } : {})
+  };
+}
+
+async function getAdminTemplateSummary({
+  companyId,
+  q,
+  wabaId,
+  category,
+  language,
+  headerFormat,
+  hasImage
+}: {
+  companyId: string;
+  q?: string;
+  wabaId?: string;
+  category?: string;
+  language?: string;
+  headerFormat?: string;
+  hasImage?: boolean;
+}): Promise<AdminTemplateListSummary> {
+  const baseWhere = buildAdminTemplateSummaryWhere({
+    companyId,
+    q,
+    wabaId,
+    category,
+    language,
+    headerFormat,
+    hasImage
+  });
+
+  const [total, ready, waiting, pending, needsMedia, rejected] = await Promise.all([
+    prisma.metaTemplate.count({ where: baseWhere }),
+    prisma.metaTemplate.count({
+      where: { ...baseWhere, operationalStatus: "READY" }
+    }),
+    prisma.metaTemplate.count({
+      where: { ...baseWhere, metaStatus: { in: ["PENDING", "IN_REVIEW"] } }
+    }),
+    prisma.metaTemplate.count({
+      where: {
+        ...baseWhere,
+        OR: [
+          { operationalStatus: "NEEDS_MEDIA" },
+          { operationalStatus: "SYNC_ERROR" },
+          { metaStatus: "REJECTED" }
+        ]
+      }
+    }),
+    prisma.metaTemplate.count({
+      where: { ...baseWhere, operationalStatus: "NEEDS_MEDIA" }
+    }),
+    prisma.metaTemplate.count({
+      where: { ...baseWhere, metaStatus: "REJECTED" }
+    })
+  ]);
+
+  return { total, ready, waiting, pending, needsMedia, rejected };
+}
+
 function buildChannelLabel(channels: AdminTemplateChannelRecord[] | undefined) {
   if (!channels?.length) return "Canal nao identificado";
   if (channels.length > 1) return `${channels.length} canais`;
@@ -331,6 +428,7 @@ function mapAdminTemplateListItem({
     channelLabel: buildChannelLabel(channelsByWaba.get(template.wabaId)),
     hasImage: Boolean(template.defaultHeaderMediaAssetId),
     requiresHeaderMedia: template.requiresHeaderMedia,
+    headerFormat: template.headerFormat,
     isActive: template.isActive,
     createdAt: template.createdAt.toISOString(),
     updatedAt: template.updatedAt.toISOString()
@@ -601,6 +699,7 @@ export async function listAdminTemplateLibrary({
   metaStatus,
   operationalStatus,
   hasImage,
+  headerFormat,
   page,
   pageSize
 }: ListAdminTemplateLibraryInput): Promise<AdminTemplateListResponse> {
@@ -628,24 +727,37 @@ export async function listAdminTemplateLibrary({
     if (!channel.wabaId?.trim()) {
       return {
         templates: [],
-        pagination: buildAdminTemplatePagination({ page, pageSize, total: 0 })
+        pagination: buildAdminTemplatePagination({ page, pageSize, total: 0 }),
+        summary: { total: 0, ready: 0, waiting: 0, pending: 0, needsMedia: 0, rejected: 0 }
       };
     }
 
     wabaId = channel.wabaId.trim();
   }
 
+  const normalizedQ = normalizeOptionalString(q) ?? undefined;
+  const normalizedCategory = normalizeOptionalString(category) ?? undefined;
+  const normalizedLanguage = normalizeOptionalString(language) ?? undefined;
+  const normalizedMetaStatus = normalizeOptionalString(metaStatus) ?? undefined;
+  const normalizedOperationalStatus = normalizeOptionalString(operationalStatus) ?? undefined;
+  const normalizedHeaderFormat = normalizeOptionalString(headerFormat) ?? undefined;
+
   const { templates, total } = await listMetaTemplatesForAdmin({
     companyId: safeCompanyId,
-    q: normalizeOptionalString(q) ?? undefined,
+    q: normalizedQ,
     wabaId,
-    category: normalizeOptionalString(category) ?? undefined,
-    language: normalizeOptionalString(language) ?? undefined,
-    metaStatus: normalizeOptionalString(metaStatus) ?? undefined,
-    operationalStatus: normalizeOptionalString(operationalStatus) ?? undefined,
+    category: normalizedCategory,
+    language: normalizedLanguage,
+    metaStatus: normalizedMetaStatus,
+    operationalStatus: normalizedOperationalStatus,
     hasImage,
+    headerFormat: normalizedHeaderFormat,
     page,
     pageSize
+  });
+  const summary = await getAdminTemplateSummary({
+    companyId: safeCompanyId,
+    wabaId
   });
   const wabaIds = Array.from(new Set(templates.map((template) => template.wabaId)));
   const channels =
@@ -681,7 +793,8 @@ export async function listAdminTemplateLibrary({
     templates: templates.map((template) =>
       mapAdminTemplateListItem({ template, channelsByWaba })
     ),
-    pagination: buildAdminTemplatePagination({ page, pageSize, total })
+    pagination: buildAdminTemplatePagination({ page, pageSize, total }),
+    summary
   };
 }
 

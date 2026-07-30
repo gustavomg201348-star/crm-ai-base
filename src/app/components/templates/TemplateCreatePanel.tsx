@@ -51,12 +51,16 @@ export type TemplateCreateDraft = {
   category: string;
   header: TemplateHeaderDraft;
   body: string;
+  bodyExampleValues: string[];
   footer: string;
   buttons: TemplateButtonDraft[];
 };
 
 type TemplateCreateErrors = Partial<
-  Record<keyof TemplateCreateDraft | "headerText" | "headerMedia" | `button-${string}`, string>
+  Record<
+    keyof TemplateCreateDraft | "headerText" | "headerMedia" | "bodyExamples" | `button-${string}`,
+    string
+  >
 >;
 
 type HeaderMediaConfig = {
@@ -100,16 +104,13 @@ const languageOptions = [
 
 const categoryOptions = [
   { label: "Marketing", value: "MARKETING" },
-  { label: "Utilidade", value: "UTILITY" },
-  { label: "Autenticação", value: "AUTHENTICATION" }
+  { label: "Utilidade", value: "UTILITY" }
 ];
 
 const headerTypeOptions: Array<{ label: string; value: HeaderType; description: string }> = [
   { label: "Sem header", value: "NONE", description: "A mensagem começa direto pelo body." },
   { label: "Texto", value: "TEXT", description: "Header simples em texto." },
-  { label: "Imagem", value: "IMAGE", description: "Imagem padrão do template." },
-  { label: "Documento", value: "DOCUMENT", description: "PDF padrão do template." },
-  { label: "Vídeo", value: "VIDEO", description: "Vídeo padrão do template." }
+  { label: "Imagem", value: "IMAGE", description: "Imagem padrão do template." }
 ];
 
 const buttonTypeOptions: Array<{ label: string; value: ButtonType }> = [
@@ -144,6 +145,7 @@ function createInitialDraft(channelId: string): TemplateCreateDraft {
     category: "UTILITY",
     header: createHeaderDraft("NONE"),
     body: "",
+    bodyExampleValues: [],
     footer: "",
     buttons: []
   };
@@ -164,6 +166,29 @@ function formatFileSize(size: number) {
 
 function isMediaHeader(type: HeaderType): type is "IMAGE" | "DOCUMENT" | "VIDEO" {
   return type === "IMAGE" || type === "DOCUMENT" || type === "VIDEO";
+}
+
+function readBodyPlaceholderNumbers(body: string) {
+  const tokens = body.match(/\{\{\s*[^{}]+\s*\}\}/g) ?? [];
+  const numbers: number[] = [];
+  const seen = new Set<number>();
+
+  for (const token of tokens) {
+    const value = Number(token.replace(/[{}]/g, "").trim());
+    if (!Number.isInteger(value) || value < 1 || seen.has(value)) {
+      return null;
+    }
+
+    seen.add(value);
+    numbers.push(value);
+  }
+
+  const sorted = [...numbers].sort((left, right) => left - right);
+  for (let index = 0; index < sorted.length; index += 1) {
+    if (sorted[index] !== index + 1) return null;
+  }
+
+  return sorted;
 }
 
 function validateHeaderFile(type: "IMAGE" | "DOCUMENT" | "VIDEO", file: File) {
@@ -187,7 +212,7 @@ function validateDraft(draft: TemplateCreateDraft, channels: TemplateChannelOpti
   const errors: TemplateCreateErrors = {};
 
   if (!draft.channelId || !channels.some((channel) => channel.id === draft.channelId)) {
-    errors.channelId = "Selecione um canal Meta/WABA para preparar o template.";
+    errors.channelId = "Selecione um canal do WhatsApp para preparar o template.";
   }
 
   if (!draft.name.trim()) {
@@ -214,6 +239,16 @@ function validateDraft(draft: TemplateCreateDraft, channels: TemplateChannelOpti
 
   if (!draft.body.trim()) {
     errors.body = "Informe o conteúdo principal do template.";
+  } else {
+    const bodyPlaceholders = readBodyPlaceholderNumbers(draft.body);
+    if (!bodyPlaceholders) {
+      errors.body = "Use variáveis no formato {{1}}, {{2}}, sem repetição ou lacunas.";
+    } else if (
+      bodyPlaceholders.length > 0 &&
+      bodyPlaceholders.some((placeholder) => !draft.bodyExampleValues[placeholder - 1]?.trim())
+    ) {
+      errors.bodyExamples = "Informe um exemplo para cada variável do body.";
+    }
   }
 
   if (draft.footer.length > 60) {
@@ -455,6 +490,17 @@ export function TemplateCreatePanel({
   const hasErrors = Object.keys(errors).length > 0;
 
   useEffect(() => {
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape" && !submitting) {
+        onClose();
+      }
+    }
+
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [onClose, submitting]);
+
+  useEffect(() => {
     setDraft((current) => {
       if (current.channelId && channels.some((channel) => channel.id === current.channelId)) {
         return current;
@@ -469,6 +515,32 @@ export function TemplateCreatePanel({
     value: TemplateCreateDraft[K]
   ) {
     setDraft((current) => ({ ...current, [field]: value }));
+    setValidated(false);
+    setSubmitError(null);
+    setSuccessToast(null);
+  }
+
+  function updateBody(value: string) {
+    const placeholders = readBodyPlaceholderNumbers(value) ?? [];
+    setDraft((current) => ({
+      ...current,
+      body: value,
+      bodyExampleValues: placeholders.map(
+        (placeholder) => current.bodyExampleValues[placeholder - 1] ?? ""
+      )
+    }));
+    setValidated(false);
+    setSubmitError(null);
+    setSuccessToast(null);
+  }
+
+  function updateBodyExample(index: number, value: string) {
+    setDraft((current) => ({
+      ...current,
+      bodyExampleValues: current.bodyExampleValues.map((example, exampleIndex) =>
+        exampleIndex === index ? value : example
+      )
+    }));
     setValidated(false);
     setSubmitError(null);
     setSuccessToast(null);
@@ -545,7 +617,9 @@ export function TemplateCreatePanel({
         formData
       });
 
-      setSuccessToast(`Template "${result.template.name}" criado e salvo na Biblioteca Local.`);
+      setSuccessToast(
+        `Template "${result.template.name}" enviado para aprovação e salvo na biblioteca.`
+      );
       onCreated();
       window.setTimeout(onClose, 900);
     } catch (error) {
@@ -560,18 +634,26 @@ export function TemplateCreatePanel({
   }
 
   return (
-    <section className="rounded border border-line bg-white shadow-soft">
+    <div
+      className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/40 p-3 backdrop-blur-sm sm:p-6"
+      role="presentation"
+    >
+      <section
+        aria-labelledby="template-create-title"
+        aria-modal="true"
+        className="mx-auto flex min-h-[calc(100dvh-1.5rem)] w-full max-w-6xl flex-col rounded-3xl border border-line bg-white shadow-2xl sm:min-h-0"
+        role="dialog"
+      >
       <div className="flex flex-col gap-3 border-b border-line/80 p-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-brand">
             Novo Template
           </p>
-          <h3 className="mt-1 text-xl font-black text-slate-950">
-            Estrutura inicial do template
+          <h3 className="mt-1 text-xl font-black text-slate-950" id="template-create-title">
+            Enviar template para aprovação
           </h3>
           <p className="mt-1 max-w-3xl text-sm text-slate-500">
-            Monte os campos principais para preparar a criação futura na Meta. Upload final,
-            preview rico e envio para aprovação serão conectados nas próximas etapas.
+            Preencha as informações, revise a prévia e envie para análise do WhatsApp.
           </p>
         </div>
         <button
@@ -592,7 +674,7 @@ export function TemplateCreatePanel({
             role="status"
           >
             <CheckCircle2 aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
-            Estrutura válida para criação integrada na Meta.
+            Tudo certo para enviar à análise.
           </div>
         )}
         {successToast && (
@@ -618,7 +700,7 @@ export function TemplateCreatePanel({
           <div className="space-y-4">
             <div className="grid gap-4 lg:grid-cols-2">
               <label>
-                <FieldLabel>Canal / WABA</FieldLabel>
+                <FieldLabel>Canal do WhatsApp</FieldLabel>
                 <select
                   className="h-11 w-full rounded-2xl border border-line bg-slate-50 px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-200 focus:bg-white focus:ring-2 focus:ring-blue-100 disabled:opacity-60"
                   disabled={channelsLoading || channels.length === 0}
@@ -627,7 +709,7 @@ export function TemplateCreatePanel({
                 >
                   {channels.length === 0 ? (
                     <option value="">
-                      {channelsLoading ? "Carregando canais..." : "Nenhum canal Meta disponível"}
+                      {channelsLoading ? "Carregando canais..." : "Nenhum canal do WhatsApp disponível"}
                     </option>
                   ) : (
                     channels.map((channel) => (
@@ -695,7 +777,7 @@ export function TemplateCreatePanel({
               <FieldLabel>Body</FieldLabel>
               <textarea
                 className="min-h-40 w-full resize-y rounded-2xl border border-line bg-slate-50 p-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-200 focus:bg-white focus:ring-2 focus:ring-blue-100"
-                onChange={(event) => updateDraft("body", event.target.value)}
+                onChange={(event) => updateBody(event.target.value)}
                 placeholder="Digite a mensagem principal do template. Use {{1}}, {{2}} para variáveis."
                 value={draft.body}
               />
@@ -704,6 +786,30 @@ export function TemplateCreatePanel({
                 <span>{draft.body.length} caracteres</span>
               </div>
               {submitted && <FieldError message={errors.body} />}
+              {draft.bodyExampleValues.length > 0 && (
+                <div className="mt-3 rounded-2xl border border-blue-100 bg-blue-50/50 p-3">
+                  <p className="text-xs font-bold uppercase tracking-[0.12em] text-brand">
+                    Exemplos das variáveis
+                  </p>
+                  <p className="mt-1 text-xs font-medium text-slate-500">
+                    Use valores neutros. Eles ajudam a Meta a revisar o template.
+                  </p>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    {draft.bodyExampleValues.map((value, index) => (
+                      <label key={`body-example-${index}`}>
+                        <FieldLabel>{`Variável {{${index + 1}}}`}</FieldLabel>
+                        <input
+                          className="h-10 w-full rounded-2xl border border-line bg-white px-3 text-sm text-slate-700 outline-none focus:border-blue-200 focus:ring-2 focus:ring-blue-100"
+                          onChange={(event) => updateBodyExample(index, event.target.value)}
+                          placeholder={index === 0 ? "Ex: Cliente" : "Ex: solicitação"}
+                          value={value}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                  {submitted && <FieldError message={errors.bodyExamples} />}
+                </div>
+              )}
             </label>
 
             <label className="block">
@@ -836,7 +942,7 @@ export function TemplateCreatePanel({
             onClick={handleValidate}
             type="button"
           >
-            Validar estrutura
+            Revisar
           </button>
           <button
             className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-brand px-4 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
@@ -845,10 +951,11 @@ export function TemplateCreatePanel({
             type="button"
           >
             {submitting && <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />}
-            {submitting ? "Criando..." : "Criar template"}
+            {submitting ? "Enviando..." : "Enviar para aprovação"}
           </button>
         </div>
       </div>
-    </section>
+      </section>
+    </div>
   );
 }

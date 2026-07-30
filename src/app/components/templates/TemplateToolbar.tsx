@@ -10,6 +10,41 @@ const operationalStatusOptions = [
   "NOT_RETURNED",
   "SYNC_ERROR"
 ];
+const headerFormatOptions = ["NONE", "TEXT", "IMAGE", "DOCUMENT", "VIDEO"];
+
+function displayCategory(value: string) {
+  if (value === "UTILITY") return "Utilidade";
+  if (value === "MARKETING") return "Marketing";
+  if (value === "AUTHENTICATION") return "Autenticação";
+  return value;
+}
+
+function displayMetaStatus(value: string) {
+  if (value === "APPROVED") return "Aprovado";
+  if (value === "PENDING") return "Aguardando";
+  if (value === "REJECTED") return "Rejeitado";
+  if (value === "PAUSED") return "Pausado";
+  if (value === "DISABLED") return "Desativado";
+  return value;
+}
+
+function displayOperationalStatus(value: string) {
+  if (value === "READY") return "Pronto";
+  if (value === "NEEDS_MEDIA") return "Precisa de imagem";
+  if (value === "UNSUPPORTED") return "Indisponível";
+  if (value === "NOT_RETURNED") return "Não retornado";
+  if (value === "SYNC_ERROR") return "Erro";
+  return value;
+}
+
+function displayHeaderFormat(value: string) {
+  if (value === "NONE") return "Sem cabeçalho";
+  if (value === "TEXT") return "Texto";
+  if (value === "IMAGE") return "Imagem";
+  if (value === "DOCUMENT") return "Documento";
+  if (value === "VIDEO") return "Vídeo";
+  return value;
+}
 
 export function TemplateToolbar({
   filters,
@@ -24,6 +59,7 @@ export function TemplateToolbar({
   onFilterChange,
   onClearFilters,
   onRefresh,
+  onCreateTemplate,
   onSelectSyncChannel,
   onSyncTemplates
 }: {
@@ -46,6 +82,7 @@ export function TemplateToolbar({
   ) => void;
   onClearFilters: () => void;
   onRefresh: () => void;
+  onCreateTemplate: () => void;
   onSelectSyncChannel: (channelId: string) => void;
   onSyncTemplates: () => void;
 }) {
@@ -55,9 +92,9 @@ export function TemplateToolbar({
     <section className="space-y-3 rounded border border-line bg-white p-4 shadow-soft">
       <div className="flex flex-col gap-3 rounded-2xl border border-blue-100 bg-blue-50/70 p-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <p className="text-sm font-bold text-slate-900">Sincronização Meta</p>
+          <p className="text-sm font-bold text-slate-900">Atualização dos templates</p>
           <p className="mt-1 text-xs font-medium text-slate-600">
-            Atualize a Biblioteca Local usando os templates aprovados ou pendentes da Meta.
+            Consulte o WhatsApp e atualize a biblioteca com os templates mais recentes.
           </p>
           {channelsError && (
             <p className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-rose-700">
@@ -68,7 +105,7 @@ export function TemplateToolbar({
           {!channelsError && !channelsLoading && syncableChannels.length === 0 && (
             <p className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700">
               <AlertTriangle aria-hidden="true" className="h-3.5 w-3.5" />
-              Nenhum canal Meta com WABA e token configurados.
+              Nenhum canal do WhatsApp está pronto para atualizar templates.
             </p>
           )}
         </div>
@@ -107,7 +144,7 @@ export function TemplateToolbar({
             ) : (
               <RefreshCcw aria-hidden="true" className="h-4 w-4" />
             )}
-            {syncing ? "Sincronizando..." : "Sincronizar Templates"}
+            {syncing ? "Atualizando..." : "Atualizar"}
           </button>
         </div>
       </div>
@@ -166,7 +203,7 @@ export function TemplateToolbar({
             <option value="">Todas as categorias</option>
             {categoryOptions.map((option) => (
               <option key={option} value={option}>
-                {option}
+                {displayCategory(option)}
               </option>
             ))}
           </select>
@@ -178,42 +215,45 @@ export function TemplateToolbar({
             value={filters.language}
           />
           <select
-            aria-label="Status Meta"
+            aria-label="Aprovação"
             className="h-10 rounded-full border border-line bg-slate-50 px-3 text-sm text-slate-700 outline-none focus:border-blue-200 focus:bg-white focus:ring-2 focus:ring-blue-100"
             onChange={(event) => onFilterChange("metaStatus", event.target.value)}
             value={filters.metaStatus}
           >
-            <option value="">Todos os status Meta</option>
+            <option value="">Todas as aprovações</option>
             {metaStatusOptions.map((option) => (
               <option key={option} value={option}>
-                {option}
+                {displayMetaStatus(option)}
               </option>
             ))}
           </select>
           <select
-            aria-label="Status operacional"
+            aria-label="Disponibilidade"
             className="h-10 rounded-full border border-line bg-slate-50 px-3 text-sm text-slate-700 outline-none focus:border-blue-200 focus:bg-white focus:ring-2 focus:ring-blue-100"
             onChange={(event) => onFilterChange("operationalStatus", event.target.value)}
             value={filters.operationalStatus}
           >
-            <option value="">Todos os status CRM</option>
+            <option value="">Toda disponibilidade</option>
             {operationalStatusOptions.map((option) => (
               <option key={option} value={option}>
-                {option}
+                {displayOperationalStatus(option)}
               </option>
             ))}
           </select>
           <select
-            aria-label="Imagem"
+            aria-label="Tipo"
             className="h-10 rounded-full border border-line bg-slate-50 px-3 text-sm text-slate-700 outline-none focus:border-blue-200 focus:bg-white focus:ring-2 focus:ring-blue-100"
             onChange={(event) =>
-              onFilterChange("hasImage", event.target.value as TemplateLibraryFilters["hasImage"])
+              onFilterChange("headerFormat", event.target.value)
             }
-            value={filters.hasImage}
+            value={filters.headerFormat}
           >
-            <option value="">Todas as mídias</option>
-            <option value="true">Com imagem</option>
-            <option value="false">Sem imagem</option>
+            <option value="">Todos os tipos</option>
+            {headerFormatOptions.map((option) => (
+              <option key={option} value={option}>
+                {displayHeaderFormat(option)}
+              </option>
+            ))}
           </select>
         </div>
 
@@ -234,11 +274,11 @@ export function TemplateToolbar({
             type="button"
           >
             <RefreshCcw aria-hidden="true" className="h-4 w-4" />
-            Atualizar
+            Recarregar lista
           </button>
           <button
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-brand px-4 text-sm font-bold text-white shadow-sm disabled:opacity-60"
-            disabled
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-brand px-4 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700"
+            onClick={onCreateTemplate}
             type="button"
           >
             <Plus aria-hidden="true" className="h-4 w-4" />

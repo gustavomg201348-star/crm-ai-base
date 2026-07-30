@@ -110,6 +110,13 @@ function PreviewButtonIcon({ type }: { type: string }) {
   return <Reply aria-hidden="true" className="h-3.5 w-3.5" />;
 }
 
+function renderBodyPreview(body: string, examples: string[]) {
+  return body.replace(/\{\{\s*(\d+)\s*\}\}/g, (_match, value: string) => {
+    const index = Number(value) - 1;
+    return examples[index]?.trim() || `Exemplo ${value}`;
+  });
+}
+
 export function TemplateCreatePreview({ draft }: { draft: TemplateCreateDraft }) {
   return (
     <aside className="rounded-2xl border border-line bg-slate-50 p-4 xl:sticky xl:top-4 xl:self-start">
@@ -140,7 +147,9 @@ export function TemplateCreatePreview({ draft }: { draft: TemplateCreateDraft })
           <PreviewHeader header={draft.header} />
 
           <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
-            {draft.body.trim() || (
+            {draft.body.trim() ? (
+              renderBodyPreview(draft.body, draft.bodyExampleValues)
+            ) : (
               <PreviewPlaceholder>O body do template aparecerá aqui.</PreviewPlaceholder>
             )}
           </p>

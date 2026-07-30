@@ -294,6 +294,7 @@ export function TemplateDetailsDrawer({
   const header = detail?.content.header ?? null;
   const canAssociateHeaderImage = Boolean(
     summary &&
+      summary.isActive &&
       header?.format === "IMAGE" &&
       header.requiresMedia &&
       summary.operationalStatus === "NEEDS_MEDIA" &&

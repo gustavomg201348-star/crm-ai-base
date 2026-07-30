@@ -133,6 +133,7 @@ export type AdminMetaTemplateListFilters = {
   metaStatus?: string;
   operationalStatus?: string;
   hasImage?: boolean;
+  headerFormat?: string;
 };
 
 export type AdminMetaTemplateListInput = AdminMetaTemplateListFilters & {
@@ -150,6 +151,7 @@ const adminMetaTemplateListSelect = {
   metaStatus: true,
   operationalStatus: true,
   requiresHeaderMedia: true,
+  headerFormat: true,
   defaultHeaderMediaAssetId: true,
   isActive: true,
   createdAt: true,
@@ -176,6 +178,7 @@ function buildAdminMetaTemplateWhere(
     ...(input.language ? { language: input.language } : {}),
     ...(input.metaStatus ? { metaStatus: input.metaStatus } : {}),
     ...(input.operationalStatus ? { operationalStatus: input.operationalStatus } : {}),
+    ...(input.headerFormat ? { headerFormat: input.headerFormat } : {}),
     ...(input.hasImage === true ? { defaultHeaderMediaAssetId: { not: null } } : {}),
     ...(input.hasImage === false ? { defaultHeaderMediaAssetId: null } : {})
   };

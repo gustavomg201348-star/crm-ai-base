@@ -60,14 +60,9 @@ function mapButton(button: TemplateButtonDraft) {
 }
 
 export function buildCreateTemplateFormData(draft: TemplateCreateDraft) {
-  if (readBodyPlaceholderNumbers(draft.body).length > 0) {
-    throw new Error(
-      "Templates com variáveis no BODY precisam de exemplos. Essa etapa ainda não está disponível na tela."
-    );
-  }
-
   const formData = new FormData();
   const buttons = draft.buttons.map(mapButton);
+  const bodyPlaceholders = readBodyPlaceholderNumbers(draft.body);
 
   formData.set("name", draft.name.trim());
   formData.set("language", draft.language.trim());
@@ -89,6 +84,14 @@ export function buildCreateTemplateFormData(draft: TemplateCreateDraft) {
   }
 
   if (draft.footer.trim()) formData.set("footerText", draft.footer.trim());
+  if (bodyPlaceholders.length > 0) {
+    formData.set(
+      "bodyExamples",
+      JSON.stringify([
+        bodyPlaceholders.map((placeholder) => draft.bodyExampleValues[placeholder - 1]?.trim() ?? "")
+      ])
+    );
+  }
   if (buttons.length > 0) formData.set("buttons", JSON.stringify(buttons));
 
   return formData;

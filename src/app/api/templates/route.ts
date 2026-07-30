@@ -71,6 +71,7 @@ function readTemplateListFilters(searchParams: URLSearchParams) {
     language: readOptionalText(searchParams, "language"),
     metaStatus: readOptionalText(searchParams, "metaStatus"),
     operationalStatus: readOptionalText(searchParams, "operationalStatus"),
+    headerFormat: readOptionalText(searchParams, "headerFormat"),
     hasImage: readHasImage(searchParams)
   };
   const page = readPositiveIntegerParam({
