@@ -358,8 +358,7 @@ export function normalizeMetaTemplate(template: MetaTemplate): NormalizedMetaTem
     requiresHeaderMedia,
     headerMediaType,
     compatibility: {
-      canSendWithCurrentBuilder:
-        uniqueUnsupportedReasons.length === 0 && !requiresHeaderMediaConfiguration,
+      canSendWithCurrentBuilder: uniqueUnsupportedReasons.length === 0,
       requiresHeaderMediaConfiguration,
       hasUnsupportedDynamicHeader: headerVariables.length > 0,
       hasUnsupportedDynamicButtons: buttons.some((button) => button.isDynamicUrl),
