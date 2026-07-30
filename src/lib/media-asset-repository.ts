@@ -101,6 +101,25 @@ export function findMediaAssetByStorageIdentity(
   });
 }
 
+export async function findMediaAssetByHeaderHandle(
+  companyId: string,
+  headerHandle: string,
+  db: DbClient = prisma
+) {
+  const matches = await db.mediaAsset.findMany({
+    where: {
+      companyId,
+      headerHandle
+    },
+    orderBy: {
+      createdAt: "asc"
+    },
+    take: 2
+  });
+
+  return matches.length === 1 ? matches[0] : null;
+}
+
 export function updateMediaAssetStorageDetails(
   companyId: string,
   id: string,

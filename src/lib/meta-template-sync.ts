@@ -88,6 +88,11 @@ export type MetaTemplateSyncDependencies = {
   upsertTemplate: (
     input: MetaTemplateSyncUpsertInput
   ) => Promise<MetaTemplateSyncExistingTemplate>;
+  resolveDefaultHeaderMediaAsset?: (input: {
+    companyId: string;
+    normalizedTemplate: NormalizedMetaTemplate;
+    existingDefaultHeaderMediaAssetId?: string | null;
+  }) => Promise<string | null>;
   listActiveTemplatesByWaba: (input: {
     companyId: string;
     wabaId: string;
@@ -526,6 +531,27 @@ export async function syncMetaTemplatesForWaba(
         name: normalized.name,
         language: normalized.language
       });
+      const resolvedDefaultHeaderMediaAssetId = dependencies.resolveDefaultHeaderMediaAsset
+        ? await dependencies
+            .resolveDefaultHeaderMediaAsset({
+              companyId: input.companyId,
+              normalizedTemplate: normalized,
+              existingDefaultHeaderMediaAssetId:
+                existing?.defaultHeaderMediaAssetId ?? null
+            })
+            .catch((error) => {
+              result.errors.push(
+                sanitizeMetaTemplateSyncError(
+                  error,
+                  "MEDIA_ASSOCIATION_FAILED",
+                  true,
+                  templateErrorDetails(normalized)
+                )
+              );
+              markIncomplete(result);
+              return existing?.defaultHeaderMediaAssetId ?? null;
+            })
+        : existing?.defaultHeaderMediaAssetId ?? null;
 
       await dependencies.upsertTemplate({
         companyId: input.companyId,
@@ -533,7 +559,7 @@ export async function syncMetaTemplatesForWaba(
         template: normalized,
         rawPayload: item.rawPayload,
         now: now(),
-        existingDefaultHeaderMediaAssetId: existing?.defaultHeaderMediaAssetId ?? null
+        existingDefaultHeaderMediaAssetId: resolvedDefaultHeaderMediaAssetId
       });
 
       seenKeys.add(item.key);

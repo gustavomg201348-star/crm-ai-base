@@ -3,7 +3,11 @@ import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
-import { markTemplateNotReturned, upsertNormalizedMetaTemplate } from "@/lib/meta-template-service";
+import {
+  markTemplateNotReturned,
+  resolveDefaultHeaderMediaAssetForTemplate,
+  upsertNormalizedMetaTemplate
+} from "@/lib/meta-template-service";
 import { findMetaTemplateByIdentity, listMetaTemplatesByWaba } from "@/lib/meta-template-repository";
 import { syncMetaTemplatesForWaba } from "@/lib/meta-template-sync";
 import { safeLogError } from "@/lib/safe-logger";
@@ -80,6 +84,16 @@ export async function POST(
         findExistingTemplate: ({ companyId, wabaId, name, language }) =>
           findMetaTemplateByIdentity(companyId, wabaId, name, language),
         upsertTemplate: upsertNormalizedMetaTemplate,
+        resolveDefaultHeaderMediaAsset: ({
+          companyId,
+          normalizedTemplate,
+          existingDefaultHeaderMediaAssetId
+        }) =>
+          resolveDefaultHeaderMediaAssetForTemplate({
+            companyId,
+            normalizedTemplate,
+            existingDefaultHeaderMediaAssetId
+          }),
         listActiveTemplatesByWaba: ({ companyId, wabaId }) =>
           listMetaTemplatesByWaba(companyId, wabaId, { isActive: true }),
         markTemplateNotReturned: ({ companyId, templateId }) =>

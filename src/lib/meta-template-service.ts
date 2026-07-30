@@ -8,6 +8,7 @@ import {
 import { prisma } from "@/lib/db";
 import {
   createMediaAsset,
+  findMediaAssetByHeaderHandle,
   findMediaAssetById,
   findMediaAssetByStorageIdentity,
   updateMediaAssetStatus,
@@ -44,6 +45,10 @@ type TemplateHeaderMediaAssetType =
   | "TEMPLATE_HEADER_IMAGE"
   | "TEMPLATE_HEADER_DOCUMENT"
   | "TEMPLATE_HEADER_VIDEO";
+type HeaderMediaAssetLookup = (
+  companyId: string,
+  headerHandle: string
+) => Promise<MediaAsset | null>;
 
 const TEMPLATE_MEDIA_ASSET_STORED_STATUS = "STORED";
 const TEMPLATE_MEDIA_ASSET_READY_STATUS = "READY";
@@ -755,6 +760,50 @@ function getTemplateHeaderMediaAssetType(
     case "VIDEO":
       return "TEMPLATE_HEADER_VIDEO";
   }
+}
+
+function isUsableTemplateHeaderImageAsset(mediaAsset: MediaAsset) {
+  return (
+    mediaAsset.companyId.trim().length > 0 &&
+    mediaAsset.type === "TEMPLATE_HEADER_IMAGE" &&
+    mediaAsset.mimeType.startsWith("image/") &&
+    Boolean(mediaAsset.publicUrl?.trim().match(/^https:\/\//i))
+  );
+}
+
+export async function resolveDefaultHeaderMediaAssetForTemplate({
+  companyId,
+  normalizedTemplate,
+  existingDefaultHeaderMediaAssetId,
+  findMediaAsset = findMediaAssetByHeaderHandle
+}: {
+  companyId: string;
+  normalizedTemplate: NormalizedMetaTemplate;
+  existingDefaultHeaderMediaAssetId?: string | null;
+  findMediaAsset?: HeaderMediaAssetLookup;
+}) {
+  const safeCompanyId = normalizeRequiredString(companyId, "companyId");
+  const preservedMediaAssetId = normalizeOptionalString(existingDefaultHeaderMediaAssetId);
+
+  if (preservedMediaAssetId) {
+    return preservedMediaAssetId;
+  }
+
+  if (!normalizedTemplate.requiresHeaderMedia || normalizedTemplate.header.format !== "IMAGE") {
+    return null;
+  }
+
+  const headerHandle = normalizeOptionalString(normalizedTemplate.header.exampleHandles[0]);
+  if (!headerHandle) {
+    return null;
+  }
+
+  const mediaAsset = await findMediaAsset(safeCompanyId, headerHandle);
+  if (!mediaAsset || mediaAsset.companyId !== safeCompanyId) {
+    return null;
+  }
+
+  return isUsableTemplateHeaderImageAsset(mediaAsset) ? mediaAsset.id : null;
 }
 
 function mediaNeedsStorageRefresh(
