@@ -3,7 +3,9 @@ import { getSessionFromRequest } from "@/lib/auth";
 import { cltBanks } from "@/lib/clt-integration";
 import { ensureCltIntegrations, mapCltIntegration } from "@/lib/clt-settings";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 
 type IntegrationPayload = {
   bankId?: string;
@@ -51,7 +53,7 @@ export async function GET(request: NextRequest) {
   try {
     const session = getSessionFromRequest(request);
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
 
     const integrations = await ensureCltIntegrations(session.companyId);
@@ -59,7 +61,19 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       integrations: integrations.map((integration) => mapCltIntegration(integration, session.role))
     });
-  } catch {
+  } catch (error) {
+    const session = getSessionFromRequest(request);
+
+    safeLogError("http-api", error, {
+      route: "/api/clt/integrations",
+      method: "GET",
+      companyId: session?.companyId,
+      currentUserId: session?.id,
+      publicErrorCode: "CLT_PROVIDER_UNAVAILABLE",
+      status: 200,
+      fallback: true
+    });
+
     return NextResponse.json({ integrations: fallbackIntegrations(), fallback: true });
   }
 }
@@ -70,7 +84,7 @@ export async function PATCH(request: NextRequest) {
   try {
     const session = getSessionFromRequest(request);
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
     const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
@@ -79,7 +93,7 @@ export async function PATCH(request: NextRequest) {
     fallbackBody = body;
 
     if (!body?.bankId) {
-      return NextResponse.json({ error: "Banco obrigatorio." }, { status: 400 });
+      return publicErrorResponse({ code: "CLT_INVALID_REQUEST", status: 400 });
     }
 
     await ensureCltIntegrations(session.companyId);
@@ -89,7 +103,7 @@ export async function PATCH(request: NextRequest) {
     });
 
     if (!current) {
-      return NextResponse.json({ error: "Integracao nao encontrada." }, { status: 404 });
+      return publicErrorResponse({ code: "NOT_FOUND", status: 404 });
     }
 
     const updated = await prisma.cltIntegration.update({
@@ -122,8 +136,20 @@ export async function PATCH(request: NextRequest) {
     });
 
     return NextResponse.json({ integration: mapCltIntegration(updated) });
-  } catch {
+  } catch (error) {
+    const session = getSessionFromRequest(request);
     const bank = cltBanks.find((item) => item.id === fallbackBody?.bankId) ?? cltBanks[0];
+
+    safeLogError("http-api", error, {
+      route: "/api/clt/integrations",
+      method: "PATCH",
+      companyId: session?.companyId,
+      currentUserId: session?.id,
+      publicErrorCode: "CLT_PROVIDER_UNAVAILABLE",
+      status: 200,
+      fallback: true,
+      providerCode: bank.provider
+    });
 
     return NextResponse.json({
       integration: {
@@ -143,11 +169,11 @@ export async function PATCH(request: NextRequest) {
             : "none"),
         hasApiKey: Boolean(fallbackBody?.apiKey),
         apiKeyPreview: fallbackBody?.apiKey ? "****" : null,
-        username: fallbackBody?.username || null,
+        username: null,
         hasPassword: Boolean(fallbackBody?.password),
-        newcorbanIdentifier: fallbackBody?.newcorbanIdentifier || null,
-        digitadorCode: fallbackBody?.digitadorCode || null,
-        certifiedAgentCpf: fallbackBody?.certifiedAgentCpf || null,
+        newcorbanIdentifier: null,
+        digitadorCode: null,
+        certifiedAgentCpf: null,
         actingUf: fallbackBody?.actingUf || null,
         smsStatus: null,
         smsRequestedAt: null,

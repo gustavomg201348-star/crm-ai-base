@@ -40,6 +40,19 @@ export type PublicErrorCode =
   | "PROPOSAL_UPDATE_FAILED"
   | "PROPOSAL_DELETE_FAILED"
   | "PROPOSAL_INVALID_STATE"
+  | "CLT_INVALID_REQUEST"
+  | "CLT_INVALID_CPF"
+  | "CLT_SIMULATION_FAILED"
+  | "CLT_CUSTOMER_LOOKUP_FAILED"
+  | "CLT_PROPOSAL_CREATE_FAILED"
+  | "CLT_PROPOSAL_NOT_FOUND"
+  | "CLT_PROPOSAL_CONFLICT"
+  | "CLT_PROVIDER_UNAVAILABLE"
+  | "CLT_PROVIDER_TIMEOUT"
+  | "CLT_PROVIDER_RATE_LIMITED"
+  | "CLT_PROVIDER_REJECTED"
+  | "CLT_CALLBACK_INVALID"
+  | "CLT_CALLBACK_PROCESSING_FAILED"
   | "META_PROVIDER_ERROR"
   | "MEDIA_FETCH_FAILED"
   | "TEMPLATE_CREATE_FAILED"
@@ -88,6 +101,19 @@ const DEFAULT_PUBLIC_MESSAGES: Record<PublicErrorCode, string> = {
   PROPOSAL_UPDATE_FAILED: "Nao foi possivel atualizar proposta.",
   PROPOSAL_DELETE_FAILED: "Nao foi possivel remover proposta.",
   PROPOSAL_INVALID_STATE: "Nao foi possivel alterar proposta neste estado.",
+  CLT_INVALID_REQUEST: "Requisicao CLT invalida.",
+  CLT_INVALID_CPF: "Informe um CPF valido.",
+  CLT_SIMULATION_FAILED: "Nao foi possivel simular CLT.",
+  CLT_CUSTOMER_LOOKUP_FAILED: "Nao foi possivel consultar dados CLT.",
+  CLT_PROPOSAL_CREATE_FAILED: "Nao foi possivel salvar proposta CLT.",
+  CLT_PROPOSAL_NOT_FOUND: "Proposta CLT nao encontrada.",
+  CLT_PROPOSAL_CONFLICT: "Nao foi possivel concluir a proposta CLT por conflito.",
+  CLT_PROVIDER_UNAVAILABLE: "Provider CLT indisponivel no momento.",
+  CLT_PROVIDER_TIMEOUT: "Provider CLT demorou para responder.",
+  CLT_PROVIDER_RATE_LIMITED: "Provider CLT temporariamente limitado.",
+  CLT_PROVIDER_REJECTED: "Operacao CLT recusada pelo provider.",
+  CLT_CALLBACK_INVALID: "Callback CLT invalido.",
+  CLT_CALLBACK_PROCESSING_FAILED: "Nao foi possivel processar callback CLT.",
   META_PROVIDER_ERROR: "Nao foi possivel concluir a operacao na Meta.",
   MEDIA_FETCH_FAILED: "Nao foi possivel carregar a midia.",
   TEMPLATE_CREATE_FAILED: "Nao foi possivel criar template.",
