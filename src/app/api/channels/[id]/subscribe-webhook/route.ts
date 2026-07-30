@@ -14,7 +14,7 @@ export async function POST(
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
     const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
@@ -25,14 +25,15 @@ export async function POST(
     });
 
     if (!channel) {
-      return NextResponse.json({ error: "Canal Meta nao encontrado." }, { status: 404 });
+      return publicErrorResponse({ code: "CHANNEL_NOT_FOUND", status: 404 });
     }
 
     if (!channel.wabaId || !channel.accessToken) {
-      return NextResponse.json(
-        { error: "Canal Meta com configuracao incompleta para assinar webhook." },
-        { status: 400 }
-      );
+      return publicErrorResponse({
+        code: "CHANNEL_INVALID_INPUT",
+        status: 400,
+        message: "Canal Meta com configuracao incompleta para assinar webhook."
+      });
     }
 
     const result = await subscribeMetaWebhook({

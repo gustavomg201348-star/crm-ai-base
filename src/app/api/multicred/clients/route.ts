@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { getSessionFromRequest } from "@/lib/auth";
 import { getContactNormalizedPhone } from "@/lib/contacts";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import {
   buildMulticredClientData,
   isValidCpf,
@@ -13,6 +14,7 @@ import {
   readString
 } from "@/lib/multicred-clients";
 import { requireCompanyAdmin } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 
 function buildWhere(companyId: string, searchParams: NextRequest["nextUrl"]["searchParams"]) {
   const search = searchParams.get("search")?.trim();
@@ -39,7 +41,7 @@ export async function GET(request: NextRequest) {
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
     const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
@@ -52,11 +54,15 @@ export async function GET(request: NextRequest) {
     });
 
     return NextResponse.json({ clients: clients.map(mapMulticredClient) });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel carregar clientes Multicred." },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      route: "/api/multicred/clients",
+      method: "GET",
+      publicErrorCode: "MULTICRED_CLIENT_LIST_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "MULTICRED_CLIENT_LIST_FAILED", status: 500 });
   }
 }
 
@@ -65,14 +71,14 @@ export async function POST(request: NextRequest) {
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
     const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
 
     const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
     if (!body) {
-      return NextResponse.json({ error: "Dados invalidos." }, { status: 400 });
+      return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
     }
 
     const data = buildMulticredClientData(body);
@@ -81,11 +87,11 @@ export async function POST(request: NextRequest) {
     const contactNormalizedWhatsapp = getContactNormalizedPhone(data.whatsapp);
 
     if (!data.name) {
-      return NextResponse.json({ error: "Nome do cliente e obrigatorio." }, { status: 400 });
+      return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
     }
 
     if (!isValidCpf(data.cpf)) {
-      return NextResponse.json({ error: "CPF invalido." }, { status: 400 });
+      return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
     }
 
     const existing = await prisma.multicredClient.findUnique({
@@ -93,10 +99,7 @@ export async function POST(request: NextRequest) {
     });
 
     if (existing) {
-      return NextResponse.json(
-        { error: "Ja existe cliente Multicred com este CPF." },
-        { status: 409 }
-      );
+      return publicErrorResponse({ code: "CONFLICT", status: 409 });
     }
 
     let linkedContact = contactId
@@ -140,7 +143,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (contactId && !linkedContact) {
-      return NextResponse.json({ error: "Contato vinculado nao encontrado." }, { status: 404 });
+      return publicErrorResponse({ code: "CONTACT_NOT_FOUND", status: 404 });
     }
 
     const client = await prisma.multicredClient.create({
@@ -154,10 +157,14 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({ client: mapMulticredClient(client) }, { status: 201 });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel criar cliente Multicred." },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      route: "/api/multicred/clients",
+      method: "POST",
+      publicErrorCode: "MULTICRED_CLIENT_CREATE_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "MULTICRED_CLIENT_CREATE_FAILED", status: 500 });
   }
 }

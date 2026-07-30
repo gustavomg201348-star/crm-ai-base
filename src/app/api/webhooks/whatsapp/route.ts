@@ -7,6 +7,7 @@ import {
 } from "@/lib/meta-whatsapp";
 import { prisma } from "@/lib/db";
 import { updateCampaignDeliveryStatus } from "@/lib/campaigns";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { updateMessageDeliveryStatus } from "@/lib/message-delivery";
 import { safeLogError, safeLogInfo } from "@/lib/safe-logger";
 
@@ -79,7 +80,7 @@ export async function GET(request: NextRequest) {
       return new NextResponse(challenge, { status: 200 });
     }
 
-    return NextResponse.json({ error: "Verify token invalido." }, { status: 403 });
+    return publicErrorResponse({ code: "FORBIDDEN", status: 403 });
   }
 
   return NextResponse.json({ ok: true, mode: "whatsapp" });
@@ -154,7 +155,7 @@ export async function POST(request: NextRequest) {
             hasChannelExternalId: Boolean(message.phoneNumberId),
             hasSender: Boolean(message.from)
           });
-          return NextResponse.json({ error: "Assinatura invalida." }, { status: 403 });
+          return publicErrorResponse({ code: "FORBIDDEN", status: 403 });
         }
 
         await prisma.channel.update({
@@ -276,10 +277,7 @@ export async function POST(request: NextRequest) {
       process.env.NODE_ENV === "production" ||
       process.env.RAILWAY_ENVIRONMENT === "production"
     ) {
-      return NextResponse.json(
-        { error: "Sandbox webhook is disabled in production." },
-        { status: 403 }
-      );
+      return publicErrorResponse({ code: "FORBIDDEN", status: 403 });
     }
 
     const companyId = body?.companyId ?? "seed-company";
@@ -290,10 +288,7 @@ export async function POST(request: NextRequest) {
         hasSandboxContact: Boolean(body?.phone),
         hasMessage: Boolean(body?.message)
       });
-      return NextResponse.json(
-        { error: "Payload sandbox requer phone e message." },
-        { status: 400 }
-      );
+      return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
     }
 
     const channel = body.channelId
@@ -317,9 +312,6 @@ export async function POST(request: NextRequest) {
     safeLogError("whatsapp-webhook-audit", error, {
       operation: "webhook-post"
     });
-    return NextResponse.json(
-      { error: "Nao foi possivel processar webhook." },
-      { status: 500 }
-    );
+    return publicErrorResponse({ code: "INTERNAL_ERROR", status: 500 });
   }
 }

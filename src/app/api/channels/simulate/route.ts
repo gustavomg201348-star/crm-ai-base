@@ -1,15 +1,17 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { processInboundMessage } from "@/lib/inbound-message";
 import { prisma } from "@/lib/db";
 import { requireAdmin } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 
 export async function POST(request: NextRequest) {
   try {
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
     const blocked = requireAdmin(session);
     if (blocked) return blocked;
@@ -24,10 +26,7 @@ export async function POST(request: NextRequest) {
       | null;
 
     if (!body?.phone || !body?.message) {
-      return NextResponse.json(
-        { error: "Telefone e mensagem sao obrigatorios." },
-        { status: 400 }
-      );
+      return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
     }
 
     const channel = body.channelId
@@ -47,10 +46,14 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({ conversation }, { status: 201 });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel simular mensagem." },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      route: "/api/channels/simulate",
+      method: "POST",
+      publicErrorCode: "INTERNAL_ERROR",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "INTERNAL_ERROR", status: 500 });
   }
 }

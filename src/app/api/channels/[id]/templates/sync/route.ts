@@ -25,7 +25,7 @@ export async function POST(
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
 
     const blocked = requireCompanyAdmin(session);
@@ -37,7 +37,7 @@ export async function POST(
     });
 
     if (!company) {
-      return NextResponse.json({ error: "Empresa invalida." }, { status: 400 });
+      return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
     }
 
     const { id } = await params;
@@ -57,11 +57,11 @@ export async function POST(
     });
 
     if (!channel?.wabaId) {
-      return NextResponse.json({ error: "Canal Meta ou WABA invalido." }, { status: 400 });
+      return publicErrorResponse({ code: "CHANNEL_INVALID_INPUT", status: 400 });
     }
 
     if (!channel.accessToken) {
-      return NextResponse.json({ error: "Canal Meta sem token." }, { status: 400 });
+      return publicErrorResponse({ code: "CHANNEL_INVALID_INPUT", status: 400 });
     }
 
     const body = (await request.json().catch(() => null)) as

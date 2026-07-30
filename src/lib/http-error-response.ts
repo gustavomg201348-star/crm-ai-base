@@ -40,6 +40,13 @@ export type PublicErrorCode =
   | "PROPOSAL_UPDATE_FAILED"
   | "PROPOSAL_DELETE_FAILED"
   | "PROPOSAL_INVALID_STATE"
+  | "CHANNELS_LIST_FAILED"
+  | "CHANNEL_CREATE_FAILED"
+  | "CHANNEL_UPDATE_FAILED"
+  | "CHANNEL_STATUS_FAILED"
+  | "CHANNEL_NOT_FOUND"
+  | "CHANNEL_CONFLICT"
+  | "CHANNEL_INVALID_INPUT"
   | "CLT_INVALID_REQUEST"
   | "CLT_INVALID_CPF"
   | "CLT_SIMULATION_FAILED"
@@ -53,6 +60,13 @@ export type PublicErrorCode =
   | "CLT_PROVIDER_REJECTED"
   | "CLT_CALLBACK_INVALID"
   | "CLT_CALLBACK_PROCESSING_FAILED"
+  | "MULTICRED_PRODUCT_LIST_FAILED"
+  | "MULTICRED_PRODUCT_SAVE_FAILED"
+  | "MULTICRED_CLIENT_LIST_FAILED"
+  | "MULTICRED_CLIENT_CREATE_FAILED"
+  | "MULTICRED_CLIENT_FETCH_FAILED"
+  | "MULTICRED_CLIENT_UPDATE_FAILED"
+  | "MULTICRED_CLIENT_NOT_FOUND"
   | "META_PROVIDER_ERROR"
   | "MEDIA_FETCH_FAILED"
   | "TEMPLATE_CREATE_FAILED"
@@ -101,6 +115,13 @@ const DEFAULT_PUBLIC_MESSAGES: Record<PublicErrorCode, string> = {
   PROPOSAL_UPDATE_FAILED: "Nao foi possivel atualizar proposta.",
   PROPOSAL_DELETE_FAILED: "Nao foi possivel remover proposta.",
   PROPOSAL_INVALID_STATE: "Nao foi possivel alterar proposta neste estado.",
+  CHANNELS_LIST_FAILED: "Nao foi possivel carregar canais.",
+  CHANNEL_CREATE_FAILED: "Nao foi possivel criar canal.",
+  CHANNEL_UPDATE_FAILED: "Nao foi possivel atualizar canal.",
+  CHANNEL_STATUS_FAILED: "Nao foi possivel carregar status dos canais.",
+  CHANNEL_NOT_FOUND: "Canal nao encontrado.",
+  CHANNEL_CONFLICT: "Ja existe um canal com estes dados.",
+  CHANNEL_INVALID_INPUT: "Dados do canal invalidos.",
   CLT_INVALID_REQUEST: "Requisicao CLT invalida.",
   CLT_INVALID_CPF: "Informe um CPF valido.",
   CLT_SIMULATION_FAILED: "Nao foi possivel simular CLT.",
@@ -114,6 +135,13 @@ const DEFAULT_PUBLIC_MESSAGES: Record<PublicErrorCode, string> = {
   CLT_PROVIDER_REJECTED: "Operacao CLT recusada pelo provider.",
   CLT_CALLBACK_INVALID: "Callback CLT invalido.",
   CLT_CALLBACK_PROCESSING_FAILED: "Nao foi possivel processar callback CLT.",
+  MULTICRED_PRODUCT_LIST_FAILED: "Nao foi possivel carregar produtos Multicred.",
+  MULTICRED_PRODUCT_SAVE_FAILED: "Nao foi possivel salvar produto Multicred.",
+  MULTICRED_CLIENT_LIST_FAILED: "Nao foi possivel carregar clientes Multicred.",
+  MULTICRED_CLIENT_CREATE_FAILED: "Nao foi possivel criar cliente Multicred.",
+  MULTICRED_CLIENT_FETCH_FAILED: "Nao foi possivel carregar cliente Multicred.",
+  MULTICRED_CLIENT_UPDATE_FAILED: "Nao foi possivel atualizar cliente Multicred.",
+  MULTICRED_CLIENT_NOT_FOUND: "Cliente Multicred nao encontrado.",
   META_PROVIDER_ERROR: "Nao foi possivel concluir a operacao na Meta.",
   MEDIA_FETCH_FAILED: "Nao foi possivel carregar a midia.",
   TEMPLATE_CREATE_FAILED: "Nao foi possivel criar template.",

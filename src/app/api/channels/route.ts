@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 import { validateMetaWhatsAppCredentials } from "@/lib/meta-whatsapp-diagnostics";
 import { sanitizeMetaDiagnostics } from "@/lib/meta-diagnostics-sanitizer";
 
@@ -60,7 +62,7 @@ async function findMetaIdentifierConflict({
     });
 
     if (channel) {
-      return `Phone Number ID ja esta em uso por outro canal Meta (${channel.name}).`;
+      return true;
     }
   }
 
@@ -74,7 +76,7 @@ async function findMetaIdentifierConflict({
     });
 
     if (channel) {
-      return `External ID ja esta em uso por outro canal Meta (${channel.name}).`;
+      return true;
     }
   }
 
@@ -86,12 +88,10 @@ export async function GET(request: NextRequest) {
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
     const blocked = requireCompanyAdmin(session);
-    if (blocked) {
-      return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
-    }
+    if (blocked) return blocked;
 
     const channels = await prisma.channel.findMany({
       where: { companyId: session.companyId },
@@ -99,11 +99,15 @@ export async function GET(request: NextRequest) {
     });
 
     return NextResponse.json({ channels: channels.map(mapChannel) });
-  } catch {
-    return NextResponse.json(
-      { error: "CHANNELS_LIST_FAILED" },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      route: "/api/channels",
+      method: "GET",
+      publicErrorCode: "CHANNELS_LIST_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "CHANNELS_LIST_FAILED", status: 500 });
   }
 }
 
@@ -112,12 +116,10 @@ export async function POST(request: NextRequest) {
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
     const blocked = requireCompanyAdmin(session);
-    if (blocked) {
-      return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
-    }
+    if (blocked) return blocked;
 
     const body = (await request.json().catch(() => null)) as
       | {
@@ -134,7 +136,7 @@ export async function POST(request: NextRequest) {
       | null;
 
     if (!body?.name?.trim()) {
-      return NextResponse.json({ error: "Nome obrigatorio." }, { status: 400 });
+      return publicErrorResponse({ code: "CHANNEL_INVALID_INPUT", status: 400 });
     }
 
     const provider = body.provider?.trim() || "sandbox";
@@ -148,7 +150,7 @@ export async function POST(request: NextRequest) {
       });
 
       if (conflict) {
-        return NextResponse.json({ error: conflict }, { status: 409 });
+        return publicErrorResponse({ code: "CHANNEL_CONFLICT", status: 409 });
       }
 
       const diagnostics = await validateMetaWhatsAppCredentials({
@@ -191,10 +193,14 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({ channel: mapChannel(channel) }, { status: 201 });
-  } catch {
-    return NextResponse.json(
-      { error: "CHANNEL_CREATE_FAILED" },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      route: "/api/channels",
+      method: "POST",
+      publicErrorCode: "CHANNEL_CREATE_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "CHANNEL_CREATE_FAILED", status: 500 });
   }
 }

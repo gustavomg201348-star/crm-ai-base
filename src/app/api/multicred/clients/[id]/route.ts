@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import {
   buildMulticredClientPatchData,
   isValidCpf,
@@ -9,6 +10,7 @@ import {
   readString
 } from "@/lib/multicred-clients";
 import { requireCompanyAdmin } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -19,7 +21,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
     const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
@@ -31,15 +33,19 @@ export async function GET(request: NextRequest, context: RouteContext) {
     });
 
     if (!client) {
-      return NextResponse.json({ error: "Cliente Multicred nao encontrado." }, { status: 404 });
+      return publicErrorResponse({ code: "MULTICRED_CLIENT_NOT_FOUND", status: 404 });
     }
 
     return NextResponse.json({ client: mapMulticredClientDetail(client) });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel carregar cliente Multicred." },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      route: "/api/multicred/clients/[id]",
+      method: "GET",
+      publicErrorCode: "MULTICRED_CLIENT_FETCH_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "MULTICRED_CLIENT_FETCH_FAILED", status: 500 });
   }
 }
 
@@ -48,7 +54,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
     const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
@@ -59,24 +65,24 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     });
 
     if (!current) {
-      return NextResponse.json({ error: "Cliente Multicred nao encontrado." }, { status: 404 });
+      return publicErrorResponse({ code: "MULTICRED_CLIENT_NOT_FOUND", status: 404 });
     }
 
     const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
     if (!body) {
-      return NextResponse.json({ error: "Dados invalidos." }, { status: 400 });
+      return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
     }
 
     const data = buildMulticredClientPatchData(body);
     const contactId = "contactId" in body ? readString(body.contactId) : undefined;
 
     if ("name" in data && !data.name) {
-      return NextResponse.json({ error: "Nome do cliente e obrigatorio." }, { status: 400 });
+      return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
     }
 
     if ("cpf" in data) {
       if (!isValidCpf(String(data.cpf ?? ""))) {
-        return NextResponse.json({ error: "CPF invalido." }, { status: 400 });
+        return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
       }
 
       const duplicated = await prisma.multicredClient.findFirst({
@@ -88,10 +94,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       });
 
       if (duplicated) {
-        return NextResponse.json(
-          { error: "Ja existe cliente Multicred com este CPF." },
-          { status: 409 }
-        );
+        return publicErrorResponse({ code: "CONFLICT", status: 409 });
       }
     }
 
@@ -102,10 +105,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         });
 
         if (!contact) {
-          return NextResponse.json(
-            { error: "Contato vinculado nao encontrado." },
-            { status: 404 }
-          );
+          return publicErrorResponse({ code: "CONTACT_NOT_FOUND", status: 404 });
         }
       }
 
@@ -119,10 +119,14 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     });
 
     return NextResponse.json({ client: mapMulticredClientDetail(client) });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel atualizar cliente Multicred." },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      route: "/api/multicred/clients/[id]",
+      method: "PATCH",
+      publicErrorCode: "MULTICRED_CLIENT_UPDATE_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "MULTICRED_CLIENT_UPDATE_FAILED", status: 500 });
   }
 }
