@@ -4,7 +4,9 @@ import {
   normalizeAssignmentMode,
   updateLeadAssignmentSettings
 } from "@/lib/lead-assignment";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { getSessionOrUnauthorized, requireCompanyAdmin } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 
 export async function GET(request: NextRequest) {
   try {
@@ -16,11 +18,19 @@ export async function GET(request: NextRequest) {
 
     const settings = await getLeadAssignmentSettings(session.companyId);
     return NextResponse.json({ settings });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel carregar configuracao de distribuicao." },
-      { status: 500 }
-    );
+  } catch (error) {
+    const { session } = getSessionOrUnauthorized(request);
+
+    safeLogError("http-api", error, {
+      route: "/api/settings/lead-assignment",
+      method: "GET",
+      companyId: session?.companyId,
+      currentUserId: session?.id,
+      publicErrorCode: "INTERNAL_ERROR",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "INTERNAL_ERROR", status: 500 });
   }
 }
 
@@ -59,10 +69,18 @@ export async function PATCH(request: NextRequest) {
     });
 
     return NextResponse.json({ settings });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel salvar configuracao de distribuicao." },
-      { status: 500 }
-    );
+  } catch (error) {
+    const { session } = getSessionOrUnauthorized(request);
+
+    safeLogError("http-api", error, {
+      route: "/api/settings/lead-assignment",
+      method: "PATCH",
+      companyId: session?.companyId,
+      currentUserId: session?.id,
+      publicErrorCode: "USER_SETTINGS_UPDATE_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "USER_SETTINGS_UPDATE_FAILED", status: 500 });
   }
 }

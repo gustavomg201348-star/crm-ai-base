@@ -1,8 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { saveFailedOutboundMessage } from "@/lib/message-delivery";
 import { canAccessConversation } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 import { sendConversationTemplate } from "@/lib/whatsapp-template.service";
 
 type RouteContext = {
@@ -55,8 +57,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     return NextResponse.json({ conversation });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Nao foi possivel enviar template.";
+    const message = "Falha ao enviar template.";
 
     await saveFailedOutboundMessage({
       conversationId: context.params.id,
@@ -65,11 +66,18 @@ export async function POST(request: NextRequest, context: RouteContext) {
       errorMessage: message
     }).catch(() => null);
 
-    return NextResponse.json(
-      {
-        error: message
-      },
-      { status: 500 }
-    );
+    safeLogError("http-api", error, {
+      operation: "conversation-template-send",
+      route: "/api/conversations/[id]/messages/template",
+      publicErrorCode: "MESSAGE_SEND_FAILED",
+      status: 500,
+      conversationId: context.params.id
+    });
+
+    return publicErrorResponse({
+      code: "MESSAGE_SEND_FAILED",
+      status: 500,
+      message: "Nao foi possivel enviar template."
+    });
   }
 }

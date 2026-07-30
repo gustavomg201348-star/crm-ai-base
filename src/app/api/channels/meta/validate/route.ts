@@ -1,14 +1,17 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 import { validateMetaWhatsAppCredentials } from "@/lib/meta-whatsapp-diagnostics";
+import { sanitizeMetaDiagnostics } from "@/lib/meta-diagnostics-sanitizer";
 
 export async function POST(request: NextRequest) {
   try {
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
     const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
@@ -27,11 +30,19 @@ export async function POST(request: NextRequest) {
       phoneNumberId: body?.phoneNumberId
     });
 
-    return NextResponse.json({ diagnostics });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel validar a integracao Meta." },
-      { status: 500 }
-    );
+    return NextResponse.json({ diagnostics: sanitizeMetaDiagnostics(diagnostics) });
+  } catch (error) {
+    safeLogError("http-api", error, {
+      route: "/api/channels/meta/validate",
+      method: "POST",
+      publicErrorCode: "META_PROVIDER_ERROR",
+      status: 500
+    });
+
+    return publicErrorResponse({
+      code: "META_PROVIDER_ERROR",
+      status: 500,
+      message: "Nao foi possivel validar as credenciais Meta."
+    });
   }
 }

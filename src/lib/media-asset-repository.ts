@@ -3,6 +3,8 @@ import { prisma } from "@/lib/db";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
+const ELIGIBLE_TEMPLATE_HEADER_IMAGE_MEDIA_ASSET_LIMIT = 50;
+
 function isPrismaRecordNotFoundError(error: unknown) {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025";
 }
@@ -60,6 +62,27 @@ export function findMediaAssetById(companyId: string, id: string, db: DbClient =
   });
 }
 
+export function listEligibleTemplateHeaderImageMediaAssets(
+  companyId: string,
+  db: DbClient = prisma
+) {
+  return db.mediaAsset.findMany({
+    where: {
+      companyId,
+      type: "TEMPLATE_HEADER_IMAGE",
+      mimeType: {
+        startsWith: "image/"
+      },
+      publicUrl: {
+        startsWith: "https://"
+      },
+      status: "READY"
+    },
+    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+    take: ELIGIBLE_TEMPLATE_HEADER_IMAGE_MEDIA_ASSET_LIMIT
+  });
+}
+
 export function createMediaAsset(input: CreateMediaAssetInput, db: DbClient = prisma) {
   const data: Prisma.MediaAssetUncheckedCreateInput = {
     companyId: input.companyId,
@@ -99,6 +122,25 @@ export function findMediaAssetByStorageIdentity(
       createdAt: "asc"
     }
   });
+}
+
+export async function findMediaAssetByHeaderHandle(
+  companyId: string,
+  headerHandle: string,
+  db: DbClient = prisma
+) {
+  const matches = await db.mediaAsset.findMany({
+    where: {
+      companyId,
+      headerHandle
+    },
+    orderBy: {
+      createdAt: "asc"
+    },
+    take: 2
+  });
+
+  return matches.length === 1 ? matches[0] : null;
 }
 
 export function updateMediaAssetStorageDetails(

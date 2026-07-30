@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireAdmin } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 
 export async function PATCH(request: NextRequest) {
   try {
@@ -91,10 +93,18 @@ export async function PATCH(request: NextRequest) {
     });
 
     return NextResponse.json({ updated: validIds.length });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel aplicar acao em massa." },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      operation: "contacts-bulk-update",
+      route: "/api/contacts/bulk",
+      publicErrorCode: "CONTACT_BULK_UPDATE_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({
+      code: "CONTACT_BULK_UPDATE_FAILED",
+      status: 500,
+      message: "Nao foi possivel aplicar acao em massa."
+    });
   }
 }

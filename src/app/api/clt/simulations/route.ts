@@ -7,23 +7,25 @@ import {
   simulateClt,
   type CltSimulationInput
 } from "@/lib/clt-integration";
+import { publicErrorResponse } from "@/lib/http-error-response";
+import { safeLogError } from "@/lib/safe-logger";
 
 export async function POST(request: NextRequest) {
   try {
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
 
     const body = (await request.json().catch(() => null)) as CltSimulationInput | null;
 
     if (!body?.cpf || !isValidCpfShape(body.cpf)) {
-      return NextResponse.json({ error: "Informe um CPF valido." }, { status: 400 });
+      return publicErrorResponse({ code: "CLT_INVALID_CPF", status: 400 });
     }
 
     if (!body.bankId) {
-      return NextResponse.json({ error: "Banco obrigatorio." }, { status: 400 });
+      return publicErrorResponse({ code: "CLT_INVALID_REQUEST", status: 400 });
     }
 
     const bank = getCltBank(body.bankId);
@@ -54,10 +56,18 @@ export async function POST(request: NextRequest) {
           : "Oferta gerada pelo simulador local.",
       offers
     });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel simular CLT." },
-      { status: 500 }
-    );
+  } catch (error) {
+    const session = getSessionFromRequest(request);
+
+    safeLogError("http-api", error, {
+      route: "/api/clt/simulations",
+      method: "POST",
+      companyId: session?.companyId,
+      currentUserId: session?.id,
+      publicErrorCode: "CLT_SIMULATION_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "CLT_SIMULATION_FAILED", status: 500 });
   }
 }

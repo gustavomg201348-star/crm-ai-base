@@ -1,5 +1,6 @@
-import { NextResponse, type NextRequest } from "next/server";
+import type { NextRequest } from "next/server";
 import { getSessionFromRequest, type SessionUser } from "@/lib/auth";
+import { publicErrorResponse } from "@/lib/http-error-response";
 
 export type Role = SessionUser["role"];
 
@@ -34,7 +35,7 @@ export function getSessionOrUnauthorized(request: NextRequest) {
   if (!session) {
     return {
       session: null,
-      response: NextResponse.json({ error: "Nao autenticado." }, { status: 401 })
+      response: publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 })
     };
   }
 
@@ -42,7 +43,7 @@ export function getSessionOrUnauthorized(request: NextRequest) {
 }
 
 export function forbidden(message = "Voce nao tem permissao para acessar este recurso.") {
-  return NextResponse.json({ error: message }, { status: 403 });
+  return publicErrorResponse({ code: "FORBIDDEN", status: 403, message });
 }
 
 export function requireAdmin(session: SessionUser) {

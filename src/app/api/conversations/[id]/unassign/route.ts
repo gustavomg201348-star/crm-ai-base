@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { unassignConversation } from "@/lib/lead-assignment";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { getSessionOrUnauthorized, requireAdmin } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 
 type RouteContext = {
   params: { id: string };
@@ -22,14 +24,18 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
     return NextResponse.json({ conversation });
   } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Nao foi possivel devolver atendimento para fila."
-      },
-      { status: 500 }
-    );
+    safeLogError("http-api", error, {
+      operation: "conversation-unassign",
+      route: "/api/conversations/[id]/unassign",
+      publicErrorCode: "INTERNAL_ERROR",
+      status: 500,
+      conversationId: context.params.id
+    });
+
+    return publicErrorResponse({
+      code: "INTERNAL_ERROR",
+      status: 500,
+      message: "Nao foi possivel devolver atendimento para fila."
+    });
   }
 }

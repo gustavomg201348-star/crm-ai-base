@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { classifyPhoneNormalization } from "@/lib/phone-normalization.service";
+import { safeLogWarn } from "@/lib/safe-logger";
 
 export type LeadTemperature = "HOT" | "WARM" | "COLD";
 
@@ -141,17 +142,7 @@ export async function findContactByNormalizedPhone(
   return null;
 }
 
-export function logContactNameMutationAttempt({
-  origin,
-  file,
-  functionName,
-  contactId,
-  phone,
-  oldName,
-  newName,
-  reason,
-  allowed
-}: {
+export function logContactNameMutationAttempt(input: {
   origin: string;
   file: string;
   functionName: string;
@@ -162,6 +153,7 @@ export function logContactNameMutationAttempt({
   reason: string;
   allowed: boolean;
 }) {
+  const { origin, contactId, phone, oldName, newName, allowed } = input;
   const normalizedOld = oldName?.trim() ?? "";
   const normalizedNew = newName?.trim() ?? "";
 
@@ -169,15 +161,12 @@ export function logContactNameMutationAttempt({
     return;
   }
 
-  console.warn("[contact-name-audit]", {
+  safeLogWarn("contact-name-audit", "contact name mutation attempt", {
     contactId: contactId ?? null,
-    phone: normalizeContactPhone(phone),
-    oldName: normalizedOld || null,
-    newName: normalizedNew || null,
+    hasPhone: Boolean(normalizeContactPhone(phone)),
+    oldNamePresent: Boolean(normalizedOld),
+    newNamePresent: Boolean(normalizedNew),
     origin,
-    file,
-    functionName,
-    reason,
     allowed
   });
 }

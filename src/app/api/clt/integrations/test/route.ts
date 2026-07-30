@@ -3,7 +3,9 @@ import { getSessionFromRequest } from "@/lib/auth";
 import { getCltBank } from "@/lib/clt-integration";
 import { ensureCltIntegrations, mapCltIntegration } from "@/lib/clt-settings";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 
 export async function POST(request: NextRequest) {
   let requestedBankId = "mercantil";
@@ -11,7 +13,7 @@ export async function POST(request: NextRequest) {
   try {
     const session = getSessionFromRequest(request);
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
     const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
@@ -19,7 +21,7 @@ export async function POST(request: NextRequest) {
     const body = (await request.json().catch(() => null)) as { bankId?: string } | null;
     requestedBankId = body?.bankId || requestedBankId;
     if (!body?.bankId) {
-      return NextResponse.json({ error: "Banco obrigatorio." }, { status: 400 });
+      return publicErrorResponse({ code: "CLT_INVALID_REQUEST", status: 400 });
     }
 
     await ensureCltIntegrations(session.companyId);
@@ -28,7 +30,7 @@ export async function POST(request: NextRequest) {
     });
 
     if (!current) {
-      return NextResponse.json({ error: "Integracao nao encontrada." }, { status: 404 });
+      return publicErrorResponse({ code: "NOT_FOUND", status: 404 });
     }
 
     const isManual = current.provider === "manual";
@@ -54,8 +56,20 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({ integration: mapCltIntegration(updated) });
-  } catch {
+  } catch (error) {
+    const session = getSessionFromRequest(request);
     const bank = getCltBank(requestedBankId);
+
+    safeLogError("http-api", error, {
+      route: "/api/clt/integrations/test",
+      method: "POST",
+      companyId: session?.companyId,
+      currentUserId: session?.id,
+      publicErrorCode: "CLT_PROVIDER_UNAVAILABLE",
+      status: 200,
+      fallback: true,
+      providerCode: bank.provider
+    });
 
     return NextResponse.json({
       integration: {

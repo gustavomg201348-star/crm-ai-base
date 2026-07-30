@@ -1,8 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 import { validateMetaWhatsAppCredentials } from "@/lib/meta-whatsapp-diagnostics";
+import { sanitizeMetaDiagnostics } from "@/lib/meta-diagnostics-sanitizer";
 
 function mapChannel(channel: {
   id: string;
@@ -59,7 +62,7 @@ async function findMetaIdentifierConflict({
     });
 
     if (channel) {
-      return `Phone Number ID ja esta em uso por outro canal Meta (${channel.name}).`;
+      return true;
     }
   }
 
@@ -73,7 +76,7 @@ async function findMetaIdentifierConflict({
     });
 
     if (channel) {
-      return `External ID ja esta em uso por outro canal Meta (${channel.name}).`;
+      return true;
     }
   }
 
@@ -85,7 +88,7 @@ export async function GET(request: NextRequest) {
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
     const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
@@ -96,11 +99,15 @@ export async function GET(request: NextRequest) {
     });
 
     return NextResponse.json({ channels: channels.map(mapChannel) });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel carregar canais." },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      route: "/api/channels",
+      method: "GET",
+      publicErrorCode: "CHANNELS_LIST_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "CHANNELS_LIST_FAILED", status: 500 });
   }
 }
 
@@ -109,7 +116,7 @@ export async function POST(request: NextRequest) {
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
     const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
@@ -129,7 +136,7 @@ export async function POST(request: NextRequest) {
       | null;
 
     if (!body?.name?.trim()) {
-      return NextResponse.json({ error: "Nome obrigatorio." }, { status: 400 });
+      return publicErrorResponse({ code: "CHANNEL_INVALID_INPUT", status: 400 });
     }
 
     const provider = body.provider?.trim() || "sandbox";
@@ -143,7 +150,7 @@ export async function POST(request: NextRequest) {
       });
 
       if (conflict) {
-        return NextResponse.json({ error: conflict }, { status: 409 });
+        return publicErrorResponse({ code: "CHANNEL_CONFLICT", status: 409 });
       }
 
       const diagnostics = await validateMetaWhatsAppCredentials({
@@ -153,14 +160,18 @@ export async function POST(request: NextRequest) {
       });
 
       if (!diagnostics.ok) {
+        const publicDiagnostics = sanitizeMetaDiagnostics(diagnostics);
         const reason =
-          diagnostics.token.error ||
-          diagnostics.waba.error ||
-          diagnostics.phone.error ||
-          (diagnostics.permissions.missing.length
-            ? `Permissoes ausentes: ${diagnostics.permissions.missing.join(", ")}.`
+          publicDiagnostics.token.error ||
+          publicDiagnostics.waba.error ||
+          publicDiagnostics.phone.error ||
+          (publicDiagnostics.permissions.missing.length
+            ? `Permissoes ausentes: ${publicDiagnostics.permissions.missing.join(", ")}.`
             : "Validacao Meta incompleta.");
-        return NextResponse.json({ error: reason, diagnostics }, { status: 400 });
+        return NextResponse.json(
+          { error: reason, diagnostics: publicDiagnostics },
+          { status: 400 }
+        );
       }
     }
 
@@ -182,10 +193,14 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({ channel: mapChannel(channel) }, { status: 201 });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel criar canal." },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      route: "/api/channels",
+      method: "POST",
+      publicErrorCode: "CHANNEL_CREATE_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "CHANNEL_CREATE_FAILED", status: 500 });
   }
 }

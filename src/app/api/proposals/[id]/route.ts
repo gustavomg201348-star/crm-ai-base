@@ -1,8 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
+import { isPrismaKnownRequestError } from "@/lib/prisma-errors";
 import { isProposalStatus, mapProposal, proposalInclude } from "@/lib/proposals";
+import { safeLogError } from "@/lib/safe-logger";
 
 function toMoney(value: unknown) {
   if (value === undefined || value === null || value === "") return undefined;
@@ -38,7 +41,7 @@ export async function PATCH(
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
     const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
@@ -49,7 +52,7 @@ export async function PATCH(
     });
 
     if (!current) {
-      return NextResponse.json({ error: "Proposta nao encontrada." }, { status: 404 });
+      return publicErrorResponse({ code: "PROPOSAL_NOT_FOUND", status: 404 });
     }
 
     const body = (await request.json().catch(() => null)) as
@@ -91,14 +94,11 @@ export async function PATCH(
       commissionReceived === null ||
       term === null
     ) {
-      return NextResponse.json(
-        { error: "Valores, prazo e comissao precisam ser validos." },
-        { status: 400 }
-      );
+      return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
     }
 
     if (body?.status !== undefined && !isProposalStatus(body.status)) {
-      return NextResponse.json({ error: "Status invalido." }, { status: 400 });
+      return publicErrorResponse({ code: "PROPOSAL_INVALID_STATE", status: 409 });
     }
 
     const bank = body?.bank?.trim();
@@ -116,10 +116,7 @@ export async function PATCH(
       (body?.agreement !== undefined && !agreement) ||
       (body?.product !== undefined && !product)
     ) {
-      return NextResponse.json(
-        { error: "Banco, convenio e produto nao podem ficar vazios." },
-        { status: 400 }
-      );
+      return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
     }
 
     const multicredClient = multicredClientId
@@ -129,10 +126,7 @@ export async function PATCH(
       : null;
 
     if (multicredClientId && !multicredClient) {
-      return NextResponse.json(
-        { error: "Cliente Multicred nao encontrado para esta empresa." },
-        { status: 404 }
-      );
+      return publicErrorResponse({ code: "NOT_FOUND", status: 404 });
     }
 
     const assignedUser = assignedUserId
@@ -142,10 +136,7 @@ export async function PATCH(
       : null;
 
     if (assignedUserId && !assignedUser) {
-      return NextResponse.json(
-        { error: "Responsavel nao encontrado para esta empresa." },
-        { status: 404 }
-      );
+      return publicErrorResponse({ code: "USER_NOT_FOUND", status: 404 });
     }
 
     const proposal = await prisma.$transaction(async (tx) => {
@@ -237,11 +228,25 @@ export async function PATCH(
     });
 
     return NextResponse.json({ proposal: mapProposal(proposal) });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel atualizar proposta." },
-      { status: 500 }
-    );
+  } catch (error) {
+    const session = getSessionFromRequest(request);
+    const { id } = await params;
+
+    if (isPrismaKnownRequestError(error, "P2025")) {
+      return publicErrorResponse({ code: "PROPOSAL_NOT_FOUND", status: 404 });
+    }
+
+    safeLogError("http-api", error, {
+      route: "/api/proposals/[id]",
+      method: "PATCH",
+      companyId: session?.companyId,
+      currentUserId: session?.id,
+      proposalId: id,
+      publicErrorCode: "PROPOSAL_UPDATE_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "PROPOSAL_UPDATE_FAILED", status: 500 });
   }
 }
 
@@ -253,7 +258,7 @@ export async function DELETE(
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
     const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
@@ -264,16 +269,30 @@ export async function DELETE(
     });
 
     if (!current) {
-      return NextResponse.json({ error: "Proposta nao encontrada." }, { status: 404 });
+      return publicErrorResponse({ code: "PROPOSAL_NOT_FOUND", status: 404 });
     }
 
     await prisma.proposal.delete({ where: { id } });
 
     return NextResponse.json({ ok: true });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel remover proposta." },
-      { status: 500 }
-    );
+  } catch (error) {
+    const session = getSessionFromRequest(request);
+    const { id } = await params;
+
+    if (isPrismaKnownRequestError(error, "P2025")) {
+      return publicErrorResponse({ code: "PROPOSAL_NOT_FOUND", status: 404 });
+    }
+
+    safeLogError("http-api", error, {
+      route: "/api/proposals/[id]",
+      method: "DELETE",
+      companyId: session?.companyId,
+      currentUserId: session?.id,
+      proposalId: id,
+      publicErrorCode: "PROPOSAL_DELETE_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "PROPOSAL_DELETE_FAILED", status: 500 });
   }
 }

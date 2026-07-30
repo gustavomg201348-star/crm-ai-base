@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 import { subscribeMetaWebhook } from "@/lib/meta-whatsapp-diagnostics";
 
 export async function POST(
@@ -12,7 +14,7 @@ export async function POST(
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
     const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
@@ -23,14 +25,15 @@ export async function POST(
     });
 
     if (!channel) {
-      return NextResponse.json({ error: "Canal Meta nao encontrado." }, { status: 404 });
+      return publicErrorResponse({ code: "CHANNEL_NOT_FOUND", status: 404 });
     }
 
     if (!channel.wabaId || !channel.accessToken) {
-      return NextResponse.json(
-        { error: "Informe WABA ID e access token antes de assinar o webhook." },
-        { status: 400 }
-      );
+      return publicErrorResponse({
+        code: "CHANNEL_INVALID_INPUT",
+        status: 400,
+        message: "Canal Meta com configuracao incompleta para assinar webhook."
+      });
     }
 
     const result = await subscribeMetaWebhook({
@@ -39,7 +42,19 @@ export async function POST(
     });
 
     if (!result.ok) {
-      return NextResponse.json({ error: result.error }, { status: 400 });
+      safeLogError("http-api", new Error("META_WEBHOOK_SUBSCRIBE_FAILED"), {
+        operation: "meta-webhook-subscribe",
+        route: "/api/channels/[id]/subscribe-webhook",
+        publicErrorCode: "META_PROVIDER_ERROR",
+        status: 400,
+        channelId: channel.id
+      });
+
+      return publicErrorResponse({
+        code: "META_PROVIDER_ERROR",
+        status: 400,
+        message: "Nao foi possivel assinar o webhook na Meta."
+      });
     }
 
     const updated = await prisma.channel.update({
@@ -53,10 +68,18 @@ export async function POST(
       message: "Webhook assinado com sucesso.",
       channel: updated
     });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel assinar o webhook na Meta." },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      operation: "meta-webhook-subscribe",
+      route: "/api/channels/[id]/subscribe-webhook",
+      publicErrorCode: "META_PROVIDER_ERROR",
+      status: 500
+    });
+
+    return publicErrorResponse({
+      code: "META_PROVIDER_ERROR",
+      status: 500,
+      message: "Nao foi possivel assinar o webhook na Meta."
+    });
   }
 }

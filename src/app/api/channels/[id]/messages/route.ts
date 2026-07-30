@@ -12,6 +12,7 @@ import {
   normalizeContactPhone
 } from "@/lib/contacts";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { saveFailedOutboundMessage } from "@/lib/message-delivery";
 import { readMetaMessageId, sendMetaTextMessage } from "@/lib/meta-whatsapp";
 import { canAccessConversation } from "@/lib/permissions";
@@ -19,6 +20,7 @@ import {
   isPrismaUniqueViolation,
   isPrismaUniqueViolationForTarget
 } from "@/lib/prisma-errors";
+import { safeLogError } from "@/lib/safe-logger";
 
 type RouteContext = {
   params: { id: string };
@@ -35,7 +37,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
 
     const { id } = context.params;
@@ -45,10 +47,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const message = body?.body?.trim();
 
     if (!message || !body?.to) {
-      return NextResponse.json(
-        { error: "Destino e mensagem sao obrigatorios." },
-        { status: 400 }
-      );
+      return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
     }
 
     const channel = await prisma.channel.findFirst({
@@ -56,21 +55,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
     });
 
     if (!channel) {
-      return NextResponse.json({ error: "Canal nao encontrado." }, { status: 404 });
+      return publicErrorResponse({ code: "CHANNEL_NOT_FOUND", status: 404 });
     }
 
     if (channel.provider !== "meta") {
-      return NextResponse.json(
-        { error: "Envio real exige canal provider=meta." },
-        { status: 400 }
-      );
+      return publicErrorResponse({ code: "CHANNEL_INVALID_INPUT", status: 400 });
     }
 
     if (!channel.phoneNumberId || !channel.accessToken) {
-      return NextResponse.json(
-        { error: "Canal sem phoneNumberId ou accessToken." },
-        { status: 400 }
-      );
+      return publicErrorResponse({ code: "CHANNEL_INVALID_INPUT", status: 400 });
     }
 
     const normalizedPhone = normalizeContactPhone(body.to);
@@ -87,29 +80,20 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     if (body.conversationId) {
       if (!conversation) {
-        return NextResponse.json({ error: "Conversa nao encontrada." }, { status: 404 });
+        return publicErrorResponse({ code: "NOT_FOUND", status: 404 });
       }
 
       if (!canAccessConversation({ session, agentId: conversation.agentId })) {
-        return NextResponse.json(
-          { error: "Conversa atribuida a outro atendente." },
-          { status: 403 }
-        );
+        return publicErrorResponse({ code: "FORBIDDEN", status: 403 });
       }
 
       if (!conversationMatchesChannel(conversation, channel.id)) {
-        return NextResponse.json(
-          { error: "A conversa nao pertence ao canal WhatsApp informado." },
-          { status: 409 }
-        );
+        return publicErrorResponse({ code: "CONFLICT", status: 409 });
       }
 
       const conversationPhone = normalizeContactPhone(conversation.contact.phone);
       if (!conversationPhone || conversationPhone !== normalizedPhone) {
-        return NextResponse.json(
-          { error: "O telefone informado nao corresponde ao contato da conversa." },
-          { status: 400 }
-        );
+        return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
       }
 
       failedConversationId = conversation.id;
@@ -248,14 +232,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     return NextResponse.json({
       ok: true,
-      meta: sent,
+      meta: {
+        accepted: true,
+        providerMessageId
+      },
       conversation: mapConversation(updated)
     });
   } catch (error) {
-    const errorMessage =
-      error instanceof Error
-        ? error.message
-        : "Nao foi possivel enviar mensagem.";
+    const errorMessage = "Falha ao enviar mensagem.";
 
     if (!metaAcceptedMessage && failedConversationId && failedMessageBody) {
       await saveFailedOutboundMessage({
@@ -265,11 +249,19 @@ export async function POST(request: NextRequest, context: RouteContext) {
       });
     }
 
-    return NextResponse.json(
-      {
-        error: errorMessage
-      },
-      { status: 500 }
-    );
+    safeLogError("http-api", error, {
+      operation: "channel-message-send",
+      route: "/api/channels/[id]/messages",
+      publicErrorCode: "MESSAGE_SEND_FAILED",
+      status: 500,
+      channelId: context.params.id,
+      conversationId: failedConversationId ?? null,
+      metaAcceptedMessage
+    });
+
+    return publicErrorResponse({
+      code: "MESSAGE_SEND_FAILED",
+      status: 500
+    });
   }
 }

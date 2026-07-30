@@ -2,12 +2,14 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { mapCltLog } from "@/lib/clt-logs";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
+import { safeLogError } from "@/lib/safe-logger";
 
 export async function GET(request: NextRequest) {
   try {
     const session = getSessionFromRequest(request);
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
 
     const bankId = request.nextUrl.searchParams.get("bankId")?.trim();
@@ -26,15 +28,26 @@ export async function GET(request: NextRequest) {
         ...(action && action !== "ALL" ? { action } : {})
       },
       include: {
-        user: { select: { name: true } },
-        contact: { select: { id: true, name: true, phone: true } }
+        contact: { select: { id: true } }
       },
       orderBy: { createdAt: "desc" },
       take
     });
 
     return NextResponse.json({ logs: logs.map(mapCltLog) });
-  } catch {
+  } catch (error) {
+    const session = getSessionFromRequest(request);
+
+    safeLogError("http-api", error, {
+      route: "/api/clt/logs",
+      method: "GET",
+      companyId: session?.companyId,
+      currentUserId: session?.id,
+      publicErrorCode: "INTERNAL_ERROR",
+      status: 200,
+      fallback: true
+    });
+
     return NextResponse.json({ logs: [], fallback: true });
   }
 }

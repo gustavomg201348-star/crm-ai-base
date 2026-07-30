@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { assignConversationToUser } from "@/lib/lead-assignment";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { getSessionOrUnauthorized, isAdmin } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 
 type RouteContext = {
   params: { id: string };
@@ -48,14 +50,18 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
     return NextResponse.json({ conversation });
   } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Nao foi possivel assumir atendimento."
-      },
-      { status: 409 }
-    );
+    safeLogError("http-api", error, {
+      operation: "conversation-assign",
+      route: "/api/conversations/[id]/assign",
+      publicErrorCode: "CONFLICT",
+      status: 409,
+      conversationId: context.params.id
+    });
+
+    return publicErrorResponse({
+      code: "CONFLICT",
+      status: 409,
+      message: "Nao foi possivel assumir atendimento."
+    });
   }
 }

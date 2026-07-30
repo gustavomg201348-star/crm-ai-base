@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { activityInclude, mapActivity } from "@/lib/activities";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
+import { safeLogError } from "@/lib/safe-logger";
 
 export async function GET(
   request: NextRequest,
@@ -32,11 +34,19 @@ export async function GET(
     });
 
     return NextResponse.json({ activities: activities.map(mapActivity) });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel carregar historico." },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      operation: "contact-activities-list",
+      route: "/api/contacts/[id]/activities",
+      publicErrorCode: "INTERNAL_ERROR",
+      status: 500
+    });
+
+    return publicErrorResponse({
+      code: "INTERNAL_ERROR",
+      status: 500,
+      message: "Nao foi possivel carregar historico."
+    });
   }
 }
 
@@ -82,10 +92,18 @@ export async function POST(
     });
 
     return NextResponse.json({ activity: mapActivity(activity) }, { status: 201 });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel salvar anotacao." },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      operation: "contact-activity-create",
+      route: "/api/contacts/[id]/activities",
+      publicErrorCode: "INTERNAL_ERROR",
+      status: 500
+    });
+
+    return publicErrorResponse({
+      code: "INTERNAL_ERROR",
+      status: 500,
+      message: "Nao foi possivel salvar anotacao."
+    });
   }
 }

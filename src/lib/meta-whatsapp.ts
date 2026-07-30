@@ -3,6 +3,7 @@ import {
   extractMetaTemplateVariables,
   type MetaTemplate
 } from "@/lib/meta-template-normalizer";
+import { safeLogError, safeLogInfo } from "@/lib/safe-logger";
 
 export type { MetaTemplate } from "@/lib/meta-template-normalizer";
 
@@ -522,6 +523,42 @@ function readMetaErrorMessage(data: unknown, fallback: string) {
   return `Falha ao enviar template pela Meta${code}${subcode}: ${message}`;
 }
 
+function maskMetaDestination(value: string) {
+  const digits = value.replace(/\D/g, "");
+  if (digits.length <= 4) {
+    return "****";
+  }
+
+  return `***${digits.slice(-4)}`;
+}
+
+function summarizeMetaError(data: unknown) {
+  const metaError = (data as
+    | {
+        error?: {
+          code?: string | number;
+          error_subcode?: string | number;
+          type?: string;
+        };
+      }
+    | null)?.error;
+
+  return {
+    metaErrorCode: metaError?.code ? String(metaError.code) : null,
+    metaErrorSubcode: metaError?.error_subcode ? String(metaError.error_subcode) : null,
+    metaErrorType: metaError?.type ?? null
+  };
+}
+
+function summarizeMetaTemplateSendResponse(data: unknown) {
+  const response = data as { messages?: Array<{ id?: string }> } | null;
+
+  return {
+    messageCount: response?.messages?.length ?? 0,
+    hasMessageId: Boolean(response?.messages?.[0]?.id)
+  };
+}
+
 export async function getMetaApprovedTemplates({
   wabaId,
   accessToken
@@ -664,18 +701,18 @@ export async function sendMetaTemplateMessage({
     }
   };
 
-  console.info(
-    "[template-send-debug]",
-    JSON.stringify({
-      templateName: name,
-      language,
-      possuiHeaderImage: hasHeaderImage,
-      possuiBodyVariables: bodyVariableCount > 0,
-      possuiButtons: buttons.length > 0,
-      componentsEnviados: components,
-      payloadFinal: payload
-    })
-  );
+  const requestStartedAt = Date.now();
+
+  safeLogInfo("template-send", "sending Meta template message", {
+    operation: "send-template-message",
+    templateName: name,
+    language,
+    componentTypes: components.map((component) => component.type),
+    hasHeader: hasHeaderImage,
+    hasBodyParameters: bodyVariableCount > 0,
+    hasButtons: buttons.length > 0,
+    destinationMasked: maskMetaDestination(to)
+  });
 
   const response = await fetch(
     `https://graph.facebook.com/${apiVersion}/${phoneNumberId}/messages`,
@@ -690,17 +727,27 @@ export async function sendMetaTemplateMessage({
   );
   const data = await response.json().catch(() => null);
 
-  console.info(
-    "[template-send-debug]",
-    JSON.stringify({
-      templateName: name,
-      responseStatus: response.status,
-      responseOk: response.ok,
-      respostaMeta: data
-    })
-  );
+  safeLogInfo("template-send", "Meta template response received", {
+    operation: "send-template-message",
+    templateName: name,
+    language,
+    responseStatus: response.status,
+    responseOk: response.ok,
+    durationMs: Date.now() - requestStartedAt,
+    ...summarizeMetaTemplateSendResponse(data),
+    ...summarizeMetaError(data)
+  });
 
   if (!response.ok) {
+    safeLogError("template-send", new Error("meta-template-send-failed"), {
+      operation: "send-template-message",
+      templateName: name,
+      language,
+      responseStatus: response.status,
+      responseOk: response.ok,
+      durationMs: Date.now() - requestStartedAt,
+      ...summarizeMetaError(data)
+    });
     throw new Error(readMetaErrorMessage(data, "Falha ao enviar template pela Meta."));
   }
 

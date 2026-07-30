@@ -2,18 +2,24 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ChevronLeft, ChevronRight, Library, Loader2 } from "lucide-react";
+import { TemplateCreatePanel } from "./TemplateCreatePanel";
 import { TemplateDetailsDrawer } from "./TemplateDetailsDrawer";
 import { TemplateEmptyState } from "./TemplateEmptyState";
 import { TemplateLoading } from "./TemplateLoading";
 import { TemplateTable } from "./TemplateTable";
 import { TemplateToolbar } from "./TemplateToolbar";
 import type {
+  TemplateChannelOption,
+  TemplateChannelsResponse,
   TemplateDetail,
   TemplateDetailResponse,
+  TemplateHeaderImageAssociationResponse,
   TemplateLibraryFilters,
   TemplateListItem,
   TemplateListResponse,
-  TemplatePagination
+  TemplateListSummary,
+  TemplatePagination,
+  TemplateSyncResult
 } from "./types";
 
 const initialFilters: TemplateLibraryFilters = {
@@ -22,6 +28,7 @@ const initialFilters: TemplateLibraryFilters = {
   language: "",
   metaStatus: "",
   operationalStatus: "",
+  headerFormat: "",
   hasImage: ""
 };
 
@@ -34,11 +41,24 @@ const initialPagination: TemplatePagination = {
   hasPreviousPage: false
 };
 
+const initialSummary: TemplateListSummary = {
+  total: 0,
+  ready: 0,
+  waiting: 0,
+  pending: 0,
+  needsMedia: 0,
+  rejected: 0
+};
+
 function isTemplateListResponse(value: unknown): value is TemplateListResponse {
   if (!value || typeof value !== "object") return false;
 
   const candidate = value as Partial<TemplateListResponse>;
-  return Array.isArray(candidate.templates) && Boolean(candidate.pagination);
+  return (
+    Array.isArray(candidate.templates) &&
+    Boolean(candidate.pagination) &&
+    Boolean(candidate.summary)
+  );
 }
 
 function isTemplateDetailResponse(value: unknown): value is TemplateDetailResponse {
@@ -46,6 +66,25 @@ function isTemplateDetailResponse(value: unknown): value is TemplateDetailRespon
 
   const candidate = value as Partial<TemplateDetailResponse>;
   return Boolean(candidate.template && typeof candidate.template.id === "string");
+}
+
+function isTemplateChannelsResponse(value: unknown): value is TemplateChannelsResponse {
+  if (!value || typeof value !== "object") return false;
+
+  const candidate = value as Partial<TemplateChannelsResponse>;
+  return Array.isArray(candidate.channels);
+}
+
+function isTemplateSyncResult(value: unknown): value is TemplateSyncResult {
+  if (!value || typeof value !== "object") return false;
+
+  const candidate = value as Partial<TemplateSyncResult>;
+  return (
+    typeof candidate.complete === "boolean" &&
+    typeof candidate.totalFetched === "number" &&
+    typeof candidate.created === "number" &&
+    typeof candidate.updated === "number"
+  );
 }
 
 async function readTemplateError(response: Response) {
@@ -59,9 +98,32 @@ function hasFilters(filters: TemplateLibraryFilters) {
   return Object.values(filters).some((value) => value.trim() !== "");
 }
 
+function isSyncableMetaChannel(channel: TemplateChannelOption) {
+  return (
+    channel.type === "whatsapp" &&
+    channel.provider === "meta" &&
+    Boolean(channel.wabaId) &&
+    channel.hasAccessToken
+  );
+}
+
+function formatSyncSummary(result: TemplateSyncResult) {
+  const base = `Sincronização concluída. ${result.totalFetched} templates encontrados, ${result.created} criados e ${result.updated} atualizados.`;
+  const extras = [
+    result.reactivated > 0 ? `${result.reactivated} reativados` : null,
+    result.markedNotReturned > 0 ? `${result.markedNotReturned} marcados como não retornados` : null,
+    result.skipped > 0 ? `${result.skipped} ignorados` : null,
+    result.failed > 0 ? `${result.failed} falharam` : null
+  ].filter(Boolean);
+  const status = result.complete ? "" : " Sincronização incompleta.";
+
+  return extras.length > 0 ? `${base} ${extras.join(", ")}.${status}` : `${base}${status}`;
+}
+
 export function TemplateLibraryPage() {
   const [templates, setTemplates] = useState<TemplateListItem[]>([]);
   const [pagination, setPagination] = useState<TemplatePagination>(initialPagination);
+  const [summary, setSummary] = useState<TemplateListSummary>(initialSummary);
   const [filters, setFilters] = useState<TemplateLibraryFilters>(initialFilters);
   const [appliedQuery, setAppliedQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -70,11 +132,23 @@ export function TemplateLibraryPage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateListItem | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [createPanelOpen, setCreatePanelOpen] = useState(false);
   const [templateDetails, setTemplateDetails] = useState<TemplateDetail | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [detailsRefreshKey, setDetailsRefreshKey] = useState(0);
+  const [channels, setChannels] = useState<TemplateChannelOption[]>([]);
+  const [channelsLoading, setChannelsLoading] = useState(true);
+  const [channelsError, setChannelsError] = useState<string | null>(null);
+  const [selectedSyncChannelId, setSelectedSyncChannelId] = useState("");
+  const [syncing, setSyncing] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState<{
+    type: "success" | "error";
+    message: string;
+    warnings?: string[];
+  } | null>(null);
   const drawerTriggerRef = useRef<HTMLElement | null>(null);
+  const syncInFlightRef = useRef(false);
 
   const activeFilters = useMemo(
     () => ({
@@ -83,6 +157,7 @@ export function TemplateLibraryPage() {
       language: filters.language,
       metaStatus: filters.metaStatus,
       operationalStatus: filters.operationalStatus,
+      headerFormat: filters.headerFormat,
       hasImage: filters.hasImage
     }),
     [
@@ -91,10 +166,70 @@ export function TemplateLibraryPage() {
       filters.language,
       filters.metaStatus,
       filters.operationalStatus,
+      filters.headerFormat,
       filters.hasImage
     ]
   );
   const hasActiveFilters = hasFilters(activeFilters);
+  const syncableChannels = useMemo(
+    () => channels.filter(isSyncableMetaChannel),
+    [channels]
+  );
+  const selectedSyncChannel = useMemo(() => {
+    if (syncableChannels.length === 0) return null;
+    return (
+      syncableChannels.find((channel) => channel.id === selectedSyncChannelId) ??
+      syncableChannels[0]
+    );
+  }, [selectedSyncChannelId, syncableChannels]);
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadChannels() {
+      setChannelsLoading(true);
+      setChannelsError(null);
+
+      try {
+        const response = await fetch("/api/channels", {
+          credentials: "same-origin",
+          signal: controller.signal
+        });
+
+        if (!response.ok) {
+          throw new Error(await readTemplateError(response));
+        }
+
+        const data = (await response.json()) as unknown;
+        if (!isTemplateChannelsResponse(data)) {
+          throw new Error("Nao foi possivel carregar os canais Meta.");
+        }
+
+        if (controller.signal.aborted) return;
+
+        setChannels(data.channels);
+        const syncable = data.channels.filter(isSyncableMetaChannel);
+        setSelectedSyncChannelId((current) =>
+          current && syncable.some((channel) => channel.id === current)
+            ? current
+            : syncable[0]?.id ?? ""
+        );
+      } catch (loadError) {
+        if (controller.signal.aborted) return;
+
+        setChannelsError(
+          loadError instanceof Error
+            ? loadError.message
+            : "Nao foi possivel carregar os canais Meta."
+        );
+      } finally {
+        if (!controller.signal.aborted) setChannelsLoading(false);
+      }
+    }
+
+    void loadChannels();
+
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -140,6 +275,7 @@ export function TemplateLibraryPage() {
 
         setTemplates(data.templates);
         setPagination(data.pagination);
+        setSummary(data.summary);
       } catch (loadError) {
         if (controller.signal.aborted) return;
 
@@ -176,6 +312,110 @@ export function TemplateLibraryPage() {
     setRefreshKey((current) => current + 1);
   }, []);
 
+  const syncTemplates = useCallback(async () => {
+    if (syncInFlightRef.current) return;
+
+    if (!selectedSyncChannel) {
+      setSyncFeedback({
+        type: "error",
+        message: "Selecione um canal do WhatsApp pronto para atualizar templates."
+      });
+      return;
+    }
+
+    syncInFlightRef.current = true;
+    setSyncing(true);
+    setSyncFeedback(null);
+
+    try {
+      const response = await fetch(
+        `/api/channels/${encodeURIComponent(selectedSyncChannel.id)}/templates/sync`,
+        {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({})
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(await readTemplateError(response));
+      }
+
+      const data = (await response.json()) as unknown;
+      if (!isTemplateSyncResult(data)) {
+        throw new Error("A sincronização terminou com resposta inesperada.");
+      }
+
+      setSyncFeedback({
+        type: data.complete && data.failed === 0 ? "success" : "error",
+        message: formatSyncSummary(data),
+        warnings: [...data.warnings, ...data.errors.map((error) => error.message)]
+      });
+      refreshTemplates();
+    } catch (syncError) {
+      setSyncFeedback({
+        type: "error",
+        message:
+          syncError instanceof Error
+            ? syncError.message
+            : "Nao foi possivel sincronizar os templates. Tente novamente."
+      });
+    } finally {
+      syncInFlightRef.current = false;
+      setSyncing(false);
+    }
+  }, [refreshTemplates, selectedSyncChannel]);
+
+  const pendingNotice = useMemo(() => {
+    const needsMedia = summary.needsMedia;
+    const rejected = summary.rejected;
+    const waiting = summary.waiting;
+
+    if (needsMedia > 0) {
+      return {
+        tone: "amber" as const,
+        message:
+          needsMedia === 1
+            ? "1 template precisa de uma imagem para ser utilizado."
+            : `${needsMedia} templates precisam de imagem para serem utilizados.`,
+        actionLabel: "Resolver",
+        action: () => updateFilter("operationalStatus", "NEEDS_MEDIA")
+      };
+    }
+
+    if (rejected > 0) {
+      return {
+        tone: "rose" as const,
+        message:
+          rejected === 1
+            ? "1 template foi rejeitado e precisa de revisão."
+            : `${rejected} templates foram rejeitados e precisam de revisão.`,
+        actionLabel: "Ver templates",
+        action: () => updateFilter("metaStatus", "REJECTED")
+      };
+    }
+
+    if (waiting > 0) {
+      return {
+        tone: "blue" as const,
+        message:
+          waiting === 1
+            ? "1 template está aguardando aprovação."
+            : `${waiting} templates estão aguardando aprovação.`,
+        actionLabel: "Atualizar",
+        action: syncTemplates
+      };
+    }
+
+    return {
+      tone: "emerald" as const,
+      message: "Todos os templates estão prontos para uso.",
+      actionLabel: null,
+      action: null
+    };
+  }, [summary.needsMedia, summary.rejected, summary.waiting, syncTemplates, updateFilter]);
+
   const closeTemplateDetails = useCallback(() => {
     setDrawerOpen(false);
     setSelectedTemplate(null);
@@ -202,6 +442,33 @@ export function TemplateLibraryPage() {
 
   const retryTemplateDetails = useCallback(() => {
     setDetailsRefreshKey((current) => current + 1);
+  }, []);
+
+  const handleTemplateMediaAssociated = useCallback(
+    (result: TemplateHeaderImageAssociationResponse) => {
+      setTemplateDetails(result.template);
+      setSelectedTemplate(result.template);
+      setTemplates((current) =>
+        current.map((template) =>
+          template.id === result.template.id ? result.template : template
+        )
+      );
+      setSyncFeedback({
+        type: "success",
+        message: "Imagem associada. O template foi atualizado na biblioteca."
+      });
+      refreshTemplates();
+    },
+    [refreshTemplates]
+  );
+
+  const openCreatePanel = useCallback(() => {
+    closeTemplateDetails();
+    setCreatePanelOpen(true);
+  }, [closeTemplateDetails]);
+
+  const closeCreatePanel = useCallback(() => {
+    setCreatePanelOpen(false);
   }, []);
 
   useEffect(() => {
@@ -270,25 +537,82 @@ export function TemplateLibraryPage() {
             <div>
               <h2 className="text-2xl font-bold text-slate-950">Templates</h2>
               <p className="mt-1 max-w-2xl text-sm text-slate-500">
-                Gerencie os templates aprovados da Meta utilizados em campanhas e conversas.
+                Gerencie os templates utilizados nas campanhas e conversas.
               </p>
             </div>
-          </div>
-
-          <div className="rounded-2xl border border-amber-100 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
-            Biblioteca administrativa
           </div>
         </div>
       </section>
 
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {[
+          ["Total", summary.total],
+          ["Prontos", summary.ready],
+          ["Aguardando", summary.waiting],
+          ["Pendências", summary.pending]
+        ].map(([label, value]) => (
+          <div
+            className="rounded-2xl border border-line bg-white p-4 shadow-soft"
+            key={label}
+          >
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">
+              {label}
+            </p>
+            <p className="mt-2 text-2xl font-black text-slate-950">{value}</p>
+          </div>
+        ))}
+      </section>
+
+      <section
+        className={`flex flex-col gap-3 rounded-2xl border p-4 text-sm font-semibold sm:flex-row sm:items-center sm:justify-between ${
+          pendingNotice.tone === "rose"
+            ? "border-rose-100 bg-rose-50 text-rose-800"
+            : pendingNotice.tone === "amber"
+              ? "border-amber-100 bg-amber-50 text-amber-800"
+              : pendingNotice.tone === "blue"
+                ? "border-blue-100 bg-blue-50 text-brand"
+                : "border-emerald-100 bg-emerald-50 text-emerald-800"
+        }`}
+      >
+        <span>{pendingNotice.message}</span>
+        {pendingNotice.action && pendingNotice.actionLabel && (
+          <button
+            className="inline-flex h-9 items-center justify-center rounded-full bg-white px-4 text-xs font-bold text-slate-700 shadow-sm disabled:opacity-60"
+            disabled={syncing && pendingNotice.actionLabel === "Atualizar"}
+            onClick={pendingNotice.action}
+            type="button"
+          >
+            {pendingNotice.actionLabel}
+          </button>
+        )}
+      </section>
+
       <TemplateToolbar
+        channelsError={channelsError}
+        channelsLoading={channelsLoading}
         filters={filters}
         hasActiveFilters={hasActiveFilters}
         loading={loading}
         onClearFilters={clearFilters}
+        onCreateTemplate={openCreatePanel}
         onFilterChange={updateFilter}
         onRefresh={refreshTemplates}
+        onSelectSyncChannel={setSelectedSyncChannelId}
+        onSyncTemplates={syncTemplates}
+        selectedSyncChannelId={selectedSyncChannel?.id ?? ""}
+        syncFeedback={syncFeedback}
+        syncableChannels={syncableChannels}
+        syncing={syncing}
       />
+
+      {createPanelOpen && (
+        <TemplateCreatePanel
+          channels={syncableChannels}
+          channelsLoading={channelsLoading}
+          onCreated={refreshTemplates}
+          onClose={closeCreatePanel}
+        />
+      )}
 
       {loading && templates.length === 0 && <TemplateLoading />}
       {error && (
@@ -311,7 +635,14 @@ export function TemplateLibraryPage() {
         </section>
       )}
       {!error && !loading && templates.length === 0 && (
-        <TemplateEmptyState hasActiveFilters={hasActiveFilters} onClearFilters={clearFilters} />
+        <TemplateEmptyState
+          hasActiveFilters={hasActiveFilters}
+          onClearFilters={clearFilters}
+          onCreateTemplate={openCreatePanel}
+          onSyncTemplates={syncTemplates}
+          syncDisabled={!selectedSyncChannel || syncing || channelsLoading}
+          syncing={syncing}
+        />
       )}
       {!error && templates.length > 0 && (
         <section aria-busy={loading} className="space-y-3">
@@ -364,6 +695,7 @@ export function TemplateLibraryPage() {
         isOpen={drawerOpen}
         loading={detailsLoading}
         onClose={closeTemplateDetails}
+        onMediaAssociated={handleTemplateMediaAssociated}
         onRetry={retryTemplateDetails}
         template={selectedTemplate}
       />

@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 
 function mapChannel(channel: {
   id: string;
@@ -61,7 +63,7 @@ async function findMetaIdentifierConflict({
     });
 
     if (channel) {
-      return `Phone Number ID ja esta em uso por outro canal Meta (${channel.name}).`;
+      return true;
     }
   }
 
@@ -76,7 +78,7 @@ async function findMetaIdentifierConflict({
     });
 
     if (channel) {
-      return `External ID ja esta em uso por outro canal Meta (${channel.name}).`;
+      return true;
     }
   }
 
@@ -91,7 +93,7 @@ export async function PATCH(
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
     const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
@@ -118,7 +120,7 @@ export async function PATCH(
     });
 
     if (!current) {
-      return NextResponse.json({ error: "Canal nao encontrado." }, { status: 404 });
+      return publicErrorResponse({ code: "CHANNEL_NOT_FOUND", status: 404 });
     }
 
     const name = body?.name?.trim();
@@ -127,15 +129,15 @@ export async function PATCH(
     const status = body?.status?.trim().toUpperCase();
 
     if (body?.name !== undefined && !name) {
-      return NextResponse.json({ error: "Nome obrigatorio." }, { status: 400 });
+      return publicErrorResponse({ code: "CHANNEL_INVALID_INPUT", status: 400 });
     }
 
     if (type !== undefined && !["whatsapp"].includes(type)) {
-      return NextResponse.json({ error: "Tipo de canal invalido." }, { status: 400 });
+      return publicErrorResponse({ code: "CHANNEL_INVALID_INPUT", status: 400 });
     }
 
     if (status !== undefined && !["ACTIVE", "INACTIVE"].includes(status)) {
-      return NextResponse.json({ error: "Status invalido." }, { status: 400 });
+      return publicErrorResponse({ code: "CHANNEL_INVALID_INPUT", status: 400 });
     }
 
     const phoneNumberId = body?.phoneNumberId?.trim();
@@ -157,7 +159,7 @@ export async function PATCH(
       });
 
       if (conflict) {
-        return NextResponse.json({ error: conflict }, { status: 409 });
+        return publicErrorResponse({ code: "CHANNEL_CONFLICT", status: 409 });
       }
     }
 
@@ -185,10 +187,14 @@ export async function PATCH(
     });
 
     return NextResponse.json({ channel: mapChannel(channel) });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel atualizar canal." },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      route: "/api/channels/[id]",
+      method: "PATCH",
+      publicErrorCode: "CHANNEL_UPDATE_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "CHANNEL_UPDATE_FAILED", status: 500 });
   }
 }

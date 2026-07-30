@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 import {
   listAdminTemplateLibrary,
   MetaTemplateServiceError,
@@ -69,6 +71,7 @@ function readTemplateListFilters(searchParams: URLSearchParams) {
     language: readOptionalText(searchParams, "language"),
     metaStatus: readOptionalText(searchParams, "metaStatus"),
     operationalStatus: readOptionalText(searchParams, "operationalStatus"),
+    headerFormat: readOptionalText(searchParams, "headerFormat"),
     hasImage: readHasImage(searchParams)
   };
   const page = readPositiveIntegerParam({
@@ -110,22 +113,40 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof TemplateListQueryError) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+      return publicErrorResponse({
+        code: "TEMPLATE_INVALID_INPUT",
+        status: 400
+      });
     }
 
     if (error instanceof MetaTemplateServiceError) {
       if (error.code === "CHANNEL_NOT_FOUND") {
-        return NextResponse.json({ error: "Canal nao encontrado." }, { status: 404 });
+        return publicErrorResponse({
+          code: "NOT_FOUND",
+          status: 404,
+          message: "Canal nao encontrado."
+        });
       }
 
       if (error.code === "INVALID_INPUT") {
-        return NextResponse.json({ error: "Parametros invalidos." }, { status: 400 });
+        return publicErrorResponse({
+          code: "TEMPLATE_INVALID_INPUT",
+          status: 400
+        });
       }
     }
 
-    return NextResponse.json(
-      { error: "Nao foi possivel carregar os templates." },
-      { status: 500 }
-    );
+    safeLogError("http-api", error, {
+      operation: "admin-templates-list",
+      route: "/api/templates",
+      publicErrorCode: "TEMPLATE_FETCH_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({
+      code: "TEMPLATE_FETCH_FAILED",
+      status: 500,
+      message: "Nao foi possivel carregar os templates."
+    });
   }
 }

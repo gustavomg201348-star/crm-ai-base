@@ -10,8 +10,10 @@ import {
   processCampaign
 } from "@/lib/campaigns";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
 import { digitsOnlyPhone } from "@/lib/phone-normalization.service";
+import { safeLogError } from "@/lib/safe-logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -55,11 +57,19 @@ export async function GET(request: NextRequest) {
     });
 
     return NextResponse.json({ campaigns: campaigns.map(mapCampaign) });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel carregar disparos." },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      operation: "campaigns-list",
+      route: "/api/campaigns",
+      publicErrorCode: "INTERNAL_ERROR",
+      status: 500
+    });
+
+    return publicErrorResponse({
+      code: "INTERNAL_ERROR",
+      status: 500,
+      message: "Nao foi possivel carregar disparos."
+    });
   }
 }
 
@@ -206,14 +216,17 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ campaign: mapCampaign(processed) }, { status: 201 });
   } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Nao foi possivel criar o disparo."
-      },
-      { status: 500 }
-    );
+    safeLogError("http-api", error, {
+      operation: "campaign-create",
+      route: "/api/campaigns",
+      publicErrorCode: "CAMPAIGN_CREATE_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({
+      code: "CAMPAIGN_CREATE_FAILED",
+      status: 500,
+      message: "Nao foi possivel criar o disparo."
+    });
   }
 }

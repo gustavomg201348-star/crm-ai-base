@@ -46,6 +46,44 @@ export type NormalizedMetaTemplateButton =
       phone_number: string;
     };
 
+export type MetaTemplateHeaderType = "NONE" | "TEXT" | "IMAGE" | "DOCUMENT" | "VIDEO";
+
+export type CreateTemplateHeaderMediaInput = {
+  fileName: string;
+  mimeType: string;
+  bytes: Buffer | Uint8Array;
+};
+
+export type CreateMetaTemplateHeaderInput =
+  | {
+      type: "NONE";
+    }
+  | {
+      type: "TEXT";
+      text: string;
+    }
+  | {
+      type: "IMAGE" | "DOCUMENT" | "VIDEO";
+      media: CreateTemplateHeaderMediaInput;
+    };
+
+export type CreateMetaTemplateInput = {
+  companyId: string;
+  channelId: string;
+  appId: string;
+  accessToken: string;
+  wabaId: string;
+  name: string;
+  language: string;
+  category: "UTILITY" | "MARKETING" | "AUTHENTICATION";
+  bodyText: string;
+  bodyExamples?: string[][];
+  footerText?: string;
+  buttons?: MetaTemplateButtonInput[];
+  header: CreateMetaTemplateHeaderInput;
+  storageNamespace?: string;
+};
+
 export type CreateImageHeaderTemplateInput = {
   companyId: string;
   channelId: string;
@@ -59,11 +97,7 @@ export type CreateImageHeaderTemplateInput = {
   bodyExamples?: string[][];
   footerText?: string;
   buttons?: MetaTemplateButtonInput[];
-  image: {
-    fileName: string;
-    mimeType: string;
-    bytes: Buffer | Uint8Array;
-  };
+  image: CreateTemplateHeaderMediaInput;
   storageNamespace?: string;
 };
 
@@ -119,6 +153,35 @@ export type ValidatedImageHeaderTemplateInput = {
   bodyExamples?: string[][];
   footerText: string | null;
   buttons: NormalizedMetaTemplateButton[];
+};
+
+export type ValidatedMetaTemplateHeaderInput =
+  | {
+      type: "NONE";
+    }
+  | {
+      type: "TEXT";
+      text: string;
+    }
+  | {
+      type: "IMAGE" | "DOCUMENT" | "VIDEO";
+      media: CreateTemplateHeaderMediaInput;
+    };
+
+export type ValidatedCreateMetaTemplateInput = {
+  companyId: string;
+  channelId: string;
+  appId: string;
+  accessToken: string;
+  wabaId: string;
+  name: string;
+  language: string;
+  category: MetaTemplateCategory;
+  bodyText: string;
+  bodyExamples?: string[][];
+  footerText: string | null;
+  buttons: NormalizedMetaTemplateButton[];
+  header: ValidatedMetaTemplateHeaderInput;
 };
 
 export type MetaTemplateCreationDependencies = {

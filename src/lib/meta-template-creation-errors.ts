@@ -1,7 +1,9 @@
 import { MetaTemplateClientRequestError } from "@/lib/meta-template-client";
 import {
   TemplateMediaStorageError,
-  type StoredTemplateMedia
+  type StoredTemplateMedia,
+  type TemplateHeaderMediaExtension,
+  type TemplateHeaderMediaMimeType
 } from "@/lib/template-media-storage";
 
 export type MetaTemplateCreationStage =
@@ -109,7 +111,9 @@ export function createValidationError({
   });
 }
 
-export function storageRecoveryContext(media?: StoredTemplateMedia) {
+export function storageRecoveryContext(
+  media?: StoredTemplateMedia<TemplateHeaderMediaMimeType, TemplateHeaderMediaExtension>
+) {
   return media
     ? {
         storageKey: media.storageKey,

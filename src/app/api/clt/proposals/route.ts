@@ -9,14 +9,17 @@ import {
   logContactNameMutationAttempt
 } from "@/lib/contacts";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
+import { isPrismaKnownRequestError } from "@/lib/prisma-errors";
 import { mapProposal, proposalInclude } from "@/lib/proposals";
+import { safeLogError } from "@/lib/safe-logger";
 
 export async function POST(request: NextRequest) {
   try {
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
 
     const body = (await request.json().catch(() => null)) as
@@ -28,10 +31,7 @@ export async function POST(request: NextRequest) {
       | null;
 
     if (!body?.customer || !body.offer) {
-      return NextResponse.json(
-        { error: "Dados do cliente e oferta sao obrigatorios." },
-        { status: 400 }
-      );
+      return publicErrorResponse({ code: "CLT_INVALID_REQUEST", status: 400 });
     }
 
     const customer = body.customer;
@@ -41,10 +41,7 @@ export async function POST(request: NextRequest) {
     const cpf = onlyDigits(customer.cpf);
 
     if (!phone || !cpf) {
-      return NextResponse.json(
-        { error: "CPF e telefone sao obrigatorios para salvar proposta." },
-        { status: 400 }
-      );
+      return publicErrorResponse({ code: "CLT_INVALID_REQUEST", status: 400 });
     }
 
     const proposalStage = await prisma.pipelineStage.findFirst({
@@ -170,16 +167,32 @@ export async function POST(request: NextRequest) {
       action: "PROPOSAL_CREATED",
       cpf,
       phone,
-      message: `Proposta CLT criada no ${offer.bankName}.`,
+      message: "Proposta CLT criada.",
       input: { customer, offer },
       output: { proposalId: proposal.id, amount: offer.releasedAmount }
     });
 
     return NextResponse.json({ proposal: mapProposal(proposal) }, { status: 201 });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel salvar proposta CLT." },
-      { status: 500 }
-    );
+  } catch (error) {
+    const session = getSessionFromRequest(request);
+
+    if (isPrismaKnownRequestError(error, "P2002")) {
+      return publicErrorResponse({ code: "CLT_PROPOSAL_CONFLICT", status: 409 });
+    }
+
+    if (isPrismaKnownRequestError(error, "P2025")) {
+      return publicErrorResponse({ code: "CLT_PROPOSAL_NOT_FOUND", status: 404 });
+    }
+
+    safeLogError("http-api", error, {
+      route: "/api/clt/proposals",
+      method: "POST",
+      companyId: session?.companyId,
+      currentUserId: session?.id,
+      publicErrorCode: "CLT_PROPOSAL_CREATE_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "CLT_PROPOSAL_CREATE_FAILED", status: 500 });
   }
 }

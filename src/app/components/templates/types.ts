@@ -8,6 +8,7 @@ export type TemplateListItem = {
   channelLabel: string;
   hasImage: boolean;
   requiresHeaderMedia: boolean;
+  headerFormat: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -25,6 +26,16 @@ export type TemplatePagination = {
 export type TemplateListResponse = {
   templates: TemplateListItem[];
   pagination: TemplatePagination;
+  summary: TemplateListSummary;
+};
+
+export type TemplateListSummary = {
+  total: number;
+  ready: number;
+  waiting: number;
+  pending: number;
+  needsMedia: number;
+  rejected: number;
 };
 
 export type TemplateHeaderContent = {
@@ -83,11 +94,67 @@ export type TemplateDetailResponse = {
   template: TemplateDetail;
 };
 
+export type TemplateHeaderImageMediaAsset = {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  publicUrl: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TemplateHeaderImageMediaAssetsResponse = {
+  mediaAssets: TemplateHeaderImageMediaAsset[];
+};
+
+export type TemplateHeaderImageAssociationResponse = {
+  template: TemplateDetail;
+  mediaAsset: TemplateHeaderImageMediaAsset;
+};
+
+export type TemplateChannelOption = {
+  id: string;
+  name: string;
+  type: string;
+  provider: string;
+  wabaId: string | null;
+  displayPhone: string | null;
+  hasAccessToken: boolean;
+  status: string;
+};
+
+export type TemplateChannelsResponse = {
+  channels: TemplateChannelOption[];
+};
+
+export type TemplateSyncError = {
+  code: string;
+  message: string;
+  retryable: boolean;
+};
+
+export type TemplateSyncResult = {
+  complete: boolean;
+  totalFetched: number;
+  totalDeduplicated: number;
+  totalNormalized: number;
+  created: number;
+  updated: number;
+  reactivated: number;
+  markedNotReturned: number;
+  skipped: number;
+  failed: number;
+  warnings: string[];
+  errors: TemplateSyncError[];
+};
+
 export type TemplateLibraryFilters = {
   q: string;
   category: string;
   language: string;
   metaStatus: string;
   operationalStatus: string;
+  headerFormat: string;
   hasImage: "" | "true" | "false";
 };

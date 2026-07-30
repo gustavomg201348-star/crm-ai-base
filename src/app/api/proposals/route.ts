@@ -4,11 +4,13 @@ import { getSessionFromRequest } from "@/lib/auth";
 import { createActivity } from "@/lib/activities";
 import { getContactNormalizedPhone } from "@/lib/contacts";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
 import {
   isPrismaUniqueViolation,
   isPrismaUniqueViolationForTarget
 } from "@/lib/prisma-errors";
+import { safeLogError } from "@/lib/safe-logger";
 import {
   isProposalStatus,
   mapProposal,
@@ -252,7 +254,7 @@ export async function GET(request: NextRequest) {
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
     const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
@@ -284,11 +286,19 @@ export async function GET(request: NextRequest) {
       proposals: proposals.map(mapProposal),
       metrics: buildMetrics(metricRows)
     });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel carregar propostas." },
-      { status: 500 }
-    );
+  } catch (error) {
+    const session = getSessionFromRequest(request);
+
+    safeLogError("http-api", error, {
+      route: "/api/proposals",
+      method: "GET",
+      companyId: session?.companyId,
+      currentUserId: session?.id,
+      publicErrorCode: "INTERNAL_ERROR",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "INTERNAL_ERROR", status: 500 });
   }
 }
 
@@ -297,7 +307,7 @@ export async function POST(request: NextRequest) {
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
     const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
@@ -326,7 +336,7 @@ export async function POST(request: NextRequest) {
       | null;
 
     if (!body) {
-      return NextResponse.json({ error: "Dados invalidos." }, { status: 400 });
+      return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
     }
 
     const amount = toMoney(body?.amount);
@@ -344,10 +354,7 @@ export async function POST(request: NextRequest) {
       typeof body?.assignedUserId === "string" ? body.assignedUserId.trim() : "";
 
     if ((!body?.contactId && !multicredClientId) || !bank || !agreement || !product) {
-      return NextResponse.json(
-        { error: "Cliente, banco, convenio e produto sao obrigatorios." },
-        { status: 400 }
-      );
+      return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
     }
 
     if (
@@ -359,10 +366,7 @@ export async function POST(request: NextRequest) {
       commissionReceived === null ||
       term === null
     ) {
-      return NextResponse.json(
-        { error: "Valores, prazo e comissao precisam ser validos." },
-        { status: 400 }
-      );
+      return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
     }
 
     const multicredClient = multicredClientId
@@ -372,10 +376,7 @@ export async function POST(request: NextRequest) {
       : null;
 
     if (multicredClientId && !multicredClient) {
-      return NextResponse.json(
-        { error: "Cliente Multicred nao encontrado para esta empresa." },
-        { status: 404 }
-      );
+      return publicErrorResponse({ code: "NOT_FOUND", status: 404 });
     }
 
     const assignedUser = assignedUserId
@@ -385,10 +386,7 @@ export async function POST(request: NextRequest) {
       : null;
 
     if (assignedUserId && !assignedUser) {
-      return NextResponse.json(
-        { error: "Responsavel nao encontrado para esta empresa." },
-        { status: 404 }
-      );
+      return publicErrorResponse({ code: "USER_NOT_FOUND", status: 404 });
     }
 
     let contact = body?.contactId
@@ -398,16 +396,13 @@ export async function POST(request: NextRequest) {
       : null;
 
     if (body?.contactId && !contact) {
-      return NextResponse.json({ error: "Contato nao encontrado." }, { status: 404 });
+      return publicErrorResponse({ code: "CONTACT_NOT_FOUND", status: 404 });
     }
 
     if (!contact && multicredClient) {
       const phone = normalizePhone(multicredClient.whatsapp ?? multicredClient.phone);
       if (!phone) {
-        return NextResponse.json(
-          { error: "Cliente Multicred precisa ter telefone ou WhatsApp para gerar proposta." },
-          { status: 400 }
-        );
+        return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
       }
       const contactNormalizedPhone = getContactNormalizedPhone(phone);
 
@@ -480,7 +475,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (!contact) {
-      return NextResponse.json({ error: "Contato nao encontrado." }, { status: 404 });
+      return publicErrorResponse({ code: "CONTACT_NOT_FOUND", status: 404 });
     }
 
     const proposalStage = await prisma.pipelineStage.findFirst({
@@ -561,10 +556,18 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({ proposal: mapProposal(proposal) }, { status: 201 });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel criar proposta." },
-      { status: 500 }
-    );
+  } catch (error) {
+    const session = getSessionFromRequest(request);
+
+    safeLogError("http-api", error, {
+      route: "/api/proposals",
+      method: "POST",
+      companyId: session?.companyId,
+      currentUserId: session?.id,
+      publicErrorCode: "PROPOSAL_CREATE_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "PROPOSAL_CREATE_FAILED", status: 500 });
   }
 }

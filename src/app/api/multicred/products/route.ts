@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import {
   buildMulticredProductData,
   ensureDefaultMulticredCatalog,
@@ -8,13 +9,14 @@ import {
   multicredProductInclude
 } from "@/lib/multicred-products";
 import { requireCompanyAdmin } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 
 export async function GET(request: NextRequest) {
   try {
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
     const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
@@ -37,11 +39,15 @@ export async function GET(request: NextRequest) {
     });
 
     return NextResponse.json({ products: products.map(mapMulticredProduct) });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel carregar produtos Multicred." },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      route: "/api/multicred/products",
+      method: "GET",
+      publicErrorCode: "MULTICRED_PRODUCT_LIST_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "MULTICRED_PRODUCT_LIST_FAILED", status: 500 });
   }
 }
 
@@ -50,28 +56,28 @@ export async function POST(request: NextRequest) {
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
     const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
 
     const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
     if (!body) {
-      return NextResponse.json({ error: "Dados invalidos." }, { status: 400 });
+      return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
     }
 
     const data = buildMulticredProductData(body);
 
     if (!data.bankName) {
-      return NextResponse.json({ error: "Nome do banco e obrigatorio." }, { status: 400 });
+      return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
     }
 
     if (!data.agreement) {
-      return NextResponse.json({ error: "Convenio e obrigatorio." }, { status: 400 });
+      return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
     }
 
     if (!data.product) {
-      return NextResponse.json({ error: "Produto e obrigatorio." }, { status: 400 });
+      return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
     }
 
     const existingBank = await prisma.multicredBank.findFirst({
@@ -125,10 +131,14 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({ product: mapMulticredProduct(product) }, { status: 201 });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel salvar produto Multicred." },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      route: "/api/multicred/products",
+      method: "POST",
+      publicErrorCode: "MULTICRED_PRODUCT_SAVE_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "MULTICRED_PRODUCT_SAVE_FAILED", status: 500 });
   }
 }

@@ -7,9 +7,11 @@ import {
 } from "@/lib/conversation-message.service";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { readMetaMessageId, sendMetaTextMessage } from "@/lib/meta-whatsapp";
 import { canAccessConversation } from "@/lib/permissions";
 import { digitsOnlyPhone } from "@/lib/phone-normalization.service";
+import { safeLogError } from "@/lib/safe-logger";
 
 type RouteContext = {
   params: { id: string };
@@ -121,14 +123,17 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     return NextResponse.json({ conversation: mapConversation(updated) });
   } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Nao foi possivel enviar mensagem."
-      },
-      { status: 500 }
-    );
+    safeLogError("http-api", error, {
+      operation: "conversation-message-send",
+      route: "/api/conversations/[id]/messages",
+      publicErrorCode: "MESSAGE_SEND_FAILED",
+      status: 500,
+      conversationId: context.params.id
+    });
+
+    return publicErrorResponse({
+      code: "MESSAGE_SEND_FAILED",
+      status: 500
+    });
   }
 }

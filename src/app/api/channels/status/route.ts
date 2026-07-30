@@ -2,7 +2,9 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { buildConversationChannelWhere } from "@/lib/conversation-channel.service";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 
 type MetaPhoneStatus = {
   ok: boolean;
@@ -43,7 +45,7 @@ async function checkMetaPhone({
   if (!response.ok) {
     return {
       ok: false,
-      error: data?.error?.message ?? "Falha ao consultar Meta Graph API."
+      error: "Nao foi possivel consultar o status na Meta."
     };
   }
 
@@ -60,7 +62,7 @@ export async function GET(request: NextRequest) {
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
     const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
@@ -208,10 +210,14 @@ export async function GET(request: NextRequest) {
         withWarnings: statuses.filter((item) => item.warnings.length > 0).length
       }
     });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel carregar status dos canais." },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      route: "/api/channels/status",
+      method: "GET",
+      publicErrorCode: "CHANNEL_STATUS_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "CHANNEL_STATUS_FAILED", status: 500 });
   }
 }

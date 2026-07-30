@@ -2,13 +2,15 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { ensureCltIntegrations, mapCltIntegration } from "@/lib/clt-settings";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 
 export async function POST(request: NextRequest) {
   try {
     const session = getSessionFromRequest(request);
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
     const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
@@ -18,7 +20,7 @@ export async function POST(request: NextRequest) {
       | null;
 
     if (!body?.bankId) {
-      return NextResponse.json({ error: "Banco obrigatorio." }, { status: 400 });
+      return publicErrorResponse({ code: "CLT_INVALID_REQUEST", status: 400 });
     }
 
     await ensureCltIntegrations(session.companyId);
@@ -28,24 +30,18 @@ export async function POST(request: NextRequest) {
     });
 
     if (!current) {
-      return NextResponse.json({ error: "Integracao nao encontrada." }, { status: 404 });
+      return publicErrorResponse({ code: "NOT_FOUND", status: 404 });
     }
 
     if (current.provider !== "newcorban") {
-      return NextResponse.json(
-        { error: "Autenticacao assistida disponivel apenas para Newcorban." },
-        { status: 400 }
-      );
+      return publicErrorResponse({ code: "CLT_PROVIDER_REJECTED", status: 400 });
     }
 
     const username = body.username?.trim() || current.username?.trim();
     const password = body.password || current.password;
 
     if (!username || !password) {
-      return NextResponse.json(
-        { error: "Informe usuario e senha para entrar no perfil." },
-        { status: 400 }
-      );
+      return publicErrorResponse({ code: "CLT_INVALID_REQUEST", status: 400 });
     }
 
     const updated = await prisma.cltIntegration.update({
@@ -69,10 +65,19 @@ export async function POST(request: NextRequest) {
       message:
         "Fluxo assistido preparado. O envio real do SMS ainda precisa ser solicitado no Newcorban."
     });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel iniciar autenticacao Newcorban." },
-      { status: 500 }
-    );
+  } catch (error) {
+    const session = getSessionFromRequest(request);
+
+    safeLogError("http-api", error, {
+      route: "/api/clt/integrations/authenticate",
+      method: "POST",
+      companyId: session?.companyId,
+      currentUserId: session?.id,
+      publicErrorCode: "CLT_PROVIDER_UNAVAILABLE",
+      status: 500,
+      providerCode: "newcorban"
+    });
+
+    return publicErrorResponse({ code: "CLT_PROVIDER_UNAVAILABLE", status: 500 });
   }
 }

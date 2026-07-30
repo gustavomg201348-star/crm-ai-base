@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { campaignInclude, mapCampaign } from "@/lib/campaigns";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { getSessionOrUnauthorized, requireCompanyAdmin } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,10 +35,19 @@ export async function PATCH(
     });
 
     return NextResponse.json({ campaign: mapCampaign(updated) });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel pausar campanha." },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      operation: "campaign-pause",
+      route: "/api/campaigns/[id]/pause",
+      publicErrorCode: "CAMPAIGN_PAUSE_FAILED",
+      status: 500,
+      campaignId: params.id
+    });
+
+    return publicErrorResponse({
+      code: "CAMPAIGN_PAUSE_FAILED",
+      status: 500,
+      message: "Nao foi possivel pausar campanha."
+    });
   }
 }

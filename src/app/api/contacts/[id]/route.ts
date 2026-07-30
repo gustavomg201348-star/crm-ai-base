@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { createActivity } from "@/lib/activities";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import {
   contactInclude,
   findContactByNormalizedPhone,
@@ -17,6 +18,7 @@ import {
   isPrismaUniqueViolation,
   isPrismaUniqueViolationForTarget
 } from "@/lib/prisma-errors";
+import { safeLogError } from "@/lib/safe-logger";
 
 type RouteContext = {
   params: { id: string };
@@ -61,11 +63,20 @@ export async function GET(request: NextRequest, context: RouteContext) {
     }
 
     return NextResponse.json({ contact: mapContact(contact) });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel carregar o contato." },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      operation: "contact-detail",
+      route: "/api/contacts/[id]",
+      publicErrorCode: "INTERNAL_ERROR",
+      status: 500,
+      contactId: context.params.id
+    });
+
+    return publicErrorResponse({
+      code: "INTERNAL_ERROR",
+      status: 500,
+      message: "Nao foi possivel carregar o contato."
+    });
   }
 }
 
@@ -297,16 +308,25 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       (isPrismaUniqueViolationForTarget(error, "normalizedPhone") ||
         isPrismaUniqueViolationForTarget(error, ["companyId", "normalizedPhone"]))
     ) {
-      return NextResponse.json(
-        { error: "Já existe um contato com este telefone." },
-        { status: 409 }
-      );
+      return publicErrorResponse({
+        code: "CONTACT_DUPLICATE",
+        status: 409
+      });
     }
 
-    return NextResponse.json(
-      { error: "Nao foi possivel atualizar o contato." },
-      { status: 500 }
-    );
+    safeLogError("http-api", error, {
+      operation: "contact-update",
+      route: "/api/contacts/[id]",
+      publicErrorCode: "CONTACT_UPDATE_FAILED",
+      status: 500,
+      contactId: context.params.id
+    });
+
+    return publicErrorResponse({
+      code: "CONTACT_UPDATE_FAILED",
+      status: 500,
+      message: "Nao foi possivel atualizar o contato."
+    });
   }
 }
 
@@ -347,10 +367,19 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     });
 
     return NextResponse.json({ contact: mapContact(contact) });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel arquivar o contato." },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      operation: "contact-delete",
+      route: "/api/contacts/[id]",
+      publicErrorCode: "CONTACT_DELETE_FAILED",
+      status: 500,
+      contactId: context.params.id
+    });
+
+    return publicErrorResponse({
+      code: "CONTACT_DELETE_FAILED",
+      status: 500,
+      message: "Nao foi possivel arquivar o contato."
+    });
   }
 }

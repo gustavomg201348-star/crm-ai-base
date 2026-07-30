@@ -1,10 +1,16 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
-import { markTemplateNotReturned, upsertNormalizedMetaTemplate } from "@/lib/meta-template-service";
+import {
+  markTemplateNotReturned,
+  resolveDefaultHeaderMediaAssetForTemplate,
+  upsertNormalizedMetaTemplate
+} from "@/lib/meta-template-service";
 import { findMetaTemplateByIdentity, listMetaTemplatesByWaba } from "@/lib/meta-template-repository";
 import { syncMetaTemplatesForWaba } from "@/lib/meta-template-sync";
+import { safeLogError } from "@/lib/safe-logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,7 +29,7 @@ export async function POST(
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
 
     const blocked = requireCompanyAdmin(session);
@@ -35,7 +41,7 @@ export async function POST(
     });
 
     if (!company) {
-      return NextResponse.json({ error: "Empresa invalida." }, { status: 400 });
+      return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
     }
 
     const { id } = await params;
@@ -55,11 +61,11 @@ export async function POST(
     });
 
     if (!channel?.wabaId) {
-      return NextResponse.json({ error: "Canal Meta ou WABA invalido." }, { status: 400 });
+      return publicErrorResponse({ code: "CHANNEL_INVALID_INPUT", status: 400 });
     }
 
     if (!channel.accessToken) {
-      return NextResponse.json({ error: "Canal Meta sem token." }, { status: 400 });
+      return publicErrorResponse({ code: "CHANNEL_INVALID_INPUT", status: 400 });
     }
 
     const body = (await request.json().catch(() => null)) as
@@ -78,6 +84,16 @@ export async function POST(
         findExistingTemplate: ({ companyId, wabaId, name, language }) =>
           findMetaTemplateByIdentity(companyId, wabaId, name, language),
         upsertTemplate: upsertNormalizedMetaTemplate,
+        resolveDefaultHeaderMediaAsset: ({
+          companyId,
+          normalizedTemplate,
+          existingDefaultHeaderMediaAssetId
+        }) =>
+          resolveDefaultHeaderMediaAssetForTemplate({
+            companyId,
+            normalizedTemplate,
+            existingDefaultHeaderMediaAssetId
+          }),
         listActiveTemplatesByWaba: ({ companyId, wabaId }) =>
           listMetaTemplatesByWaba(companyId, wabaId, { isActive: true }),
         markTemplateNotReturned: ({ companyId, templateId }) =>
@@ -86,10 +102,18 @@ export async function POST(
     );
 
     return NextResponse.json(result);
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel sincronizar templates da Meta." },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      operation: "admin-template-sync",
+      route: "/api/channels/[id]/templates/sync",
+      publicErrorCode: "TEMPLATE_FETCH_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({
+      code: "TEMPLATE_FETCH_FAILED",
+      status: 500,
+      message: "Nao foi possivel sincronizar templates da Meta."
+    });
   }
 }

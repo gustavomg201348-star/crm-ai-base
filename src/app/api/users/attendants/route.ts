@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { listAttendants } from "@/lib/lead-assignment";
 import { getSessionOrUnauthorized } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 
 export async function GET(request: NextRequest) {
   try {
@@ -9,10 +11,18 @@ export async function GET(request: NextRequest) {
 
     const attendants = await listAttendants(session.companyId);
     return NextResponse.json({ attendants });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel carregar atendentes." },
-      { status: 500 }
-    );
+  } catch (error) {
+    const { session } = getSessionOrUnauthorized(request);
+
+    safeLogError("http-api", error, {
+      route: "/api/users/attendants",
+      method: "GET",
+      companyId: session?.companyId,
+      currentUserId: session?.id,
+      publicErrorCode: "INTERNAL_ERROR",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "INTERNAL_ERROR", status: 500 });
   }
 }

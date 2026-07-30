@@ -119,7 +119,9 @@ export type PersistCreatedMetaTemplateRepositoryInput = {
   components: string;
   rawPayload: string | null;
   supportFlags: string | null;
-  defaultHeaderMediaAssetId: string;
+  requiresHeaderMedia: boolean;
+  headerFormat: string | null;
+  defaultHeaderMediaAssetId: string | null;
   lastSeenAt: Date | null;
 };
 
@@ -131,6 +133,7 @@ export type AdminMetaTemplateListFilters = {
   metaStatus?: string;
   operationalStatus?: string;
   hasImage?: boolean;
+  headerFormat?: string;
 };
 
 export type AdminMetaTemplateListInput = AdminMetaTemplateListFilters & {
@@ -148,6 +151,7 @@ const adminMetaTemplateListSelect = {
   metaStatus: true,
   operationalStatus: true,
   requiresHeaderMedia: true,
+  headerFormat: true,
   defaultHeaderMediaAssetId: true,
   isActive: true,
   createdAt: true,
@@ -174,6 +178,7 @@ function buildAdminMetaTemplateWhere(
     ...(input.language ? { language: input.language } : {}),
     ...(input.metaStatus ? { metaStatus: input.metaStatus } : {}),
     ...(input.operationalStatus ? { operationalStatus: input.operationalStatus } : {}),
+    ...(input.headerFormat ? { headerFormat: input.headerFormat } : {}),
     ...(input.hasImage === true ? { defaultHeaderMediaAssetId: { not: null } } : {}),
     ...(input.hasImage === false ? { defaultHeaderMediaAssetId: null } : {})
   };
@@ -422,8 +427,8 @@ export async function persistCreatedMetaTemplateRecord(
     category: input.category,
     metaStatus: input.metaStatus,
     operationalStatus: input.operationalStatus,
-    requiresHeaderMedia: true,
-    headerFormat: "IMAGE",
+    requiresHeaderMedia: input.requiresHeaderMedia,
+    headerFormat: input.headerFormat,
     components: input.components,
     rawPayload: input.rawPayload,
     supportFlags: input.supportFlags,
@@ -545,4 +550,30 @@ export function setMetaTemplateDefaultHeaderMediaAndStatus(
       operationalStatus
     }
   });
+}
+
+export async function setMetaTemplateDefaultHeaderMediaAndStatusIfUnset(
+  companyId: string,
+  templateId: string,
+  mediaAssetId: string,
+  operationalStatus: string,
+  db: DbClient = prisma
+) {
+  const updated = await db.metaTemplate.updateMany({
+    where: {
+      id: templateId,
+      companyId,
+      defaultHeaderMediaAssetId: null
+    },
+    data: {
+      defaultHeaderMediaAssetId: mediaAssetId,
+      operationalStatus
+    }
+  });
+
+  if (updated.count === 0) {
+    return null;
+  }
+
+  return findMetaTemplateById(companyId, templateId, db);
 }

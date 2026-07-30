@@ -3,7 +3,9 @@ import type { Prisma } from "@prisma/client";
 import { getSessionFromRequest } from "@/lib/auth";
 import { contactInclude, mapContact } from "@/lib/contacts";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireAdmin } from "@/lib/permissions";
+import { safeLogError } from "@/lib/safe-logger";
 
 function buildContactWhere(
   companyId: string,
@@ -98,10 +100,18 @@ export async function GET(request: NextRequest) {
         "Content-Disposition": `attachment; filename="contatos-${new Date().toISOString().slice(0, 10)}.csv"`
       }
     });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel exportar contatos." },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      operation: "contacts-export",
+      route: "/api/contacts/export",
+      publicErrorCode: "CONTACT_EXPORT_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({
+      code: "CONTACT_EXPORT_FAILED",
+      status: 500,
+      message: "Nao foi possivel exportar contatos."
+    });
   }
 }

@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { publicErrorResponse } from "@/lib/http-error-response";
+import { safeLogError } from "@/lib/safe-logger";
 
 function mapAvailableChannel(channel: {
   id: string;
@@ -25,7 +27,7 @@ export async function GET(request: NextRequest) {
     const session = getSessionFromRequest(request);
 
     if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
 
     const channels = await prisma.channel.findMany({
@@ -47,10 +49,14 @@ export async function GET(request: NextRequest) {
     });
 
     return NextResponse.json({ channels: channels.map(mapAvailableChannel) });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel carregar canais disponiveis." },
-      { status: 500 }
-    );
+  } catch (error) {
+    safeLogError("http-api", error, {
+      route: "/api/channels/available",
+      method: "GET",
+      publicErrorCode: "CHANNELS_LIST_FAILED",
+      status: 500
+    });
+
+    return publicErrorResponse({ code: "CHANNELS_LIST_FAILED", status: 500 });
   }
 }
