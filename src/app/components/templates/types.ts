@@ -99,7 +99,7 @@ export type TemplateHeaderImageMediaAsset = {
   fileName: string;
   mimeType: string;
   sizeBytes: number;
-  publicUrl: string;
+  publicUrl: string | null;
   createdAt: string;
   updatedAt: string;
 };

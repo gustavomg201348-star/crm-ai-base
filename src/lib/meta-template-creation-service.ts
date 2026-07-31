@@ -78,7 +78,7 @@ export type CreateMetaTemplateResult = {
     id: string;
     storageProvider: string;
     storageKey: string;
-    publicUrl: string;
+    publicUrl: string | null;
     checksum: string;
     checksumAlgorithm: "sha256";
     mimeType: string;

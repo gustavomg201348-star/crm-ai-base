@@ -128,7 +128,7 @@ export type CreateImageHeaderTemplateResult = {
     id: string;
     storageProvider: string;
     storageKey: string;
-    publicUrl: string;
+    publicUrl: string | null;
     checksum: string;
     checksumAlgorithm: "sha256";
     mimeType: "image/jpeg" | "image/png";

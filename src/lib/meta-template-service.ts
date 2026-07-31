@@ -233,7 +233,7 @@ export type AdminTemplateHeaderImageMediaAsset = {
   fileName: string;
   mimeType: string;
   sizeBytes: number;
-  publicUrl: string;
+  publicUrl: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -620,16 +620,12 @@ function mapAdminTemplateHeaderImageMediaAsset(
 ): AdminTemplateHeaderImageMediaAsset {
   const publicUrl = mediaAsset.publicUrl?.trim();
 
-  if (!publicUrl) {
-    throw new MetaTemplateServiceError("MEDIA_ASSET_INCOMPATIBLE", "Midia sem URL publica.");
-  }
-
   return {
     id: mediaAsset.id,
     fileName: mediaAsset.fileName,
     mimeType: mediaAsset.mimeType,
     sizeBytes: mediaAsset.sizeBytes,
-    publicUrl,
+    publicUrl: publicUrl || null,
     createdAt: mediaAsset.createdAt.toISOString(),
     updatedAt: mediaAsset.updatedAt.toISOString()
   };
@@ -991,7 +987,8 @@ function isUsableTemplateHeaderImageAsset(mediaAsset: MediaAsset) {
     mediaAsset.companyId.trim().length > 0 &&
     mediaAsset.type === "TEMPLATE_HEADER_IMAGE" &&
     mediaAsset.mimeType.startsWith("image/") &&
-    Boolean(mediaAsset.publicUrl?.trim().match(/^https:\/\//i))
+    Boolean(mediaAsset.storageProvider?.trim()) &&
+    Boolean(mediaAsset.storageKey?.trim())
   );
 }
 
@@ -1300,13 +1297,6 @@ export async function uploadAndAssociateTemplateHeaderImage({
     }
 
     throw error;
-  }
-
-  if (!storedMedia.publicUrl.trim().match(/^https:\/\//i)) {
-    throw new MetaTemplateServiceError(
-      "MEDIA_STORAGE_FAILED",
-      "URL publica da midia precisa ser HTTPS."
-    );
   }
 
   const persistedMediaAsset = await persistTemplateHeaderMediaAsset({
