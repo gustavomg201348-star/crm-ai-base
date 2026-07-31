@@ -235,14 +235,22 @@ function EligibleMediaAssetCard({
   disabled: boolean;
   onSelect: (mediaAsset: TemplateHeaderImageMediaAsset) => void;
 }) {
+  const safePublicUrl = mediaAsset.publicUrl?.replace(/"/g, "%22") ?? null;
+
   return (
     <div className="flex gap-3 rounded-2xl border border-line bg-white p-3">
-      <div
-        aria-label={`Preview de ${mediaAsset.fileName}`}
-        className="h-16 w-16 shrink-0 rounded-xl border border-line bg-cover bg-center"
-        role="img"
-        style={{ backgroundImage: `url("${mediaAsset.publicUrl.replace(/"/g, "%22")}")` }}
-      />
+      {safePublicUrl ? (
+        <div
+          aria-label={`Preview de ${mediaAsset.fileName}`}
+          className="h-16 w-16 shrink-0 rounded-xl border border-line bg-cover bg-center"
+          role="img"
+          style={{ backgroundImage: `url("${safePublicUrl}")` }}
+        />
+      ) : (
+        <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl border border-line bg-slate-50 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+          Imagem
+        </div>
+      )}
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-bold text-slate-800">{mediaAsset.fileName}</p>
         <p className="mt-1 text-xs font-semibold text-slate-500">

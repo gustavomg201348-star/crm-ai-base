@@ -340,16 +340,19 @@ export async function uploadMetaMedia({
     }
   );
   const data = await response.json().catch(() => null);
+  const mediaId = readMetaMediaUploadId(data);
 
-  if (!response.ok || !data?.id) {
-    throw new Error(
-      typeof data?.error?.message === "string"
-        ? data.error.message
-        : "Falha ao enviar midia para a Meta."
+  if (!response.ok || !mediaId) {
+    throw new MetaMediaUploadError(
+      readMetaMediaUploadErrorMessage(data, "Falha ao enviar midia para a Meta."),
+      {
+        status: response.status,
+        ...summarizeMetaMediaUploadError(data)
+      }
     );
   }
 
-  return data as { id: string };
+  return { id: mediaId, mediaId };
 }
 
 export async function sendMetaImageMessage({
@@ -454,12 +457,17 @@ export async function sendMetaMediaMessage({
   return data;
 }
 
+export type MetaTemplateHeaderMedia = {
+  type: "image";
+  mediaId: string;
+};
+
 type MetaTemplateSendComponent =
   | {
       type: "header";
       parameters: Array<{
         type: "image";
-        image: { link: string };
+        image: { id: string } | { link: string };
       }>;
     }
   | {
@@ -550,6 +558,72 @@ function summarizeMetaError(data: unknown) {
   };
 }
 
+function readMetaMediaUploadId(data: unknown) {
+  const id = (data as { id?: unknown } | null)?.id;
+  return typeof id === "string" && id.trim() ? id.trim() : null;
+}
+
+function readMetaMediaUploadErrorMessage(data: unknown, fallback: string) {
+  const error = data as
+    | {
+        error?: {
+          message?: string;
+          error_data?: { details?: string };
+        };
+      }
+    | null;
+
+  return error?.error?.message ?? error?.error?.error_data?.details ?? fallback;
+}
+
+function summarizeMetaMediaUploadError(data: unknown) {
+  const metaError = (data as
+    | {
+        error?: {
+          code?: string | number;
+          error_subcode?: string | number;
+          type?: string;
+          fbtrace_id?: string;
+        };
+      }
+    | null)?.error;
+
+  return {
+    metaErrorCode: metaError?.code ? String(metaError.code) : null,
+    metaErrorSubcode: metaError?.error_subcode ? String(metaError.error_subcode) : null,
+    metaErrorType: metaError?.type ?? null,
+    fbtraceId: metaError?.fbtrace_id ?? null
+  };
+}
+
+export class MetaMediaUploadError extends Error {
+  readonly stage = "meta_media_upload";
+  readonly status: number | null;
+  readonly metaErrorCode: string | null;
+  readonly metaErrorSubcode: string | null;
+  readonly metaErrorType: string | null;
+  readonly fbtraceId: string | null;
+
+  constructor(
+    message: string,
+    context: {
+      status?: number;
+      metaErrorCode?: string | null;
+      metaErrorSubcode?: string | null;
+      metaErrorType?: string | null;
+      fbtraceId?: string | null;
+    } = {}
+  ) {
+    super(message);
+    this.name = "MetaMediaUploadError";
+    this.status = context.status ?? null;
+    this.metaErrorCode = context.metaErrorCode ?? null;
+    this.metaErrorSubcode = context.metaErrorSubcode ?? null;
+    this.metaErrorType = context.metaErrorType ?? null;
+    this.fbtraceId = context.fbtraceId ?? null;
+  }
+}
+
 function summarizeMetaTemplateSendResponse(data: unknown) {
   const response = data as { messages?: Array<{ id?: string }> } | null;
 
@@ -595,6 +669,7 @@ export async function sendMetaTemplateMessage({
   language,
   variables,
   template,
+  headerMedia,
   headerImageUrl,
   buttonPayloads,
   urlButtonVariables
@@ -606,6 +681,7 @@ export async function sendMetaTemplateMessage({
   language: string;
   variables: string[];
   template?: MetaTemplate | null;
+  headerMedia?: MetaTemplateHeaderMedia | null;
   headerImageUrl?: string | null;
   buttonPayloads?: string[];
   urlButtonVariables?: string[];
@@ -620,27 +696,35 @@ export async function sendMetaTemplateMessage({
   const components: MetaTemplateSendComponent[] = [];
 
   if (hasHeaderImage) {
-    if (!headerImageUrl) {
+    if (headerMedia) {
+      components.push({
+        type: "header",
+        parameters: [
+          {
+            type: "image",
+            image: { id: headerMedia.mediaId }
+          }
+        ]
+      });
+    } else if (!headerImageUrl) {
       throw new Error(
         `O template ${name} possui imagem no cabecalho. Configure uma URL HTTPS publica em WHATSAPP_TEMPLATE_HEADER_IMAGE_URL_${name
           .toUpperCase()
           .replace(/[^A-Z0-9]+/g, "_")} ou WHATSAPP_TEMPLATE_HEADER_IMAGE_URL.`
       );
-    }
-
-    if (!/^https:\/\//i.test(headerImageUrl)) {
+    } else if (!/^https:\/\//i.test(headerImageUrl)) {
       throw new Error("A imagem do cabecalho do template precisa ser uma URL publica HTTPS.");
+    } else {
+      components.push({
+        type: "header",
+        parameters: [
+          {
+            type: "image",
+            image: { link: headerImageUrl }
+          }
+        ]
+      });
     }
-
-    components.push({
-      type: "header",
-      parameters: [
-        {
-          type: "image",
-          image: { link: headerImageUrl }
-        }
-      ]
-    });
   }
 
   if (bodyVariableCount > 0) {
@@ -709,6 +793,7 @@ export async function sendMetaTemplateMessage({
     language,
     componentTypes: components.map((component) => component.type),
     hasHeader: hasHeaderImage,
+    headerMediaMode: headerMedia ? "id" : headerImageUrl ? "link" : "none",
     hasBodyParameters: bodyVariableCount > 0,
     hasButtons: buttons.length > 0,
     destinationMasked: maskMetaDestination(to)
