@@ -107,6 +107,7 @@ export type TemplateMediaStorageErrorCode =
   | "STORAGE_DELETE_FAILED"
   | "STORAGE_INVALID_KEY"
   | "STORAGE_EMPTY_FILE"
+  | "STORAGE_OPERATION_TIMEOUT"
   | "INVALID_FILE_NAME"
   | "EMPTY_FILE"
   | "UNSUPPORTED_MIME_TYPE"
@@ -115,15 +116,27 @@ export type TemplateMediaStorageErrorCode =
   | "STORAGE_CONFIGURATION_ERROR"
   | "STORAGE_WRITE_ERROR";
 
+export type TemplateMediaStorageErrorContext = Record<
+  string,
+  string | number | boolean | null
+>;
+
 export class TemplateMediaStorageError extends Error {
   readonly code: TemplateMediaStorageErrorCode;
   readonly cause?: unknown;
+  readonly context?: TemplateMediaStorageErrorContext;
 
-  constructor(code: TemplateMediaStorageErrorCode, message: string, cause?: unknown) {
+  constructor(
+    code: TemplateMediaStorageErrorCode,
+    message: string,
+    cause?: unknown,
+    context?: TemplateMediaStorageErrorContext
+  ) {
     super(message);
     this.name = "TemplateMediaStorageError";
     this.code = code;
     this.cause = cause;
+    this.context = context;
   }
 
   toJSON() {
@@ -158,6 +171,7 @@ export type R2StorageConfig = {
   accessKeyId: string;
   secretAccessKey: string;
   publicBaseUrl: string | null;
+  timeoutMs: number;
 };
 
 export type TemplateMediaS3Command =
@@ -165,6 +179,10 @@ export type TemplateMediaS3Command =
   | GetObjectCommand
   | DeleteObjectCommand;
 
+export type TemplateMediaS3SendOptions = {
+  abortSignal?: AbortSignal;
+};
+
 export type TemplateMediaS3Client = {
-  send(command: TemplateMediaS3Command): Promise<unknown>;
+  send(command: TemplateMediaS3Command, options?: TemplateMediaS3SendOptions): Promise<unknown>;
 };

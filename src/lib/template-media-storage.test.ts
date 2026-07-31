@@ -14,6 +14,10 @@ import {
   saveTemplateHeaderMedia,
   TemplateMediaStorageError
 } from "./template-media-storage";
+import {
+  resetTemplateMediaR2ClientCacheForTests,
+  setTemplateMediaR2ClientFactoryForTests
+} from "./template-media-storage-r2";
 
 const pngBytes = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
@@ -29,6 +33,18 @@ function r2Config() {
     secretAccessKey: "test-secret-key",
     publicBaseUrl: null
   };
+}
+
+function abortedPromise(signal?: AbortSignal) {
+  return new Promise<never>((_resolve, reject) => {
+    signal?.addEventListener(
+      "abort",
+      () => {
+        reject(new DOMException("The operation was aborted.", "AbortError"));
+      },
+      { once: true }
+    );
+  });
 }
 
 test("salva, le e exclui midia local preservando checksum, MIME e tamanho", async () => {
@@ -236,4 +252,283 @@ test("usa comandos R2/S3 para salvar, ler e excluir sem URL publica obrigatoria"
   assert.equal(commands.some((command) => command instanceof PutObjectCommand), true);
   assert.equal(commands.some((command) => command instanceof GetObjectCommand), true);
   assert.equal(commands.some((command) => command instanceof DeleteObjectCommand), true);
+});
+
+test("reutiliza S3Client para a mesma configuracao R2 e recria quando a configuracao muda", async () => {
+  resetTemplateMediaR2ClientCacheForTests();
+  const clients: unknown[] = [];
+  const commands: Array<PutObjectCommand | GetObjectCommand | DeleteObjectCommand> = [];
+
+  setTemplateMediaR2ClientFactoryForTests(() => {
+    const client = {
+      async send(command: PutObjectCommand | GetObjectCommand | DeleteObjectCommand) {
+        commands.push(command);
+
+        if (command instanceof GetObjectCommand) {
+          return {
+            Body: pngBytes,
+            ContentType: "image/png",
+            ContentLength: pngBytes.byteLength
+          };
+        }
+
+        return {};
+      }
+    };
+
+    clients.push(client);
+    return client;
+  });
+
+  try {
+    const stored = await saveTemplateHeaderMedia(
+      {
+        fileName: "image.png",
+        mimeType: "image/png",
+        bytes: pngBytes,
+        namespace: "company-1"
+      },
+      {
+        provider: "r2",
+        r2Config: r2Config()
+      }
+    );
+
+    await readTemplateMedia(
+      {
+        storageProvider: stored.storageProvider,
+        storageKey: stored.storageKey
+      },
+      { r2Config: r2Config() }
+    );
+
+    await deleteTemplateMedia(
+      {
+        storageProvider: stored.storageProvider,
+        storageKey: stored.storageKey
+      },
+      { r2Config: r2Config() }
+    );
+
+    assert.equal(clients.length, 1);
+    assert.equal(commands.length, 3);
+
+    await saveTemplateHeaderMedia(
+      {
+        fileName: "image.png",
+        mimeType: "image/png",
+        bytes: pngBytes,
+        namespace: "company-1"
+      },
+      {
+        provider: "r2",
+        r2Config: {
+          ...r2Config(),
+          bucket: "templates-other"
+        }
+      }
+    );
+
+    assert.equal(clients.length, 2);
+  } finally {
+    resetTemplateMediaR2ClientCacheForTests();
+  }
+});
+
+test("aplica timeout R2 configurado e retorna erro seguro sem segredo", async () => {
+  let signalReceived: AbortSignal | undefined;
+  const r2Client = {
+    async send(
+      _command: PutObjectCommand | GetObjectCommand | DeleteObjectCommand,
+      options?: { abortSignal?: AbortSignal }
+    ) {
+      signalReceived = options?.abortSignal;
+      return abortedPromise(options?.abortSignal);
+    }
+  };
+
+  await assert.rejects(
+    () =>
+      saveTemplateHeaderMedia(
+        {
+          fileName: "image.png",
+          mimeType: "image/png",
+          bytes: pngBytes,
+          namespace: "company-1"
+        },
+        {
+          provider: "r2",
+          r2Client,
+          r2Config: {
+            ...r2Config(),
+            timeoutMs: 1_000
+          }
+        }
+      ),
+    (error) => {
+      assert.equal(signalReceived?.aborted, true);
+      assert.equal(error instanceof TemplateMediaStorageError, true);
+      const storageError = error as TemplateMediaStorageError;
+      assert.equal(storageError.code, "STORAGE_OPERATION_TIMEOUT");
+      assert.equal(storageError.context?.operation, "put");
+      assert.equal(storageError.context?.storageProvider, "r2");
+      assert.equal(storageError.context?.timeoutMs, 1_000);
+      assert.deepEqual(storageError.toJSON(), {
+        code: "STORAGE_OPERATION_TIMEOUT",
+        message: "Operacao de storage R2 excedeu o tempo limite."
+      });
+      assert.equal(JSON.stringify(storageError).includes("test-secret-key"), false);
+      assert.equal(JSON.stringify(storageError).includes("test-access-key"), false);
+      return true;
+    }
+  );
+});
+
+test("aplica timeout R2 configurado em leitura e exclusao", async () => {
+  const r2Client = {
+    async send(
+      _command: PutObjectCommand | GetObjectCommand | DeleteObjectCommand,
+      options?: { abortSignal?: AbortSignal }
+    ) {
+      return abortedPromise(options?.abortSignal);
+    }
+  };
+
+  await assert.rejects(
+    () =>
+      readTemplateMedia(
+        {
+          storageProvider: "r2",
+          storageKey: "templates/company-1/aa/image.png",
+          mimeType: "image/png"
+        },
+        {
+          r2Client,
+          r2Config: {
+            ...r2Config(),
+            timeoutMs: 1_000
+          }
+        }
+      ),
+    (error) =>
+      error instanceof TemplateMediaStorageError &&
+      error.code === "STORAGE_OPERATION_TIMEOUT" &&
+      error.context?.operation === "get"
+  );
+
+  await assert.rejects(
+    () =>
+      deleteTemplateMedia(
+        {
+          storageProvider: "r2",
+          storageKey: "templates/company-1/aa/image.png"
+        },
+        {
+          r2Client,
+          r2Config: {
+            ...r2Config(),
+            timeoutMs: 1_000
+          }
+        }
+      ),
+    (error) =>
+      error instanceof TemplateMediaStorageError &&
+      error.code === "STORAGE_OPERATION_TIMEOUT" &&
+      error.context?.operation === "delete"
+  );
+});
+
+test("limpa timer R2 em sucesso e em erro sem timeout", async () => {
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const timers = new Set<Parameters<typeof clearTimeout>[0]>();
+
+  globalThis.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+    const timer = originalSetTimeout(handler, timeout, ...args);
+    timers.add(timer);
+    return timer;
+  }) as typeof setTimeout;
+  globalThis.clearTimeout = ((timer?: Parameters<typeof clearTimeout>[0]) => {
+    if (timer) timers.delete(timer);
+    return originalClearTimeout(timer);
+  }) as typeof clearTimeout;
+
+  try {
+    const successClient = {
+      async send(_command: PutObjectCommand | GetObjectCommand | DeleteObjectCommand) {
+        return {};
+      }
+    };
+
+    await saveTemplateHeaderMedia(
+      {
+        fileName: "image.png",
+        mimeType: "image/png",
+        bytes: pngBytes,
+        namespace: "company-1"
+      },
+      {
+        provider: "r2",
+        r2Client: successClient,
+        r2Config: r2Config()
+      }
+    );
+
+    assert.equal(timers.size, 0);
+
+    const errorClient = {
+      async send(_command: PutObjectCommand | GetObjectCommand | DeleteObjectCommand) {
+        throw new Error("network failed");
+      }
+    };
+
+    await assert.rejects(() =>
+      deleteTemplateMedia(
+        {
+          storageProvider: "r2",
+          storageKey: "templates/company-1/aa/image.png"
+        },
+        {
+          r2Client: errorClient,
+          r2Config: r2Config()
+        }
+      )
+    );
+
+    assert.equal(timers.size, 0);
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+  }
+});
+
+test("usa timeout padrao quando timeout R2 configurado e invalido", async () => {
+  const r2Client = {
+    async send(
+      _command: PutObjectCommand | GetObjectCommand | DeleteObjectCommand,
+      options?: { abortSignal?: AbortSignal }
+    ) {
+      options?.abortSignal?.throwIfAborted();
+      return {};
+    }
+  };
+
+  const stored = await saveTemplateHeaderMedia(
+    {
+      fileName: "image.png",
+      mimeType: "image/png",
+      bytes: pngBytes,
+      namespace: "company-1"
+    },
+    {
+      provider: "r2",
+      r2Client,
+      r2Config: {
+        ...r2Config(),
+        timeoutMs: 999
+      }
+    }
+  );
+
+  assert.equal(stored.storageProvider, "r2");
 });
