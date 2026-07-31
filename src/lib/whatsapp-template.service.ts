@@ -1,6 +1,8 @@
 import {
   readMetaMessageId,
   sendMetaTemplateMessage,
+  uploadMetaMedia,
+  type MetaTemplateHeaderMedia,
   type MetaTemplate
 } from "@/lib/meta-whatsapp";
 import {
@@ -23,6 +25,11 @@ import {
   type MetaTemplateLibraryEntry
 } from "@/lib/meta-template-service";
 import { digitsOnlyPhone } from "@/lib/phone-normalization.service";
+import {
+  readTemplateMedia,
+  TEMPLATE_IMAGE_MIME_TYPES,
+  TemplateMediaStorageError
+} from "@/lib/template-media-storage";
 
 export function extractBodyText(template: MetaTemplate) {
   return normalizeMetaTemplate(template).body.text;
@@ -227,6 +234,134 @@ export async function resolveLocalTemplateHeaderImageUrl({
   return publicUrl;
 }
 
+type ResolvedTemplateHeaderImageMedia = {
+  headerMedia: MetaTemplateHeaderMedia | null;
+  historyMediaUrl: string | null;
+  mimeType: string | null;
+};
+
+function isSupportedTemplateImageMimeType(mimeType: string) {
+  return (TEMPLATE_IMAGE_MIME_TYPES as readonly string[]).includes(mimeType);
+}
+
+function assertUsableHeaderImageMediaAsset(
+  mediaAsset: Awaited<ReturnType<typeof findMediaAssetById>>
+): asserts mediaAsset is NonNullable<Awaited<ReturnType<typeof findMediaAssetById>>> {
+  if (!mediaAsset) {
+    throw new Error("Midia padrao do template nao encontrada.");
+  }
+
+  if (mediaAsset.status !== "READY") {
+    throw new Error("Midia padrao do template nao esta pronta para envio.");
+  }
+
+  if (mediaAsset.type !== "TEMPLATE_HEADER_IMAGE") {
+    throw new Error("Midia padrao do template nao e uma imagem de cabecalho.");
+  }
+
+  if (!isSupportedTemplateImageMimeType(mediaAsset.mimeType)) {
+    throw new Error("Formato da midia padrao do template nao suportado para envio.");
+  }
+
+  if (!mediaAsset.storageProvider?.trim() || !mediaAsset.storageKey?.trim()) {
+    throw new Error("Midia padrao do template sem armazenamento recuperavel.");
+  }
+}
+
+function assertReadableHeaderImageMedia({
+  bytes,
+  mimeType,
+  sizeBytes
+}: {
+  bytes: Buffer;
+  mimeType: string;
+  sizeBytes: number;
+}) {
+  if (bytes.byteLength === 0 || sizeBytes === 0) {
+    throw new TemplateMediaStorageError(
+      "STORAGE_EMPTY_FILE",
+      "Midia padrao do template esta vazia."
+    );
+  }
+
+  if (bytes.byteLength !== sizeBytes) {
+    throw new TemplateMediaStorageError(
+      "STORAGE_READ_FAILED",
+      "Tamanho da midia padrao do template incoerente."
+    );
+  }
+
+  if (!isSupportedTemplateImageMimeType(mimeType)) {
+    throw new TemplateMediaStorageError(
+      "UNSUPPORTED_MIME_TYPE",
+      "Formato da midia padrao do template nao suportado para envio."
+    );
+  }
+}
+
+export async function resolveAndUploadLocalTemplateHeaderImageMedia({
+  companyId,
+  phoneNumberId,
+  accessToken,
+  localTemplate,
+  template
+}: {
+  companyId: string;
+  phoneNumberId: string;
+  accessToken: string;
+  localTemplate: MetaTemplateLibraryEntry;
+  template: MetaTemplate;
+}): Promise<ResolvedTemplateHeaderImageMedia> {
+  if (!templateHasHeaderImage(template)) {
+    return {
+      headerMedia: null,
+      historyMediaUrl: null,
+      mimeType: null
+    };
+  }
+
+  if (!localTemplate.defaultHeaderMediaAssetId) {
+    throw new Error("Template com imagem no cabecalho sem midia padrao configurada.");
+  }
+
+  const mediaAsset = await findMediaAssetById(
+    companyId,
+    localTemplate.defaultHeaderMediaAssetId
+  );
+
+  assertUsableHeaderImageMediaAsset(mediaAsset);
+
+  if (mediaAsset.companyId !== companyId) {
+    throw new Error("Midia padrao do template nao pertence a empresa.");
+  }
+
+  const storedMedia = await readTemplateMedia({
+    storageProvider: mediaAsset.storageProvider,
+    storageKey: mediaAsset.storageKey,
+    mimeType: mediaAsset.mimeType,
+    fileName: mediaAsset.fileName
+  });
+
+  assertReadableHeaderImageMedia(storedMedia);
+
+  const uploaded = await uploadMetaMedia({
+    phoneNumberId,
+    accessToken,
+    fileName: storedMedia.fileName,
+    mimeType: storedMedia.mimeType,
+    bytes: storedMedia.bytes
+  });
+
+  return {
+    headerMedia: {
+      type: "image",
+      mediaId: uploaded.mediaId
+    },
+    historyMediaUrl: mediaAsset.publicUrl?.trim() || null,
+    mimeType: storedMedia.mimeType
+  };
+}
+
 export async function findReadyLocalMetaTemplate({
   companyId,
   wabaId,
@@ -334,6 +469,9 @@ export async function sendConversationTemplate({
     companyId
   });
   if (!channel.wabaId) throw new Error("Canal Meta sem WABA ID.");
+  if (!channel.phoneNumberId || !channel.accessToken) {
+    throw new Error("Canal Meta sem Phone Number ID ou token.");
+  }
 
   const localTemplateContext = await findReadyLocalMetaTemplate({
     companyId,
@@ -354,8 +492,10 @@ export async function sendConversationTemplate({
     throw new Error("Preencha todas as variaveis obrigatorias do template.");
   }
 
-  const headerImageUrl = await resolveLocalTemplateHeaderImageUrl({
+  const headerImage = await resolveAndUploadLocalTemplateHeaderImageMedia({
     companyId,
+    phoneNumberId: channel.phoneNumberId,
+    accessToken: channel.accessToken,
     localTemplate,
     template
   });
@@ -367,7 +507,7 @@ export async function sendConversationTemplate({
     language,
     variables: cleanVariables,
     template,
-    headerImageUrl
+    headerMedia: headerImage.headerMedia
   });
   const historyBody = renderTemplateHistoryBody({
     template,
@@ -380,8 +520,8 @@ export async function sendConversationTemplate({
     userId,
     body: historyBody,
     type: "template",
-    mediaUrl: headerImageUrl,
-    mimeType: headerImageUrl ? "image/jpeg" : null,
+    mediaUrl: headerImage.historyMediaUrl,
+    mimeType: headerImage.mimeType,
     templateName,
     templateLanguage: language,
     templateVariables: JSON.stringify({
