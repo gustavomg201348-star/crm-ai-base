@@ -30,6 +30,12 @@ function mapServiceError(error: MetaTemplateServiceError) {
         status: 400,
         message: error.message
       });
+    case "TEMPLATE_MEDIA_UNAVAILABLE":
+      return publicErrorResponse({
+        code: "TEMPLATE_MEDIA_UNAVAILABLE",
+        status: 400,
+        message: error.message
+      });
     default:
       return null;
   }

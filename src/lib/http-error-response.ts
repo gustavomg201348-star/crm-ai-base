@@ -72,6 +72,7 @@ export type PublicErrorCode =
   | "TEMPLATE_CREATE_FAILED"
   | "TEMPLATE_FETCH_FAILED"
   | "TEMPLATE_INVALID_INPUT"
+  | "TEMPLATE_MEDIA_UNAVAILABLE"
   | "MESSAGE_SEND_FAILED"
   | "INTERNAL_ERROR";
 
@@ -147,6 +148,7 @@ const DEFAULT_PUBLIC_MESSAGES: Record<PublicErrorCode, string> = {
   TEMPLATE_CREATE_FAILED: "Nao foi possivel criar template.",
   TEMPLATE_FETCH_FAILED: "Nao foi possivel carregar templates.",
   TEMPLATE_INVALID_INPUT: "Parametros invalidos.",
+  TEMPLATE_MEDIA_UNAVAILABLE: "Esta imagem nao esta mais disponivel. Envie uma nova imagem.",
   MESSAGE_SEND_FAILED: "Nao foi possivel enviar mensagem.",
   INTERNAL_ERROR: "Erro interno ao processar a requisicao."
 };
