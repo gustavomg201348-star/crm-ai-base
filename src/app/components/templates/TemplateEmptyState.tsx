@@ -1,6 +1,7 @@
 import { Library, Plus, RefreshCcw } from "lucide-react";
 
 export function TemplateEmptyState({
+  emptyTitle,
   hasActiveFilters,
   onClearFilters,
   onCreateTemplate,
@@ -8,6 +9,7 @@ export function TemplateEmptyState({
   syncDisabled,
   syncing
 }: {
+  emptyTitle?: string;
   hasActiveFilters?: boolean;
   onClearFilters?: () => void;
   onCreateTemplate?: () => void;
@@ -25,7 +27,7 @@ export function TemplateEmptyState({
       <h3 className="mt-4 text-lg font-bold text-slate-950">
         {hasActiveFilters
           ? "Nenhum template corresponde aos filtros selecionados"
-          : "Nenhum template encontrado"}
+          : emptyTitle ?? "Nenhum template encontrado"}
       </h3>
       <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
         {hasActiveFilters
