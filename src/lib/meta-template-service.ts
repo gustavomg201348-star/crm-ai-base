@@ -29,6 +29,7 @@ import {
   type AdminMetaTemplateListRecord
 } from "@/lib/meta-template-repository";
 import { parseJsonField, serializeJsonField } from "@/lib/json-storage";
+import { safeLogError } from "@/lib/safe-logger";
 import {
   calculateMetaTemplateOperationalStatus,
   isMetaTemplateSupportFlags,
@@ -37,8 +38,10 @@ import {
   supportFlagsIndicateSupportedComponents
 } from "@/lib/meta-template-status";
 import {
+  readTemplateMedia,
   saveTemplateImage,
   TemplateMediaStorageError,
+  type ReadTemplateMediaResult,
   type StoredTemplateMedia,
   type TemplateHeaderMediaExtension,
   type TemplateHeaderMediaMimeType
@@ -56,6 +59,9 @@ type HeaderMediaAssetLookup = (
 
 const TEMPLATE_MEDIA_ASSET_STORED_STATUS = "STORED";
 const TEMPLATE_MEDIA_ASSET_READY_STATUS = "READY";
+const TEMPLATE_MEDIA_ASSET_BROKEN_STATUS = "BROKEN";
+const TEMPLATE_MEDIA_UNAVAILABLE_MESSAGE =
+  "Esta imagem nao esta mais disponivel. Envie uma nova imagem.";
 
 export type MetaTemplateServiceErrorCode =
   | "INVALID_INPUT"
@@ -67,6 +73,7 @@ export type MetaTemplateServiceErrorCode =
   | "TEMPLATE_MEDIA_ALREADY_CONFIGURED"
   | "TEMPLATE_HEADER_UNSUPPORTED"
   | "MEDIA_ASSET_INCOMPATIBLE"
+  | "TEMPLATE_MEDIA_UNAVAILABLE"
   | "MEDIA_STORAGE_FAILED"
   | "META_TEMPLATE_ID_CONFLICT";
 
@@ -664,6 +671,111 @@ function assertUsableTemplateHeaderImageAsset(mediaAsset: MediaAsset) {
   }
 }
 
+function isDefinitiveMissingTemplateMediaError(error: TemplateMediaStorageError) {
+  return error.code === "STORAGE_FILE_NOT_FOUND";
+}
+
+function buildMediaAssetValidationError(error: TemplateMediaStorageError) {
+  return `template_header_image_unavailable:${error.code}`;
+}
+
+async function markHeaderImageAssetBrokenIfMissing({
+  companyId,
+  mediaAsset,
+  error,
+  now
+}: {
+  companyId: string;
+  mediaAsset: MediaAsset;
+  error: TemplateMediaStorageError;
+  now: Date;
+}) {
+  if (!isDefinitiveMissingTemplateMediaError(error)) {
+    return;
+  }
+
+  await updateMediaAssetStatus(companyId, mediaAsset.id, {
+    status: TEMPLATE_MEDIA_ASSET_BROKEN_STATUS,
+    lastValidatedAt: now,
+    validationError: buildMediaAssetValidationError(error)
+  });
+}
+
+function assertReadableHeaderImageMedia(
+  mediaAsset: MediaAsset,
+  storedMedia: ReadTemplateMediaResult
+) {
+  const mediaAssetMimeType = mediaAsset.mimeType.trim().toLowerCase();
+  const storedMimeType = storedMedia.mimeType.trim().toLowerCase();
+
+  if (
+    storedMedia.bytes.byteLength === 0 ||
+    !storedMimeType.startsWith("image/") ||
+    storedMimeType !== mediaAssetMimeType
+  ) {
+    throw new MetaTemplateServiceError(
+      "MEDIA_ASSET_INCOMPATIBLE",
+      "Midia incompativel com header IMAGE."
+    );
+  }
+}
+
+export async function validateTemplateHeaderImageMediaAssetForAssociation({
+  companyId,
+  templateId,
+  mediaAsset,
+  now = new Date(),
+  readMedia = readTemplateMedia,
+  markUnavailable = markHeaderImageAssetBrokenIfMissing
+}: {
+  companyId: string;
+  templateId?: string | null;
+  mediaAsset: MediaAsset;
+  now?: Date;
+  readMedia?: typeof readTemplateMedia;
+  markUnavailable?: typeof markHeaderImageAssetBrokenIfMissing;
+}) {
+  assertUsableTemplateHeaderImageAsset(mediaAsset);
+
+  try {
+    const storedMedia = await readMedia({
+      storageProvider: mediaAsset.storageProvider,
+      storageKey: mediaAsset.storageKey,
+      mimeType: mediaAsset.mimeType,
+      fileName: mediaAsset.fileName
+    });
+
+    assertReadableHeaderImageMedia(mediaAsset, storedMedia);
+  } catch (error) {
+    if (error instanceof TemplateMediaStorageError) {
+      try {
+        await markUnavailable({
+          companyId,
+          mediaAsset,
+          error,
+          now
+        });
+      } catch (markError) {
+        safeLogError("template-media-association", markError, {
+          operation: "mark-template-header-image-media-broken",
+          companyId,
+          templateId: templateId ?? null,
+          mediaAssetId: mediaAsset.id,
+          storageProvider: mediaAsset.storageProvider,
+          originalErrorCode: error.code
+        });
+      }
+
+      throw new MetaTemplateServiceError(
+        "TEMPLATE_MEDIA_UNAVAILABLE",
+        TEMPLATE_MEDIA_UNAVAILABLE_MESSAGE
+      );
+    }
+
+    throw error;
+  }
+}
+
 async function setReadyStatusForHeaderImageAsset({
   companyId,
   mediaAssetId,
@@ -1195,7 +1307,6 @@ async function associateHeaderImageMediaAsset({
   }
 
   assertTemplateAcceptsHeaderImageAssociation(template);
-  assertUsableTemplateHeaderImageAsset(mediaAsset);
 
   if (mediaAsset.companyId !== safeCompanyId) {
     throw new MetaTemplateServiceError(
@@ -1203,6 +1314,12 @@ async function associateHeaderImageMediaAsset({
       "Midia nao pertence a empresa do template."
     );
   }
+
+  await validateTemplateHeaderImageMediaAssetForAssociation({
+    companyId: safeCompanyId,
+    templateId: safeTemplateId,
+    mediaAsset
+  });
 
   const operationalStatus = calculateMetaTemplateOperationalStatus({
     metaStatus: template.metaStatus,
