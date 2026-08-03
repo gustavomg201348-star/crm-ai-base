@@ -471,15 +471,20 @@ export function TemplateCreatePanel({
   channels,
   channelsLoading,
   onCreated,
-  onClose
+  onClose,
+  preferredChannelId
 }: {
   channels: TemplateChannelOption[];
   channelsLoading: boolean;
   onCreated: () => void;
   onClose: () => void;
+  preferredChannelId?: string | null;
 }) {
-  const firstChannelId = channels[0]?.id ?? "";
-  const [draft, setDraft] = useState<TemplateCreateDraft>(() => createInitialDraft(firstChannelId));
+  const initialChannelId =
+    channels.find((channel) => channel.id === preferredChannelId)?.id ?? channels[0]?.id ?? "";
+  const [draft, setDraft] = useState<TemplateCreateDraft>(() =>
+    createInitialDraft(initialChannelId)
+  );
   const [submitted, setSubmitted] = useState(false);
   const [validated, setValidated] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -506,9 +511,15 @@ export function TemplateCreatePanel({
         return current;
       }
 
-      return { ...current, channelId: channels[0]?.id ?? "" };
+      return {
+        ...current,
+        channelId:
+          channels.find((channel) => channel.id === preferredChannelId)?.id ??
+          channels[0]?.id ??
+          ""
+      };
     });
-  }, [channels]);
+  }, [channels, preferredChannelId]);
 
   function updateDraft<K extends keyof TemplateCreateDraft>(
     field: K,

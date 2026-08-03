@@ -148,6 +148,7 @@ export function TemplateLibraryPage() {
     warnings?: string[];
   } | null>(null);
   const drawerTriggerRef = useRef<HTMLElement | null>(null);
+  const listRequestIdRef = useRef(0);
   const syncInFlightRef = useRef(false);
 
   const activeFilters = useMemo(
@@ -182,6 +183,7 @@ export function TemplateLibraryPage() {
       syncableChannels[0]
     );
   }, [selectedSyncChannelId, syncableChannels]);
+  const selectedTemplateChannelId = selectedSyncChannel?.id ?? "";
   useEffect(() => {
     const controller = new AbortController();
 
@@ -241,8 +243,25 @@ export function TemplateLibraryPage() {
   }, [filters.q]);
 
   useEffect(() => {
+    if (channelsLoading) {
+      setLoading(true);
+      return;
+    }
+
+    if (!selectedTemplateChannelId) {
+      setTemplates([]);
+      setPagination(initialPagination);
+      setSummary(initialSummary);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
     const controller = new AbortController();
+    const requestId = listRequestIdRef.current + 1;
+    listRequestIdRef.current = requestId;
     const params = new URLSearchParams({
+      channelId: selectedTemplateChannelId,
       page: String(page),
       pageSize: String(pagination.pageSize)
     });
@@ -271,13 +290,13 @@ export function TemplateLibraryPage() {
           throw new Error("Nao foi possivel carregar os templates. Tente novamente.");
         }
 
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || requestId !== listRequestIdRef.current) return;
 
         setTemplates(data.templates);
         setPagination(data.pagination);
         setSummary(data.summary);
       } catch (loadError) {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || requestId !== listRequestIdRef.current) return;
 
         setError(
           loadError instanceof Error
@@ -285,14 +304,23 @@ export function TemplateLibraryPage() {
             : "Nao foi possivel carregar os templates. Tente novamente."
         );
       } finally {
-        if (!controller.signal.aborted) setLoading(false);
+        if (!controller.signal.aborted && requestId === listRequestIdRef.current) {
+          setLoading(false);
+        }
       }
     }
 
     void loadTemplates();
 
     return () => controller.abort();
-  }, [activeFilters, page, pagination.pageSize, refreshKey]);
+  }, [
+    activeFilters,
+    channelsLoading,
+    page,
+    pagination.pageSize,
+    refreshKey,
+    selectedTemplateChannelId
+  ]);
 
   const updateFilter = useCallback(
     <K extends keyof TemplateLibraryFilters>(field: K, value: TemplateLibraryFilters[K]) => {
@@ -430,6 +458,21 @@ export function TemplateLibraryPage() {
       window.setTimeout(() => trigger.focus(), 0);
     }
   }, []);
+
+  const selectTemplateChannel = useCallback(
+    (channelId: string) => {
+      setSelectedSyncChannelId(channelId);
+      setTemplates([]);
+      setPagination(initialPagination);
+      setSummary(initialSummary);
+      setPage(1);
+      setError(null);
+      setSyncFeedback(null);
+      setCreatePanelOpen(false);
+      closeTemplateDetails();
+    },
+    [closeTemplateDetails]
+  );
 
   const openTemplateDetails = useCallback((template: TemplateListItem) => {
     drawerTriggerRef.current =
@@ -597,7 +640,7 @@ export function TemplateLibraryPage() {
         onCreateTemplate={openCreatePanel}
         onFilterChange={updateFilter}
         onRefresh={refreshTemplates}
-        onSelectSyncChannel={setSelectedSyncChannelId}
+        onSelectSyncChannel={selectTemplateChannel}
         onSyncTemplates={syncTemplates}
         selectedSyncChannelId={selectedSyncChannel?.id ?? ""}
         syncFeedback={syncFeedback}
@@ -611,6 +654,7 @@ export function TemplateLibraryPage() {
           channelsLoading={channelsLoading}
           onCreated={refreshTemplates}
           onClose={closeCreatePanel}
+          preferredChannelId={selectedTemplateChannelId}
         />
       )}
 
@@ -636,6 +680,7 @@ export function TemplateLibraryPage() {
       )}
       {!error && !loading && templates.length === 0 && (
         <TemplateEmptyState
+          emptyTitle="Nenhum template encontrado para este canal."
           hasActiveFilters={hasActiveFilters}
           onClearFilters={clearFilters}
           onCreateTemplate={openCreatePanel}
