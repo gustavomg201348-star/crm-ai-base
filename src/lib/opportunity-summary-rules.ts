@@ -17,7 +17,7 @@ import type {
   OpportunitySummaryProposalInput
 } from "@/lib/opportunity-summary-types";
 
-const ACTIVE_PROPOSAL_STATUSES = new Set([
+export const ACTIVE_PROPOSAL_STATUS_VALUES = [
   "NEW",
   "TYPED",
   "ANALYSIS",
@@ -26,10 +26,16 @@ const ACTIVE_PROPOSAL_STATUSES = new Set([
   "DRAFT",
   "FORMALIZING",
   "REWORK"
-]);
+] as const;
 
-const CLOSED_PROPOSAL_STATUSES = new Set(["PAID", "CANCELED", "REJECTED"]);
-const INACTIVE_RETIREMENT_LEAD_STATUSES = new Set(["CONVERTED", "LOST"]);
+export const CLOSED_PROPOSAL_STATUS_VALUES = ["PAID", "CANCELED", "REJECTED"] as const;
+export const INACTIVE_RETIREMENT_LEAD_STATUS_VALUES = ["CONVERTED", "LOST"] as const;
+
+const ACTIVE_PROPOSAL_STATUSES = new Set<string>(ACTIVE_PROPOSAL_STATUS_VALUES);
+const CLOSED_PROPOSAL_STATUSES = new Set<string>(CLOSED_PROPOSAL_STATUS_VALUES);
+const INACTIVE_RETIREMENT_LEAD_STATUSES = new Set<string>(
+  INACTIVE_RETIREMENT_LEAD_STATUS_VALUES
+);
 
 const PRODUCT_LABELS: Record<OpportunityProductType, string> = {
   UNKNOWN: "Produto nao identificado",
