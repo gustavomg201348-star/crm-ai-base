@@ -23,6 +23,7 @@ import { ConversationList } from "@/app/components/conversations/ConversationLis
 import { TemplateLibraryPage } from "@/app/components/templates/TemplateLibraryPage";
 import { useNewMessageSound } from "@/app/hooks/use-new-message-sound";
 import { resolveConversationChannelId } from "@/lib/conversation-channel.service";
+import type { OpportunitySummary } from "@/lib/opportunity-summary-types";
 import {
   ArrowRight,
   Archive,
@@ -919,6 +920,11 @@ type TaskRow = {
   assignee: { id: string; name: string; email: string } | null;
 };
 
+type OpportunitySummaryResponse = {
+  summary?: OpportunitySummary;
+  error?: string;
+};
+
 type ImportResult = {
   summary: {
     totalRows: number;
@@ -1052,6 +1058,12 @@ const temperatureLabels = {
   WARM: "Morno",
   COLD: "Frio"
 } as const;
+
+const contextLevelLabels: Record<OpportunitySummary["contextLevel"], string> = {
+  LOW: "Baixo",
+  MEDIUM: "Medio",
+  HIGH: "Alto"
+};
 
 const conversationStatusLabels: Record<ConversationRow["status"], string> = {
   OPEN: "Aberto",
@@ -5221,6 +5233,153 @@ function TransferConversationModal({
   );
 }
 
+function OpportunitySummaryCard({
+  summary,
+  loading,
+  error,
+  onFocusComposer,
+  onFollowUp,
+  onOpenCltSimulation,
+  onOpenTemplates
+}: {
+  summary: OpportunitySummary | null;
+  loading: boolean;
+  error: string;
+  onFocusComposer: () => void;
+  onFollowUp: () => void;
+  onOpenCltSimulation: () => void;
+  onOpenTemplates: () => void;
+}) {
+  const actionHandlers: Partial<
+    Record<OpportunitySummary["recommendedAction"]["type"], () => void>
+  > = {
+    RESPOND_CUSTOMER: onFocusComposer,
+    FOLLOW_UP: onFollowUp,
+    SIMULATE_CLT: onOpenCltSimulation,
+    SEND_TEMPLATE: onOpenTemplates
+  };
+  const actionHandler = summary ? actionHandlers[summary.recommendedAction.type] : undefined;
+
+  return (
+    <div className="rounded border border-line bg-white p-4 shadow-soft">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand">
+            Motor comercial
+          </p>
+          <h3 className="mt-1 font-bold text-slate-950">Oportunidade comercial</h3>
+        </div>
+        {loading && <Loader2 className="h-4 w-4 animate-spin text-brand" />}
+      </div>
+
+      {error && !loading && (
+        <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+          {error}
+        </p>
+      )}
+
+      {!error && !loading && !summary && (
+        <p className="mt-3 text-sm text-slate-500">
+          Nao ha sinais comerciais suficientes neste momento.
+        </p>
+      )}
+
+      {summary && (
+        <div className="mt-4 space-y-3 text-sm">
+          <div className="grid gap-2">
+            <Info label="Produto provavel" value={summary.probableProduct.label} />
+            <Info label="Estado" value={summary.commercialState.label} />
+            <Info label="Contexto" value={contextLevelLabels[summary.contextLevel]} />
+            <Info
+              label="Ultima interacao"
+              value={
+                summary.lastRelevantInteraction.occurredAt
+                  ? `${summary.lastRelevantInteraction.label} (${formatRelativeDate(
+                      String(summary.lastRelevantInteraction.occurredAt)
+                    )})`
+                  : summary.lastRelevantInteraction.label
+              }
+            />
+          </div>
+
+          <div className="rounded-2xl bg-slate-50 p-3">
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-slate-400">
+              Proxima acao
+            </p>
+            <p className="mt-1 font-bold text-slate-950">
+              {summary.recommendedAction.label}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-slate-600">
+              {summary.recommendedActionReason}
+            </p>
+            {actionHandler && (
+              <button
+                className="mt-3 inline-flex h-9 items-center justify-center rounded-full bg-brand px-3 text-xs font-bold text-white transition hover:bg-blue-700"
+                type="button"
+                onClick={actionHandler}
+              >
+                Executar acao
+              </button>
+            )}
+          </div>
+
+          {summary.pendingReturn && (
+            <div className="rounded-2xl border border-amber-100 bg-amber-50 p-3 text-xs text-amber-900">
+              <p className="font-bold">
+                {summary.pendingReturn.overdue ? "Retorno vencido" : "Retorno programado"}
+              </p>
+              <p className="mt-1">
+                {summary.pendingReturn.title} - {formatRelativeDate(String(summary.pendingReturn.dueAt))}
+              </p>
+            </div>
+          )}
+
+          {summary.activeProposal && (
+            <div className="rounded-2xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-900">
+              <p className="font-bold">Proposta ativa</p>
+              <p className="mt-1">
+                {summary.activeProposal.product} - {summary.activeProposal.status}
+                {summary.activeProposal.amount ? ` - R$ ${summary.activeProposal.amount}` : ""}
+              </p>
+            </div>
+          )}
+
+          {summary.recentCampaign && (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+              <p className="font-bold">Campanha recente</p>
+              <p className="mt-1">
+                {summary.recentCampaign.name} - {summary.recentCampaign.status}
+              </p>
+            </div>
+          )}
+
+          {summary.evidences.length > 0 ? (
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.12em] text-slate-400">
+                Evidencias
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {summary.evidences.slice(0, 3).map((evidence) => (
+                  <span
+                    className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700"
+                    key={`${evidence.type}-${evidence.sourceId ?? "source"}`}
+                  >
+                    {evidence.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500">
+              Nao ha sinais comerciais suficientes neste momento.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EditConversationContactModal({
   contactName,
   contactCpf,
@@ -6587,6 +6746,9 @@ function Atendimento({
   const [recording, setRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [aiSidebarCollapsed, setAiSidebarCollapsed] = useState(false);
+  const [opportunitySummary, setOpportunitySummary] = useState<OpportunitySummary | null>(null);
+  const [opportunityLoading, setOpportunityLoading] = useState(false);
+  const [opportunityError, setOpportunityError] = useState("");
   const [mobileConversationOpen, setMobileConversationOpen] = useState(false);
   const [mobileDetailsOpen, setMobileDetailsOpen] = useState(false);
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
@@ -6599,6 +6761,8 @@ function Atendimento({
   const recordingTimerRef = useRef<number | null>(null);
   const draftsByConversationRef = useRef<Record<string, string>>({});
   const selectedConversationIdRef = useRef<string | null>(selectedConversation?.id ?? null);
+  const opportunityRequestIdRef = useRef(0);
+  const activeConversationId = selectedConversation?.id ?? null;
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ block: "end" });
@@ -6644,6 +6808,81 @@ function Atendimento({
     setInternalNoteStatus("");
     setInternalNoteError("");
   }, [selectedConversation?.contact.internalNote, selectedConversation?.id]);
+
+  useEffect(() => {
+    if (!activeConversationId) {
+      opportunityRequestIdRef.current += 1;
+      setOpportunitySummary(null);
+      setOpportunityLoading(false);
+      setOpportunityError("");
+      return;
+    }
+
+    const conversationId = activeConversationId;
+    const requestId = opportunityRequestIdRef.current + 1;
+    opportunityRequestIdRef.current = requestId;
+    const controller = new AbortController();
+
+    setOpportunitySummary(null);
+    setOpportunityLoading(true);
+    setOpportunityError("");
+
+    async function loadOpportunitySummary() {
+      try {
+        const response = await fetch(
+          `/api/conversations/${encodeURIComponent(conversationId)}/opportunity-summary`,
+          {
+            credentials: "same-origin",
+            signal: controller.signal
+          }
+        );
+
+        const data = (await response.json().catch(() => null)) as
+          | OpportunitySummaryResponse
+          | null;
+
+        if (!response.ok) {
+          throw new Error(data?.error ?? "Nao foi possivel carregar a oportunidade.");
+        }
+
+        if (!data?.summary) {
+          throw new Error("A oportunidade retornou uma resposta inesperada.");
+        }
+
+        if (
+          !controller.signal.aborted &&
+          opportunityRequestIdRef.current === requestId
+        ) {
+          setOpportunitySummary(data.summary);
+        }
+      } catch (error) {
+        if (
+          controller.signal.aborted ||
+          opportunityRequestIdRef.current !== requestId
+        ) {
+          return;
+        }
+
+        setOpportunitySummary(null);
+        setOpportunityError(
+          error instanceof Error
+            ? error.message
+            : "Nao foi possivel carregar a oportunidade."
+        );
+      } finally {
+        if (
+          !controller.signal.aborted &&
+          opportunityRequestIdRef.current === requestId
+        ) {
+          setOpportunityLoading(false);
+        }
+      }
+    }
+
+    void loadOpportunitySummary();
+
+    return () => controller.abort();
+  }, [activeConversationId]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -7250,6 +7489,17 @@ function Atendimento({
             />
           </dl>
         </div>
+        <OpportunitySummaryCard
+          error={opportunityError}
+          loading={opportunityLoading}
+          summary={opportunitySummary}
+          onFollowUp={openFollowUp}
+          onFocusComposer={focusComposerInput}
+          onOpenCltSimulation={() =>
+            selectedConversation ? onOpenCltSimulation(selectedConversation) : undefined
+          }
+          onOpenTemplates={() => void openTemplates()}
+        />
         <div className="rounded border border-line bg-white p-4 shadow-soft">
           <div className="flex items-center justify-between gap-3">
             <h3 className="font-bold">Observacao interna</h3>
