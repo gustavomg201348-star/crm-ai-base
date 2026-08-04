@@ -7,6 +7,9 @@ import type {
   OpportunityEvidenceType,
   OpportunityLastRelevantInteraction,
   OpportunityPendingReturn,
+  OpportunityPrimaryAction,
+  OpportunityPriority,
+  OpportunityPriorityLevel,
   OpportunityProductType,
   OpportunityRecentCampaign,
   OpportunityRecommendedAction,
@@ -44,8 +47,22 @@ const COMMERCIAL_STATE_LABELS: Record<OpportunityCommercialState, string> = {
   WAITING_CUSTOMER: "Aguardando cliente",
   FOLLOW_UP: "Retorno programado",
   PROPOSAL: "Em proposta",
-  NURTURING: "Nutrir",
+  NURTURING: "Em acompanhamento",
   NO_CLEAR_OPPORTUNITY: "Sem oportunidade clara"
+};
+
+const PRIORITY_LABELS: Record<OpportunityPriorityLevel, string> = {
+  URGENT: "Prioridade urgente",
+  HIGH: "Prioridade alta",
+  NORMAL: "Prioridade normal",
+  LOW: "Prioridade baixa",
+  NONE: "Sem prioridade"
+};
+
+const CONTEXT_EXPLANATIONS: Record<OpportunityContextLevel, string> = {
+  LOW: "Poucas informacoes disponiveis",
+  MEDIUM: "Contexto comercial parcial",
+  HIGH: "Contexto comercial completo"
 };
 
 export function isActiveProposalStatus(status: string) {
@@ -98,6 +115,29 @@ function isInboundWaitingForResponse(input: BuildOpportunitySummaryInput) {
 function isRecent(date: Date | null | undefined, now: Date, hours: number) {
   if (!date) return false;
   return now.getTime() - date.getTime() <= hours * 60 * 60 * 1000;
+}
+
+function formatDateTime(date: Date) {
+  return new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short",
+    timeZone: "America/Sao_Paulo"
+  }).format(date);
+}
+
+function formatRelativeTime(date: Date | null | undefined, now: Date) {
+  if (!date) return "em data nao informada";
+
+  const diffMs = date.getTime() - now.getTime();
+  const absMs = Math.abs(diffMs);
+  const minutes = Math.max(1, Math.round(absMs / (60 * 1000)));
+  const hours = Math.round(absMs / (60 * 60 * 1000));
+  const days = Math.round(absMs / (24 * 60 * 60 * 1000));
+  const suffix = diffMs >= 0 ? "em" : "ha";
+
+  if (minutes < 60) return `${suffix} ${minutes} min`;
+  if (hours < 24) return `${suffix} ${hours} h`;
+  return `${suffix} ${days} d`;
 }
 
 function selectPendingReturn(input: BuildOpportunitySummaryInput): OpportunityPendingReturn | null {
@@ -497,7 +537,222 @@ function determineContextLevel({
   return "LOW";
 }
 
+function determinePriority({
+  evidences,
+  activeProposal,
+  pendingReturn,
+  probableProductType,
+  commercialState
+}: {
+  evidences: OpportunityEvidence[];
+  activeProposal: OpportunityActiveProposal | null;
+  pendingReturn: OpportunityPendingReturn | null;
+  probableProductType: OpportunityProductType;
+  commercialState: OpportunityCommercialState;
+}): OpportunityPriority {
+  let type: OpportunityPriorityLevel = "NONE";
+
+  if (
+    hasEvidence(evidences, "CUSTOMER_REPLIED_RECENTLY") ||
+    hasEvidence(evidences, "UNREAD_MESSAGES") ||
+    hasEvidence(evidences, "RETURN_OVERDUE")
+  ) {
+    type = "URGENT";
+  } else if (
+    activeProposal ||
+    (probableProductType !== "UNKNOWN" && hasEvidence(evidences, "HOT_CONTACT"))
+  ) {
+    type = "HIGH";
+  } else if (pendingReturn || commercialState === "WAITING_CUSTOMER") {
+    type = "NORMAL";
+  } else if (commercialState === "NURTURING") {
+    type = "LOW";
+  }
+
+  return {
+    type,
+    label: PRIORITY_LABELS[type]
+  };
+}
+
+function buildLastInteractionExplanation(
+  lastRelevantInteraction: OpportunityLastRelevantInteraction,
+  now: Date
+) {
+  if (!lastRelevantInteraction.occurredAt) {
+    return "Nao ha interacao recente registrada.";
+  }
+
+  const relative = formatRelativeTime(lastRelevantInteraction.occurredAt, now);
+
+  if (lastRelevantInteraction.type === "CUSTOMER_MESSAGE") {
+    return `O cliente respondeu ${relative}.`;
+  }
+
+  if (lastRelevantInteraction.type === "OPERATOR_MESSAGE") {
+    return `A empresa respondeu ${relative}.`;
+  }
+
+  return `A ultima interacao aconteceu ${relative}.`;
+}
+
+function buildSituation({
+  evidences,
+  pendingReturn,
+  activeProposal,
+  commercialState,
+  lastRelevantInteraction,
+  now
+}: {
+  evidences: OpportunityEvidence[];
+  pendingReturn: OpportunityPendingReturn | null;
+  activeProposal: OpportunityActiveProposal | null;
+  commercialState: OpportunityCommercialState;
+  lastRelevantInteraction: OpportunityLastRelevantInteraction;
+  now: Date;
+}) {
+  if (hasEvidence(evidences, "UNREAD_MESSAGES")) {
+    return {
+      title: "Cliente aguardando resposta",
+      explanation: "Existem mensagens nao lidas nesta conversa. A conversa precisa de atencao.",
+      duplicateEvidenceTypes: ["UNREAD_MESSAGES"] satisfies OpportunityEvidenceType[]
+    };
+  }
+
+  if (hasEvidence(evidences, "CUSTOMER_REPLIED_RECENTLY")) {
+    return {
+      title: "Cliente respondeu recentemente",
+      explanation: `O cliente respondeu ${formatRelativeTime(
+        lastRelevantInteraction.occurredAt,
+        now
+      )}. A conversa precisa de atencao.`,
+      duplicateEvidenceTypes: ["CUSTOMER_REPLIED_RECENTLY"] satisfies OpportunityEvidenceType[]
+    };
+  }
+
+  if (pendingReturn?.overdue) {
+    return {
+      title: "Retorno vencido",
+      explanation: `O retorno estava agendado para ${formatDateTime(pendingReturn.dueAt)}.`,
+      duplicateEvidenceTypes: ["RETURN_OVERDUE"] satisfies OpportunityEvidenceType[]
+    };
+  }
+
+  if (commercialState === "FOLLOW_UP" && pendingReturn) {
+    return {
+      title: "Retorno agendado",
+      explanation: `Existe um retorno programado para ${formatDateTime(pendingReturn.dueAt)}.`,
+      duplicateEvidenceTypes: ["RETURN_SCHEDULED"] satisfies OpportunityEvidenceType[]
+    };
+  }
+
+  if (commercialState === "PROPOSAL" && activeProposal) {
+    return {
+      title: "Proposta em andamento",
+      explanation: `Ha uma proposta ${activeProposal.product} ativa, atualizada ${formatRelativeTime(
+        activeProposal.updatedAt,
+        now
+      )}.`,
+      duplicateEvidenceTypes: ["ACTIVE_PROPOSAL"] satisfies OpportunityEvidenceType[]
+    };
+  }
+
+  if (commercialState === "WAITING_CUSTOMER") {
+    return {
+      title: "Aguardar resposta do cliente",
+      explanation: "A empresa respondeu por ultimo. O cliente ainda nao retornou.",
+      duplicateEvidenceTypes: [] satisfies OpportunityEvidenceType[]
+    };
+  }
+
+  if (commercialState === "NURTURING") {
+    return {
+      title: "Manter em acompanhamento",
+      explanation: "Ha sinais comerciais, mas nao existe urgencia para uma acao imediata.",
+      duplicateEvidenceTypes: [] satisfies OpportunityEvidenceType[]
+    };
+  }
+
+  return {
+    title: "Nenhuma acao necessaria agora",
+    explanation: "Nao ha sinais comerciais suficientes neste momento.",
+    duplicateEvidenceTypes: [] satisfies OpportunityEvidenceType[]
+  };
+}
+
+function buildPrimaryAction({
+  recommendedAction,
+  commercialState,
+  pendingReturn
+}: {
+  recommendedAction: OpportunityRecommendedAction;
+  commercialState: OpportunityCommercialState;
+  pendingReturn: OpportunityPendingReturn | null;
+}): OpportunityPrimaryAction {
+  switch (recommendedAction.type) {
+    case "RESPOND_CUSTOMER":
+      return {
+        title: "Responder agora",
+        reason: recommendedAction.reason,
+        actionable: true
+      };
+    case "FOLLOW_UP":
+      return {
+        title: "Realizar retorno",
+        reason: recommendedAction.reason,
+        actionable: true
+      };
+    case "SIMULATE_CLT":
+      return {
+        title: "Simular CLT",
+        reason: recommendedAction.reason,
+        actionable: true
+      };
+    case "SEND_TEMPLATE":
+      return {
+        title: "Enviar template",
+        reason: recommendedAction.reason,
+        actionable: true
+      };
+    case "REVIEW_PROPOSAL":
+      return {
+        title: "Revisar proposta",
+        reason: recommendedAction.reason,
+        actionable: false
+      };
+    case "WAIT":
+      return {
+        title: pendingReturn ? "Aguardar retorno agendado" : "Aguardar",
+        reason: recommendedAction.reason,
+        actionable: false
+      };
+    case "NO_ACTION":
+      if (commercialState === "WAITING_CUSTOMER") {
+        return {
+          title: "Aguardar resposta do cliente",
+          reason: "A empresa respondeu por ultimo. O cliente ainda nao retornou.",
+          actionable: false
+        };
+      }
+
+      if (commercialState === "NURTURING") {
+        return {
+          title: "Manter em acompanhamento",
+          reason: "Ha sinais comerciais, mas nao existe urgencia para uma acao imediata.",
+          actionable: false
+        };
+      }
+
+      return {
+        title: "Nenhuma acao necessaria agora",
+        reason: "Nao ha sinais comerciais suficientes neste momento.",
+        actionable: false
+      };
+  }
+}
+
 export function buildOpportunitySummary(input: BuildOpportunitySummaryInput): OpportunitySummary {
+  const now = input.now ?? new Date();
   const pendingReturn = selectPendingReturn(input);
   const activeProposal = selectActiveProposal(input);
   const recentCampaign = selectRecentCampaign(input);
@@ -529,6 +784,27 @@ export function buildOpportunitySummary(input: BuildOpportunitySummaryInput): Op
     evidences,
     hasOwner: Boolean(input.conversation.agentId)
   });
+  const priority = determinePriority({
+    evidences,
+    activeProposal,
+    pendingReturn,
+    probableProductType: probableProduct.type,
+    commercialState: commercialStateType
+  });
+  const situation = buildSituation({
+    evidences,
+    pendingReturn,
+    activeProposal,
+    commercialState: commercialStateType,
+    lastRelevantInteraction,
+    now
+  });
+  const primaryAction = buildPrimaryAction({
+    recommendedAction,
+    commercialState: commercialStateType,
+    pendingReturn
+  });
+  const duplicateEvidenceTypes: OpportunityEvidenceType[] = situation.duplicateEvidenceTypes;
 
   return {
     contactId: input.conversation.contactId,
@@ -543,8 +819,21 @@ export function buildOpportunitySummary(input: BuildOpportunitySummaryInput): Op
     activeProposal,
     recentCampaign,
     evidences,
+    displayEvidences: evidences
+      .filter((evidence) => !duplicateEvidenceTypes.includes(evidence.type))
+      .slice(0, 3),
     recommendedAction,
     recommendedActionReason: recommendedAction.reason,
+    primaryAction,
+    situationTitle: situation.title,
+    situationExplanation: situation.explanation,
+    priority,
+    contextExplanation: CONTEXT_EXPLANATIONS[contextLevel],
+    lastInteractionExplanation: buildLastInteractionExplanation(lastRelevantInteraction, now),
+    productDisplayLabel:
+      probableProduct.type === "UNKNOWN"
+        ? "Produto ainda nao identificado"
+        : probableProduct.label,
     contextLevel
   };
 }
