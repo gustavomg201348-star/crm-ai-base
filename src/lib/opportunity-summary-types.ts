@@ -18,6 +18,8 @@ export type OpportunityCommercialState =
 
 export type OpportunityContextLevel = "LOW" | "MEDIUM" | "HIGH";
 
+export type OpportunityPriorityLevel = "URGENT" | "HIGH" | "NORMAL" | "LOW" | "NONE";
+
 export type OpportunityEvidenceType =
   | "CUSTOMER_REPLIED_RECENTLY"
   | "RETURN_OVERDUE"
@@ -100,6 +102,17 @@ export type OpportunityRecommendedAction = {
   evidenceTypes: OpportunityEvidenceType[];
 };
 
+export type OpportunityPriority = {
+  type: OpportunityPriorityLevel;
+  label: string;
+};
+
+export type OpportunityPrimaryAction = {
+  title: string;
+  reason: string;
+  actionable: boolean;
+};
+
 export type OpportunitySummary = {
   contactId: string;
   conversationId: string;
@@ -117,8 +130,16 @@ export type OpportunitySummary = {
   activeProposal: OpportunityActiveProposal | null;
   recentCampaign: OpportunityRecentCampaign | null;
   evidences: OpportunityEvidence[];
+  displayEvidences: OpportunityEvidence[];
   recommendedAction: OpportunityRecommendedAction;
   recommendedActionReason: string;
+  primaryAction: OpportunityPrimaryAction;
+  situationTitle: string;
+  situationExplanation: string;
+  priority: OpportunityPriority;
+  contextExplanation: string;
+  lastInteractionExplanation: string;
+  productDisplayLabel: string;
   contextLevel: OpportunityContextLevel;
 };
 

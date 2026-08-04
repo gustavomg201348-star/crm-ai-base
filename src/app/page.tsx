@@ -1059,10 +1059,15 @@ const temperatureLabels = {
   COLD: "Frio"
 } as const;
 
-const contextLevelLabels: Record<OpportunitySummary["contextLevel"], string> = {
-  LOW: "Baixo",
-  MEDIUM: "Medio",
-  HIGH: "Alto"
+const opportunityPriorityStyles: Record<
+  OpportunitySummary["priority"]["type"],
+  string
+> = {
+  URGENT: "border-orange-200 bg-orange-50 text-orange-800",
+  HIGH: "border-amber-200 bg-amber-50 text-amber-800",
+  NORMAL: "border-blue-200 bg-blue-50 text-blue-800",
+  LOW: "border-slate-200 bg-slate-50 text-slate-700",
+  NONE: "border-slate-200 bg-slate-50 text-slate-500"
 };
 
 const conversationStatusLabels: Record<ConversationRow["status"], string> = {
@@ -5258,7 +5263,10 @@ function OpportunitySummaryCard({
     SIMULATE_CLT: onOpenCltSimulation,
     SEND_TEMPLATE: onOpenTemplates
   };
-  const actionHandler = summary ? actionHandlers[summary.recommendedAction.type] : undefined;
+  const actionHandler =
+    summary?.primaryAction.actionable
+      ? actionHandlers[summary.recommendedAction.type]
+      : undefined;
 
   return (
     <div className="rounded border border-line bg-white p-4 shadow-soft">
@@ -5286,20 +5294,27 @@ function OpportunitySummaryCard({
 
       {summary && (
         <div className="mt-4 space-y-3 text-sm">
-          <div className="grid gap-2">
-            <Info label="Produto provavel" value={summary.probableProduct.label} />
-            <Info label="Estado" value={summary.commercialState.label} />
-            <Info label="Contexto" value={contextLevelLabels[summary.contextLevel]} />
-            <Info
-              label="Ultima interacao"
-              value={
-                summary.lastRelevantInteraction.occurredAt
-                  ? `${summary.lastRelevantInteraction.label} (${formatRelativeDate(
-                      String(summary.lastRelevantInteraction.occurredAt)
-                    )})`
-                  : summary.lastRelevantInteraction.label
-              }
-            />
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className={`rounded-full border px-2.5 py-1 text-xs font-bold ${opportunityPriorityStyles[summary.priority.type]}`}
+            >
+              {summary.priority.label}
+            </span>
+            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-700">
+              {summary.commercialState.label}
+            </span>
+          </div>
+
+          <div>
+            <h4 className="text-base font-extrabold text-slate-950">
+              {summary.situationTitle}
+            </h4>
+            <p className="mt-1 text-sm leading-5 text-slate-600">
+              {summary.situationExplanation}
+            </p>
+            <p className="mt-2 text-xs leading-5 text-slate-500">
+              {summary.lastInteractionExplanation}
+            </p>
           </div>
 
           <div className="rounded-2xl bg-slate-50 p-3">
@@ -5307,10 +5322,10 @@ function OpportunitySummaryCard({
               Proxima acao
             </p>
             <p className="mt-1 font-bold text-slate-950">
-              {summary.recommendedAction.label}
+              {summary.primaryAction.title}
             </p>
             <p className="mt-1 text-xs leading-5 text-slate-600">
-              {summary.recommendedActionReason}
+              {summary.primaryAction.reason}
             </p>
             {actionHandler && (
               <button
@@ -5318,9 +5333,14 @@ function OpportunitySummaryCard({
                 type="button"
                 onClick={actionHandler}
               >
-                Executar acao
+                {summary.primaryAction.title}
               </button>
             )}
+          </div>
+
+          <div className="grid gap-2 rounded-2xl border border-slate-100 p-3">
+            <Info label="Produto provavel" value={summary.productDisplayLabel} />
+            <Info label="Contexto comercial" value={summary.contextExplanation} />
           </div>
 
           {summary.pendingReturn && (
@@ -5328,7 +5348,7 @@ function OpportunitySummaryCard({
               <p className="font-bold">
                 {summary.pendingReturn.overdue ? "Retorno vencido" : "Retorno programado"}
               </p>
-              <p className="mt-1">
+              <p className="mt-1 break-words">
                 {summary.pendingReturn.title} - {formatRelativeDate(String(summary.pendingReturn.dueAt))}
               </p>
             </div>
@@ -5337,29 +5357,20 @@ function OpportunitySummaryCard({
           {summary.activeProposal && (
             <div className="rounded-2xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-900">
               <p className="font-bold">Proposta ativa</p>
-              <p className="mt-1">
+              <p className="mt-1 break-words">
                 {summary.activeProposal.product} - {summary.activeProposal.status}
                 {summary.activeProposal.amount ? ` - R$ ${summary.activeProposal.amount}` : ""}
               </p>
             </div>
           )}
 
-          {summary.recentCampaign && (
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
-              <p className="font-bold">Campanha recente</p>
-              <p className="mt-1">
-                {summary.recentCampaign.name} - {summary.recentCampaign.status}
-              </p>
-            </div>
-          )}
-
-          {summary.evidences.length > 0 ? (
+          {summary.displayEvidences.length > 0 && (
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.12em] text-slate-400">
                 Evidencias
               </p>
               <div className="mt-2 flex flex-wrap gap-2">
-                {summary.evidences.slice(0, 3).map((evidence) => (
+                {summary.displayEvidences.map((evidence) => (
                   <span
                     className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700"
                     key={`${evidence.type}-${evidence.sourceId ?? "source"}`}
@@ -5369,10 +5380,6 @@ function OpportunitySummaryCard({
                 ))}
               </div>
             </div>
-          ) : (
-            <p className="text-sm text-slate-500">
-              Nao ha sinais comerciais suficientes neste momento.
-            </p>
           )}
         </div>
       )}

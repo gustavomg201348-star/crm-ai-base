@@ -56,6 +56,14 @@ test("mensagem inbound recente recomenda responder cliente", () => {
   assert.equal(summary.commercialState.type, "ACTION_REQUIRED");
   assert.equal(summary.recommendedAction.type, "RESPOND_CUSTOMER");
   assert.equal(summary.evidences[0]?.type, "CUSTOMER_REPLIED_RECENTLY");
+  assert.equal(summary.priority.type, "URGENT");
+  assert.equal(summary.situationTitle, "Cliente respondeu recentemente");
+  assert.equal(summary.primaryAction.title, "Responder agora");
+  assert.equal(summary.primaryAction.actionable, true);
+  assert.equal(
+    summary.displayEvidences.some((evidence) => evidence.type === "CUSTOMER_REPLIED_RECENTLY"),
+    false
+  );
 });
 
 test("retorno vencido recomenda follow-up e exige acao", () => {
@@ -76,6 +84,9 @@ test("retorno vencido recomenda follow-up e exige acao", () => {
   assert.equal(summary.commercialState.type, "ACTION_REQUIRED");
   assert.equal(summary.recommendedAction.type, "FOLLOW_UP");
   assert.equal(summary.pendingReturn?.overdue, true);
+  assert.equal(summary.priority.type, "URGENT");
+  assert.equal(summary.situationTitle, "Retorno vencido");
+  assert.equal(summary.primaryAction.title, "Realizar retorno");
 });
 
 test("retorno futuro mantém follow-up e recomenda aguardar", () => {
@@ -96,6 +107,10 @@ test("retorno futuro mantém follow-up e recomenda aguardar", () => {
   assert.equal(summary.commercialState.type, "FOLLOW_UP");
   assert.equal(summary.recommendedAction.type, "WAIT");
   assert.equal(summary.evidences[0]?.type, "RETURN_SCHEDULED");
+  assert.equal(summary.priority.type, "NORMAL");
+  assert.equal(summary.situationTitle, "Retorno agendado");
+  assert.equal(summary.primaryAction.title, "Aguardar retorno agendado");
+  assert.equal(summary.primaryAction.actionable, false);
 });
 
 test("proposta ativa gera estado de proposta e recomenda revisão", () => {
@@ -117,6 +132,10 @@ test("proposta ativa gera estado de proposta e recomenda revisão", () => {
   assert.equal(summary.probableProduct.type, "CLT");
   assert.equal(summary.commercialState.type, "PROPOSAL");
   assert.equal(summary.recommendedAction.type, "REVIEW_PROPOSAL");
+  assert.equal(summary.priority.type, "HIGH");
+  assert.equal(summary.situationTitle, "Proposta em andamento");
+  assert.equal(summary.primaryAction.title, "Revisar proposta");
+  assert.equal(summary.primaryAction.actionable, false);
 });
 
 test("proposta ativa com inbound recente prioriza resposta ao cliente", () => {
@@ -167,8 +186,11 @@ test("contato quente sem proposta mantém evidência HOT", () => {
 
   assert.equal(summary.probableProduct.type, "FGTS");
   assert.equal(summary.commercialState.type, "NURTURING");
+  assert.equal(summary.situationTitle, "Manter em acompanhamento");
   assert.equal(summary.evidences.some((evidence) => evidence.type === "HOT_CONTACT"), true);
   assert.equal(summary.recommendedAction.type, "SEND_TEMPLATE");
+  assert.equal(summary.priority.type, "HIGH");
+  assert.equal(summary.primaryAction.title, "Enviar template");
 });
 
 test("contato quente com produto CLT recomenda simulaÃ§Ã£o CLT", () => {
@@ -187,6 +209,8 @@ test("contato quente com produto CLT recomenda simulaÃ§Ã£o CLT", () => {
 
   assert.equal(summary.probableProduct.type, "CLT");
   assert.equal(summary.recommendedAction.type, "SIMULATE_CLT");
+  assert.equal(summary.primaryAction.title, "Simular CLT");
+  assert.equal(summary.primaryAction.actionable, true);
 });
 
 test("contato quente com produto nÃ£o CLT nÃ£o recomenda simulaÃ§Ã£o CLT", () => {
@@ -224,6 +248,36 @@ test("sem dados suficientes retorna sem oportunidade clara e sem acao", () => {
   assert.equal(summary.commercialState.type, "NO_CLEAR_OPPORTUNITY");
   assert.equal(summary.recommendedAction.type, "NO_ACTION");
   assert.equal(summary.contextLevel, "LOW");
+  assert.equal(summary.priority.type, "NONE");
+  assert.equal(summary.situationTitle, "Nenhuma acao necessaria agora");
+  assert.equal(summary.primaryAction.title, "Nenhuma acao necessaria agora");
+  assert.equal(summary.primaryAction.actionable, false);
+  assert.equal(summary.productDisplayLabel, "Produto ainda nao identificado");
+  assert.equal(summary.contextExplanation, "Poucas informacoes disponiveis");
+});
+
+test("empresa respondeu por ultimo recomenda aguardar resposta do cliente", () => {
+  const summary = buildOpportunitySummary(
+    baseInput({
+      conversation: {
+        ...baseInput().conversation,
+        messages: [
+          {
+            id: "message-1",
+            direction: "outbound",
+            body: "Enviei as informacoes",
+            createdAt: new Date("2026-08-04T10:30:00.000Z")
+          }
+        ]
+      }
+    })
+  );
+
+  assert.equal(summary.commercialState.type, "WAITING_CUSTOMER");
+  assert.equal(summary.priority.type, "NORMAL");
+  assert.equal(summary.situationTitle, "Aguardar resposta do cliente");
+  assert.equal(summary.primaryAction.title, "Aguardar resposta do cliente");
+  assert.equal(summary.primaryAction.actionable, false);
 });
 
 test("produto desconhecido permanece UNKNOWN quando não há evidência confiável", () => {
@@ -420,6 +474,40 @@ test("contexto sobe para alto quando produto, proposta, interação recente e re
   );
 
   assert.equal(summary.contextLevel, "HIGH");
+  assert.equal(summary.contextExplanation, "Contexto comercial completo");
+});
+
+test("campanha recente nao afirma resposta do cliente", () => {
+  const summary = buildOpportunitySummary(
+    baseInput({
+      campaignRecipients: [
+        {
+          id: "recipient-1",
+          status: "SENT",
+          sentAt: new Date("2026-08-04T09:00:00.000Z"),
+          deliveredAt: null,
+          createdAt: new Date("2026-08-04T08:50:00.000Z"),
+          campaign: {
+            id: "campaign-1",
+            name: "Campanha FGTS",
+            templateName: "fgts_utilidade",
+            updatedAt: new Date("2026-08-04T09:00:00.000Z"),
+            channel: { name: "WhatsApp" }
+          }
+        }
+      ]
+    })
+  );
+
+  assert.equal(summary.recentCampaign?.id, "campaign-1");
+  assert.equal(
+    summary.displayEvidences.some((evidence) => evidence.type === "RECENT_CAMPAIGN"),
+    true
+  );
+  assert.equal(
+    summary.evidences.some((evidence) => evidence.type === "CUSTOMER_REPLIED_RECENTLY"),
+    false
+  );
 });
 
 test("montagem do resumo não cria tarefa nem persiste oportunidade", () => {
