@@ -42,6 +42,19 @@ export type MissionCopy = {
   helper: string | null;
 };
 
+export type MissionSummary = {
+  total: number;
+  respondNow: number;
+  returns: number;
+  negotiation: number;
+};
+
+export type TeamSummaryItem = {
+  id: string;
+  name: string;
+  total: number;
+};
+
 function hasEvidence(
   item: OpportunityQueueItem,
   evidenceType: "CUSTOMER_REPLIED_RECENTLY" | "UNREAD_MESSAGES"
@@ -90,16 +103,84 @@ export function groupOpportunityItems(items: OpportunityQueueItem[]): Opportunit
   }));
 }
 
+export function getVisibleOpportunityGroups({
+  groups,
+  limit,
+  expanded
+}: {
+  groups: OpportunityGroup[];
+  limit: number;
+  expanded: boolean;
+}): OpportunityGroup[] {
+  let remaining = expanded ? Number.POSITIVE_INFINITY : limit;
+
+  return groups.flatMap((group) => {
+    if (group.items.length === 0 || remaining <= 0) return [];
+
+    const items = group.items.slice(0, remaining);
+    remaining -= items.length;
+
+    return [
+      {
+        ...group,
+        items
+      }
+    ];
+  });
+}
+
+export function buildMissionSummary(groups: OpportunityGroup[]): MissionSummary {
+  const findGroupTotal = (key: OpportunityGroupKey) =>
+    groups.find((group) => group.key === key)?.items.length ?? 0;
+
+  return {
+    total: groups.reduce((sum, group) => sum + group.items.length, 0),
+    respondNow: findGroupTotal("respond-now"),
+    returns: findGroupTotal("returns"),
+    negotiation: findGroupTotal("negotiation")
+  };
+}
+
 export function getMissionCopy(hasMoreItems: boolean): MissionCopy {
   if (!hasMoreItems) {
     return {
-      title: "Hoje existem:",
+      title: "Hoje existem oportunidades relevantes.",
       helper: null
     };
   }
 
   return {
-    title: "Entre as principais oportunidades carregadas:",
+    title: "Entre as principais oportunidades carregadas, há trabalho relevante para a equipe.",
     helper: "Existem outras oportunidades além das exibidas nesta visão."
   };
+}
+
+export function buildMissionMessage(summary: MissionSummary, hasMoreItems: boolean) {
+  const prefix = hasMoreItems
+    ? `Entre as principais oportunidades carregadas, existem ${summary.total} oportunidades relevantes.`
+    : `Hoje existem ${summary.total} oportunidades relevantes.`;
+
+  return `${prefix} Comece por ${summary.respondNow} clientes aguardando resposta, ${summary.returns} retornos e ${summary.negotiation} propostas em andamento.`;
+}
+
+export function buildTeamSummary(items: OpportunityQueueItem[]): TeamSummaryItem[] {
+  const owners = new Map<string, TeamSummaryItem>();
+
+  for (const item of items) {
+    const id = item.owner?.id ?? "unassigned";
+    const name = item.owner?.name ?? "Sem responsável";
+    const current = owners.get(id) ?? { id, name, total: 0 };
+
+    owners.set(id, {
+      ...current,
+      total: current.total + 1
+    });
+  }
+
+  return Array.from(owners.values()).sort((a, b) => {
+    if (b.total !== a.total) return b.total - a.total;
+    if (a.id === "unassigned") return 1;
+    if (b.id === "unassigned") return -1;
+    return a.name.localeCompare(b.name);
+  });
 }

@@ -6,11 +6,17 @@ import { EmptyState } from "@/app/components/opportunities/EmptyState";
 import { LoadingState } from "@/app/components/opportunities/LoadingState";
 import { MissionCard } from "@/app/components/opportunities/MissionCard";
 import { OpportunityGroup } from "@/app/components/opportunities/OpportunityGroup";
-import { groupOpportunityItems } from "@/app/components/opportunities/opportunity-presentation";
+import {
+  buildTeamSummary,
+  getVisibleOpportunityGroups,
+  groupOpportunityItems
+} from "@/app/components/opportunities/opportunity-presentation";
 import type {
   OpportunityQueueItem,
   OpportunityQueueResponse
 } from "@/app/components/opportunities/types";
+
+const INITIAL_VISIBLE_OPPORTUNITIES = 10;
 
 async function loadOpportunityQueue(signal: AbortSignal) {
   const response = await fetch("/api/opportunities/queue?limit=50", {
@@ -36,6 +42,7 @@ export function MotorCommercialPage({
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
   const requestRef = useRef(0);
 
   const loadQueue = useCallback(() => {
@@ -51,6 +58,7 @@ export function MotorCommercialPage({
         if (requestRef.current !== requestId) return;
         setItems(data.items);
         setNextCursor(data.nextCursor);
+        setShowAll(false);
       })
       .catch((loadError: unknown) => {
         if (controller.signal.aborted || requestRef.current !== requestId) return;
@@ -72,6 +80,18 @@ export function MotorCommercialPage({
   useEffect(() => loadQueue(), [loadQueue]);
 
   const groups = useMemo(() => groupOpportunityItems(items), [items]);
+  const visibleGroups = useMemo(
+    () =>
+      getVisibleOpportunityGroups({
+        groups,
+        limit: INITIAL_VISIBLE_OPPORTUNITIES,
+        expanded: showAll
+      }),
+    [groups, showAll]
+  );
+  const teamSummary = useMemo(() => buildTeamSummary(items), [items]);
+  const visibleCount = visibleGroups.reduce((sum, group) => sum + group.items.length, 0);
+  const hasHiddenLoadedItems = visibleCount < items.length;
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
@@ -120,10 +140,35 @@ export function MotorCommercialPage({
         <EmptyState />
       ) : (
         <>
-          <MissionCard groups={groups} hasMoreItems={Boolean(nextCursor)} />
+          <MissionCard
+            groups={groups}
+            hasMoreItems={Boolean(nextCursor)}
+            visibleCount={visibleCount}
+          />
+
+          <section className="rounded-[1.5rem] border border-line/80 bg-white p-4 shadow-soft md:p-5">
+            <div className="flex flex-col gap-1">
+              <h2 className="text-lg font-semibold text-ink">Equipe hoje</h2>
+              <p className="text-sm text-slate-500">
+                Distribuição operacional das oportunidades carregadas.
+              </p>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              {teamSummary.map((member) => (
+                <div key={member.id} className="rounded-2xl border border-line bg-slate-50 p-4">
+                  <p className="truncate text-sm font-semibold text-ink">{member.name}</p>
+                  <p className="mt-2 text-2xl font-bold text-brand">{member.total}</p>
+                  <p className="text-xs font-medium text-slate-500">
+                    {member.total === 1 ? "oportunidade" : "oportunidades"}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </section>
 
           <div className="grid gap-5">
-            {groups.map((group) => (
+            {visibleGroups.map((group) => (
               <OpportunityGroup
                 key={group.key}
                 group={group}
@@ -131,6 +176,18 @@ export function MotorCommercialPage({
               />
             ))}
           </div>
+
+          {hasHiddenLoadedItems && (
+            <div className="flex justify-center">
+              <button
+                type="button"
+                onClick={() => setShowAll(true)}
+                className="rounded-2xl border border-line bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-brand/40 hover:text-brand"
+              >
+                Ver todas
+              </button>
+            </div>
+          )}
         </>
       )}
     </div>

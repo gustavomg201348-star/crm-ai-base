@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildMissionMessage,
+  buildMissionSummary,
+  buildTeamSummary,
   getMissionCopy,
+  getVisibleOpportunityGroups,
   groupOpportunityItems
 } from "@/app/components/opportunities/opportunity-presentation";
 import type { OpportunityQueueItem } from "@/app/components/opportunities/types";
@@ -56,16 +60,34 @@ function getCountByGroup(items: OpportunityQueueItem[], title: string) {
 
 test("mission copy uses complete language when there is no next cursor", () => {
   assert.deepEqual(getMissionCopy(false), {
-    title: "Hoje existem:",
+    title: "Hoje existem oportunidades relevantes.",
     helper: null
   });
 });
 
 test("mission copy uses partial language when there is a next cursor", () => {
   assert.deepEqual(getMissionCopy(true), {
-    title: "Entre as principais oportunidades carregadas:",
+    title: "Entre as principais oportunidades carregadas, há trabalho relevante para a equipe.",
     helper: "Existem outras oportunidades além das exibidas nesta visão."
   });
+});
+
+test("mission message uses loaded totals and partial language when there is a next cursor", () => {
+  const summary = {
+    total: 18,
+    respondNow: 4,
+    returns: 3,
+    negotiation: 5
+  };
+
+  assert.equal(
+    buildMissionMessage(summary, false),
+    "Hoje existem 18 oportunidades relevantes. Comece por 4 clientes aguardando resposta, 3 retornos e 5 propostas em andamento."
+  );
+  assert.equal(
+    buildMissionMessage(summary, true),
+    "Entre as principais oportunidades carregadas, existem 18 oportunidades relevantes. Comece por 4 clientes aguardando resposta, 3 retornos e 5 propostas em andamento."
+  );
 });
 
 test("ACTION_REQUIRED enters Responder agora without depending on action text", () => {
@@ -171,6 +193,12 @@ test("every item appears once and mission counts match group quantities", () => 
     groups.reduce((total, group) => total + group.items.length, 0),
     items.length
   );
+  assert.deepEqual(buildMissionSummary(groups), {
+    total: 4,
+    respondNow: 1,
+    returns: 0,
+    negotiation: 0
+  });
 });
 
 test("changing action title does not change grouping", () => {
@@ -187,4 +215,40 @@ test("changing action title does not change grouping", () => {
 
   assert.equal(getCountByGroup([base], "Responder agora"), 1);
   assert.equal(getCountByGroup([changed], "Responder agora"), 1);
+});
+
+test("visible groups hide empty groups and respect the initial list limit", () => {
+  const items = [
+    createItem({ id: "a", commercialState: { type: "ACTION_REQUIRED", label: "A" } }),
+    createItem({ id: "b", commercialState: { type: "WAITING_CUSTOMER", label: "B" } }),
+    createItem({ id: "c", commercialState: { type: "NURTURING", label: "C" } })
+  ];
+
+  const visibleGroups = getVisibleOpportunityGroups({
+    groups: groupOpportunityItems(items),
+    limit: 2,
+    expanded: false
+  });
+
+  assert.deepEqual(
+    visibleGroups.map((group) => group.title),
+    ["Responder agora", "Aguardando cliente"]
+  );
+  assert.equal(
+    visibleGroups.reduce((total, group) => total + group.items.length, 0),
+    2
+  );
+});
+
+test("team summary groups opportunities by owner and keeps unassigned visible", () => {
+  const items = [
+    createItem({ id: "a", owner: { id: "owner-1", name: "Ana" } }),
+    createItem({ id: "b", owner: { id: "owner-1", name: "Ana" } }),
+    createItem({ id: "c", owner: null })
+  ];
+
+  assert.deepEqual(buildTeamSummary(items), [
+    { id: "owner-1", name: "Ana", total: 2 },
+    { id: "unassigned", name: "Sem responsável", total: 1 }
+  ]);
 });

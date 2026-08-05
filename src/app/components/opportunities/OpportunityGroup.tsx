@@ -21,19 +21,13 @@ export function OpportunityGroup({
       </div>
 
       <div className="mt-4 space-y-3">
-        {group.items.length > 0 ? (
-          group.items.map((item) => (
-            <OpportunityItem
-              key={item.id}
-              item={item}
-              onOpenConversation={onOpenConversation}
-            />
-          ))
-        ) : (
-          <div className="rounded-2xl border border-dashed border-line bg-slate-50 p-5 text-sm text-slate-500">
-            Nenhum cliente neste bloco agora.
-          </div>
-        )}
+        {group.items.map((item) => (
+          <OpportunityItem
+            key={item.id}
+            item={item}
+            onOpenConversation={onOpenConversation}
+          />
+        ))}
       </div>
     </section>
   );
