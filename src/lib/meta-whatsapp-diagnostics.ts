@@ -245,38 +245,68 @@ export async function validateMetaWhatsAppCredentials({
   };
 
   if (tokenOk && phone) {
-    const result = await graphGet<{
+    const phoneDetails = await graphGet<{
       id?: string;
       display_phone_number?: string;
       verified_name?: string;
       quality_rating?: string;
-      whatsapp_business_account?: { id?: string; name?: string };
     }>(
-      `/${phone}?fields=id,display_phone_number,verified_name,quality_rating,whatsapp_business_account`,
+      `/${phone}?fields=id,display_phone_number,verified_name,quality_rating`,
       token
     );
-    if (result.ok) {
-      const linkedWaba = result.data.whatsapp_business_account?.id ?? null;
-      const belongsToWaba = Boolean(waba && linkedWaba === waba);
+
+    let linkedWaba: string | null = null;
+    let belongsToWaba = false;
+    let phoneFromWaba: {
+      id?: string;
+      display_phone_number?: string;
+      verified_name?: string;
+      quality_rating?: string;
+    } | null = null;
+    let membershipError: string | null = null;
+
+    if (tokenOk && waba) {
+      const wabaPhones = await graphGet<{
+        data?: Array<{
+          id?: string;
+          display_phone_number?: string;
+          verified_name?: string;
+          quality_rating?: string;
+        }>;
+      }>(`/${waba}/phone_numbers?fields=id,display_phone_number,verified_name,quality_rating&limit=100`, token);
+
+      if (wabaPhones.ok) {
+        phoneFromWaba =
+          wabaPhones.data.data?.find((item) => item.id === phone) ?? null;
+        belongsToWaba = Boolean(phoneFromWaba);
+        linkedWaba = belongsToWaba ? waba : null;
+      } else {
+        membershipError = wabaPhones.error;
+      }
+    }
+
+    if (phoneDetails.ok || phoneFromWaba) {
+      const data = phoneFromWaba ?? (phoneDetails.ok ? phoneDetails.data : {});
       phoneResult = {
         ok: true,
-        id: result.data.id ?? phone,
-        displayPhone: result.data.display_phone_number ?? null,
-        verifiedName: result.data.verified_name ?? null,
-        qualityRating: result.data.quality_rating ?? null,
+        id: data.id ?? phone,
+        displayPhone: data.display_phone_number ?? null,
+        verifiedName: data.verified_name ?? null,
+        qualityRating: data.quality_rating ?? null,
         wabaId: linkedWaba,
         belongsToWaba,
         error:
-          waba && !belongsToWaba
+          membershipError ??
+          (waba && !belongsToWaba
             ? "Phone Number ID encontrado, mas nao pertence a WABA informada."
-            : null
+            : null)
       };
     } else {
       phoneResult = {
         ok: false,
         id: phone,
         belongsToWaba: false,
-        error: result.error
+        error: phoneDetails.error
       };
     }
   }
