@@ -1,71 +1,67 @@
+import { Target } from "lucide-react";
 import {
-  CircleEllipsis,
-  Clock3,
-  Handshake,
-  MessageCircleReply,
-  PhoneForwarded,
-  WalletCards
-} from "lucide-react";
-import { getMissionCopy } from "@/app/components/opportunities/opportunity-presentation";
+  buildMissionMessage,
+  getMissionCopy
+} from "@/app/components/opportunities/opportunity-presentation";
 import type { OpportunityGroup } from "@/app/components/opportunities/types";
-
-const GROUP_ICONS: Record<OpportunityGroup["key"], typeof MessageCircleReply> = {
-  "respond-now": MessageCircleReply,
-  returns: Clock3,
-  negotiation: WalletCards,
-  "waiting-customer": Handshake,
-  "follow-up": PhoneForwarded,
-  other: CircleEllipsis
-};
-
-const GROUP_TONES: Record<OpportunityGroup["key"], string> = {
-  "respond-now": "bg-blue-50 text-blue-700",
-  returns: "bg-amber-50 text-amber-700",
-  negotiation: "bg-violet-50 text-violet-700",
-  "waiting-customer": "bg-cyan-50 text-cyan-700",
-  "follow-up": "bg-emerald-50 text-emerald-700",
-  other: "bg-slate-100 text-slate-700"
-};
 
 export function MissionCard({
   groups,
-  hasMoreItems
+  hasMoreItems,
+  visibleCount
 }: {
   groups: OpportunityGroup[];
   hasMoreItems: boolean;
+  visibleCount: number;
 }) {
   const missionCopy = getMissionCopy(hasMoreItems);
-  const stats = groups.map((group) => ({
-    label: group.title.toLowerCase(),
-    value: group.items.length,
-    icon: GROUP_ICONS[group.key],
-    tone: GROUP_TONES[group.key]
-  }));
+  const totalCount = groups.reduce((sum, group) => sum + group.items.length, 0);
+  const progress = totalCount > 0 ? Math.round((visibleCount / totalCount) * 100) : 0;
 
   return (
     <section className="rounded-[1.75rem] border border-line/80 bg-white p-5 shadow-soft md:p-6">
-      <p className="text-xs font-semibold uppercase tracking-[0.22em] text-brand">Missão do Dia</p>
-      <h2 className="mt-2 text-2xl font-bold text-ink md:text-3xl">{missionCopy.title}</h2>
-      {missionCopy.helper && (
-        <p className="mt-2 text-sm text-slate-500">{missionCopy.helper}</p>
-      )}
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex gap-4">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-brand/10 text-brand">
+            <Target className="h-6 w-6" />
+          </div>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-brand">Missão do Dia</p>
+            <h2 className="mt-2 max-w-3xl text-2xl font-bold leading-tight text-ink">
+              {missionCopy.title}
+            </h2>
+            <p className="mt-3 max-w-3xl text-base leading-7 text-slate-600">
+              {buildMissionMessage(
+                {
+                  total: totalCount,
+                  respondNow: groups.find((group) => group.key === "respond-now")?.items.length ?? 0,
+                  returns: groups.find((group) => group.key === "returns")?.items.length ?? 0,
+                  negotiation: groups.find((group) => group.key === "negotiation")?.items.length ?? 0
+                },
+                hasMoreItems
+              )}
+            </p>
+            {missionCopy.helper && (
+              <p className="mt-2 text-sm text-slate-500">{missionCopy.helper}</p>
+            )}
+          </div>
+        </div>
 
-      <div className="mt-5 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-        {stats.map((stat) => {
-          const Icon = stat.icon;
-
-          return (
-            <div key={stat.label} className="rounded-2xl border border-line bg-slate-50/70 p-4">
-              <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${stat.tone}`}>
-                <Icon className="h-5 w-5" />
-              </div>
-              <div className="mt-4 flex items-end gap-2">
-                <span className="text-3xl font-bold text-ink">{stat.value}</span>
-              </div>
-              <p className="mt-1 text-sm font-medium text-slate-600">{stat.label}</p>
-            </div>
-          );
-        })}
+        <div className="min-w-[220px] rounded-2xl border border-line bg-slate-50 p-4">
+          <div className="flex items-center justify-between text-sm">
+            <span className="font-semibold text-slate-700">Progresso da visão</span>
+            <span className="font-bold text-ink">{visibleCount}/{totalCount}</span>
+          </div>
+          <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200">
+            <div
+              className="h-full rounded-full bg-brand transition-all"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          <p className="mt-2 text-xs text-slate-500">
+            Baseado apenas nas oportunidades exibidas agora.
+          </p>
+        </div>
       </div>
     </section>
   );
