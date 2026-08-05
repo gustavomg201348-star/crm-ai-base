@@ -8,6 +8,7 @@ import {
   RotateCcw,
   SkipForward,
   Sparkles,
+  X,
   UserRound
 } from "lucide-react";
 import type {
@@ -19,6 +20,21 @@ type ActionNotice = {
   tone: "success" | "info";
   message: string;
 } | null;
+
+type ActionResult = {
+  id: string;
+  label: string;
+};
+
+const ACTION_RESULTS: ActionResult[] = [
+  { id: "client_replied", label: "Cliente respondeu" },
+  { id: "requested_return", label: "Cliente pediu retorno" },
+  { id: "proposal_created", label: "Proposta criada" },
+  { id: "sale_closed", label: "Venda realizada" },
+  { id: "not_interested", label: "Sem interesse" },
+  { id: "contact_failed", label: "Não consegui contato" },
+  { id: "invalid_number", label: "Número inválido" }
+];
 
 async function loadNextBestActionQueue(signal: AbortSignal) {
   const response = await fetch("/api/opportunities/queue?limit=50", {
@@ -62,6 +78,8 @@ export function NextBestActionPage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<ActionNotice>(null);
+  const [isResultModalOpen, setIsResultModalOpen] = useState(false);
+  const [selectedResultId, setSelectedResultId] = useState<string | null>(null);
   const requestRef = useRef(0);
 
   const currentOpportunity = items[0] ?? null;
@@ -100,6 +118,23 @@ export function NextBestActionPage({
 
   useEffect(() => loadQueue(), [loadQueue]);
 
+  useEffect(() => {
+    if (!isResultModalOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsResultModalOpen(false);
+        setSelectedResultId(null);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isResultModalOpen]);
+
   const queueInfo = useMemo(() => {
     if (nextCursor) {
       return `${items.length} oportunidades carregadas nesta rodada. Existem outras oportunidades além desta visão.`;
@@ -109,12 +144,27 @@ export function NextBestActionPage({
   }, [items.length, nextCursor]);
 
   const handleComplete = useCallback(() => {
+    setSelectedResultId(null);
+    setIsResultModalOpen(true);
+    setNotice(null);
+  }, []);
+
+  const handleCloseResultModal = useCallback(() => {
+    setIsResultModalOpen(false);
+    setSelectedResultId(null);
+  }, []);
+
+  const handleConfirmResult = useCallback(() => {
+    if (!selectedResultId) return;
+
     setItems((current) => current.slice(1));
+    setIsResultModalOpen(false);
+    setSelectedResultId(null);
     setNotice({
       tone: "success",
-      message: "Ação concluída nesta rodada. A próxima melhor oportunidade foi preparada."
+      message: "Resultado registrado. Próxima oportunidade preparada."
     });
-  }, []);
+  }, [selectedResultId]);
 
   const handleSkip = useCallback(() => {
     setItems((current) => moveFirstToEnd(current));
@@ -297,6 +347,77 @@ export function NextBestActionPage({
               }
             >
               {notice.message}
+            </div>
+          )}
+
+          {isResultModalOpen && (
+            <div
+              aria-modal="true"
+              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4 py-6"
+              role="dialog"
+            >
+              <div className="w-full max-w-lg rounded-[1.5rem] border border-line bg-white p-5 shadow-2xl">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-brand">
+                      Resultado da ação
+                    </p>
+                    <h3 className="mt-1 text-xl font-bold text-ink">
+                      Como terminou este atendimento?
+                    </h3>
+                    <p className="mt-2 text-sm text-slate-500">
+                      Escolha um resultado para avançar para a próxima oportunidade. Nada será persistido nesta fase.
+                    </p>
+                  </div>
+                  <button
+                    aria-label="Fechar"
+                    className="rounded-full border border-line p-2 text-slate-500 transition hover:border-slate-300 hover:text-slate-700"
+                    onClick={handleCloseResultModal}
+                    type="button"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="mt-5 grid gap-2">
+                  {ACTION_RESULTS.map((result) => {
+                    const isSelected = selectedResultId === result.id;
+
+                    return (
+                      <button
+                        className={
+                          isSelected
+                            ? "rounded-2xl border border-brand bg-brand/10 px-4 py-3 text-left text-sm font-semibold text-brand transition"
+                            : "rounded-2xl border border-line bg-white px-4 py-3 text-left text-sm font-semibold text-slate-700 transition hover:border-brand/40 hover:text-brand"
+                        }
+                        key={result.id}
+                        onClick={() => setSelectedResultId(result.id)}
+                        type="button"
+                      >
+                        {result.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                  <button
+                    className="rounded-2xl border border-line bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300"
+                    onClick={handleCloseResultModal}
+                    type="button"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    className="rounded-2xl bg-brand px-4 py-2.5 text-sm font-semibold text-white shadow-soft transition hover:bg-brand/90 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
+                    disabled={!selectedResultId}
+                    onClick={handleConfirmResult}
+                    type="button"
+                  >
+                    Confirmar resultado
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </>
