@@ -24,16 +24,45 @@ type ActionNotice = {
 type ActionResult = {
   id: string;
   label: string;
+  consequence: string;
 };
 
 const ACTION_RESULTS: ActionResult[] = [
-  { id: "client_replied", label: "Cliente respondeu" },
-  { id: "requested_return", label: "Cliente pediu retorno" },
-  { id: "proposal_created", label: "Proposta criada" },
-  { id: "sale_closed", label: "Venda realizada" },
-  { id: "not_interested", label: "Sem interesse" },
-  { id: "contact_failed", label: "Não consegui contato" },
-  { id: "invalid_number", label: "Número inválido" }
+  {
+    id: "client_replied",
+    label: "Cliente respondeu",
+    consequence: "A oportunidade sairá da sua ação atual e ficará aguardando o próximo movimento do cliente."
+  },
+  {
+    id: "requested_return",
+    label: "Cliente pediu retorno",
+    consequence: "A oportunidade deverá voltar para a fila no horário combinado."
+  },
+  {
+    id: "proposal_created",
+    label: "Proposta criada",
+    consequence: "A oportunidade seguirá como negociação em andamento."
+  },
+  {
+    id: "sale_closed",
+    label: "Venda realizada",
+    consequence: "A oportunidade será considerada concluída e sairá da fila ativa."
+  },
+  {
+    id: "not_interested",
+    label: "Sem interesse",
+    consequence: "A oportunidade ficará fora da fila até surgir um novo sinal comercial."
+  },
+  {
+    id: "contact_failed",
+    label: "Não consegui contato",
+    consequence: "A oportunidade poderá voltar para uma nova tentativa posteriormente."
+  },
+  {
+    id: "invalid_number",
+    label: "Número inválido",
+    consequence: "A oportunidade deverá ficar fora da fila até o contato ser corrigido."
+  }
 ];
 
 async function loadNextBestActionQueue(signal: AbortSignal) {
@@ -384,18 +413,24 @@ export function NextBestActionPage({
                     const isSelected = selectedResultId === result.id;
 
                     return (
-                      <button
-                        className={
-                          isSelected
-                            ? "rounded-2xl border border-brand bg-brand/10 px-4 py-3 text-left text-sm font-semibold text-brand transition"
-                            : "rounded-2xl border border-line bg-white px-4 py-3 text-left text-sm font-semibold text-slate-700 transition hover:border-brand/40 hover:text-brand"
-                        }
-                        key={result.id}
-                        onClick={() => setSelectedResultId(result.id)}
-                        type="button"
-                      >
-                        {result.label}
-                      </button>
+                      <div className="grid gap-2" key={result.id}>
+                        <button
+                          className={
+                            isSelected
+                              ? "rounded-2xl border border-brand bg-brand/10 px-4 py-3 text-left text-sm font-semibold text-brand transition"
+                              : "rounded-2xl border border-line bg-white px-4 py-3 text-left text-sm font-semibold text-slate-700 transition hover:border-brand/40 hover:text-brand"
+                          }
+                          onClick={() => setSelectedResultId(result.id)}
+                          type="button"
+                        >
+                          {result.label}
+                        </button>
+                        {isSelected && (
+                          <p className="rounded-2xl border border-brand/15 bg-brand/5 px-4 py-3 text-sm leading-6 text-slate-600">
+                            {result.consequence}
+                          </p>
+                        )}
+                      </div>
                     );
                   })}
                 </div>
