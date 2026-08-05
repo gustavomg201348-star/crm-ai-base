@@ -2345,6 +2345,7 @@ export default function Home() {
         const data = (await response.json()) as { conversation: ConversationRow };
         setActive("atendimento");
         mergeConversation(data.conversation, "open-notification");
+        setSelectedConversation(data.conversation);
         await markConversationRead(conversationId);
         await markNotificationsRead({ conversationId });
       }
