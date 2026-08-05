@@ -21,6 +21,7 @@ import {
 } from "@/lib/mock-data";
 import { ConversationList } from "@/app/components/conversations/ConversationList";
 import { MotorCommercialPage } from "@/app/components/opportunities/MotorCommercialPage";
+import { NextBestActionPage } from "@/app/components/opportunities/NextBestActionPage";
 import { TemplateLibraryPage } from "@/app/components/templates/TemplateLibraryPage";
 import { useNewMessageSound } from "@/app/hooks/use-new-message-sound";
 import { resolveConversationChannelId } from "@/lib/conversation-channel.service";
@@ -1854,6 +1855,7 @@ export default function Home() {
         [
           "dashboard",
           "motor-comercial",
+          "next-best-action",
           "atendimento",
           "kanban",
           "contatos",
@@ -1865,7 +1867,7 @@ export default function Home() {
     }
 
     return navItems.filter((item) =>
-      ["motor-comercial", "atendimento", "contatos", "kanban", "simulacao-clt"].includes(item.id)
+      ["motor-comercial", "next-best-action", "atendimento", "contatos", "kanban", "simulacao-clt"].includes(item.id)
     );
   }, [session]);
 
@@ -4655,6 +4657,9 @@ export default function Home() {
           )}
           {active === "motor-comercial" && (
             <MotorCommercialPage onOpenConversation={openConversationById} />
+          )}
+          {active === "next-best-action" && (
+            <NextBestActionPage onOpenConversation={openConversationById} />
           )}
           {active === "atendimento" && (
             <div className="min-h-0 flex-1 overflow-hidden">

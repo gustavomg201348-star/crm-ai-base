@@ -23,6 +23,7 @@ import {
 export const navItems = [
   { id: "dashboard", label: "Dashboard", icon: Gauge },
   { id: "motor-comercial", label: "Motor Comercial", icon: Sparkles },
+  { id: "next-best-action", label: "Próxima Melhor Ação", icon: BadgeCheck },
   { id: "atendimento", label: "Atendimento", icon: Headphones, count: 23 },
   { id: "kanban", label: "Kanban", icon: KanbanSquare },
   { id: "contatos", label: "Contatos", icon: ContactRound },
