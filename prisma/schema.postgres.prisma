@@ -589,6 +589,7 @@ model Campaign {
   templateName String?
   templateLanguage String?
   templateVariables String?
+  templateVariableMapping String?
   imagePath   String?
   imageName   String?
   imageMime   String?
@@ -622,6 +623,7 @@ model CampaignRecipient {
   providerMessageId String?
   errorCode         String?
   errorMessage      String?
+  resolvedTemplateVariables String?
   sentAt            DateTime?
   deliveredAt       DateTime?
   failedAt          DateTime?
