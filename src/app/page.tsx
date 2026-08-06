@@ -106,12 +106,12 @@ const navigationGroups: NavigationGroup[] = [
   {
     id: "produtos-financeiros",
     label: "Produtos Financeiros",
-    itemIds: ["simulacao-clt", "multicred"]
+    itemIds: ["simulacao-clt", "multicred", "recem-aposentados"]
   },
   {
     id: "administracao-apoio",
-    label: "Administração e apoio",
-    itemIds: ["recem-aposentados", "chatbot", "empresas", "config"]
+    label: "Administração",
+    itemIds: ["chatbot", "empresas", "config"]
   }
 ];
 
