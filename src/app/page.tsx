@@ -15643,8 +15643,7 @@ function Disparos({
           setError("Nenhum contato confirmado possui variaveis resolvidas para envio.");
           return;
         }
-      }
-      if (
+      } else if (
         campaignTemplateValues.length < selectedCampaignTemplate.variableCount ||
         campaignTemplateValues.some((value) => !value.trim())
       ) {
