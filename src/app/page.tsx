@@ -20,6 +20,7 @@ import {
   Tags
 } from "@/lib/mock-data";
 import { ConversationList } from "@/app/components/conversations/ConversationList";
+import { TemplateVariableDialog } from "@/app/components/conversations/TemplateVariableDialog";
 import { MotorCommercialPage } from "@/app/components/opportunities/MotorCommercialPage";
 import { NextBestActionPage } from "@/app/components/opportunities/NextBestActionPage";
 import { TemplateLibraryPage } from "@/app/components/templates/TemplateLibraryPage";
@@ -6936,6 +6937,7 @@ function Atendimento({
   const [templates, setTemplates] = useState<WhatsAppTemplateRow[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<WhatsAppTemplateRow | null>(null);
   const [templateValues, setTemplateValues] = useState<string[]>([]);
+  const [templateVariableDialogOpen, setTemplateVariableDialogOpen] = useState(false);
   const [filePreview, setFilePreview] = useState<{ file: File; url?: string } | null>(null);
   const [audioPreview, setAudioPreview] = useState<{ file: File; url: string } | null>(null);
   const [transferOpen, setTransferOpen] = useState(false);
@@ -7024,6 +7026,12 @@ function Atendimento({
     const conversationId = selectedConversation?.id ?? null;
     selectedConversationIdRef.current = conversationId;
     setMessage(conversationId ? draftsByConversationRef.current[conversationId] ?? "" : "");
+    setSelectedTemplate(null);
+    setTemplateValues([]);
+    setTemplateVariableDialogOpen(false);
+    setTemplatesOpen(false);
+    setTemplates([]);
+    setTemplatesLoading(false);
   }, [selectedConversation?.id]);
 
   useEffect(() => {
@@ -7369,11 +7377,39 @@ function Atendimento({
     }
   }
 
+  function clearTemplateSelection() {
+    setSelectedTemplate(null);
+    setTemplateValues([]);
+    setTemplateVariableDialogOpen(false);
+  }
+
+  function closeTemplatesPanel() {
+    clearTemplateSelection();
+    setTemplatesOpen(false);
+  }
+
+  function selectTemplate(template: WhatsAppTemplateRow) {
+    const initialValues = Array.from({ length: template.variableCount }, () => "");
+    setSelectedTemplate(template);
+    setTemplateValues(initialValues);
+    setTemplateVariableDialogOpen(template.variableCount > 0);
+  }
+
+  function updateTemplateValue(index: number, value: string) {
+    setTemplateValues((current) =>
+      current.map((item, itemIndex) => (itemIndex === index ? value : item))
+    );
+  }
+
   async function openTemplates() {
     if (!selectedConversation) return;
-    setTemplatesOpen((current) => !current);
     setQuickRepliesOpen(false);
     setEmojiOpen(false);
+    if (templatesOpen) {
+      closeTemplatesPanel();
+      return;
+    }
+    setTemplatesOpen(true);
     if (templates.length) return;
     setTemplatesLoading(true);
     setComposerError("");
@@ -7386,7 +7422,7 @@ function Atendimento({
     }
   }
 
-  async function sendTemplate() {
+  async function sendTemplate(values = templateValues) {
     if (!selectedConversation || !selectedTemplate || sendingAttachment) return;
     setSendingAttachment(true);
     setComposerError("");
@@ -7394,11 +7430,9 @@ function Atendimento({
       await onSendTemplate(selectedConversation.id, {
         templateName: selectedTemplate.name,
         language: selectedTemplate.language,
-        variables: templateValues
+        variables: values
       });
-      setSelectedTemplate(null);
-      setTemplateValues([]);
-      setTemplatesOpen(false);
+      closeTemplatesPanel();
     } catch (error) {
       setComposerError(error instanceof Error ? error.message : "Falha ao enviar template.");
     } finally {
@@ -7406,9 +7440,6 @@ function Atendimento({
     }
   }
 
-  const hasPendingTemplateVariables = Boolean(
-    selectedTemplate && templateValues.some((value) => !value.trim())
-  );
   const selectedConversationChannelId = selectedConversation
     ? resolveConversationChannelId(selectedConversation)
     : null;
@@ -8325,7 +8356,7 @@ function Atendimento({
             <div className="mb-3 max-h-72 overflow-y-auto rounded-2xl border border-line bg-white p-3 shadow-soft">
               <div className="mb-3 flex items-center justify-between">
                 <p className="text-sm font-bold text-slate-900">Templates aprovados</p>
-                <button type="button" className="text-xs font-semibold text-slate-500" onClick={() => setTemplatesOpen(false)}>
+                <button type="button" className="text-xs font-semibold text-slate-500" onClick={closeTemplatesPanel}>
                   Fechar
                 </button>
               </div>
@@ -8345,8 +8376,7 @@ function Atendimento({
                         : "border-line"
                     )}
                     onClick={() => {
-                      setSelectedTemplate(template);
-                      setTemplateValues(Array.from({ length: template.variableCount }, () => ""));
+                      selectTemplate(template);
                     }}
                   >
                     <div className="flex items-center justify-between gap-3">
@@ -8362,30 +8392,25 @@ function Atendimento({
               </div>
               {selectedTemplate && (
                 <div className="mt-3 rounded-2xl bg-slate-50 p-3">
+                  <p className="text-sm font-semibold text-slate-900">
+                    {selectedTemplate.name}
+                  </p>
                   {selectedTemplate.variableCount > 0 && (
-                    <div className="space-y-2">
-                      {templateValues.map((value, index) => (
-                        <input
-                          key={index}
-                          className="h-9 w-full rounded-xl border border-line px-3 text-sm outline-none focus:border-blue-200"
-                          placeholder={`Variavel ${index + 1}`}
-                          value={value}
-                          onChange={(event) =>
-                            setTemplateValues((current) =>
-                              current.map((item, itemIndex) =>
-                                itemIndex === index ? event.target.value : item
-                              )
-                            )
-                          }
-                        />
-                      ))}
-                    </div>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Preencha as variaveis antes de enviar.
+                    </p>
                   )}
                   <button
                     type="button"
                     className="mt-3 inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-full bg-brand text-sm font-semibold text-white disabled:opacity-50"
-                    disabled={sendingAttachment || !selectedTemplate || hasPendingTemplateVariables}
-                    onClick={() => void sendTemplate()}
+                    disabled={sendingAttachment || !selectedTemplate}
+                    onClick={() => {
+                      if (selectedTemplate.variableCount > 0) {
+                        setTemplateVariableDialogOpen(true);
+                        return;
+                      }
+                      void sendTemplate();
+                    }}
                   >
                     {sendingAttachment ? (
                       <>
@@ -8393,12 +8418,23 @@ function Atendimento({
                         Enviando...
                       </>
                     ) : (
-                      "Enviar template"
+                      selectedTemplate.variableCount > 0 ? "Preencher variaveis" : "Enviar template"
                     )}
                   </button>
                 </div>
               )}
             </div>
+          )}
+
+          {templateVariableDialogOpen && selectedTemplate && selectedTemplate.variableCount > 0 && (
+            <TemplateVariableDialog
+              template={selectedTemplate}
+              values={templateValues}
+              sending={sendingAttachment}
+              onChange={updateTemplateValue}
+              onCancel={clearTemplateSelection}
+              onConfirm={() => void sendTemplate(templateValues)}
+            />
           )}
 
           <input
@@ -8481,7 +8517,7 @@ function Atendimento({
                 onClick={() => {
                   setQuickRepliesOpen((current) => !current);
                   setEmojiOpen(false);
-                  setTemplatesOpen(false);
+                  closeTemplatesPanel();
                 }}
               >
                 <MessageSquareText aria-hidden="true" className="h-3.5 w-3.5" />
@@ -8542,7 +8578,7 @@ function Atendimento({
               onClick={() => {
                 setQuickRepliesOpen((current) => !current);
                 setEmojiOpen(false);
-                setTemplatesOpen(false);
+                closeTemplatesPanel();
               }}
             >
               <MessageSquareText aria-hidden="true" className="h-4 w-4" />
