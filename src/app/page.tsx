@@ -38,6 +38,7 @@ import {
   Check,
   CheckCheck,
   ChevronDown,
+  ChevronRight,
   CircleDollarSign,
   Clock3,
   Clipboard,
@@ -74,6 +75,45 @@ import {
 } from "lucide-react";
 
 type Section = (typeof navItems)[number]["id"];
+
+type NavigationGroup = {
+  id: string;
+  label: string;
+  itemIds: Section[];
+};
+
+const navigationGroups: NavigationGroup[] = [
+  {
+    id: "dashboard",
+    label: "Dashboard",
+    itemIds: ["dashboard"]
+  },
+  {
+    id: "operacao-comercial",
+    label: "Operação Comercial",
+    itemIds: ["motor-comercial", "next-best-action"]
+  },
+  {
+    id: "relacionamento",
+    label: "Relacionamento",
+    itemIds: ["atendimento", "kanban", "contatos", "tags"]
+  },
+  {
+    id: "comunicacao",
+    label: "Comunicação",
+    itemIds: ["canais", "templates", "disparos"]
+  },
+  {
+    id: "produtos-financeiros",
+    label: "Produtos Financeiros",
+    itemIds: ["simulacao-clt", "multicred"]
+  },
+  {
+    id: "administracao-apoio",
+    label: "Administração e apoio",
+    itemIds: ["recem-aposentados", "chatbot", "empresas", "config"]
+  }
+];
 
 const INBOUND_MESSAGE_NOTIFICATION_TYPE = "NEW_INBOUND_MESSAGE";
 
@@ -1588,6 +1628,7 @@ function emptyDashboardData(): DashboardData {
 export default function Home() {
   const { playNewMessageSound } = useNewMessageSound();
   const [active, setActive] = useState<Section>("dashboard");
+  const [collapsedNavigationGroups, setCollapsedNavigationGroups] = useState<Record<string, boolean>>({});
   const [session, setSession] = useState<Session | null>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
   const [contacts, setContacts] = useState<ContactRow[]>([]);
@@ -1870,6 +1911,33 @@ export default function Home() {
       ["motor-comercial", "next-best-action", "atendimento", "contatos", "kanban", "simulacao-clt"].includes(item.id)
     );
   }, [session]);
+
+  const visibleNavigationGroups = useMemo(() => {
+    const visibleItemIds = new Set<Section>(visibleNavItems.map((item) => item.id));
+
+    return navigationGroups
+      .map((group) => ({
+        ...group,
+        items: group.itemIds
+          .filter((itemId) => visibleItemIds.has(itemId))
+          .map((itemId) => visibleNavItems.find((item) => item.id === itemId))
+          .filter((item): item is (typeof visibleNavItems)[number] => Boolean(item))
+      }))
+      .filter((group) => group.items.length > 0);
+  }, [visibleNavItems]);
+
+  const activeNavigationGroupId = useMemo(() => {
+    return visibleNavigationGroups.find((group) =>
+      group.items.some((item) => item.id === active)
+    )?.id;
+  }, [active, visibleNavigationGroups]);
+
+  const toggleNavigationGroup = useCallback((groupId: string) => {
+    setCollapsedNavigationGroups((current) => ({
+      ...current,
+      [groupId]: !current[groupId]
+    }));
+  }, []);
 
   const atendimentoUnread = useMemo(
     () =>
@@ -4216,60 +4284,108 @@ export default function Home() {
               Navegacao
             </p>
           )}
-          {visibleNavItems.map((item) => {
-            const Icon = item.icon;
-            const itemCount =
-              item.id === "atendimento"
-                ? atendimentoUnread
-                : "count" in item && typeof item.count === "number"
-                  ? item.count
-                  : 0;
-            return (
-              <button
-                key={item.id}
-                className={clsx(
-                  "group relative flex h-10 w-full items-center rounded-xl text-left text-sm font-medium transition-colors",
-                  leftSidebarCollapsed
-                    ? "justify-center px-0"
-                    : "justify-between px-3",
-                  active === item.id
-                    ? "bg-blue-50 text-brand shadow-[inset_0_0_0_1px_rgba(37,99,235,0.10)]"
-                    : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"
-                )}
-                onClick={() => setActive(item.id)}
-                title={leftSidebarCollapsed ? item.label : undefined}
-              >
-                <span
-                  className={clsx(
-                    "flex items-center",
-                    leftSidebarCollapsed ? "justify-center" : "gap-3"
-                  )}
-                >
-                  <Icon
+          {leftSidebarCollapsed
+            ? visibleNavItems.map((item) => {
+                const Icon = item.icon;
+                const itemCount =
+                  item.id === "atendimento"
+                    ? atendimentoUnread
+                    : "count" in item && typeof item.count === "number"
+                      ? item.count
+                      : 0;
+                return (
+                  <button
+                    key={item.id}
                     className={clsx(
-                      "h-4 w-4",
+                      "group relative flex h-10 w-full items-center rounded-xl text-left text-sm font-medium transition-colors",
+                      "justify-center px-0",
                       active === item.id
-                        ? "text-brand"
-                        : "text-slate-400 group-hover:text-slate-600"
+                        ? "bg-blue-50 text-brand shadow-[inset_0_0_0_1px_rgba(37,99,235,0.10)]"
+                        : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"
                     )}
-                  />
-                  {!leftSidebarCollapsed && item.label}
-                </span>
-                {itemCount > 0 && (
-                  <span
-                    className={clsx(
-                      "rounded-full bg-rose-500 text-[11px] font-bold text-white",
-                      leftSidebarCollapsed
-                        ? "absolute ml-7 mt-[-1.6rem] min-w-4 px-1 text-[9px]"
-                        : "px-2 py-0.5"
-                    )}
+                    onClick={() => setActive(item.id)}
+                    title={item.label}
                   >
-                    {itemCount > 99 ? "99+" : itemCount}
-                  </span>
-                )}
-              </button>
-            );
-          })}
+                    <span className="flex items-center justify-center">
+                      <Icon
+                        className={clsx(
+                          "h-4 w-4",
+                          active === item.id
+                            ? "text-brand"
+                            : "text-slate-400 group-hover:text-slate-600"
+                        )}
+                      />
+                    </span>
+                    {itemCount > 0 && (
+                      <span className="absolute ml-7 mt-[-1.6rem] min-w-4 rounded-full bg-rose-500 px-1 text-[9px] font-bold text-white">
+                        {itemCount > 99 ? "99+" : itemCount}
+                      </span>
+                    )}
+                  </button>
+                );
+              })
+            : visibleNavigationGroups.map((group) => {
+                const isActiveGroup = group.id === activeNavigationGroupId;
+                const isCollapsed = collapsedNavigationGroups[group.id] && !isActiveGroup;
+
+                return (
+                  <div key={group.id} className="space-y-1">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400 transition hover:bg-slate-50 hover:text-slate-600"
+                      onClick={() => toggleNavigationGroup(group.id)}
+                    >
+                      <span>{group.label}</span>
+                      <ChevronRight
+                        className={clsx(
+                          "h-3.5 w-3.5 transition-transform",
+                          !isCollapsed && "rotate-90"
+                        )}
+                      />
+                    </button>
+                    {!isCollapsed &&
+                      group.items.map((item) => {
+                        const Icon = item.icon;
+                        const itemCount =
+                          item.id === "atendimento"
+                            ? atendimentoUnread
+                            : "count" in item && typeof item.count === "number"
+                              ? item.count
+                              : 0;
+
+                        return (
+                          <button
+                            key={item.id}
+                            className={clsx(
+                              "group relative flex h-10 w-full items-center justify-between rounded-xl px-3 text-left text-sm font-medium transition-colors",
+                              active === item.id
+                                ? "bg-blue-50 text-brand shadow-[inset_0_0_0_1px_rgba(37,99,235,0.10)]"
+                                : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"
+                            )}
+                            onClick={() => setActive(item.id)}
+                          >
+                            <span className="flex items-center gap-3">
+                              <Icon
+                                className={clsx(
+                                  "h-4 w-4",
+                                  active === item.id
+                                    ? "text-brand"
+                                    : "text-slate-400 group-hover:text-slate-600"
+                                )}
+                              />
+                              {item.label}
+                            </span>
+                            {itemCount > 0 && (
+                              <span className="rounded-full bg-rose-500 px-2 py-0.5 text-[11px] font-bold text-white">
+                                {itemCount > 99 ? "99+" : itemCount}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                  </div>
+                );
+              })}
         </nav>
 
         <div
@@ -4392,46 +4508,70 @@ export default function Home() {
               <p className="px-3 pb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">
                 Navegacao
               </p>
-              {visibleNavItems.map((item) => {
-                const Icon = item.icon;
-                const itemCount =
-                  item.id === "atendimento"
-                    ? atendimentoUnread
-                    : "count" in item && typeof item.count === "number"
-                      ? item.count
-                      : 0;
+              {visibleNavigationGroups.map((group) => {
+                const isActiveGroup = group.id === activeNavigationGroupId;
+                const isCollapsed = collapsedNavigationGroups[group.id] && !isActiveGroup;
+
                 return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className={clsx(
-                      "group relative flex h-10 w-full items-center justify-between rounded-xl px-3 text-left text-sm font-medium transition-colors",
-                      active === item.id
-                        ? "bg-blue-50 text-brand shadow-[inset_0_0_0_1px_rgba(37,99,235,0.10)]"
-                        : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"
-                    )}
-                    onClick={() => {
-                      setActive(item.id);
-                      setMobileSidebarOpen(false);
-                    }}
-                  >
-                    <span className="flex items-center gap-3">
-                      <Icon
+                  <div key={group.id} className="space-y-1">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400 transition hover:bg-slate-50 hover:text-slate-600"
+                      onClick={() => toggleNavigationGroup(group.id)}
+                    >
+                      <span>{group.label}</span>
+                      <ChevronRight
                         className={clsx(
-                          "h-4 w-4",
-                          active === item.id
-                            ? "text-brand"
-                            : "text-slate-400 group-hover:text-slate-600"
+                          "h-3.5 w-3.5 transition-transform",
+                          !isCollapsed && "rotate-90"
                         )}
                       />
-                      {item.label}
-                    </span>
-                    {itemCount > 0 && (
-                      <span className="rounded-full bg-rose-500 px-2 py-0.5 text-[11px] font-bold text-white">
-                        {itemCount > 99 ? "99+" : itemCount}
-                      </span>
-                    )}
-                  </button>
+                    </button>
+                    {!isCollapsed &&
+                      group.items.map((item) => {
+                        const Icon = item.icon;
+                        const itemCount =
+                          item.id === "atendimento"
+                            ? atendimentoUnread
+                            : "count" in item && typeof item.count === "number"
+                              ? item.count
+                              : 0;
+
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            className={clsx(
+                              "group relative flex h-10 w-full items-center justify-between rounded-xl px-3 text-left text-sm font-medium transition-colors",
+                              active === item.id
+                                ? "bg-blue-50 text-brand shadow-[inset_0_0_0_1px_rgba(37,99,235,0.10)]"
+                                : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"
+                            )}
+                            onClick={() => {
+                              setActive(item.id);
+                              setMobileSidebarOpen(false);
+                            }}
+                          >
+                            <span className="flex items-center gap-3">
+                              <Icon
+                                className={clsx(
+                                  "h-4 w-4",
+                                  active === item.id
+                                    ? "text-brand"
+                                    : "text-slate-400 group-hover:text-slate-600"
+                                )}
+                              />
+                              {item.label}
+                            </span>
+                            {itemCount > 0 && (
+                              <span className="rounded-full bg-rose-500 px-2 py-0.5 text-[11px] font-bold text-white">
+                                {itemCount > 99 ? "99+" : itemCount}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                  </div>
                 );
               })}
             </nav>
