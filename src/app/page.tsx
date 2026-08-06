@@ -15485,19 +15485,67 @@ function Disparos({
     URL.revokeObjectURL(url);
   }
 
-  function downloadImportTemplate() {
-    const csv = [
-      ["CPF", "Nome", "Telefone", "Data Concessao", "Beneficio", "Cidade", "Estado"].join(";"),
-      ["12345678901", "Maria Silva", "33999413444", "01/04/2026", "Aposentadoria", "Governador Valadares", "MG"].join(";"),
-      ["98765432100", "Joao Pereira", "5533998887766", "", "", "", ""].join(";")
-    ].join("\n");
-
+  async function downloadImportTemplate() {
+    const XLSX = await import("xlsx");
+    const contactsRows = [
+      ["CPF", "Nome", "Telefone", "Valor Liberado", "Data Concessao", "Beneficio", "Cidade", "Estado"],
+      ["12345678900", "Maria Silva", "5533999999999", "350,00", "01/04/2026", "Aposentadoria", "Governador Valadares", "MG"],
+      ["98765432100", "Joao Pereira", "5533998888776", "50,00", "15/06/2026", "Pensao", "Caratinga", "MG"]
+    ];
+    const instructionsRows = [
+      ["Como usar variaveis nos disparos"],
+      [""],
+      ["1. CPF, Nome e Telefone sao obrigatorios."],
+      ["2. Voce pode adicionar quantas colunas extras precisar."],
+      ["3. Cada coluna extra pode ser usada como variavel do template."],
+      ["4. Na tela de Disparos, apos escolher o template, faca o mapeamento entre a variavel e a coluna."],
+      [""],
+      ["Exemplo"],
+      ["Template:"],
+      ["Ola {{1}}, tudo bem?"],
+      ["Verificamos que hoje voce possui R$ {{2}} disponivel para antecipacao do seu FGTS."],
+      [""],
+      ["Mapeamento:"],
+      ["{{1}} -> Nome"],
+      ["{{2}} -> Valor Liberado"],
+      [""],
+      ["Resultado:"],
+      ["Ola Maria Silva, tudo bem?"],
+      ["Verificamos que hoje voce possui R$ 350,00 disponivel para antecipacao do seu FGTS."],
+      [""],
+      ["Avisos"],
+      ["- Nao coloque R$ na coluna Valor Liberado se o template ja contem R$."],
+      ["- Nao altere os nomes de CPF, Nome e Telefone."],
+      ["- Colunas extras podem ter qualquer nome."],
+      ["- Linhas com variavel vazia podem ser consideradas invalidas no disparo."],
+      ["- Use somente numeros autorizados para testes."]
+    ];
+    const workbook = XLSX.utils.book_new();
+    const contactsSheet = XLSX.utils.aoa_to_sheet(contactsRows);
+    contactsSheet["!cols"] = [
+      { wch: 14 },
+      { wch: 20 },
+      { wch: 18 },
+      { wch: 16 },
+      { wch: 16 },
+      { wch: 18 },
+      { wch: 22 },
+      { wch: 10 }
+    ];
+    contactsSheet["!autofilter"] = { ref: "A1:H3" };
+    const instructionsSheet = XLSX.utils.aoa_to_sheet(instructionsRows);
+    instructionsSheet["!cols"] = [{ wch: 100 }];
+    XLSX.utils.book_append_sheet(workbook, contactsSheet, "Contatos");
+    XLSX.utils.book_append_sheet(workbook, instructionsSheet, "Como usar");
+    const workbookBytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
     const url = URL.createObjectURL(
-      new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" })
+      new Blob([workbookBytes], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      })
     );
     const link = document.createElement("a");
     link.href = url;
-    link.download = "modelo-importacao-contatos.csv";
+    link.download = "modelo-importacao-contatos.xlsx";
     link.click();
     URL.revokeObjectURL(url);
   }
@@ -15719,8 +15767,8 @@ function Disparos({
                 Importar planilha para disparo
               </p>
               <p className="mt-1 text-xs text-slate-600">
-                Aceita CSV ou Excel .xlsx com CPF, Nome e Telefone. Variaveis:
-                {" {{nome}}"}, {"{{cpf}}"} e {"{{telefone}}"}.
+                Aceita CSV ou Excel .xlsx. CPF, Nome e Telefone sao obrigatorios.
+                Colunas extras podem ser usadas como variaveis do template.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
