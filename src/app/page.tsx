@@ -4208,7 +4208,7 @@ export default function Home() {
     >
       <aside
         className={clsx(
-          "fixed left-0 top-0 hidden h-screen flex-col border-r border-line/80 bg-white/95 backdrop-blur transition-[width] duration-300 ease-out xl:flex",
+          "fixed left-0 top-0 hidden h-screen flex-col border-r border-slate-200/80 bg-[#F3F6FB] shadow-[10px_0_28px_rgba(15,23,42,0.08)] backdrop-blur transition-[width] duration-300 ease-out xl:flex",
           leftSidebarCollapsed ? "w-[72px]" : "w-[264px]"
         )}
       >
@@ -4247,7 +4247,7 @@ export default function Home() {
           <div className="shrink-0 px-3">
             <button
               type="button"
-              className="grid h-10 w-full place-items-center rounded-2xl border border-line bg-slate-50 text-slate-500 transition hover:bg-blue-50 hover:text-brand"
+              className="grid h-10 w-full place-items-center rounded-2xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-blue-100 hover:bg-blue-50 hover:text-brand"
               title="Expandir menu lateral"
               onClick={() => setLeftSidebarCollapsed(false)}
             >
@@ -4255,20 +4255,20 @@ export default function Home() {
             </button>
           </div>
         ) : (
-          <div className="mx-4 shrink-0 rounded-2xl border border-line/80 bg-slate-50/80 p-3">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+          <div className="mx-4 shrink-0 rounded-2xl border border-slate-200/80 bg-white/85 p-4 shadow-sm">
+            <p className="text-xs font-semibold tracking-wide text-slate-700">
               Workspace
             </p>
-            <div className="mt-2 flex items-center justify-between gap-2">
+            <div className="mt-2.5 flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-slate-900">
+                <p className="truncate text-[15px] font-bold text-slate-950">
                   {session.company.name}
                 </p>
-                <p className="truncate text-xs text-slate-500">
+                <p className="mt-0.5 truncate text-xs text-slate-500">
                   {session.company.segment ?? "Credito consignado"}
                 </p>
               </div>
-              <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
+              <ChevronDown className="h-[18px] w-[18px] shrink-0 text-slate-500" />
             </div>
           </div>
         )}
@@ -4276,11 +4276,11 @@ export default function Home() {
         <nav
           className={clsx(
             "min-h-0 flex-1 space-y-1 overflow-y-scroll pb-4 [scrollbar-color:#CBD5E1_transparent] [scrollbar-width:thin]",
-            leftSidebarCollapsed ? "mt-4 px-3" : "mt-5 px-3 pr-2"
+            leftSidebarCollapsed ? "mt-4 px-3" : "mt-6 px-3 pr-2"
           )}
         >
           {!leftSidebarCollapsed && (
-            <p className="px-3 pb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">
+            <p className="px-3 pb-3 text-xs font-semibold tracking-wide text-slate-700">
               Navegacao
             </p>
           )}
@@ -4297,11 +4297,11 @@ export default function Home() {
                   <button
                     key={item.id}
                     className={clsx(
-                      "group relative flex h-10 w-full items-center rounded-xl text-left text-sm font-medium transition-colors",
+                      "group relative flex h-10 w-full items-center rounded-xl text-left text-sm font-medium shadow-sm transition-colors",
                       "justify-center px-0",
                       active === item.id
-                        ? "bg-blue-50 text-brand shadow-[inset_0_0_0_1px_rgba(37,99,235,0.10)]"
-                        : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"
+                        ? "bg-white text-brand ring-1 ring-blue-100"
+                        : "bg-white/60 text-slate-600 hover:bg-white hover:text-slate-950"
                     )}
                     onClick={() => setActive(item.id)}
                     title={item.label}
@@ -4324,21 +4324,33 @@ export default function Home() {
                   </button>
                 );
               })
-            : visibleNavigationGroups.map((group) => {
+            : visibleNavigationGroups.map((group, groupIndex) => {
                 const isActiveGroup = group.id === activeNavigationGroupId;
                 const isCollapsed = collapsedNavigationGroups[group.id] && !isActiveGroup;
 
                 return (
-                  <div key={group.id} className="space-y-1">
+                  <div
+                    key={group.id}
+                    className={clsx(
+                      "space-y-2 rounded-2xl p-1 transition-colors",
+                      !isCollapsed && "bg-white/45 shadow-sm ring-1 ring-white/70",
+                      groupIndex > 0 && "mt-4 pt-1"
+                    )}
+                  >
                     <button
                       type="button"
-                      className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400 transition hover:bg-slate-50 hover:text-slate-600"
+                      className={clsx(
+                        "flex w-full items-center justify-between rounded-xl border-l-[3px] px-3 py-2.5 text-left text-[14px] font-bold tracking-normal shadow-sm transition-colors duration-150",
+                        isActiveGroup
+                          ? "border-blue-500 bg-white text-slate-950 ring-1 ring-blue-100"
+                          : "border-transparent bg-white/65 text-slate-700 hover:border-blue-400 hover:bg-blue-50 hover:text-slate-950 hover:ring-1 hover:ring-blue-100"
+                      )}
                       onClick={() => toggleNavigationGroup(group.id)}
                     >
                       <span>{group.label}</span>
                       <ChevronRight
                         className={clsx(
-                          "h-3.5 w-3.5 transition-transform",
+                          "h-[18px] w-[18px] text-slate-600 transition-transform duration-150",
                           !isCollapsed && "rotate-90"
                         )}
                       />
@@ -4357,10 +4369,10 @@ export default function Home() {
                           <button
                             key={item.id}
                             className={clsx(
-                              "group relative flex h-10 w-full items-center justify-between rounded-xl px-3 text-left text-sm font-medium transition-colors",
+                              "group relative flex h-10 w-full items-center justify-between rounded-xl px-3 pl-4 text-left text-sm font-medium transition-colors",
                               active === item.id
-                                ? "bg-blue-50 text-brand shadow-[inset_0_0_0_1px_rgba(37,99,235,0.10)]"
-                                : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"
+                                ? "bg-blue-50 text-brand shadow-[inset_0_0_0_1px_rgba(37,99,235,0.12)]"
+                                : "text-slate-600 hover:bg-white/90 hover:text-slate-950"
                             )}
                             onClick={() => setActive(item.id)}
                           >
@@ -4390,7 +4402,7 @@ export default function Home() {
 
         <div
           className={clsx(
-            "shrink-0 border-t border-line/70",
+            "shrink-0 border-t border-slate-200/70",
             leftSidebarCollapsed ? "space-y-2 p-3" : "space-y-3 p-4"
           )}
         >
@@ -4403,7 +4415,7 @@ export default function Home() {
                   : "gap-3 px-3",
                 active === "tags"
                   ? "bg-blue-50 text-brand shadow-[inset_0_0_0_1px_rgba(37,99,235,0.10)]"
-                  : "bg-white text-slate-600 ring-1 ring-line hover:bg-slate-50 hover:text-slate-950"
+                  : "bg-white/80 text-slate-600 ring-1 ring-slate-200 hover:bg-white hover:text-slate-950"
               )}
               onClick={() => setActive("tags")}
               type="button"
@@ -4436,7 +4448,7 @@ export default function Home() {
           </div>
           <div
             className={clsx(
-              "flex items-center rounded-2xl hover:bg-slate-50",
+              "flex items-center rounded-2xl transition hover:bg-white/70",
               leftSidebarCollapsed ? "justify-center p-0" : "gap-3 p-2"
             )}
             title={leftSidebarCollapsed ? `${session.user.name} - ${session.user.role}` : undefined}
@@ -4464,7 +4476,7 @@ export default function Home() {
             className="absolute inset-0 bg-slate-950/40 backdrop-blur-sm"
             onClick={() => setMobileSidebarOpen(false)}
           />
-          <aside className="relative z-10 flex h-[100dvh] w-72 max-w-[85vw] flex-col border-r border-line/80 bg-white shadow-soft">
+          <aside className="relative z-10 flex h-[100dvh] w-72 max-w-[85vw] flex-col border-r border-slate-200/80 bg-[#F3F6FB] shadow-[10px_0_28px_rgba(15,23,42,0.12)]">
             <div className="flex h-20 shrink-0 items-center gap-3 px-5">
               <div className="grid h-10 w-10 place-items-center rounded-2xl bg-brand text-sm font-bold text-white shadow-soft">
                 AI
@@ -4487,42 +4499,54 @@ export default function Home() {
               </button>
             </div>
 
-            <div className="mx-4 shrink-0 rounded-2xl border border-line/80 bg-slate-50/80 p-3">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            <div className="mx-4 shrink-0 rounded-2xl border border-slate-200/80 bg-white/85 p-4 shadow-sm">
+              <p className="text-xs font-semibold tracking-wide text-slate-700">
                 Workspace
               </p>
-              <div className="mt-2 flex items-center justify-between gap-2">
+              <div className="mt-2.5 flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-slate-900">
+                  <p className="truncate text-[15px] font-bold text-slate-950">
                     {session.company.name}
                   </p>
-                  <p className="truncate text-xs text-slate-500">
+                  <p className="mt-0.5 truncate text-xs text-slate-500">
                     {session.company.segment ?? "Credito consignado"}
                   </p>
                 </div>
-                <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
+                <ChevronDown className="h-[18px] w-[18px] shrink-0 text-slate-500" />
               </div>
             </div>
 
-            <nav className="mt-5 min-h-0 flex-1 space-y-1 overflow-y-auto px-3 pr-2 pb-4 [scrollbar-color:#CBD5E1_transparent] [scrollbar-width:thin]">
-              <p className="px-3 pb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">
+            <nav className="mt-6 min-h-0 flex-1 space-y-1 overflow-y-auto px-3 pr-2 pb-4 [scrollbar-color:#CBD5E1_transparent] [scrollbar-width:thin]">
+              <p className="px-3 pb-3 text-xs font-semibold tracking-wide text-slate-700">
                 Navegacao
               </p>
-              {visibleNavigationGroups.map((group) => {
+              {visibleNavigationGroups.map((group, groupIndex) => {
                 const isActiveGroup = group.id === activeNavigationGroupId;
                 const isCollapsed = collapsedNavigationGroups[group.id] && !isActiveGroup;
 
                 return (
-                  <div key={group.id} className="space-y-1">
+                  <div
+                    key={group.id}
+                    className={clsx(
+                      "space-y-2 rounded-2xl p-1 transition-colors",
+                      !isCollapsed && "bg-white/45 shadow-sm ring-1 ring-white/70",
+                      groupIndex > 0 && "mt-4 pt-1"
+                    )}
+                  >
                     <button
                       type="button"
-                      className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400 transition hover:bg-slate-50 hover:text-slate-600"
+                      className={clsx(
+                        "flex w-full items-center justify-between rounded-xl border-l-[3px] px-3 py-2.5 text-left text-[14px] font-bold tracking-normal shadow-sm transition-colors duration-150",
+                        isActiveGroup
+                          ? "border-blue-500 bg-white text-slate-950 ring-1 ring-blue-100"
+                          : "border-transparent bg-white/65 text-slate-700 hover:border-blue-400 hover:bg-blue-50 hover:text-slate-950 hover:ring-1 hover:ring-blue-100"
+                      )}
                       onClick={() => toggleNavigationGroup(group.id)}
                     >
                       <span>{group.label}</span>
                       <ChevronRight
                         className={clsx(
-                          "h-3.5 w-3.5 transition-transform",
+                          "h-[18px] w-[18px] text-slate-600 transition-transform duration-150",
                           !isCollapsed && "rotate-90"
                         )}
                       />
@@ -4542,10 +4566,10 @@ export default function Home() {
                             key={item.id}
                             type="button"
                             className={clsx(
-                              "group relative flex h-10 w-full items-center justify-between rounded-xl px-3 text-left text-sm font-medium transition-colors",
+                              "group relative flex h-10 w-full items-center justify-between rounded-xl px-3 pl-4 text-left text-sm font-medium transition-colors",
                               active === item.id
-                                ? "bg-blue-50 text-brand shadow-[inset_0_0_0_1px_rgba(37,99,235,0.10)]"
-                                : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"
+                                ? "bg-blue-50 text-brand shadow-[inset_0_0_0_1px_rgba(37,99,235,0.12)]"
+                                : "text-slate-600 hover:bg-white/90 hover:text-slate-950"
                             )}
                             onClick={() => {
                               setActive(item.id);
