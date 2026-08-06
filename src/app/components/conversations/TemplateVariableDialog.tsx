@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useEffect, useMemo, useRef } from "react";
+import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef } from "react";
 import { Loader2 } from "lucide-react";
 import { renderTemplateBodyWithVariables } from "@/lib/template-parameters";
 
@@ -54,17 +54,25 @@ export function TemplateVariableDialog({
     };
   }, [onCancel, sending]);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function handleConfirm() {
     if (hasEmptyValue || sending) return;
     onConfirm();
   }
 
+  function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    event.stopPropagation();
+    handleConfirm();
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/40 p-3 sm:items-center">
-      <form
+      <div
+        aria-modal="true"
         className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-3xl border border-line bg-white p-5 shadow-2xl"
-        onSubmit={handleSubmit}
+        onKeyDown={handleKeyDown}
+        role="dialog"
       >
         <div className="mb-4">
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-brand">
@@ -114,9 +122,10 @@ export function TemplateVariableDialog({
             Cancelar
           </button>
           <button
-            type="submit"
+            type="button"
             className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-brand px-5 text-sm font-semibold text-white disabled:opacity-50"
             disabled={hasEmptyValue || sending}
+            onClick={handleConfirm}
           >
             {sending ? (
               <>
@@ -128,7 +137,7 @@ export function TemplateVariableDialog({
             )}
           </button>
         </div>
-      </form>
+      </div>
     </div>
   );
 }
