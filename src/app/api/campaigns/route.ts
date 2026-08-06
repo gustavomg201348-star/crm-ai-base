@@ -9,11 +9,23 @@ import {
   mapCampaign,
   processCampaign
 } from "@/lib/campaigns";
+import {
+  parseCampaignRecipientTemplateVariables,
+  serializeCampaignRecipientResolvedVariables,
+  validateCampaignRecipientTemplateVariables
+} from "@/lib/campaign-template-recipient-variables";
 import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
 import { digitsOnlyPhone } from "@/lib/phone-normalization.service";
 import { safeLogError } from "@/lib/safe-logger";
+import {
+  deserializeTemplateVariableMappingV1,
+  extractTemplateBodyVariableIndexes,
+  serializeTemplateVariableMappingV1,
+  TemplateParameterError
+} from "@/lib/template-parameters";
+import { findReadyLocalMetaTemplate } from "@/lib/whatsapp-template.service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,6 +49,15 @@ function parseContactIds(value: FormDataEntryValue | null) {
   return Array.isArray(parsed)
     ? parsed.filter((item): item is string => typeof item === "string")
     : [];
+}
+
+function getTemplateBodyText(template: { components?: Array<{ type?: string; text?: unknown }> }) {
+  const body = template.components?.find((component) => component.type === "BODY");
+  return typeof body?.text === "string" ? body.text : "";
+}
+
+function templateParameterResponse(error: TemplateParameterError) {
+  return NextResponse.json({ error: error.message }, { status: 400 });
 }
 
 export async function GET(request: NextRequest) {
@@ -92,6 +113,12 @@ export async function POST(request: NextRequest) {
     const templateName = String(formData.get("templateName") ?? "").trim();
     const templateLanguage = String(formData.get("templateLanguage") ?? "").trim();
     const templateVariables = String(formData.get("templateVariables") ?? "").trim();
+    const templateVariableMappingRaw = String(
+      formData.get("templateVariableMapping") ?? ""
+    ).trim();
+    const recipientTemplateVariablesRaw = String(
+      formData.get("recipientTemplateVariables") ?? ""
+    ).trim();
 
     if (!channelId) {
       return NextResponse.json({ error: "Canal obrigatorio." }, { status: 400 });
@@ -135,6 +162,86 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    let templateVariableMapping: ReturnType<
+      typeof deserializeTemplateVariableMappingV1
+    > = null;
+    let recipientTemplateVariables = parseCampaignRecipientTemplateVariables();
+
+    if (templateVariableMappingRaw || recipientTemplateVariablesRaw) {
+      if (messageType !== "TEMPLATE") {
+        return NextResponse.json(
+          { error: "Variaveis por coluna exigem campanha com template." },
+          { status: 400 }
+        );
+      }
+      if (!templateVariableMappingRaw) {
+        return NextResponse.json(
+          { error: "Mapeamento de variaveis obrigatorio." },
+          { status: 400 }
+        );
+      }
+      if (!recipientTemplateVariablesRaw) {
+        return NextResponse.json(
+          { error: "Variaveis por destinatario obrigatorias." },
+          { status: 400 }
+        );
+      }
+      if (!channel.wabaId) {
+        return NextResponse.json(
+          { error: "Canal Meta sem WABA ID." },
+          { status: 400 }
+        );
+      }
+
+      try {
+        templateVariableMapping =
+          deserializeTemplateVariableMappingV1(templateVariableMappingRaw);
+      } catch (error) {
+        if (error instanceof TemplateParameterError) {
+          return templateParameterResponse(error);
+        }
+        throw error;
+      }
+
+      const localTemplateContext = await findReadyLocalMetaTemplate({
+        companyId: session.companyId,
+        wabaId: channel.wabaId,
+        templateName,
+        language: templateLanguage
+      });
+
+      if (!localTemplateContext) {
+        return NextResponse.json(
+          { error: "Template aprovado nao encontrado para o disparo." },
+          { status: 400 }
+        );
+      }
+
+      let expectedBodyLength = 0;
+      try {
+        expectedBodyLength = extractTemplateBodyVariableIndexes(
+          getTemplateBodyText(localTemplateContext.template)
+        ).length;
+        recipientTemplateVariables = parseCampaignRecipientTemplateVariables(
+          recipientTemplateVariablesRaw,
+          expectedBodyLength
+        );
+      } catch (error) {
+        if (error instanceof TemplateParameterError) {
+          return templateParameterResponse(error);
+        }
+        throw error;
+      }
+
+      const mappedVariables = Object.keys(templateVariableMapping?.body ?? {}).length;
+      if (mappedVariables !== expectedBodyLength) {
+        return NextResponse.json(
+          { error: "Mapeamento nao corresponde ao template selecionado." },
+          { status: 400 }
+        );
+      }
+    }
+
     const contacts = await prisma.contact.findMany({
       where: {
         id: { in: contactIds },
@@ -149,6 +256,32 @@ export async function POST(request: NextRequest) {
         { error: "Nenhum contato valido encontrado para este tenant." },
         { status: 400 }
       );
+    }
+
+    let validatedRecipientTemplateVariables: ReturnType<
+      typeof validateCampaignRecipientTemplateVariables
+    > | null = null;
+    if (recipientTemplateVariables.length) {
+      try {
+        validatedRecipientTemplateVariables =
+          validateCampaignRecipientTemplateVariables({
+            recipients: recipientTemplateVariables,
+            allowedContactIds: contacts.map((contact) => contact.id),
+            expectedBodyLength: recipientTemplateVariables[0]?.resolved.body.length ?? 0
+          });
+      } catch (error) {
+        if (error instanceof TemplateParameterError) {
+          return templateParameterResponse(error);
+        }
+        throw error;
+      }
+
+      if (contacts.length !== recipientTemplateVariables.length) {
+        return NextResponse.json(
+          { error: "Destinatarios nao correspondem as variaveis resolvidas." },
+          { status: 400 }
+        );
+      }
     }
 
     let imageBuffer: Buffer | null = null;
@@ -187,15 +320,26 @@ export async function POST(request: NextRequest) {
         templateName: messageType === "TEMPLATE" ? templateName : null,
         templateLanguage: messageType === "TEMPLATE" ? templateLanguage : null,
         templateVariables: messageType === "TEMPLATE" ? templateVariables || "[]" : null,
+        templateVariableMapping: templateVariableMapping
+          ? serializeTemplateVariableMappingV1(templateVariableMapping)
+          : null,
         imageName,
         imageMime,
         imageSize,
         total: contacts.length,
         recipients: {
-          create: contacts.map((contact) => ({
-            contactId: contact.id,
-            phone: digitsOnlyPhone(contact.phone)
-          }))
+          create: contacts.map((contact) => {
+            const resolved =
+              validatedRecipientTemplateVariables?.byContactId.get(contact.id)?.resolved;
+
+            return {
+              contactId: contact.id,
+              phone: digitsOnlyPhone(contact.phone),
+              resolvedTemplateVariables: resolved
+                ? serializeCampaignRecipientResolvedVariables(resolved)
+                : null
+            };
+          })
         }
       }
     });

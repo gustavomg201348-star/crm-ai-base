@@ -18,6 +18,10 @@ import {
   renderTemplateHistoryBody,
 } from "@/lib/whatsapp-template.service";
 import { digitsOnlyPhone } from "@/lib/phone-normalization.service";
+import {
+  deserializeResolvedTemplateVariablesV1,
+  extractTemplateBodyVariableIndexes
+} from "@/lib/template-parameters";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -106,6 +110,15 @@ function readTemplateVariables(value?: string | null) {
   } catch {
     return [];
   }
+}
+
+function getTemplateBodyText(template?: MetaTemplate | null) {
+  const body = template?.components?.find((component) => component.type === "BODY");
+  return typeof body?.text === "string" ? body.text : "";
+}
+
+function getTemplateBodyVariableCount(template?: MetaTemplate | null) {
+  return extractTemplateBodyVariableIndexes(getTemplateBodyText(template)).length;
 }
 
 async function findOrCreateCampaignConversation({
@@ -239,6 +252,10 @@ export async function processCampaign(campaignId: string) {
     });
   }
 
+  const campaignTemplateBodyVariableCount = campaignTemplate
+    ? getTemplateBodyVariableCount(campaignTemplate)
+    : 0;
+
   for (const recipient of campaign.recipients) {
     const currentCampaign = await prisma.campaign.findUnique({
       where: { id: campaign.id },
@@ -264,15 +281,31 @@ export async function processCampaign(campaignId: string) {
         cpf: recipient.contact.cpf,
         phone: recipient.contact.phone
       });
-      const templateVariables = readTemplateVariables(
-        campaign.templateVariables
-      ).map((value) =>
-        renderCampaignMessage(value, {
-          name: recipient.contact.name,
-          cpf: recipient.contact.cpf,
-          phone: recipient.contact.phone
-        })
+      const recipientResolvedVariables = deserializeResolvedTemplateVariablesV1(
+        recipient.resolvedTemplateVariables,
+        campaignTemplateBodyVariableCount
       );
+      const templateVariables = recipientResolvedVariables
+        ? recipientResolvedVariables.body.map((value) =>
+            renderCampaignMessage(value, {
+              name: recipient.contact.name,
+              cpf: recipient.contact.cpf,
+              phone: recipient.contact.phone
+            })
+          )
+        : readTemplateVariables(campaign.templateVariables).map((value) =>
+            renderCampaignMessage(value, {
+              name: recipient.contact.name,
+              cpf: recipient.contact.cpf,
+              phone: recipient.contact.phone
+            })
+          );
+      if (
+        campaignTemplate &&
+        templateVariables.length !== campaignTemplateBodyVariableCount
+      ) {
+        throw new Error("Quantidade de variaveis do template invalida para o destinatario.");
+      }
       const templateHeaderImageUrl = campaignTemplate
         ? campaignTemplateHeaderImageUrl
         : null;

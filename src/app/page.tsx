@@ -26,6 +26,21 @@ import { TemplateLibraryPage } from "@/app/components/templates/TemplateLibraryP
 import { useNewMessageSound } from "@/app/hooks/use-new-message-sound";
 import { resolveConversationChannelId } from "@/lib/conversation-channel.service";
 import type { OpportunitySummary } from "@/lib/opportunity-summary-types";
+import type {
+  SpreadsheetImportColumn,
+  SpreadsheetImportRawValues
+} from "@/lib/spreadsheet-import-columns";
+import {
+  resolveTemplateColumnParameters,
+  serializeResolvedTemplateVariablesV1,
+  serializeTemplateVariableMappingV1,
+  TemplateParameterError
+} from "@/lib/template-parameters";
+import type {
+  ResolvedTemplateVariablesV1,
+  TemplateVariableMapping,
+  TemplateVariableMappingV1
+} from "@/lib/template-parameters";
 import {
   ArrowRight,
   Archive,
@@ -984,6 +999,7 @@ type SpreadsheetImportRow = {
   cpf: string;
   phone: string;
   whatsapp: string;
+  rawValues?: SpreadsheetImportRawValues;
   status: "VALID" | "INVALID";
   errors: string[];
   duplicateCpf: boolean;
@@ -992,6 +1008,8 @@ type SpreadsheetImportRow = {
 };
 
 type SpreadsheetImportPreview = {
+  headers: string[];
+  columns: SpreadsheetImportColumn[];
   rows: SpreadsheetImportRow[];
   summary: {
     totalRows: number;
@@ -1012,7 +1030,28 @@ type SpreadsheetImportConfirm = {
     invalid: number;
   };
   contactIds: string[];
+  rows: Array<{
+    rowNumber: number;
+    contactId: string;
+    phone: string;
+  }>;
   errors: Array<{ rowNumber: number; reason: string }>;
+};
+
+type TemplateImportRowValidation = {
+  row: SpreadsheetImportRow;
+  status: "VALID" | "INVALID";
+  reasons: string[];
+  resolved?: ResolvedTemplateVariablesV1;
+  renderedBody?: string;
+};
+
+type TemplateImportValidationSummary = {
+  totalRows: number;
+  readyRows: number;
+  invalidRows: number;
+  reasons: Array<{ reason: string; count: number }>;
+  rows: TemplateImportRowValidation[];
 };
 
 type RetirementLeadRow = {
@@ -2843,6 +2882,12 @@ export default function Home() {
     templateName?: string;
     templateLanguage?: string;
     templateVariables?: string[];
+    templateVariableMapping?: TemplateVariableMappingV1;
+    recipientTemplateVariables?: Array<{
+      contactId: string;
+      rowNumber: number;
+      resolved: ResolvedTemplateVariablesV1;
+    }>;
   }) {
     const formData = new FormData();
     formData.set("channelId", payload.channelId);
@@ -2855,6 +2900,26 @@ export default function Home() {
     }
     if (payload.templateVariables) {
       formData.set("templateVariables", JSON.stringify(payload.templateVariables));
+    }
+    if (payload.templateVariableMapping) {
+      formData.set(
+        "templateVariableMapping",
+        serializeTemplateVariableMappingV1(payload.templateVariableMapping)
+      );
+    }
+    if (payload.recipientTemplateVariables) {
+      formData.set(
+        "recipientTemplateVariables",
+        JSON.stringify(
+          payload.recipientTemplateVariables.map((recipient) => ({
+            contactId: recipient.contactId,
+            rowNumber: recipient.rowNumber,
+            resolved: JSON.parse(
+              serializeResolvedTemplateVariablesV1(recipient.resolved)
+            ) as ResolvedTemplateVariablesV1
+          }))
+        )
+      );
     }
     if (payload.image) formData.set("image", payload.image);
 
@@ -14892,6 +14957,54 @@ function MessageStatusBadge({ status }: { status: string }) {
   );
 }
 
+function templateParameterErrorMessage(error: unknown) {
+  if (error instanceof TemplateParameterError) {
+    if (error.code === "TEMPLATE_VARIABLE_MAPPING_INCOMPLETE") {
+      return error.variableIndex
+        ? `Variavel {{${error.variableIndex}}} sem coluna mapeada.`
+        : "Mapeamento incompleto.";
+    }
+    if (error.code === "TEMPLATE_VARIABLE_COLUMN_NOT_FOUND") {
+      return error.variableIndex
+        ? `Coluna da variavel {{${error.variableIndex}}} nao encontrada.`
+        : "Coluna mapeada nao encontrada.";
+    }
+    if (error.code === "TEMPLATE_VARIABLE_VALUE_EMPTY") {
+      return error.variableIndex
+        ? `Valor vazio para {{${error.variableIndex}}}.`
+        : "Valor vazio em coluna mapeada.";
+    }
+    if (error.code === "TEMPLATE_VARIABLE_SEQUENCE_INVALID") {
+      return "Variaveis numericas fora de sequencia.";
+    }
+  }
+
+  return "Nao foi possivel resolver as variaveis desta linha.";
+}
+
+function summarizeTemplateImportValidation(
+  rows: TemplateImportRowValidation[]
+): TemplateImportValidationSummary {
+  const reasonCounts = new Map<string, number>();
+  for (const row of rows) {
+    if (row.status !== "INVALID") continue;
+    for (const reason of row.reasons) {
+      reasonCounts.set(reason, (reasonCounts.get(reason) ?? 0) + 1);
+    }
+  }
+
+  return {
+    totalRows: rows.length,
+    readyRows: rows.filter((row) => row.status === "VALID").length,
+    invalidRows: rows.filter((row) => row.status === "INVALID").length,
+    reasons: Array.from(reasonCounts.entries())
+      .map(([reason, count]) => ({ reason, count }))
+      .sort((left, right) => right.count - left.count)
+      .slice(0, 4),
+    rows
+  };
+}
+
 function Disparos({
   campaigns,
   channels,
@@ -14913,6 +15026,12 @@ function Disparos({
     templateName?: string;
     templateLanguage?: string;
     templateVariables?: string[];
+    templateVariableMapping?: TemplateVariableMappingV1;
+    recipientTemplateVariables?: Array<{
+      contactId: string;
+      rowNumber: number;
+      resolved: ResolvedTemplateVariablesV1;
+    }>;
   }) => Promise<CampaignRow | null>;
   onRefreshCampaigns: () => Promise<void>;
 }) {
@@ -14947,6 +15066,10 @@ function Disparos({
     useState<SpreadsheetImportPreview | null>(null);
   const [importConfirm, setImportConfirm] =
     useState<SpreadsheetImportConfirm | null>(null);
+  const [templateColumnMapping, setTemplateColumnMapping] =
+    useState<TemplateVariableMapping>({});
+  const [templatePreviewRowNumber, setTemplatePreviewRowNumber] =
+    useState<number | null>(null);
   const [importLoading, setImportLoading] = useState(false);
   const [importing, setImporting] = useState(false);
 
@@ -14991,6 +15114,8 @@ function Disparos({
     setCampaignTemplates([]);
     setSelectedCampaignTemplate(null);
     setCampaignTemplateValues([]);
+    setTemplateColumnMapping({});
+    setTemplatePreviewRowNumber(null);
 
     if (!channelId) return;
 
@@ -15042,6 +15167,154 @@ function Disparos({
       .length ?? 0;
   const importedContactsPreview =
     importPreview?.rows.filter((row) => row.status === "VALID").slice(0, 4) ?? [];
+  const templateVariableIndexes = selectedCampaignTemplate
+    ? Array.from(
+        { length: selectedCampaignTemplate.variableCount },
+        (_, index) => index + 1
+      )
+    : [];
+  const hasTemplateColumnMapping =
+    messageMode === "TEMPLATE" &&
+    Boolean(selectedCampaignTemplate?.variableCount) &&
+    Boolean(importPreview?.columns.length);
+  const templateImportValidation = useMemo(() => {
+    if (!selectedCampaignTemplate || !importPreview) return null;
+    if (selectedCampaignTemplate.variableCount === 0) {
+      return summarizeTemplateImportValidation(
+        importPreview.rows.map((row) => ({
+          row,
+          status: row.status,
+          reasons: row.status === "INVALID" ? row.errors : [],
+          resolved:
+            row.status === "VALID"
+              ? {
+                  version: 1,
+                  body: []
+                }
+              : undefined,
+          renderedBody:
+            row.status === "VALID" ? selectedCampaignTemplate.preview : undefined
+        }))
+      );
+    }
+
+    return summarizeTemplateImportValidation(
+      importPreview.rows.map((row) => {
+        if (row.status === "INVALID") {
+          return {
+            row,
+            status: "INVALID",
+            reasons: row.errors.length ? row.errors : ["Linha invalida."]
+          };
+        }
+        if (!row.rawValues) {
+          return {
+            row,
+            status: "INVALID",
+            reasons: ["Linha sem valores preservados da planilha."]
+          };
+        }
+
+        try {
+          const resolved = resolveTemplateColumnParameters({
+            templateBody: selectedCampaignTemplate.preview,
+            mapping: templateColumnMapping,
+            columns: importPreview.columns,
+            rawValues: row.rawValues
+          });
+
+          return {
+            row,
+            status: "VALID",
+            reasons: [],
+            resolved: {
+              version: 1,
+              body: resolved.variables
+            },
+            renderedBody: resolved.renderedBody
+          };
+        } catch (validationError) {
+          return {
+            row,
+            status: "INVALID",
+            reasons: [templateParameterErrorMessage(validationError)]
+          };
+        }
+      })
+    );
+  }, [importPreview, selectedCampaignTemplate, templateColumnMapping]);
+  const resolvedTemplatePreviewRows = useMemo(
+    () => templateImportValidation?.rows.filter((row) => row.status === "VALID") ?? [],
+    [templateImportValidation]
+  );
+  const templatePreviewRow = useMemo(
+    () =>
+      resolvedTemplatePreviewRows.find(
+        (row) => row.row.rowNumber === templatePreviewRowNumber
+      ) ??
+      resolvedTemplatePreviewRows[0] ??
+      null,
+    [resolvedTemplatePreviewRows, templatePreviewRowNumber]
+  );
+  const selectedTemplateVariableMappingPayload =
+    selectedCampaignTemplate &&
+    hasTemplateColumnMapping &&
+    templateVariableIndexes.every((index) => templateColumnMapping[String(index)])
+      ? ({
+          version: 1,
+          mode: "COLUMN_MAPPING",
+          body: templateColumnMapping,
+          columns: importPreview?.columns ?? []
+        } satisfies TemplateVariableMappingV1)
+      : null;
+  const recipientTemplateVariables = useMemo(() => {
+    if (!selectedTemplateVariableMappingPayload || !importConfirm || !templateImportValidation) {
+      return [];
+    }
+
+    const confirmedByRow = new Map(
+      importConfirm.rows.map((row) => [row.rowNumber, row])
+    );
+    const recipients: Array<{
+      contactId: string;
+      rowNumber: number;
+      resolved: ResolvedTemplateVariablesV1;
+    }> = [];
+    const seen = new Set<string>();
+
+    for (const rowValidation of templateImportValidation.rows) {
+      if (rowValidation.status !== "VALID" || !rowValidation.resolved) continue;
+
+      const confirmed = confirmedByRow.get(rowValidation.row.rowNumber);
+      if (!confirmed) continue;
+
+      const stableKey = `${confirmed.contactId}:${confirmed.rowNumber}`;
+      if (seen.has(stableKey)) continue;
+      seen.add(stableKey);
+
+      recipients.push({
+        contactId: confirmed.contactId,
+        rowNumber: confirmed.rowNumber,
+        resolved: rowValidation.resolved
+      });
+    }
+
+    return recipients;
+  }, [importConfirm, selectedTemplateVariableMappingPayload, templateImportValidation]);
+
+  useEffect(() => {
+    const firstRowNumber = resolvedTemplatePreviewRows[0]?.row.rowNumber ?? null;
+    if (!firstRowNumber) {
+      setTemplatePreviewRowNumber(null);
+      return;
+    }
+    setTemplatePreviewRowNumber((current) =>
+      current && resolvedTemplatePreviewRows.some((row) => row.row.rowNumber === current)
+        ? current
+        : firstRowNumber
+    );
+  }, [resolvedTemplatePreviewRows]);
+
   const previewContact =
     selectedContacts[0] ??
     (importedContactsPreview[0]
@@ -15053,6 +15326,15 @@ function Disparos({
       : null);
 
   function renderMessagePreview() {
+    if (
+      messageMode === "TEMPLATE" &&
+      selectedCampaignTemplate &&
+      hasTemplateColumnMapping &&
+      templatePreviewRow?.renderedBody
+    ) {
+      return templatePreviewRow.renderedBody;
+    }
+
     const template =
       messageMode === "TEMPLATE" && selectedCampaignTemplate
         ? selectedCampaignTemplate.preview.replace(/\{\{(\d+)\}\}/g, (_, index) => {
@@ -15100,6 +15382,8 @@ function Disparos({
     setError("");
     setImportPreview(null);
     setImportConfirm(null);
+    setTemplateColumnMapping({});
+    setTemplatePreviewRowNumber(null);
 
     if (!importFile) {
       setError("Selecione uma planilha CSV ou Excel .xlsx.");
@@ -15130,7 +15414,11 @@ function Disparos({
       return;
     }
 
-    setImportPreview((await response.json()) as SpreadsheetImportPreview);
+    const preview = (await response.json()) as SpreadsheetImportPreview;
+    setImportPreview(preview);
+    setTemplatePreviewRowNumber(
+      preview.rows.find((row) => row.status === "VALID")?.rowNumber ?? null
+    );
   }
 
   async function handleConfirmSpreadsheetImport() {
@@ -15316,12 +15604,16 @@ function Disparos({
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
+    const effectiveContactIds =
+      hasTemplateColumnMapping && recipientTemplateVariables.length
+        ? recipientTemplateVariables.map((recipient) => recipient.contactId)
+        : selectedIds;
 
     if (!channelId) {
       setError("Selecione um canal WhatsApp Meta ativo.");
       return;
     }
-    if (!selectedIds.length) {
+    if (!effectiveContactIds.length) {
       setError("Selecione pelo menos um contato.");
       return;
     }
@@ -15334,6 +15626,24 @@ function Disparos({
         setError("Selecione um template aprovado da Meta.");
         return;
       }
+      if (hasTemplateColumnMapping) {
+        if (!selectedTemplateVariableMappingPayload) {
+          setError("Mapeie todas as variaveis do template antes de continuar.");
+          return;
+        }
+        if (!templateImportValidation?.readyRows) {
+          setError("Nenhuma linha valida possui todos os valores exigidos pelo template.");
+          return;
+        }
+        if (!importConfirm) {
+          setError("Confirme a importacao da planilha antes de criar a campanha.");
+          return;
+        }
+        if (!recipientTemplateVariables.length) {
+          setError("Nenhum contato confirmado possui variaveis resolvidas para envio.");
+          return;
+        }
+      }
       if (
         campaignTemplateValues.length < selectedCampaignTemplate.variableCount ||
         campaignTemplateValues.some((value) => !value.trim())
@@ -15344,20 +15654,23 @@ function Disparos({
     }
 
     const confirmed = window.confirm(
-      `Enviar disparo para ${selectedIds.length} contato(s)?`
+      `Enviar disparo para ${effectiveContactIds.length} contato(s)?`
     );
     if (!confirmed) return;
 
     setSending(true);
     const campaign = await onCreateCampaign({
       channelId,
-      contactIds: selectedIds,
+      contactIds: effectiveContactIds,
       message: messageMode === "TEMPLATE" ? renderMessagePreview() : message,
       image: messageMode === "TEMPLATE" ? null : image,
       messageType: messageMode,
       templateName: selectedCampaignTemplate?.name,
       templateLanguage: selectedCampaignTemplate?.language,
-      templateVariables: campaignTemplateValues
+      templateVariables: campaignTemplateValues,
+      templateVariableMapping: selectedTemplateVariableMappingPayload ?? undefined,
+      recipientTemplateVariables:
+        recipientTemplateVariables.length > 0 ? recipientTemplateVariables : undefined
     });
     setSending(false);
 
@@ -15368,6 +15681,11 @@ function Disparos({
       setImage(null);
       setSelectedCampaignTemplate(null);
       setCampaignTemplateValues([]);
+      setImportFile(null);
+      setImportPreview(null);
+      setImportConfirm(null);
+      setTemplateColumnMapping({});
+      setTemplatePreviewRowNumber(null);
     }
   }
 
@@ -15426,9 +15744,27 @@ function Disparos({
                     setImportFile(event.target.files?.[0] ?? null);
                     setImportPreview(null);
                     setImportConfirm(null);
+                    setTemplateColumnMapping({});
+                    setTemplatePreviewRowNumber(null);
                   }}
                 />
               </label>
+              {importFile && (
+                <button
+                  className="inline-flex h-10 items-center gap-2 rounded-full border border-blue-200 bg-white px-3 text-sm font-semibold text-slate-600 shadow-sm"
+                  type="button"
+                  onClick={() => {
+                    setImportFile(null);
+                    setImportPreview(null);
+                    setImportConfirm(null);
+                    setTemplateColumnMapping({});
+                    setTemplatePreviewRowNumber(null);
+                  }}
+                >
+                  <X className="h-4 w-4" />
+                  Remover
+                </button>
+              )}
               <button
                 className="inline-flex h-10 items-center gap-2 rounded-full bg-white px-3 text-sm font-semibold text-brand shadow-sm ring-1 ring-blue-200 disabled:opacity-60"
                 disabled={importLoading || !importFile}
@@ -15563,6 +15899,20 @@ function Disparos({
               Importacao concluida: {importConfirm.summary.created} criado(s),{" "}
               {importConfirm.summary.updated} atualizado(s). A base importada ja foi
               selecionada para o disparo.
+              {selectedTemplateVariableMappingPayload && (
+                <div className="mt-2 rounded-lg bg-white/70 p-2 text-xs">
+                  Campanha com variaveis por coluna:{" "}
+                  <b>{recipientTemplateVariables.length}</b> destinatario(s) pronto(s)
+                  para envio
+                  {templateImportValidation
+                    ? ` e ${Math.max(
+                        templateImportValidation.totalRows -
+                          recipientTemplateVariables.length,
+                        0
+                      )} linha(s) fora do envio.`
+                    : "."}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -15643,6 +15993,8 @@ function Disparos({
                             ? Array.from({ length: template.variableCount }, () => "")
                             : []
                         );
+                        setTemplateColumnMapping({});
+                        setTemplatePreviewRowNumber(null);
                       }}
                     >
                       <option value="">
@@ -15674,7 +16026,7 @@ function Disparos({
                       <p className="mt-3 whitespace-pre-wrap text-slate-700">
                         {selectedCampaignTemplate.preview}
                       </p>
-                      {campaignTemplateValues.length > 0 && (
+                      {campaignTemplateValues.length > 0 && !hasTemplateColumnMapping && (
                         <div className="mt-3 grid gap-2 sm:grid-cols-2">
                           {campaignTemplateValues.map((value, index) => (
                             <input
@@ -15693,6 +16045,169 @@ function Disparos({
                           ))}
                         </div>
                       )}
+                      {selectedCampaignTemplate.variableCount > 0 &&
+                        importPreview?.columns.length ? (
+                          <div className="mt-4 rounded-xl border border-blue-100 bg-white p-3">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <p className="text-sm font-bold text-slate-900">
+                                  Mapeamento das variaveis
+                                </p>
+                                <p className="mt-1 text-xs text-slate-500">
+                                  Escolha quais colunas da planilha alimentam cada
+                                  variavel numerica do template.
+                                </p>
+                              </div>
+                              {templateImportValidation && (
+                                <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                                  <span className="rounded-lg bg-slate-50 px-2 py-1.5">
+                                    <b className="block text-slate-900">
+                                      {templateImportValidation.totalRows}
+                                    </b>
+                                    total
+                                  </span>
+                                  <span className="rounded-lg bg-emerald-50 px-2 py-1.5 text-emerald-700">
+                                    <b className="block">
+                                      {templateImportValidation.readyRows}
+                                    </b>
+                                    prontas
+                                  </span>
+                                  <span className="rounded-lg bg-rose-50 px-2 py-1.5 text-rose-700">
+                                    <b className="block">
+                                      {templateImportValidation.invalidRows}
+                                    </b>
+                                    invalidas
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="mt-3 grid gap-2">
+                              {templateVariableIndexes.map((variableIndex) => (
+                                <label
+                                  key={variableIndex}
+                                  className="grid gap-2 text-xs font-bold text-slate-600 sm:grid-cols-[70px_minmax(0,1fr)] sm:items-center"
+                                >
+                                  <span>{`{{${variableIndex}}}`}</span>
+                                  <select
+                                    className="h-10 rounded border border-line bg-white px-3 text-sm font-normal text-slate-800 outline-none focus:border-brand"
+                                    value={templateColumnMapping[String(variableIndex)] ?? ""}
+                                    onChange={(event) => {
+                                      const value = event.target.value;
+                                      setTemplateColumnMapping((current) => ({
+                                        ...current,
+                                        [String(variableIndex)]: value
+                                      }));
+                                      setTemplatePreviewRowNumber(null);
+                                    }}
+                                  >
+                                    <option value="">Selecionar coluna</option>
+                                    {importPreview.columns.map((column) => (
+                                      <option key={column.key} value={column.key}>
+                                        {column.label || "Coluna sem nome"} - coluna{" "}
+                                        {column.index + 1}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                              ))}
+                            </div>
+
+                            {templateImportValidation?.reasons.length ? (
+                              <div className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
+                                <p className="font-bold">Principais motivos</p>
+                                <ul className="mt-1 space-y-1">
+                                  {templateImportValidation.reasons.map((item) => (
+                                    <li key={item.reason}>
+                                      {item.count} linha(s): {item.reason}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ) : null}
+
+                            {templatePreviewRow ? (
+                              <div className="mt-3 rounded-lg border border-line bg-slate-50 p-3 text-xs text-slate-600">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <p className="font-bold uppercase text-slate-500">
+                                    Preview por coluna
+                                  </p>
+                                  {resolvedTemplatePreviewRows.length > 1 && (
+                                    <select
+                                      className="h-8 rounded border border-line bg-white px-2 text-xs outline-none focus:border-brand"
+                                      value={templatePreviewRow.row.rowNumber}
+                                      onChange={(event) =>
+                                        setTemplatePreviewRowNumber(Number(event.target.value))
+                                      }
+                                    >
+                                      {resolvedTemplatePreviewRows.slice(0, 20).map((item) => (
+                                        <option
+                                          key={item.row.rowNumber}
+                                          value={item.row.rowNumber}
+                                        >
+                                          Linha {item.row.rowNumber} -{" "}
+                                          {item.row.name || item.row.whatsapp}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  )}
+                                </div>
+                                <div className="mt-3 grid gap-3">
+                                  <div>
+                                    <p className="font-bold text-slate-700">Template</p>
+                                    <p className="mt-1 whitespace-pre-wrap">
+                                      {selectedCampaignTemplate.preview}
+                                    </p>
+                                  </div>
+                                  <div>
+                                    <p className="font-bold text-slate-700">Mapeamento</p>
+                                    <div className="mt-1 flex flex-wrap gap-2">
+                                      {templateVariableIndexes.map((variableIndex) => {
+                                        const column = importPreview.columns.find(
+                                          (item) =>
+                                            item.key ===
+                                            templateColumnMapping[String(variableIndex)]
+                                        );
+                                        return (
+                                          <span
+                                            key={variableIndex}
+                                            className="rounded-full bg-white px-2 py-1"
+                                          >
+                                            {`{{${variableIndex}}}`} -{" "}
+                                            {column
+                                              ? `${column.label || "Coluna sem nome"} (coluna ${
+                                                  column.index + 1
+                                                })`
+                                              : "nao mapeada"}
+                                          </span>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <p className="font-bold text-slate-700">
+                                      Linha {templatePreviewRow.row.rowNumber}
+                                    </p>
+                                    <p className="mt-1 truncate">
+                                      {templatePreviewRow.resolved?.body.join(" | ") || "-"}
+                                    </p>
+                                  </div>
+                                  <div>
+                                    <p className="font-bold text-slate-700">Preview</p>
+                                    <p className="mt-1 whitespace-pre-wrap rounded bg-white p-2 text-slate-800">
+                                      {templatePreviewRow.renderedBody}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-900">
+                                Complete o mapeamento e garanta que ao menos uma linha
+                                possua todos os valores exigidos para gerar o preview.
+                              </div>
+                            )}
+                          </div>
+                        ) : null}
                     </div>
                   )}
 
