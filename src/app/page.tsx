@@ -7070,14 +7070,22 @@ function Atendimento({
     try {
       const sent = await onSendMessage(conversationId, messageToSend);
       if (sent) {
-        if (draftsByConversationRef.current[conversationId] === messageToSend) {
-          delete draftsByConversationRef.current[conversationId];
-        }
         setMessage((current) =>
-          selectedConversationIdRef.current === conversationId && current === messageToSend
-            ? ""
+          selectedConversationIdRef.current === conversationId
+            ? current.startsWith(messageToSend)
+              ? current.slice(messageToSend.length)
+              : current
             : current
         );
+        const currentDraft = draftsByConversationRef.current[conversationId];
+        if (currentDraft?.startsWith(messageToSend)) {
+          const nextDraft = currentDraft.slice(messageToSend.length);
+          if (nextDraft) {
+            draftsByConversationRef.current[conversationId] = nextDraft;
+          } else {
+            delete draftsByConversationRef.current[conversationId];
+          }
+        }
       }
     } finally {
       setSendingMessage(false);
