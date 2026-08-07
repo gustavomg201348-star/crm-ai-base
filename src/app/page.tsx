@@ -2663,12 +2663,12 @@ export default function Home() {
         ? eligibleNewConversationChannels[0].id
         : "");
 
-    if (userIsAdmin(session) && eligibleNewConversationChannels.length === 0) {
+    if (eligibleNewConversationChannels.length === 0) {
       setNewConversationError("Nenhum canal Meta ativo disponivel para iniciar conversa.");
       return;
     }
 
-    if (userIsAdmin(session) && eligibleNewConversationChannels.length > 1 && !resolvedChannelId) {
+    if (eligibleNewConversationChannels.length > 1 && !resolvedChannelId) {
       setNewConversationError("Selecione um canal WhatsApp para iniciar conversa.");
       return;
     }
@@ -4984,7 +4984,7 @@ export default function Home() {
         <NewConversationModal
           contacts={contacts}
           channels={eligibleNewConversationChannels}
-          channelSelectionKnown={userIsAdmin(session)}
+          channelSelectionKnown={Boolean(session)}
           form={newConversationForm}
           saving={newConversationSaving}
           error={newConversationError}
@@ -5082,7 +5082,7 @@ function NewConversationModal({
           {channelSelectionKnown && (
             <div>
               <label className="text-sm font-semibold text-slate-800">
-                Canal WhatsApp
+                Canal de envio *
               </label>
               {channels.length === 0 && (
                 <div className="mt-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
