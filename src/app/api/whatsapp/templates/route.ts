@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
+import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
+import { canAccessConversation } from "@/lib/permissions";
 import { safeLogError } from "@/lib/safe-logger";
 import {
   getApprovedTemplatesForChannel,
@@ -21,6 +23,27 @@ export async function GET(request: NextRequest) {
         { error: "Informe a conversa ou canal." },
         { status: 400 }
       );
+    }
+
+    if (conversationId) {
+      const conversation = await prisma.conversation.findFirst({
+        where: {
+          id: conversationId,
+          contact: { companyId: session.companyId }
+        },
+        select: { agentId: true }
+      });
+
+      if (!conversation) {
+        return NextResponse.json({ error: "Conversa nao encontrada." }, { status: 404 });
+      }
+
+      if (!canAccessConversation({ session, agentId: conversation.agentId })) {
+        return NextResponse.json(
+          { error: "Conversa atribuida a outro atendente." },
+          { status: 403 }
+        );
+      }
     }
 
     const templates = conversationId
