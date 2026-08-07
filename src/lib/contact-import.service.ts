@@ -4,6 +4,14 @@ import { getAutomaticContactNameUpdate, logContactNameMutationAttempt } from "@/
 import { prisma } from "@/lib/db";
 import { classifyPhoneNormalization, type PhoneNormalizationReason } from "@/lib/phone-normalization.service";
 import { upsertRetirementLeadForContact } from "@/lib/retirement-leads";
+import {
+  buildSpreadsheetImportColumns,
+  buildSpreadsheetRawValues,
+  SPREADSHEET_IMPORT_MAX_HEADER_LENGTH,
+  sanitizeSpreadsheetCellText,
+  type SpreadsheetImportColumn,
+  type SpreadsheetImportRawValues
+} from "@/lib/spreadsheet-import-columns";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -23,6 +31,7 @@ export type ImportPreviewRow = {
   cpf: string;
   phone: string;
   whatsapp: string;
+  rawValues?: SpreadsheetImportRawValues;
   status: "VALID" | "INVALID";
   errors: string[];
   duplicateCpf: boolean;
@@ -37,6 +46,8 @@ export type ImportPreviewRow = {
 };
 
 export type ContactImportPreview = {
+  headers: string[];
+  columns: SpreadsheetImportColumn[];
   rows: ImportPreviewRow[];
   summary: {
     totalRows: number;
@@ -57,6 +68,11 @@ export type ContactImportConfirmResult = {
     invalid: number;
   };
   contactIds: string[];
+  rows: Array<{
+    rowNumber: number;
+    contactId: string;
+    phone: string;
+  }>;
   errors: Array<{ rowNumber: number; reason: string }>;
 };
 
@@ -246,7 +262,11 @@ export async function buildContactImportPreview({
     throw new Error("A planilha precisa ter cabecalho e pelo menos uma linha.");
   }
 
-  const headers = table[0].map((header) => normalizeHeader(String(header ?? "")));
+  const originalHeaders = table[0].map((header) =>
+    sanitizeSpreadsheetCellText(header, SPREADSHEET_IMPORT_MAX_HEADER_LENGTH)
+  );
+  const columns = buildSpreadsheetImportColumns(originalHeaders);
+  const headers = columns.map((column) => column.normalized);
   const indexes = {
     cpf: findHeaderIndex(headers, HEADER_ALIASES.cpf),
     name: findHeaderIndex(headers, HEADER_ALIASES.name),
@@ -300,6 +320,7 @@ export async function buildContactImportPreview({
       cpf,
       phone,
       whatsapp,
+      rawValues: buildSpreadsheetRawValues(line, columns),
       status: errors.length ? "INVALID" : "VALID",
       errors,
       duplicateCpf: false,
@@ -326,6 +347,8 @@ export async function buildContactImportPreview({
   });
 
   return {
+    headers: originalHeaders,
+    columns,
     rows,
     summary: {
       totalRows: rows.length,
@@ -395,6 +418,7 @@ export async function confirmContactImport({
 
   const result = await prisma.$transaction(async (tx) => {
     const contactIds: string[] = [];
+    const confirmedRows: ContactImportConfirmResult["rows"] = [];
     let created = 0;
     let updated = 0;
 
@@ -431,6 +455,11 @@ export async function confirmContactImport({
         });
         updated += 1;
         contactIds.push(contact.id);
+        confirmedRows.push({
+          rowNumber: row.rowNumber,
+          contactId: contact.id,
+          phone: row.whatsapp
+        });
 
         await createActivity(tx, {
           contactId: contact.id,
@@ -475,6 +504,11 @@ export async function confirmContactImport({
         });
         created += 1;
         contactIds.push(contact.id);
+        confirmedRows.push({
+          rowNumber: row.rowNumber,
+          contactId: contact.id,
+          phone: row.whatsapp
+        });
 
         await createActivity(tx, {
           contactId: contact.id,
@@ -497,7 +531,12 @@ export async function confirmContactImport({
       }
     }
 
-    return { contactIds: Array.from(new Set(contactIds)), created, updated };
+    return {
+      contactIds: Array.from(new Set(contactIds)),
+      rows: confirmedRows,
+      created,
+      updated
+    };
   });
 
   return {
@@ -509,6 +548,7 @@ export async function confirmContactImport({
       invalid: errors.length
     },
     contactIds: result.contactIds,
+    rows: result.rows,
     errors
   };
 }
