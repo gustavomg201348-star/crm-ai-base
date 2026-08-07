@@ -4309,7 +4309,7 @@ export default function Home() {
           )}
         </div>
 
-        {leftSidebarCollapsed ? (
+        {leftSidebarCollapsed && (
           <div className="shrink-0 px-3">
             <button
               type="button"
@@ -4320,29 +4320,12 @@ export default function Home() {
               <PanelLeftOpen className="h-4 w-4" />
             </button>
           </div>
-        ) : (
-          <div className="mx-4 shrink-0 rounded-2xl border border-slate-200/80 bg-white/85 p-4 shadow-sm">
-            <p className="text-xs font-semibold tracking-wide text-slate-700">
-              Workspace
-            </p>
-            <div className="mt-2.5 flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="truncate text-[15px] font-bold text-slate-950">
-                  {session.company.name}
-                </p>
-                <p className="mt-0.5 truncate text-xs text-slate-500">
-                  {session.company.segment ?? "Credito consignado"}
-                </p>
-              </div>
-              <ChevronDown className="h-[18px] w-[18px] shrink-0 text-slate-500" />
-            </div>
-          </div>
         )}
 
         <nav
           className={clsx(
             "min-h-0 flex-1 space-y-1 overflow-y-scroll pb-4 [scrollbar-color:#CBD5E1_transparent] [scrollbar-width:thin]",
-            leftSidebarCollapsed ? "mt-4 px-3" : "mt-6 px-3 pr-2"
+            leftSidebarCollapsed ? "mt-4 px-3" : "mt-4 px-3 pr-2"
           )}
         >
           {!leftSidebarCollapsed && (
@@ -4469,49 +4452,9 @@ export default function Home() {
         <div
           className={clsx(
             "shrink-0 border-t border-slate-200/70",
-            leftSidebarCollapsed ? "space-y-2 p-3" : "space-y-3 p-4"
+            leftSidebarCollapsed ? "p-3" : "p-4"
           )}
         >
-          {userCanManageOperation(session) && (
-            <button
-              className={clsx(
-                "flex h-10 w-full items-center rounded-xl text-left text-sm font-semibold transition-colors",
-                leftSidebarCollapsed
-                  ? "justify-center px-0"
-                  : "gap-3 px-3",
-                active === "tags"
-                  ? "bg-blue-50 text-brand shadow-[inset_0_0_0_1px_rgba(37,99,235,0.10)]"
-                  : "bg-white/80 text-slate-600 ring-1 ring-slate-200 hover:bg-white hover:text-slate-950"
-              )}
-              onClick={() => setActive("tags")}
-              type="button"
-              title={leftSidebarCollapsed ? "Gerenciar tags" : undefined}
-            >
-              <Tags className={clsx("h-4 w-4", active === "tags" ? "text-brand" : "text-slate-400")} />
-              {!leftSidebarCollapsed && "Gerenciar tags"}
-            </button>
-          )}
-          <div
-            className={clsx(
-              "rounded-2xl bg-gradient-to-br from-blue-50 to-white ring-1 ring-blue-100",
-              leftSidebarCollapsed ? "grid h-10 place-items-center p-0" : "p-3"
-            )}
-            title={leftSidebarCollapsed ? "IA ativa" : undefined}
-          >
-            <div className={clsx("flex items-center", leftSidebarCollapsed ? "justify-center" : "gap-2")}>
-              <Sparkles className="h-4 w-4 text-brand" />
-              {!leftSidebarCollapsed && (
-                <p className="text-xs font-bold uppercase tracking-wide text-brand">
-                  IA ativa
-                </p>
-              )}
-            </div>
-            {!leftSidebarCollapsed && (
-              <p className="mt-2 text-sm leading-5 text-slate-600">
-                Correspondente bancario com foco em FGTS, CLT e INSS.
-              </p>
-            )}
-          </div>
           <div
             className={clsx(
               "flex items-center rounded-2xl transition hover:bg-white/70",
@@ -4565,24 +4508,7 @@ export default function Home() {
               </button>
             </div>
 
-            <div className="mx-4 shrink-0 rounded-2xl border border-slate-200/80 bg-white/85 p-4 shadow-sm">
-              <p className="text-xs font-semibold tracking-wide text-slate-700">
-                Workspace
-              </p>
-              <div className="mt-2.5 flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate text-[15px] font-bold text-slate-950">
-                    {session.company.name}
-                  </p>
-                  <p className="mt-0.5 truncate text-xs text-slate-500">
-                    {session.company.segment ?? "Credito consignado"}
-                  </p>
-                </div>
-                <ChevronDown className="h-[18px] w-[18px] shrink-0 text-slate-500" />
-              </div>
-            </div>
-
-            <nav className="mt-6 min-h-0 flex-1 space-y-1 overflow-y-auto px-3 pr-2 pb-4 [scrollbar-color:#CBD5E1_transparent] [scrollbar-width:thin]">
+            <nav className="mt-4 min-h-0 flex-1 space-y-1 overflow-y-auto px-3 pr-2 pb-4 [scrollbar-color:#CBD5E1_transparent] [scrollbar-width:thin]">
               <p className="px-3 pb-3 text-xs font-semibold tracking-wide text-slate-700">
                 Navegacao
               </p>
@@ -4666,37 +4592,8 @@ export default function Home() {
               })}
             </nav>
 
-            <div className="shrink-0 space-y-3 border-t border-line/70 p-4">
-              {userCanManageOperation(session) && (
-                <button
-                  className={clsx(
-                    "flex h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-semibold transition-colors",
-                    active === "tags"
-                      ? "bg-blue-50 text-brand shadow-[inset_0_0_0_1px_rgba(37,99,235,0.10)]"
-                      : "bg-white text-slate-600 ring-1 ring-line hover:bg-slate-50 hover:text-slate-950"
-                  )}
-                  onClick={() => {
-                    setActive("tags");
-                    setMobileSidebarOpen(false);
-                  }}
-                  type="button"
-                >
-                  <Tags className={clsx("h-4 w-4", active === "tags" ? "text-brand" : "text-slate-400")} />
-                  Gerenciar tags
-                </button>
-              )}
-              <div className="rounded-2xl bg-gradient-to-br from-blue-50 to-white p-3 ring-1 ring-blue-100">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="h-4 w-4 text-brand" />
-                  <p className="text-xs font-bold uppercase tracking-wide text-brand">
-                    IA ativa
-                  </p>
-                </div>
-                <p className="mt-2 text-sm leading-5 text-slate-600">
-                  Correspondente bancario com foco em FGTS, CLT e INSS.
-                </p>
-              </div>
-              <div className="flex items-center gap-3 rounded-2xl p-2 hover:bg-slate-50">
+            <div className="shrink-0 border-t border-slate-200/70 p-4">
+              <div className="flex items-center gap-3 rounded-2xl p-2 transition hover:bg-white/70">
                 <div className="grid h-9 w-9 place-items-center rounded-full bg-slate-900 text-xs font-bold text-white">
                   {session.user.name.slice(0, 1).toUpperCase()}
                 </div>
