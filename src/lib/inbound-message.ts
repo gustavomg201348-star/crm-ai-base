@@ -1,8 +1,8 @@
 import { Prisma, type Conversation } from "@prisma/client";
 import {
-  conversationMatchesChannel,
   LEGACY_WHATSAPP_CHANNEL
 } from "@/lib/conversation-channel.service";
+import { resolveReferencedInboundMessage } from "@/lib/inbound-message-resolution";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { findOrCreateConversationForChannel } from "@/lib/conversation-lifecycle.service";
 import { prisma } from "@/lib/db";
@@ -78,6 +78,7 @@ export async function processInboundMessage({
     ? await prisma.message.findFirst({
         where: {
           providerMessageId: contextProviderMessageId,
+          direction: "outbound",
           conversation: { contact: { companyId } }
         },
         include: {
@@ -85,12 +86,26 @@ export async function processInboundMessage({
         }
       })
     : null;
-  const referencedPhoneMatched = referencedMessage
-    ? phonesMatch(referencedMessage.conversation.contact.phone, normalizedPhone)
-    : false;
-  const referencedChannelMatched = referencedMessage
-    ? !channelId || conversationMatchesChannel(referencedMessage.conversation, channelId)
-    : false;
+  const referencedResolution = resolveReferencedInboundMessage({
+    message: referencedMessage,
+    channelId,
+    incomingPhone: normalizedPhone
+  });
+  const referencedPhoneMatched = referencedResolution.phoneMatched;
+  const referencedChannelMatched = referencedResolution.channelMatched;
+
+  if (
+    referencedResolution.shouldUseReferencedConversation &&
+    !referencedPhoneMatched
+  ) {
+    safeLogWarn("whatsapp-inbound-audit", "referenced message used with phone mismatch", {
+      conversationId: referencedMessage?.conversationId ?? null,
+      referencedProviderMessageId: contextProviderMessageId ?? null,
+      channelMatched: referencedChannelMatched,
+      hasIncomingPhone: Boolean(normalizedPhone),
+      hasStoredPhone: Boolean(referencedMessage?.conversation.contact.phone)
+    });
+  }
 
   const [origin, stage] = await Promise.all([
     prisma.origin.findFirst({
@@ -103,7 +118,7 @@ export async function processInboundMessage({
   ]);
 
   let contact =
-    referencedMessage && referencedPhoneMatched
+    referencedMessage && referencedResolution.shouldUseReferencedConversation
       ? referencedMessage.conversation.contact
       : await findContactByNormalizedPhone(prisma, {
           companyId,
@@ -214,7 +229,7 @@ export async function processInboundMessage({
   }
 
   let conversation: Conversation | null =
-    referencedMessage && referencedPhoneMatched && referencedChannelMatched
+    referencedMessage && referencedResolution.shouldUseReferencedConversation
       ? referencedMessage.conversation
       : null;
   let conversationCreated = false;
@@ -372,20 +387,6 @@ export async function processInboundMessage({
   return mapConversation(updated);
 }
 
-function phonesMatch(storedPhone?: string | null, incomingPhone?: string | null) {
-  const stored = normalizeContactPhone(storedPhone);
-  const incoming = normalizeContactPhone(incomingPhone);
-
-  if (!stored || !incoming) return false;
-  if (stored === incoming) return true;
-
-  const storedWithoutCountryCode =
-    stored.startsWith("55") && stored.length > 11 ? stored.slice(2) : stored;
-  const incomingWithoutCountryCode =
-    incoming.startsWith("55") && incoming.length > 11 ? incoming.slice(2) : incoming;
-
-  return storedWithoutCountryCode === incomingWithoutCountryCode;
-}
 
 function isProviderMessageIdUniqueViolation(error: unknown) {
   if (!(error instanceof Prisma.PrismaClientKnownRequestError)) {

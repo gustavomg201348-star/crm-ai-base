@@ -1426,8 +1426,9 @@ function buildShortChannelLabel(name?: string | null) {
 
 function formatContactNameForUi(name?: string | null) {
   const trimmed = name?.trim().replace(/\s+/g, " ") ?? "";
+  const meaningfulName = trimmed.replace(/[,\s.;:|/\\_-]+/g, "");
 
-  if (!trimmed) {
+  if (!meaningfulName) {
     return "Cliente";
   }
 
