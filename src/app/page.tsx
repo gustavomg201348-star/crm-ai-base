@@ -4785,7 +4785,9 @@ export default function Home() {
               onCompleteTask={handleCompleteTask}
             />
           )}
-          {active === "sala-controle" && <CommercialControlPage />}
+          {active === "sala-controle" && (
+            <CommercialControlPage onOpenConversation={openConversationById} />
+          )}
           {active === "motor-comercial" && (
             <MotorCommercialPage onOpenConversation={openConversationById} />
           )}

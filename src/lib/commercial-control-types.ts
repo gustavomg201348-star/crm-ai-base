@@ -10,6 +10,7 @@ export type CommercialControlTaskItem = {
   id: string;
   title: string;
   dueAt: string;
+  overdueMinutes?: number;
   contact: {
     id: string;
     name: string;
@@ -19,6 +20,33 @@ export type CommercialControlTaskItem = {
     id: string;
     name: string;
   } | null;
+};
+
+export type CommercialControlOperationalItem = {
+  id: string;
+  sourceId: string;
+  sourceType: "CONVERSATION" | "TASK" | "PROPOSAL";
+  title: string;
+  reason: string;
+  dueAt: string | null;
+  overdueMinutes: number | null;
+  actionLabel: string;
+  conversationId: string | null;
+  contact: {
+    id: string;
+    name: string;
+    phone: string | null;
+  };
+  owner: {
+    id: string;
+    name: string;
+  } | null;
+};
+
+export type CommercialControlOperationalBucket = {
+  total: number;
+  items: CommercialControlOperationalItem[];
+  limitation: string | null;
 };
 
 export type CommercialControlAgendaBucket = {
@@ -81,6 +109,16 @@ export type CommercialControlOverview = {
     todayTasks: number;
     priorityOpportunities: number;
     activeProposals: number;
+    forgottenClients: number;
+    overdueNextActions: number;
+    overdueAppointments: number;
+    riskyNegotiations: number;
+  };
+  operationalControl: {
+    forgottenClients: CommercialControlOperationalBucket;
+    overdueNextActions: CommercialControlOperationalBucket;
+    overdueAppointments: CommercialControlOperationalBucket;
+    riskyNegotiations: CommercialControlOperationalBucket;
   };
   agenda: {
     overdue: CommercialControlAgendaBucket;
