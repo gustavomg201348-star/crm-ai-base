@@ -21,6 +21,7 @@ import {
 } from "@/lib/mock-data";
 import { ConversationList } from "@/app/components/conversations/ConversationList";
 import { TemplateVariableDialog } from "@/app/components/conversations/TemplateVariableDialog";
+import { CommercialControlPage } from "@/app/components/commercial-control/CommercialControlPage";
 import { MotorCommercialPage } from "@/app/components/opportunities/MotorCommercialPage";
 import { NextBestActionPage } from "@/app/components/opportunities/NextBestActionPage";
 import { TemplateLibraryPage } from "@/app/components/templates/TemplateLibraryPage";
@@ -107,7 +108,7 @@ const navigationGroups: NavigationGroup[] = [
   {
     id: "operacao-comercial",
     label: "Operação Comercial",
-    itemIds: ["motor-comercial", "next-best-action"]
+    itemIds: ["sala-controle", "motor-comercial", "next-best-action"]
   },
   {
     id: "relacionamento",
@@ -1935,6 +1936,7 @@ export default function Home() {
       return navItems.filter((item) =>
         [
           "dashboard",
+          "sala-controle",
           "motor-comercial",
           "next-best-action",
           "atendimento",
@@ -4783,6 +4785,7 @@ export default function Home() {
               onCompleteTask={handleCompleteTask}
             />
           )}
+          {active === "sala-controle" && <CommercialControlPage />}
           {active === "motor-comercial" && (
             <MotorCommercialPage onOpenConversation={openConversationById} />
           )}
