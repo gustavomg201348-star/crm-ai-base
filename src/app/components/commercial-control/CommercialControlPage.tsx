@@ -4,6 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { ControlRoomAttentionList } from "@/app/components/commercial-control/ControlRoomAttentionList";
 import { ControlRoomMetric } from "@/app/components/commercial-control/ControlRoomMetric";
+import {
+  ControlRoomOperationalControl,
+  type OperationalControlKey
+} from "@/app/components/commercial-control/ControlRoomOperationalControl";
 import { ControlRoomSection } from "@/app/components/commercial-control/ControlRoomSection";
 import type { CommercialControlOverview } from "@/lib/commercial-control-types";
 
@@ -52,8 +56,14 @@ function formatGeneratedAt(value: string) {
   }).format(new Date(value));
 }
 
-export function CommercialControlPage() {
+export function CommercialControlPage({
+  onOpenConversation
+}: {
+  onOpenConversation?: (conversationId: string) => void | Promise<void>;
+}) {
   const [overview, setOverview] = useState<CommercialControlOverview | null>(null);
+  const [selectedOperationalKey, setSelectedOperationalKey] =
+    useState<OperationalControlKey>("forgottenClients");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const requestRef = useRef(0);
@@ -103,6 +113,37 @@ export function CommercialControlPage() {
       overview.campaigns.todayTotal === 0 &&
       overview.pipeline.totalContacts === 0
     );
+  }, [overview]);
+
+  const operationalCards = useMemo(() => {
+    if (!overview) return [];
+
+    return [
+      {
+        key: "forgottenClients" as const,
+        title: "Clientes esquecidos",
+        description: "Conversas pendentes paradas acima do limite operacional.",
+        bucket: overview.operationalControl.forgottenClients
+      },
+      {
+        key: "overdueNextActions" as const,
+        title: "Proximas acoes vencidas",
+        description: "Tarefas operacionais pendentes que ja passaram do prazo.",
+        bucket: overview.operationalControl.overdueNextActions
+      },
+      {
+        key: "overdueAppointments" as const,
+        title: "Agendamentos vencidos",
+        description: "Retornos agendados que ainda nao foram tratados.",
+        bucket: overview.operationalControl.overdueAppointments
+      },
+      {
+        key: "riskyNegotiations" as const,
+        title: "Negociacoes em risco",
+        description: "Propostas ativas com pendencia vencida no contato.",
+        bucket: overview.operationalControl.riskyNegotiations
+      }
+    ];
   }, [overview]);
 
   return (
@@ -203,7 +244,13 @@ export function CommercialControlPage() {
             title="O que precisa de atencao"
             description="Fatos objetivos. Sem diagnostico de IA e sem indicadores estimados."
           >
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <ControlRoomOperationalControl
+              cards={operationalCards}
+              selectedKey={selectedOperationalKey}
+              onSelect={setSelectedOperationalKey}
+              onOpenConversation={onOpenConversation}
+            />
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
               <ControlRoomMetric
                 label="Tarefas vencidas"
                 value={overview.attention.overdueTasks}

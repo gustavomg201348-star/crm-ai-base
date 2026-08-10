@@ -3,7 +3,11 @@ import { prisma } from "@/lib/db";
 import { ACTIVE_PROPOSAL_STATUS_VALUES } from "@/lib/opportunity-summary-rules";
 import { listOpportunityQueue } from "@/lib/opportunity-queue-service";
 import type { OpportunityQueueResult } from "@/lib/opportunity-queue-types";
-import type { CommercialControlOverview, CommercialControlTaskItem } from "@/lib/commercial-control-types";
+import type {
+  CommercialControlOperationalItem,
+  CommercialControlOverview,
+  CommercialControlTaskItem
+} from "@/lib/commercial-control-types";
 
 type CommercialControlDb = Pick<
   PrismaClient,
@@ -26,6 +30,9 @@ const CONTRACT_STATUS = "PAID";
 const TASK_ITEM_LIMIT = 6;
 const OPPORTUNITY_LIMIT = 8;
 const RECENT_CAMPAIGN_LIMIT = 6;
+const OPERATIONAL_ITEM_LIMIT = 8;
+const RETURN_TASK_PREFIX = "Retorno:";
+const FORGOTTEN_CLIENT_THRESHOLD_MS = 1000 * 60 * 60 * 4;
 
 function getTimeZoneParts(date: Date, timeZone: string) {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -119,6 +126,10 @@ function toIso(date: Date) {
   return date.toISOString();
 }
 
+function getOverdueMinutes({ dueAt, now }: { dueAt: Date; now: Date }) {
+  return Math.max(0, Math.floor((now.getTime() - dueAt.getTime()) / (1000 * 60)));
+}
+
 function mapTaskItem(task: {
   id: string;
   title: string;
@@ -142,6 +153,153 @@ function mapTaskItem(task: {
         }
       : null
   };
+}
+
+function mapTaskOperationalItem({
+  task,
+  now,
+  sourceType = "TASK",
+  reason,
+  actionLabel
+}: {
+  task: {
+    id: string;
+    title: string;
+    dueAt: Date;
+    contact: { id: string; name: string; phone: string | null };
+    assignee: { id: string; name: string } | null;
+  };
+  now: Date;
+  sourceType?: "TASK";
+  reason: string;
+  actionLabel: string;
+}): CommercialControlOperationalItem {
+  return {
+    id: `${sourceType.toLowerCase()}-${task.id}`,
+    sourceId: task.id,
+    sourceType,
+    title: task.title,
+    reason,
+    dueAt: toIso(task.dueAt),
+    overdueMinutes: getOverdueMinutes({ dueAt: task.dueAt, now }),
+    actionLabel,
+    conversationId: null,
+    contact: {
+      id: task.contact.id,
+      name: task.contact.name,
+      phone: task.contact.phone
+    },
+    owner: task.assignee
+      ? {
+          id: task.assignee.id,
+          name: task.assignee.name
+        }
+      : null
+  };
+}
+
+function mapForgottenConversationItem({
+  conversation,
+  now
+}: {
+  conversation: {
+    id: string;
+    updatedAt: Date;
+    lastMessageAt: Date | null;
+    contact: { id: string; name: string; phone: string | null };
+    agent: { id: string; name: string } | null;
+  };
+  now: Date;
+}): CommercialControlOperationalItem {
+  const referenceDate = conversation.lastMessageAt ?? conversation.updatedAt;
+
+  return {
+    id: `conversation-${conversation.id}`,
+    sourceId: conversation.id,
+    sourceType: "CONVERSATION",
+    title: "Cliente aguardando resposta",
+    reason: "Conversa pendente acima do limite operacional de 4h.",
+    dueAt: toIso(referenceDate),
+    overdueMinutes: getOverdueMinutes({ dueAt: referenceDate, now }),
+    actionLabel: "Abrir conversa",
+    conversationId: conversation.id,
+    contact: {
+      id: conversation.contact.id,
+      name: conversation.contact.name,
+      phone: conversation.contact.phone
+    },
+    owner: conversation.agent
+      ? {
+          id: conversation.agent.id,
+          name: conversation.agent.name
+        }
+      : null
+  };
+}
+
+function mapRiskyProposalItem({
+  proposal,
+  now
+}: {
+  proposal: {
+    id: string;
+    product: string;
+    status: string;
+    updatedAt: Date;
+    assignedUser: { id: string; name: string } | null;
+    contact: {
+      id: string;
+      name: string;
+      phone: string | null;
+      tasks: Array<{
+        id: string;
+        title: string;
+        dueAt: Date;
+        assignee: { id: string; name: string } | null;
+      }>;
+    };
+  };
+  now: Date;
+}): CommercialControlOperationalItem | null {
+  const overdueTask = proposal.contact.tasks[0];
+  if (!overdueTask) return null;
+
+  return {
+    id: `proposal-${proposal.id}`,
+    sourceId: proposal.id,
+    sourceType: "PROPOSAL",
+    title: `${proposal.product} em ${proposal.status}`,
+    reason: `Proposta ativa com tarefa vencida: ${overdueTask.title}.`,
+    dueAt: toIso(overdueTask.dueAt),
+    overdueMinutes: getOverdueMinutes({ dueAt: overdueTask.dueAt, now }),
+    actionLabel: "Retomar negociacao",
+    conversationId: null,
+    contact: {
+      id: proposal.contact.id,
+      name: proposal.contact.name,
+      phone: proposal.contact.phone
+    },
+    owner: proposal.assignedUser ??
+      (overdueTask.assignee
+        ? {
+            id: overdueTask.assignee.id,
+            name: overdueTask.assignee.name
+          }
+        : null)
+  };
+}
+
+function dedupeOperationalItemsByContact(items: CommercialControlOperationalItem[]) {
+  const seen = new Set<string>();
+  const deduped: CommercialControlOperationalItem[] = [];
+
+  for (const item of items) {
+    if (seen.has(item.contact.id)) continue;
+    seen.add(item.contact.id);
+    deduped.push(item);
+  }
+
+  return deduped;
 }
 
 function countByPriority(items: OpportunityQueueResult["items"]) {
@@ -178,6 +336,35 @@ export async function getCommercialControlOverview({
     companyId,
     status: "PENDING"
   };
+  const overdueTaskWhere = {
+    ...taskWhere,
+    dueAt: { lt: now }
+  };
+  const overdueNextActionWhere = {
+    ...overdueTaskWhere,
+    NOT: { title: { startsWith: RETURN_TASK_PREFIX } }
+  };
+  const overdueAppointmentWhere = {
+    ...overdueTaskWhere,
+    title: { startsWith: RETURN_TASK_PREFIX }
+  };
+  const forgottenClientThreshold = new Date(now.getTime() - FORGOTTEN_CLIENT_THRESHOLD_MS);
+  const forgottenConversationWhere = {
+    ...conversationCompanyWhere,
+    status: "PENDING",
+    updatedAt: { lt: forgottenClientThreshold }
+  };
+  const activeProposalStatuses = [...ACTIVE_PROPOSAL_STATUS_VALUES];
+  const riskyProposalWhere = {
+    companyId,
+    status: { in: activeProposalStatuses },
+    contact: {
+      archivedAt: null,
+      tasks: {
+        some: overdueTaskWhere
+      }
+    }
+  };
   const todayDateWhere = {
     gte: ranges.todayStart,
     lt: ranges.todayEnd
@@ -186,7 +373,6 @@ export async function getCommercialControlOverview({
     gte: ranges.tomorrowStart,
     lt: ranges.tomorrowEnd
   };
-  const activeProposalStatuses = [...ACTIVE_PROPOSAL_STATUS_VALUES];
 
   const [
     activeOrMovedConversations,
@@ -205,7 +391,14 @@ export async function getCommercialControlOverview({
     campaignItems,
     pipelineStages,
     pipelineCounts,
-    priorityQueue
+    priorityQueue,
+    forgottenClients,
+    forgottenClientItems,
+    overdueNextActions,
+    overdueAppointments,
+    overdueOperationalTasks,
+    riskyNegotiations,
+    riskyProposalCandidates
   ] = await Promise.all([
     db.conversation.count({
       where: {
@@ -336,6 +529,69 @@ export async function getCommercialControlOverview({
       requesterId,
       requesterRole,
       limit: OPPORTUNITY_LIMIT
+    }),
+    db.conversation.count({
+      where: forgottenConversationWhere
+    }),
+    db.conversation.findMany({
+      where: forgottenConversationWhere,
+      orderBy: { updatedAt: "asc" },
+      take: OPERATIONAL_ITEM_LIMIT,
+      select: {
+        id: true,
+        updatedAt: true,
+        lastMessageAt: true,
+        contact: { select: { id: true, name: true, phone: true } },
+        agent: { select: { id: true, name: true } }
+      }
+    }),
+    db.task.count({
+      where: overdueNextActionWhere
+    }),
+    db.task.count({
+      where: overdueAppointmentWhere
+    }),
+    db.task.findMany({
+      where: overdueTaskWhere,
+      orderBy: { dueAt: "asc" },
+      take: OPERATIONAL_ITEM_LIMIT * 3,
+      include: {
+        contact: { select: { id: true, name: true, phone: true } },
+        assignee: { select: { id: true, name: true } }
+      }
+    }),
+    db.proposal.count({
+      where: riskyProposalWhere
+    }),
+    db.proposal.findMany({
+      where: riskyProposalWhere,
+      orderBy: { updatedAt: "asc" },
+      take: OPERATIONAL_ITEM_LIMIT * 3,
+      select: {
+        id: true,
+        product: true,
+        status: true,
+        updatedAt: true,
+        assignedUser: { select: { id: true, name: true } },
+        contact: {
+          select: {
+            id: true,
+            name: true,
+            phone: true,
+            tasks: {
+              where: overdueTaskWhere,
+              orderBy: { dueAt: "asc" },
+              take: 1,
+              select: {
+                id: true,
+                title: true,
+                dueAt: true,
+                assignee: { select: { id: true, name: true } }
+              }
+            }
+          }
+        }
+      }
     })
   ]);
 
@@ -370,6 +626,33 @@ export async function getCommercialControlOverview({
     count: pipelineCountMap.get(stage.id) ?? 0
   }));
   const withoutStageCount = pipelineCountMap.get(null) ?? 0;
+  const overdueNextActionItems = overdueOperationalTasks
+    .filter((task) => !task.title.startsWith(RETURN_TASK_PREFIX))
+    .slice(0, OPERATIONAL_ITEM_LIMIT)
+    .map((task) =>
+      mapTaskOperationalItem({
+        task,
+        now,
+        reason: "Proxima acao vencida e ainda pendente.",
+        actionLabel: "Executar proxima acao"
+      })
+    );
+  const overdueAppointmentItems = overdueOperationalTasks
+    .filter((task) => task.title.startsWith(RETURN_TASK_PREFIX))
+    .slice(0, OPERATIONAL_ITEM_LIMIT)
+    .map((task) =>
+      mapTaskOperationalItem({
+        task,
+        now,
+        reason: "Agendamento de retorno vencido e ainda pendente.",
+        actionLabel: "Tratar retorno vencido"
+      })
+    );
+  const riskyNegotiationItems = dedupeOperationalItemsByContact(
+    riskyProposalCandidates
+      .map((proposal) => mapRiskyProposalItem({ proposal, now }))
+      .filter((item): item is CommercialControlOperationalItem => Boolean(item))
+  ).slice(0, OPERATIONAL_ITEM_LIMIT);
 
   return {
     generatedAt: toIso(now),
@@ -391,7 +674,35 @@ export async function getCommercialControlOverview({
       overdueTasks,
       todayTasks,
       priorityOpportunities: priorityQueue.total,
-      activeProposals
+      activeProposals,
+      forgottenClients,
+      overdueNextActions,
+      overdueAppointments,
+      riskyNegotiations
+    },
+    operationalControl: {
+      forgottenClients: {
+        total: forgottenClients,
+        items: forgottenClientItems.map((conversation) =>
+          mapForgottenConversationItem({ conversation, now })
+        ),
+        limitation: "Usa conversas PENDING sem movimentacao ha mais de 4h; nao interpreta texto das mensagens."
+      },
+      overdueNextActions: {
+        total: overdueNextActions,
+        items: overdueNextActionItems,
+        limitation: "Usa apenas tarefas PENDING vencidas que nao sao retornos agendados."
+      },
+      overdueAppointments: {
+        total: overdueAppointments,
+        items: overdueAppointmentItems,
+        limitation: "O modelo nao possui status especifico de reagendamento; item sai da lista quando deixa de estar PENDING ou recebe novo prazo futuro."
+      },
+      riskyNegotiations: {
+        total: riskyNegotiations,
+        items: riskyNegotiationItems,
+        limitation: "MVP considera em risco somente proposta ativa cujo contato possui tarefa vencida."
+      }
     },
     agenda: {
       overdue: {

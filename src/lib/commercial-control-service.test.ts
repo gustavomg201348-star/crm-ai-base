@@ -22,14 +22,27 @@ function createEmptyDb(capturedWhere: unknown[] = []) {
   };
 
   return {
-    conversation: { count },
+    conversation: {
+      count,
+      findMany: ({ where }: { where: unknown }) => {
+        capturedWhere.push(where);
+        return Promise.resolve([]);
+      }
+    },
     task: {
       count,
-      findMany: () => Promise.resolve([])
+      findMany: ({ where }: { where: unknown }) => {
+        capturedWhere.push(where);
+        return Promise.resolve([]);
+      }
     },
     proposal: {
       count,
-      groupBy: () => Promise.resolve([])
+      groupBy: () => Promise.resolve([]),
+      findMany: ({ where }: { where: unknown }) => {
+        capturedWhere.push(where);
+        return Promise.resolve([]);
+      }
     },
     campaign: {
       count,
@@ -75,6 +88,10 @@ describe("getCommercialControlOverview", () => {
     assert.equal(overview.proposals.createdToday, 0);
     assert.equal(overview.campaigns.todayTotal, 0);
     assert.equal(overview.opportunities.total, 0);
+    assert.equal(overview.operationalControl.forgottenClients.total, 0);
+    assert.equal(overview.operationalControl.overdueNextActions.total, 0);
+    assert.equal(overview.operationalControl.overdueAppointments.total, 0);
+    assert.equal(overview.operationalControl.riskyNegotiations.total, 0);
     assert.deepEqual(overview.pipeline.stages, []);
   });
 
@@ -101,8 +118,10 @@ describe("getCommercialControlOverview", () => {
     const dueToday = new Date("2026-08-07T18:00:00.000Z");
     const dueTomorrow = new Date("2026-08-08T18:00:00.000Z");
     const dueOverdue = new Date("2026-08-07T12:00:00.000Z");
-    const countValues = [5, 2, 1, 3, 4, 6, 2, 7, 2, 1, 9];
+    const forgottenUpdatedAt = new Date("2026-08-07T09:00:00.000Z");
+    const countValues = [5, 2, 1, 3, 4, 6, 2, 7, 2, 1, 9, 1, 1, 1, 2];
     const nextCount = () => Promise.resolve(countValues.shift() ?? 0);
+    let taskFindManyCalls = 0;
     const queue: OpportunityQueueResult = {
       nextCursor: null,
       scanned: 20,
@@ -149,33 +168,67 @@ describe("getCommercialControlOverview", () => {
       ]
     };
     const db = {
-      conversation: { count: nextCount },
-      task: {
+      conversation: {
         count: nextCount,
         findMany: () =>
           Promise.resolve([
             {
-              id: "task-overdue",
-              title: "Retornar cliente",
-              dueAt: dueOverdue,
-              contact: { id: "contact-1", name: "Maria", phone: "553399999999" },
-              assignee: { id: "user-1", name: "Laura" }
-            },
-            {
-              id: "task-today",
-              title: "Conferir proposta",
-              dueAt: dueToday,
-              contact: { id: "contact-2", name: "Joao", phone: null },
-              assignee: null
-            },
-            {
-              id: "task-tomorrow",
-              title: "Ligar amanha",
-              dueAt: dueTomorrow,
-              contact: { id: "contact-3", name: "Ana", phone: null },
-              assignee: null
+              id: "conversation-forgotten",
+              updatedAt: forgottenUpdatedAt,
+              lastMessageAt: null,
+              contact: { id: "contact-forgotten", name: "Carlos", phone: null },
+              agent: { id: "user-2", name: "Bruna" }
             }
           ])
+      },
+      task: {
+        count: nextCount,
+        findMany: () => {
+          taskFindManyCalls += 1;
+
+          if (taskFindManyCalls === 1) {
+            return Promise.resolve([
+              {
+                id: "task-overdue",
+                title: "Retornar cliente",
+                dueAt: dueOverdue,
+                contact: { id: "contact-1", name: "Maria", phone: "553399999999" },
+                assignee: { id: "user-1", name: "Laura" }
+              },
+              {
+                id: "task-today",
+                title: "Conferir proposta",
+                dueAt: dueToday,
+                contact: { id: "contact-2", name: "Joao", phone: null },
+                assignee: null
+              },
+              {
+                id: "task-tomorrow",
+                title: "Ligar amanha",
+                dueAt: dueTomorrow,
+                contact: { id: "contact-3", name: "Ana", phone: null },
+                assignee: null
+              }
+            ]);
+          }
+
+          return Promise.resolve([
+            {
+              id: "task-action-overdue",
+              title: "Conferir margem",
+              dueAt: dueOverdue,
+              contact: { id: "contact-4", name: "Helena", phone: null },
+              assignee: null
+            },
+            {
+              id: "task-appointment-overdue",
+              title: "Retorno: cliente pediu ligacao",
+              dueAt: dueOverdue,
+              contact: { id: "contact-5", name: "Rafael", phone: null },
+              assignee: { id: "user-3", name: "Diego" }
+            }
+          ]);
+        }
       },
       proposal: {
         count: nextCount,
@@ -183,6 +236,49 @@ describe("getCommercialControlOverview", () => {
           Promise.resolve([
             { status: "PAID", _count: { _all: 2 } },
             { status: "PENDING", _count: { _all: 5 } }
+          ]),
+        findMany: () =>
+          Promise.resolve([
+            {
+              id: "proposal-risk-1",
+              product: "FGTS",
+              status: "PENDING",
+              updatedAt: now,
+              assignedUser: null,
+              contact: {
+                id: "contact-risk",
+                name: "Risco Um",
+                phone: null,
+                tasks: [
+                  {
+                    id: "task-risk-1",
+                    title: "Retorno: negociar proposta",
+                    dueAt: dueOverdue,
+                    assignee: { id: "user-4", name: "Nina" }
+                  }
+                ]
+              }
+            },
+            {
+              id: "proposal-risk-2",
+              product: "FGTS",
+              status: "ANALYSIS",
+              updatedAt: now,
+              assignedUser: null,
+              contact: {
+                id: "contact-risk",
+                name: "Risco Um",
+                phone: null,
+                tasks: [
+                  {
+                    id: "task-risk-2",
+                    title: "Conferir documento",
+                    dueAt: dueOverdue,
+                    assignee: null
+                  }
+                ]
+              }
+            }
           ])
       },
       campaign: {
@@ -235,6 +331,15 @@ describe("getCommercialControlOverview", () => {
     assert.equal(overview.campaigns.todayTotal, 2);
     assert.equal(overview.campaigns.sentToday, 9);
     assert.equal(overview.opportunities.total, 2);
+    assert.equal(overview.attention.forgottenClients, 1);
+    assert.equal(overview.attention.overdueNextActions, 1);
+    assert.equal(overview.attention.overdueAppointments, 1);
+    assert.equal(overview.attention.riskyNegotiations, 2);
+    assert.equal(overview.operationalControl.forgottenClients.items[0]?.contact.name, "Carlos");
+    assert.equal(overview.operationalControl.overdueNextActions.items[0]?.sourceId, "task-action-overdue");
+    assert.equal(overview.operationalControl.overdueAppointments.items[0]?.sourceId, "task-appointment-overdue");
+    assert.equal(overview.operationalControl.riskyNegotiations.total, 2);
+    assert.equal(overview.operationalControl.riskyNegotiations.items.length, 1);
     assert.equal(overview.pipeline.totalContacts, 15);
     assert.equal(overview.pipeline.stages.at(-1)?.name, "Sem etapa");
   });
