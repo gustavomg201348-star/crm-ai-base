@@ -22,6 +22,7 @@ import {
 
 export const navItems = [
   { id: "dashboard", label: "Dashboard", icon: Gauge },
+  { id: "sala-controle", label: "Sala de Controle", icon: BarChart3 },
   { id: "motor-comercial", label: "Motor Comercial", icon: Sparkles },
   { id: "next-best-action", label: "Próxima Melhor Ação", icon: BadgeCheck },
   { id: "atendimento", label: "Atendimento", icon: Headphones, count: 23 },
