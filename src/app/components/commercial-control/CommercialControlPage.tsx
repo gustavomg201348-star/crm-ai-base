@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { ControlRoomAttentionList } from "@/app/components/commercial-control/ControlRoomAttentionList";
+import { ControlRoomGoalPace } from "@/app/components/commercial-control/ControlRoomGoalPace";
 import { ControlRoomMetric } from "@/app/components/commercial-control/ControlRoomMetric";
 import {
   ControlRoomOperationalControl,
@@ -238,6 +239,13 @@ export function CommercialControlPage({
                 tone="brand"
               />
             </div>
+          </ControlRoomSection>
+
+          <ControlRoomSection
+            title="Meta e ritmo"
+            description="Resposta operacional simples sobre o andamento do dia. Sem previsao sofisticada."
+          >
+            <ControlRoomGoalPace goalPace={overview.goalPace} />
           </ControlRoomSection>
 
           <ControlRoomSection

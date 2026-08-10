@@ -38,6 +38,10 @@ function createEmptyDb(capturedWhere: unknown[] = []) {
     },
     proposal: {
       count,
+      aggregate: ({ where }: { where: unknown }) => {
+        capturedWhere.push(where);
+        return Promise.resolve({ _sum: { amount: null }, _avg: { amount: null } });
+      },
       groupBy: () => Promise.resolve([]),
       findMany: ({ where }: { where: unknown }) => {
         capturedWhere.push(where);
@@ -88,6 +92,12 @@ describe("getCommercialControlOverview", () => {
     assert.equal(overview.proposals.createdToday, 0);
     assert.equal(overview.campaigns.todayTotal, 0);
     assert.equal(overview.opportunities.total, 0);
+    assert.equal(overview.goalPace.configured, false);
+    assert.equal(overview.goalPace.status, "NOT_CONFIGURED");
+    assert.equal(overview.goalPace.targetAmount, null);
+    assert.equal(overview.goalPace.realizedAmount, 0);
+    assert.equal(overview.goalPace.achievedPercent, null);
+    assert.equal(overview.goalPace.expectedPercent, null);
     assert.equal(overview.operationalControl.forgottenClients.total, 0);
     assert.equal(overview.operationalControl.overdueNextActions.total, 0);
     assert.equal(overview.operationalControl.overdueAppointments.total, 0);
@@ -232,6 +242,11 @@ describe("getCommercialControlOverview", () => {
       },
       proposal: {
         count: nextCount,
+        aggregate: () =>
+          Promise.resolve({
+            _sum: { amount: { toNumber: () => 6200 } },
+            _avg: { amount: { toNumber: () => 3100 } }
+          }),
         groupBy: () =>
           Promise.resolve([
             { status: "PAID", _count: { _all: 2 } },
@@ -328,6 +343,13 @@ describe("getCommercialControlOverview", () => {
     assert.equal(overview.agenda.tomorrow.total, 4);
     assert.equal(overview.proposals.createdToday, 6);
     assert.equal(overview.proposals.contractsToday, 2);
+    assert.equal(overview.goalPace.configured, false);
+    assert.equal(overview.goalPace.statusLabel, "Meta nao configurada");
+    assert.equal(overview.goalPace.realizedAmount, 6200);
+    assert.equal(overview.goalPace.contractsToday, 2);
+    assert.equal(overview.goalPace.averageTicketToday, 3100);
+    assert.equal(overview.goalPace.missingAmount, null);
+    assert.equal(overview.goalPace.missingContracts, null);
     assert.equal(overview.campaigns.todayTotal, 2);
     assert.equal(overview.campaigns.sentToday, 9);
     assert.equal(overview.opportunities.total, 2);

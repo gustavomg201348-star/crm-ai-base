@@ -6,6 +6,35 @@ export type CommercialControlMetric = {
   description: string;
 };
 
+export type CommercialControlGoalPaceStatus =
+  | "NOT_CONFIGURED"
+  | "NO_RITMO"
+  | "ATENCAO"
+  | "ABAIXO_DO_RITMO";
+
+export type CommercialControlGoalPace = {
+  configured: boolean;
+  status: CommercialControlGoalPaceStatus;
+  statusLabel: string;
+  message: string;
+  targetAmount: number | null;
+  realizedAmount: number;
+  missingAmount: number | null;
+  achievedPercent: number | null;
+  expectedPercent: number | null;
+  paceDifferencePercent: number | null;
+  contractsToday: number;
+  averageTicketToday: number | null;
+  missingContracts: number | null;
+  businessHours: {
+    configured: boolean;
+    start: string | null;
+    end: string | null;
+    elapsedPercent: number | null;
+  };
+  limitation: string | null;
+};
+
 export type CommercialControlTaskItem = {
   id: string;
   title: string;
@@ -104,6 +133,7 @@ export type CommercialControlOverview = {
     contractsClosed: number;
     priorityOpportunities: number;
   };
+  goalPace: CommercialControlGoalPace;
   attention: {
     overdueTasks: number;
     todayTasks: number;

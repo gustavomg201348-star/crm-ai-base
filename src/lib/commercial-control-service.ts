@@ -33,6 +33,8 @@ const RECENT_CAMPAIGN_LIMIT = 6;
 const OPERATIONAL_ITEM_LIMIT = 8;
 const RETURN_TASK_PREFIX = "Retorno:";
 const FORGOTTEN_CLIENT_THRESHOLD_MS = 1000 * 60 * 60 * 4;
+const GOAL_PACE_NOT_CONFIGURED_MESSAGE =
+  "Meta diaria ainda nao configurada. Acompanhe o realizado de hoje, mas o ritmo nao pode ser classificado com seguranca.";
 
 function getTimeZoneParts(date: Date, timeZone: string) {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -315,6 +317,11 @@ function countByPriority(items: OpportunityQueueResult["items"]) {
   }));
 }
 
+function decimalToNumber(value: { toNumber(): number } | number | null | undefined) {
+  if (typeof value === "number") return value;
+  return value?.toNumber() ?? 0;
+}
+
 export async function getCommercialControlOverview({
   companyId,
   requesterId,
@@ -385,6 +392,7 @@ export async function getCommercialControlOverview({
     contractsClosed,
     activeProposals,
     proposalStatusCounts,
+    productionToday,
     todayCampaigns,
     activeCampaigns,
     sentToday,
@@ -469,6 +477,15 @@ export async function getCommercialControlOverview({
       by: ["status"],
       where: { companyId },
       _count: { _all: true }
+    }),
+    db.proposal.aggregate({
+      where: {
+        companyId,
+        status: CONTRACT_STATUS,
+        updatedAt: todayDateWhere
+      },
+      _sum: { amount: true },
+      _avg: { amount: true }
     }),
     db.campaign.count({
       where: {
@@ -669,6 +686,28 @@ export async function getCommercialControlOverview({
       proposalsCreated,
       contractsClosed,
       priorityOpportunities: priorityQueue.total
+    },
+    goalPace: {
+      configured: false,
+      status: "NOT_CONFIGURED",
+      statusLabel: "Meta nao configurada",
+      message: GOAL_PACE_NOT_CONFIGURED_MESSAGE,
+      targetAmount: null,
+      realizedAmount: decimalToNumber(productionToday._sum.amount),
+      missingAmount: null,
+      achievedPercent: null,
+      expectedPercent: null,
+      paceDifferencePercent: null,
+      contractsToday: contractsClosed,
+      averageTicketToday: contractsClosed > 0 ? decimalToNumber(productionToday._avg.amount) : null,
+      missingContracts: null,
+      businessHours: {
+        configured: false,
+        start: null,
+        end: null,
+        elapsedPercent: null
+      },
+      limitation: "Nao existe meta diaria ou horario comercial persistidos de forma confiavel no schema atual."
     },
     attention: {
       overdueTasks,
