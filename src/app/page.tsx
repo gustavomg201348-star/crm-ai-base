@@ -6857,6 +6857,7 @@ function Atendimento({
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [templates, setTemplates] = useState<WhatsAppTemplateRow[]>([]);
+  const [templateSearch, setTemplateSearch] = useState("");
   const [selectedTemplate, setSelectedTemplate] = useState<WhatsAppTemplateRow | null>(null);
   const [templateValues, setTemplateValues] = useState<string[]>([]);
   const [templateVariableDialogOpen, setTemplateVariableDialogOpen] = useState(false);
@@ -6945,6 +6946,26 @@ function Atendimento({
   }, [mobileActionsOpen, mobileDetailsOpen]);
 
   useEffect(() => {
+    if (!templatesOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !templateVariableDialogOpen) {
+        setSelectedTemplate(null);
+        setTemplateValues([]);
+        setTemplateVariableDialogOpen(false);
+        setTemplatesOpen(false);
+        setTemplateSearch("");
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [templatesOpen, templateVariableDialogOpen]);
+
+  useEffect(() => {
     const conversationId = selectedConversation?.id ?? null;
     selectedConversationIdRef.current = conversationId;
     setMessage(conversationId ? draftsByConversationRef.current[conversationId] ?? "" : "");
@@ -6953,6 +6974,7 @@ function Atendimento({
     setTemplateVariableDialogOpen(false);
     setTemplatesOpen(false);
     setTemplates([]);
+    setTemplateSearch("");
     setTemplatesLoading(false);
   }, [selectedConversation?.id]);
 
@@ -7316,7 +7338,27 @@ function Atendimento({
   function closeTemplatesPanel() {
     clearTemplateSelection();
     setTemplatesOpen(false);
+    setTemplateSearch("");
   }
+
+  const filteredTemplates = useMemo(() => {
+    const term = templateSearch
+      .trim()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+
+    if (!term) return templates;
+
+    return templates.filter((template) => {
+      const searchableText = `${template.name} ${template.preview ?? ""}`
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase();
+
+      return searchableText.includes(term);
+    });
+  }, [templateSearch, templates]);
 
   function selectTemplate(template: WhatsAppTemplateRow) {
     const initialValues = Array.from({ length: template.variableCount }, () => "");
@@ -8283,76 +8325,141 @@ function Atendimento({
           )}
 
           {templatesOpen && (
-            <div className="mb-3 max-h-72 overflow-y-auto rounded-2xl border border-line bg-white p-3 shadow-soft">
-              <div className="mb-3 flex items-center justify-between">
-                <p className="text-sm font-bold text-slate-900">Templates aprovados</p>
-                <button type="button" className="text-xs font-semibold text-slate-500" onClick={closeTemplatesPanel}>
-                  Fechar
-                </button>
-              </div>
-              {templatesLoading && <p className="text-sm text-slate-500">Buscando templates...</p>}
-              {!templatesLoading && templates.length === 0 && (
-                <p className="text-sm text-slate-500">Nenhum template aprovado encontrado para este numero.</p>
-              )}
-              <div className="space-y-2">
-                {templates.map((template) => (
-                  <button
-                    key={`${template.name}-${template.language}`}
-                    type="button"
-                    className={clsx(
-                      "w-full rounded-2xl border p-3 text-left hover:bg-slate-50",
-                      selectedTemplate?.name === template.name && selectedTemplate.language === template.language
-                        ? "border-blue-200 bg-blue-50"
-                        : "border-line"
-                    )}
-                    onClick={() => {
-                      selectTemplate(template);
-                    }}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="font-semibold text-slate-900">{template.name}</p>
-                      <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700">
-                        {template.status}
-                      </span>
+            <div className="fixed inset-0 z-40 flex items-end justify-center bg-slate-950/40 p-3 backdrop-blur-sm sm:items-center">
+              <div
+                aria-labelledby="conversation-template-picker-title"
+                aria-modal="true"
+                className="flex max-h-[92vh] w-full max-w-5xl flex-col rounded-3xl border border-line bg-white shadow-2xl"
+                role="dialog"
+              >
+                <div className="border-b border-line p-4 sm:p-5">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-[0.18em] text-brand">
+                        Atendimento
+                      </p>
+                      <h3
+                        className="mt-1 text-lg font-black text-slate-950"
+                        id="conversation-template-picker-title"
+                      >
+                        Templates aprovados
+                      </h3>
+                      <p className="mt-1 text-sm text-slate-500">
+                        Escolha um template aprovado para esta conversa.
+                      </p>
                     </div>
-                    <p className="mt-1 text-xs text-slate-500">{template.category} - {template.language}</p>
-                    <p className="mt-2 line-clamp-2 text-sm text-slate-600">{template.preview}</p>
-                  </button>
-                ))}
-              </div>
-              {selectedTemplate && (
-                <div className="mt-3 rounded-2xl bg-slate-50 p-3">
-                  <p className="text-sm font-semibold text-slate-900">
-                    {selectedTemplate.name}
-                  </p>
-                  {selectedTemplate.variableCount > 0 && (
-                    <p className="mt-1 text-xs text-slate-500">
-                      Preencha as variaveis antes de enviar.
-                    </p>
-                  )}
-                  <button
-                    type="button"
-                    className="mt-3 inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-full bg-brand text-sm font-semibold text-white disabled:opacity-50"
-                    disabled={sendingAttachment || !selectedTemplate}
-                    onClick={() => {
-                      if (selectedTemplate.variableCount > 0) {
-                        setTemplateVariableDialogOpen(true);
-                        return;
-                      }
-                      void sendTemplate();
-                    }}
-                  >
-                    {sendingAttachment ? (
-                      <>
-                        <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
-                        Enviando...
-                      </>
-                    ) : (
-                      selectedTemplate.variableCount > 0 ? "Preencher variaveis" : "Enviar template"
-                    )}
-                  </button>
+                    <button
+                      type="button"
+                      className="rounded-full border border-line px-3 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-50"
+                      onClick={closeTemplatesPanel}
+                    >
+                      Fechar
+                    </button>
+                  </div>
+
+                  <label className="mt-4 block">
+                    <span className="sr-only">Buscar template</span>
+                    <input
+                      className="h-11 w-full rounded-2xl border border-line bg-white px-4 text-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                      placeholder="Buscar template..."
+                      type="search"
+                      value={templateSearch}
+                      onChange={(event) => setTemplateSearch(event.target.value)}
+                    />
+                  </label>
                 </div>
-              )}
+
+                <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:max-h-[68vh] sm:p-5">
+                  {templatesLoading && (
+                    <div className="rounded-2xl border border-dashed border-line p-5 text-sm text-slate-500">
+                      Buscando templates...
+                    </div>
+                  )}
+                  {!templatesLoading && templates.length === 0 && (
+                    <div className="rounded-2xl border border-dashed border-line p-5 text-sm text-slate-500">
+                      Nenhum template aprovado encontrado para este numero.
+                    </div>
+                  )}
+                  {!templatesLoading && templates.length > 0 && filteredTemplates.length === 0 && (
+                    <div className="rounded-2xl border border-dashed border-line p-5 text-sm text-slate-500">
+                      Nenhum template corresponde à busca.
+                    </div>
+                  )}
+                  {!templatesLoading && filteredTemplates.length > 0 && (
+                    <div className="grid gap-2 md:grid-cols-2">
+                      {filteredTemplates.map((template) => (
+                        <button
+                          key={`${template.name}-${template.language}`}
+                          type="button"
+                          className={clsx(
+                            "w-full rounded-2xl border p-3 text-left transition hover:bg-slate-50",
+                            selectedTemplate?.name === template.name &&
+                              selectedTemplate.language === template.language
+                              ? "border-blue-200 bg-blue-50"
+                              : "border-line"
+                          )}
+                          onClick={() => {
+                            selectTemplate(template);
+                          }}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="truncate font-semibold text-slate-900">{template.name}</p>
+                              <p className="mt-1 text-xs text-slate-500">
+                                {template.category} - {template.language}
+                              </p>
+                            </div>
+                            <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700">
+                              {template.status}
+                            </span>
+                          </div>
+                          <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-slate-600">
+                            {template.preview}
+                          </p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {selectedTemplate && (
+                  <div className="border-t border-line bg-slate-50 p-4 sm:p-5">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">
+                          {selectedTemplate.name}
+                        </p>
+                        {selectedTemplate.variableCount > 0 && (
+                          <p className="mt-1 text-xs text-slate-500">
+                            Preencha as variaveis antes de enviar.
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        className="inline-flex h-10 items-center justify-center gap-1.5 rounded-full bg-brand px-5 text-sm font-semibold text-white disabled:opacity-50"
+                        disabled={sendingAttachment || !selectedTemplate}
+                        onClick={() => {
+                          if (selectedTemplate.variableCount > 0) {
+                            setTemplateVariableDialogOpen(true);
+                            return;
+                          }
+                          void sendTemplate();
+                        }}
+                      >
+                        {sendingAttachment ? (
+                          <>
+                            <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
+                            Enviando...
+                          </>
+                        ) : (
+                          selectedTemplate.variableCount > 0 ? "Preencher variaveis" : "Enviar template"
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
