@@ -15,6 +15,9 @@ import {
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
+export const CONTACT_IMPORT_IDENTITY_CONFLICT_MESSAGE =
+  "CPF e telefone pertencem a contatos diferentes.";
+
 const HEADER_ALIASES = {
   cpf: ["cpf", "documento", "doc", "documento cpf", "cpf cliente"],
   name: ["nome", "cliente", "nome cliente", "nome completo"],
@@ -74,6 +77,22 @@ export type ContactImportConfirmResult = {
     phone: string;
   }>;
   errors: Array<{ rowNumber: number; reason: string }>;
+};
+
+export class ContactImportConflictError extends Error {
+  readonly code = "CONTACT_IMPORT_IDENTITY_CONFLICT";
+  readonly rowNumber: number;
+
+  constructor(rowNumber: number, reason = CONTACT_IMPORT_IDENTITY_CONFLICT_MESSAGE) {
+    super(`Linha ${rowNumber}: ${reason}`);
+    this.name = "ContactImportConflictError";
+    this.rowNumber = rowNumber;
+  }
+}
+
+export type ExistingImportContactIndexes = {
+  byCpf: Map<string, string>;
+  byPhone: Map<string, string>;
 };
 
 function normalizeHeader(value: string) {
@@ -198,16 +217,23 @@ export function renderCampaignMessage(
     .replace(/\{\{\s*telefone\s*\}\}/gi, contact.phone);
 }
 
-async function findExistingContacts(companyId: string, rows: ImportPreviewRow[]) {
+async function findExistingContactIndexes(
+  db: DbClient,
+  companyId: string,
+  rows: ImportPreviewRow[]
+): Promise<ExistingImportContactIndexes> {
   const cpfs = rows.map((row) => row.cpf).filter(Boolean);
   const phones = rows.map((row) => row.whatsapp).filter(Boolean);
 
-  if (!cpfs.length && !phones.length) return new Map<string, string>();
+  const indexes: ExistingImportContactIndexes = {
+    byCpf: new Map(),
+    byPhone: new Map()
+  };
 
-  const map = new Map<string, string>();
+  if (!cpfs.length && !phones.length) return indexes;
 
   const contactsByCpf = cpfs.length
-    ? await prisma.contact.findMany({
+    ? await db.contact.findMany({
         where: {
           companyId,
           cpf: { in: cpfs }
@@ -216,11 +242,11 @@ async function findExistingContacts(companyId: string, rows: ImportPreviewRow[])
       })
     : [];
   contactsByCpf.forEach((contact) => {
-    if (contact.cpf) map.set(`cpf:${contact.cpf}`, contact.id);
+    if (contact.cpf) indexes.byCpf.set(contact.cpf, contact.id);
   });
 
   if (phones.length) {
-    const contactsByNormalizedPhone = await prisma.contact.findMany({
+    const contactsByNormalizedPhone = await db.contact.findMany({
       where: {
         companyId,
         normalizedPhone: { in: phones }
@@ -229,11 +255,11 @@ async function findExistingContacts(companyId: string, rows: ImportPreviewRow[])
     });
     contactsByNormalizedPhone.forEach((contact) => {
       if (contact.normalizedPhone) {
-        map.set(`phone:${contact.normalizedPhone}`, contact.id);
+        indexes.byPhone.set(contact.normalizedPhone, contact.id);
       }
     });
 
-    const contactsByLegacyPhone = await prisma.contact.findMany({
+    const contactsByLegacyPhone = await db.contact.findMany({
       where: {
         companyId,
         phone: { in: phones }
@@ -241,13 +267,52 @@ async function findExistingContacts(companyId: string, rows: ImportPreviewRow[])
       select: { id: true, phone: true }
     });
     contactsByLegacyPhone.forEach((contact) => {
-      if (contact.phone && !map.has(`phone:${contact.phone}`)) {
-        map.set(`phone:${contact.phone}`, contact.id);
+      if (contact.phone && !indexes.byPhone.has(contact.phone)) {
+        indexes.byPhone.set(contact.phone, contact.id);
       }
     });
   }
 
-  return map;
+  return indexes;
+}
+
+export function resolveContactImportIdentityForRow(
+  row: Pick<ImportPreviewRow, "cpf" | "whatsapp">,
+  indexes: ExistingImportContactIndexes
+) {
+  const cpfContactId = row.cpf ? indexes.byCpf.get(row.cpf) ?? null : null;
+  const phoneContactId = row.whatsapp
+    ? indexes.byPhone.get(row.whatsapp) ?? null
+    : null;
+
+  if (cpfContactId && phoneContactId && cpfContactId !== phoneContactId) {
+    return {
+      existingContactId: null,
+      conflictReason: CONTACT_IMPORT_IDENTITY_CONFLICT_MESSAGE
+    };
+  }
+
+  return {
+    existingContactId: cpfContactId ?? phoneContactId,
+    conflictReason: null
+  };
+}
+
+export function findFirstContactImportIdentityConflict(
+  rows: Array<Pick<ImportPreviewRow, "rowNumber" | "cpf" | "whatsapp">>,
+  indexes: ExistingImportContactIndexes
+) {
+  for (const row of rows) {
+    const identity = resolveContactImportIdentityForRow(row, indexes);
+    if (identity.conflictReason) {
+      return {
+        rowNumber: row.rowNumber,
+        reason: identity.conflictReason
+      };
+    }
+  }
+
+  return null;
 }
 
 export async function buildContactImportPreview({
@@ -340,10 +405,18 @@ export async function buildContactImportPreview({
     );
   });
 
-  const existingMap = await findExistingContacts(companyId, rows);
+  const existingIndexes = await findExistingContactIndexes(prisma, companyId, rows);
   rows.forEach((row) => {
-    row.existingContactId =
-      existingMap.get(`cpf:${row.cpf}`) ?? existingMap.get(`phone:${row.whatsapp}`) ?? null;
+    const identity = resolveContactImportIdentityForRow(row, existingIndexes);
+    row.existingContactId = identity.existingContactId;
+
+    if (identity.conflictReason) {
+      row.status = "INVALID";
+      row.existingContactId = null;
+      if (!row.errors.includes(identity.conflictReason)) {
+        row.errors.push(identity.conflictReason);
+      }
+    }
   });
 
   return {
@@ -421,6 +494,18 @@ export async function confirmContactImport({
     const confirmedRows: ContactImportConfirmResult["rows"] = [];
     let created = 0;
     let updated = 0;
+    const existingIndexes = await findExistingContactIndexes(tx, companyId, validRows);
+    const identityConflict = findFirstContactImportIdentityConflict(
+      validRows,
+      existingIndexes
+    );
+
+    if (identityConflict) {
+      throw new ContactImportConflictError(
+        identityConflict.rowNumber,
+        identityConflict.reason
+      );
+    }
 
     for (const row of validRows) {
       const existing = await findContactForImport(tx, companyId, row);

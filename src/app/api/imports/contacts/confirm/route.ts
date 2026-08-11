@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import {
+  ContactImportConflictError,
   confirmContactImport,
   type ImportPreviewRow
 } from "@/lib/contact-import.service";
@@ -37,6 +38,14 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(result);
   } catch (error) {
+    if (error instanceof ContactImportConflictError) {
+      return publicErrorResponse({
+        code: "CONFLICT",
+        status: 409,
+        message: error.message
+      });
+    }
+
     safeLogError("http-api", error, {
       operation: "contact-import-confirm",
       route: "/api/imports/contacts/confirm",

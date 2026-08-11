@@ -15518,9 +15518,11 @@ function Disparos({
 
     if (!response.ok) {
       const data = (await response.json().catch(() => null)) as
-        | { error?: string }
+        | { error?: string; message?: string }
         | null;
-      setError(data?.error ?? "Nao foi possivel confirmar a importacao.");
+      setError(
+        data?.message ?? data?.error ?? "Nao foi possivel confirmar a importacao."
+      );
       return;
     }
 
@@ -15983,30 +15985,36 @@ function Disparos({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-line">
-                      {importPreview.rows.slice(0, 80).map((row) => (
-                        <tr key={`${row.rowNumber}-${row.cpf}-${row.whatsapp}`}>
-                          <td className="px-3 py-2">{row.rowNumber}</td>
-                          <td className="max-w-[180px] truncate px-3 py-2 font-semibold">
-                            {row.name || "-"}
-                          </td>
-                          <td className="px-3 py-2">{row.cpf || "-"}</td>
-                          <td className="px-3 py-2">{row.whatsapp || "-"}</td>
-                          <td className="px-3 py-2">
-                            {row.status === "VALID" ? (
-                              <span className="rounded-full bg-emerald-50 px-2 py-1 font-semibold text-emerald-700">
-                                {row.existingContactId ? "Atualizar" : "Criar"}
-                              </span>
-                            ) : (
-                              <span
-                                className="inline-block max-w-[220px] truncate rounded-full bg-rose-50 px-2 py-1 font-semibold text-rose-700"
-                                title={row.errors.join(" ")}
-                              >
-                                {row.errors[0]}
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
+                      {importPreview.rows.slice(0, 80).map((row) => {
+                        const conflictError = row.errors.find((error) =>
+                          error.toLowerCase().includes("contatos diferentes")
+                        );
+
+                        return (
+                          <tr key={`${row.rowNumber}-${row.cpf}-${row.whatsapp}`}>
+                            <td className="px-3 py-2">{row.rowNumber}</td>
+                            <td className="max-w-[180px] truncate px-3 py-2 font-semibold">
+                              {row.name || "-"}
+                            </td>
+                            <td className="px-3 py-2">{row.cpf || "-"}</td>
+                            <td className="px-3 py-2">{row.whatsapp || "-"}</td>
+                            <td className="px-3 py-2">
+                              {row.status === "VALID" ? (
+                                <span className="rounded-full bg-emerald-50 px-2 py-1 font-semibold text-emerald-700">
+                                  {row.existingContactId ? "Atualizar" : "Criar"}
+                                </span>
+                              ) : (
+                                <span
+                                  className="inline-block max-w-[220px] truncate rounded-full bg-rose-50 px-2 py-1 font-semibold text-rose-700"
+                                  title={row.errors.join(" ")}
+                                >
+                                  {conflictError ? `Conflito: ${conflictError}` : row.errors[0]}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
