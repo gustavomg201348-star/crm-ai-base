@@ -5,23 +5,27 @@ import { renderCampaignMessage } from "@/lib/contact-import.service";
 import { prisma } from "@/lib/db";
 import {
   readMetaMessageId,
+  MetaMediaUploadError,
   sendMetaImageMessage,
   sendMetaTemplateMessage,
   sendMetaTextMessage,
   uploadMetaMedia,
+  type MetaTemplateHeaderMedia,
   type MetaTemplate
 } from "@/lib/meta-whatsapp";
 import {
   extractTemplateButtons,
   findReadyLocalMetaTemplate,
-  resolveLocalTemplateHeaderImageUrl,
+  resolveAndUploadLocalTemplateHeaderImageMedia,
   renderTemplateHistoryBody,
+  templateHasHeaderImage,
 } from "@/lib/whatsapp-template.service";
 import { digitsOnlyPhone } from "@/lib/phone-normalization.service";
 import {
   deserializeResolvedTemplateVariablesV1,
   extractTemplateBodyVariableIndexes
 } from "@/lib/template-parameters";
+import { TemplateMediaStorageError } from "@/lib/template-media-storage";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -121,6 +125,98 @@ function getTemplateBodyVariableCount(template?: MetaTemplate | null) {
   return extractTemplateBodyVariableIndexes(getTemplateBodyText(template)).length;
 }
 
+export function buildCampaignPreparationFailureMessage(error: unknown) {
+  if (error instanceof TemplateMediaStorageError) {
+    return `Falha antes do processamento dos destinatarios: leitura da midia do template falhou (${error.code}).`;
+  }
+
+  if (error instanceof MetaMediaUploadError) {
+    return "Falha antes do processamento dos destinatarios: upload da midia para a Meta falhou.";
+  }
+
+  const message = error instanceof Error ? error.message : "Falha desconhecida.";
+  return `Falha antes do processamento dos destinatarios: ${message}`;
+}
+
+type MarkCampaignPreparationFailedDeps = {
+  markPendingRecipientsFailed: (input: {
+    campaignId: string;
+    failedAt: Date;
+    errorCode: string;
+    errorMessage: string;
+  }) => Promise<unknown>;
+  refreshCounters: (campaignId: string) => Promise<unknown>;
+};
+
+export async function markCampaignPreparationFailed(
+  campaignId: string,
+  error: unknown,
+  deps: MarkCampaignPreparationFailedDeps = {
+    markPendingRecipientsFailed: ({ campaignId: id, failedAt, errorCode, errorMessage }) =>
+      prisma.campaignRecipient.updateMany({
+        where: { campaignId: id, status: "PENDING" },
+        data: {
+          status: "FAILED",
+          failedAt,
+          errorCode,
+          errorMessage
+        }
+      }),
+    refreshCounters: refreshCampaignCounters
+  }
+) {
+  const failedAt = new Date();
+  const errorCode = "CAMPAIGN_PREPARATION_FAILED";
+  const errorMessage = buildCampaignPreparationFailureMessage(error);
+
+  await deps.markPendingRecipientsFailed({
+    campaignId,
+    failedAt,
+    errorCode,
+    errorMessage
+  });
+  await deps.refreshCounters(campaignId);
+
+  return { errorMessage };
+}
+
+type ResolveCampaignTemplateHeaderMediaInput =
+  Parameters<typeof resolveAndUploadLocalTemplateHeaderImageMedia>[0];
+
+type ResolveCampaignTemplateHeaderMediaDeps = {
+  resolveAndUploadHeaderImageMedia?: typeof resolveAndUploadLocalTemplateHeaderImageMedia;
+};
+
+export async function resolveCampaignTemplateHeaderMedia(
+  {
+    companyId,
+    phoneNumberId,
+    accessToken,
+    localTemplate,
+    template
+  }: ResolveCampaignTemplateHeaderMediaInput,
+  deps: ResolveCampaignTemplateHeaderMediaDeps = {}
+) {
+  if (!templateHasHeaderImage(template)) {
+    return {
+      headerMedia: null,
+      historyMediaUrl: null,
+      mimeType: null
+    };
+  }
+
+  const resolveAndUploadHeaderImageMedia =
+    deps.resolveAndUploadHeaderImageMedia ?? resolveAndUploadLocalTemplateHeaderImageMedia;
+
+  return resolveAndUploadHeaderImageMedia({
+    companyId,
+    phoneNumberId,
+    accessToken,
+    localTemplate,
+    template
+  });
+}
+
 async function findOrCreateCampaignConversation({
   db,
   companyId,
@@ -210,45 +306,62 @@ export async function processCampaign(campaignId: string) {
 
   let mediaId: string | null = null;
   let campaignTemplate: MetaTemplate | null = null;
-  let campaignTemplateHeaderImageUrl: string | null = null;
-  if (campaign.imagePath && campaign.imageMime && campaign.imageName) {
-    const { readFile } = await import("node:fs/promises");
-    const bytes = await readFile(campaign.imagePath);
-    const uploaded = await uploadMetaMedia({
-      phoneNumberId: campaign.channel.phoneNumberId,
-      accessToken: campaign.channel.accessToken,
-      fileName: campaign.imageName,
-      mimeType: campaign.imageMime,
-      bytes
-    });
-    mediaId = uploaded.id;
-  }
+  let campaignTemplateHeaderMedia: MetaTemplateHeaderMedia | null = null;
+  let campaignTemplateHistoryMediaUrl: string | null = null;
+  let campaignTemplateHeaderMimeType: string | null = null;
 
-  if (
-    campaign.messageType === "TEMPLATE" &&
-    campaign.templateName &&
-    campaign.templateLanguage
-  ) {
-    if (!campaign.channel.wabaId) throw new Error("Canal Meta sem WABA ID.");
-
-    const localTemplateContext = await findReadyLocalMetaTemplate({
-      companyId: campaign.companyId,
-      wabaId: campaign.channel.wabaId,
-      templateName: campaign.templateName,
-      language: campaign.templateLanguage
-    });
-
-    if (!localTemplateContext) {
-      throw new Error("Template aprovado nao encontrado para o disparo.");
+  try {
+    if (campaign.imagePath && campaign.imageMime && campaign.imageName) {
+      const { readFile } = await import("node:fs/promises");
+      const bytes = await readFile(campaign.imagePath);
+      const uploaded = await uploadMetaMedia({
+        phoneNumberId: campaign.channel.phoneNumberId,
+        accessToken: campaign.channel.accessToken,
+        fileName: campaign.imageName,
+        mimeType: campaign.imageMime,
+        bytes
+      });
+      mediaId = uploaded.id;
     }
 
-    campaignTemplate = localTemplateContext.template;
-    // Imagem anexada na campanha continua exclusiva do envio de imagem;
-    // templates usam primeiro a midia padrao local do proprio template.
-    campaignTemplateHeaderImageUrl = await resolveLocalTemplateHeaderImageUrl({
-      companyId: campaign.companyId,
-      localTemplate: localTemplateContext.localTemplate,
-      template: localTemplateContext.template
+    if (
+      campaign.messageType === "TEMPLATE" &&
+      campaign.templateName &&
+      campaign.templateLanguage
+    ) {
+      if (!campaign.channel.wabaId) throw new Error("Canal Meta sem WABA ID.");
+
+      const localTemplateContext = await findReadyLocalMetaTemplate({
+        companyId: campaign.companyId,
+        wabaId: campaign.channel.wabaId,
+        templateName: campaign.templateName,
+        language: campaign.templateLanguage
+      });
+
+      if (!localTemplateContext) {
+        throw new Error("Template aprovado nao encontrado para o disparo.");
+      }
+
+      campaignTemplate = localTemplateContext.template;
+      // Imagem anexada na campanha continua exclusiva do envio de imagem;
+      // templates usam primeiro a midia padrao local do proprio template.
+      const headerImage = await resolveCampaignTemplateHeaderMedia({
+        companyId: campaign.companyId,
+        phoneNumberId: campaign.channel.phoneNumberId,
+        accessToken: campaign.channel.accessToken,
+        localTemplate: localTemplateContext.localTemplate,
+        template: localTemplateContext.template
+      });
+      campaignTemplateHeaderMedia = headerImage.headerMedia;
+      campaignTemplateHistoryMediaUrl = headerImage.historyMediaUrl;
+      campaignTemplateHeaderMimeType = headerImage.mimeType;
+    }
+  } catch (error) {
+    await markCampaignPreparationFailed(campaign.id, error);
+
+    return prisma.campaign.findUniqueOrThrow({
+      where: { id: campaign.id },
+      include: campaignInclude
     });
   }
 
@@ -307,7 +420,7 @@ export async function processCampaign(campaignId: string) {
         throw new Error("Quantidade de variaveis do template invalida para o destinatario.");
       }
       const templateHeaderImageUrl = campaignTemplate
-        ? campaignTemplateHeaderImageUrl
+        ? campaignTemplateHistoryMediaUrl
         : null;
       const metaResponse =
         campaign.messageType === "TEMPLATE" &&
@@ -321,7 +434,8 @@ export async function processCampaign(campaignId: string) {
               language: campaign.templateLanguage,
               variables: templateVariables,
               template: campaignTemplate,
-              headerImageUrl: templateHeaderImageUrl
+              headerMedia: campaignTemplateHeaderMedia,
+              headerImageUrl: null
             })
           : mediaId
             ? await sendMetaImageMessage({
@@ -364,7 +478,7 @@ export async function processCampaign(campaignId: string) {
             body: historyBody,
             type: campaign.messageType === "TEMPLATE" ? "template" : "text",
             mediaUrl: templateHeaderImageUrl,
-            mimeType: templateHeaderImageUrl ? "image/jpeg" : null,
+            mimeType: campaignTemplateHeaderMimeType,
             templateName: campaign.templateName,
             templateLanguage: campaign.templateLanguage,
             templateVariables: campaignTemplate
