@@ -478,6 +478,9 @@ export async function POST(request: NextRequest) {
       return publicErrorResponse({ code: "CONTACT_NOT_FOUND", status: 404 });
     }
 
+    const initialStatus = isProposalStatus(body.status) ? body.status : "DRAFT";
+    const proposalPaidAt = initialStatus === "PAID" ? new Date() : null;
+
     const proposalStage = await prisma.pipelineStage.findFirst({
       where: { companyId: session.companyId, name: { contains: "Proposta" } },
       orderBy: { position: "asc" }
@@ -504,7 +507,8 @@ export async function POST(request: NextRequest) {
           commission: commission ?? 0,
           commissionReceived,
           notes: readOptionalString(body.notes),
-          status: isProposalStatus(body.status) ? body.status : "DRAFT"
+          status: initialStatus,
+          paidAt: proposalPaidAt
         },
         include: proposalInclude
       });

@@ -598,6 +598,12 @@ export async function getCommercialControlOverview({
     gte: ranges.todayStart,
     lt: ranges.todayEnd
   };
+  const paidTodayWhere = {
+    OR: [
+      { paidAt: todayDateWhere },
+      { paidAt: null, updatedAt: todayDateWhere }
+    ]
+  };
   const tomorrowDateWhere = {
     gte: ranges.tomorrowStart,
     lt: ranges.tomorrowEnd
@@ -687,7 +693,7 @@ export async function getCommercialControlOverview({
       where: {
         companyId,
         status: CONTRACT_STATUS,
-        updatedAt: todayDateWhere
+        ...paidTodayWhere
       }
     }),
     db.proposal.count({
@@ -705,7 +711,7 @@ export async function getCommercialControlOverview({
       where: {
         companyId,
         status: CONTRACT_STATUS,
-        updatedAt: todayDateWhere
+        ...paidTodayWhere
       },
       _sum: { amount: true },
       _avg: { amount: true }

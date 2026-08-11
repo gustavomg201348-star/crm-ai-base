@@ -1,8 +1,5 @@
 import { Prisma, type Conversation } from "@prisma/client";
-import {
-  conversationMatchesChannel,
-  LEGACY_WHATSAPP_CHANNEL
-} from "@/lib/conversation-channel.service";
+import { LEGACY_WHATSAPP_CHANNEL } from "@/lib/conversation-channel.service";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { findOrCreateConversationForChannel } from "@/lib/conversation-lifecycle.service";
 import { prisma } from "@/lib/db";
@@ -24,6 +21,7 @@ import {
   isPrismaUniqueViolationForTarget
 } from "@/lib/prisma-errors";
 import { safeLogError, safeLogWarn } from "@/lib/safe-logger";
+import { resolveInboundContextReference } from "@/lib/inbound-message-resolution";
 
 export async function processInboundMessage({
   companyId,
@@ -74,10 +72,11 @@ export async function processInboundMessage({
     }
   }
 
-  const referencedMessage = contextProviderMessageId
+  const referencedMessageCandidate = contextProviderMessageId
     ? await prisma.message.findFirst({
         where: {
           providerMessageId: contextProviderMessageId,
+          direction: "outbound",
           conversation: { contact: { companyId } }
         },
         include: {
@@ -85,12 +84,25 @@ export async function processInboundMessage({
         }
       })
     : null;
-  const referencedPhoneMatched = referencedMessage
-    ? phonesMatch(referencedMessage.conversation.contact.phone, normalizedPhone)
+  const referencedPhoneMatched = referencedMessageCandidate
+    ? phonesMatch(referencedMessageCandidate.conversation.contact.phone, normalizedPhone)
     : false;
-  const referencedChannelMatched = referencedMessage
-    ? !channelId || conversationMatchesChannel(referencedMessage.conversation, channelId)
-    : false;
+  const contextResolution = resolveInboundContextReference({
+    companyId,
+    channelId,
+    contextProviderMessageId,
+    referencedMessage: referencedMessageCandidate,
+    phoneMatched: referencedPhoneMatched
+  });
+  const referencedMessage = contextResolution.reusable ? referencedMessageCandidate : null;
+
+  if (contextProviderMessageId && !contextResolution.reusable) {
+    safeLogWarn("whatsapp-inbound-context-resolution", "inbound context reference ignored", {
+      reason: contextResolution.reason,
+      hasChannelId: Boolean(channelId?.trim()),
+      referencedMessageFound: Boolean(referencedMessageCandidate)
+    });
+  }
 
   const [origin, stage] = await Promise.all([
     prisma.origin.findFirst({
@@ -116,6 +128,7 @@ export async function processInboundMessage({
     contactId: contact?.id ?? null,
     conversationId: referencedMessage?.conversationId ?? null,
     referencedProviderMessageId: contextProviderMessageId ?? null,
+    contextResolutionReason: contextResolution.reason,
     referencedMessageFound: Boolean(referencedMessage),
     referencedPhoneMatched,
     hasExistingContact: Boolean(contact),
@@ -213,10 +226,9 @@ export async function processInboundMessage({
     }
   }
 
-  let conversation: Conversation | null =
-    referencedMessage && referencedPhoneMatched && referencedChannelMatched
-      ? referencedMessage.conversation
-      : null;
+  let conversation: Conversation | null = referencedMessage
+    ? referencedMessage.conversation
+    : null;
   let conversationCreated = false;
 
   if (!conversation && channelId) {

@@ -142,6 +142,36 @@ export async function findContactByNormalizedPhone(
   return null;
 }
 
+export async function listDuplicateNormalizedPhoneGroups(
+  db: ContactLookupDbClient,
+  {
+    companyId
+  }: {
+    companyId?: string;
+  } = {}
+) {
+  const rows = await db.$queryRaw<Array<{
+    companyId: string;
+    normalizedPhone: string;
+    total: bigint | number;
+  }>>`
+    SELECT "companyId", "normalizedPhone", COUNT(*) AS "total"
+    FROM "Contact"
+    WHERE "normalizedPhone" IS NOT NULL
+      AND trim("normalizedPhone") <> ''
+      ${companyId ? Prisma.sql`AND "companyId" = ${companyId}` : Prisma.empty}
+    GROUP BY "companyId", "normalizedPhone"
+    HAVING COUNT(*) > 1
+    ORDER BY COUNT(*) DESC
+  `;
+
+  return rows.map((row) => ({
+    companyId: row.companyId,
+    normalizedPhone: row.normalizedPhone,
+    total: Number(row.total)
+  }));
+}
+
 export function logContactNameMutationAttempt(input: {
   origin: string;
   file: string;
