@@ -41,6 +41,7 @@ model Company {
   leadAssignmentHistory LeadAssignmentHistory[]
   metaTemplates MetaTemplate[]
   mediaAssets   MediaAsset[]
+  commercialObservations CommercialObservation[]
 }
 
 model Channel {
@@ -501,6 +502,7 @@ model Conversation {
   notifications Notification[]
   tags          ConversationTag[]
   assignmentHistory LeadAssignmentHistory[]
+  commercialObservation CommercialObservation?
 
   @@index([contactId])
   @@index([channelId])
@@ -509,6 +511,29 @@ model Conversation {
   @@index([agentId, status, updatedAt])
   @@index([lastMessageAt])
   @@index([status])
+}
+
+model CommercialObservation {
+  id               String       @id @default(cuid())
+  companyId        String
+  conversationId   String
+  status           String       @default("PENDING")
+  version          Int          @default(1)
+  analyzedAt       DateTime?
+  sourceUpdatedAt  DateTime?
+  nextEligibleAt   DateTime?
+  model            String?
+  structuredResult String?
+  lastError        String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  company          Company      @relation(fields: [companyId], references: [id])
+  conversation     Conversation @relation(fields: [conversationId], references: [id])
+
+  @@unique([companyId, conversationId])
+  @@unique([conversationId])
+  @@index([companyId, status, nextEligibleAt])
+  @@index([companyId, analyzedAt])
 }
 
 model ConversationTag {

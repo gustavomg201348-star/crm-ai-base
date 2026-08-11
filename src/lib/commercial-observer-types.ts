@@ -60,6 +60,21 @@ export type CommercialObserverResultV1 = {
   limitations: string[];
 };
 
+export type CommercialObservationStatus =
+  | "CURRENT"
+  | "STALE"
+  | "PENDING"
+  | "PROCESSING"
+  | "ERROR";
+
+export const COMMERCIAL_OBSERVATION_STATUS_VALUES: CommercialObservationStatus[] = [
+  "CURRENT",
+  "STALE",
+  "PENDING",
+  "PROCESSING",
+  "ERROR"
+];
+
 export const COMMERCIAL_OBSERVER_STAGE_VALUES: CommercialObserverStageValue[] = [
   "NEW",
   "INTEREST",

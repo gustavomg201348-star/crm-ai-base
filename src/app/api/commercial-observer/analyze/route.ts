@@ -4,6 +4,7 @@ import {
   analyzeConversationWithCommercialObserver,
   CommercialObserverError
 } from "@/lib/commercial-observer-service";
+import { upsertCommercialObservationResult } from "@/lib/commercial-observer-persistence";
 import { requireAdmin } from "@/lib/permissions";
 import { safeLogError } from "@/lib/safe-logger";
 
@@ -28,9 +29,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "conversationId obrigatorio." }, { status: 400 });
     }
 
-    const { analysis } = await analyzeConversationWithCommercialObserver({
+    const { analysis, input } = await analyzeConversationWithCommercialObserver({
       conversationId,
       companyId: session.companyId
+    });
+
+    await upsertCommercialObservationResult({
+      companyId: session.companyId,
+      conversationId,
+      result: analysis,
+      model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+      sourceUpdatedAt: input.conversation.updatedAt
     });
 
     return NextResponse.json({ analysis });
