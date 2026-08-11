@@ -139,6 +139,9 @@ export async function PATCH(
       return publicErrorResponse({ code: "USER_NOT_FOUND", status: 404 });
     }
 
+    const shouldSetPaidAt =
+      body?.status === "PAID" && current.status !== "PAID" && !current.paidAt;
+
     const proposal = await prisma.$transaction(async (tx) => {
       const updated = await tx.proposal.update({
         where: { id },
@@ -169,7 +172,8 @@ export async function PATCH(
           ...(commission !== undefined ? { commission } : {}),
           ...(commissionReceived !== undefined ? { commissionReceived } : {}),
           ...(body?.notes !== undefined ? { notes: readOptionalString(body.notes) } : {}),
-          ...(body?.status !== undefined ? { status: body.status } : {})
+          ...(body?.status !== undefined ? { status: body.status } : {}),
+          ...(shouldSetPaidAt ? { paidAt: new Date() } : {})
         },
         include: proposalInclude
       });

@@ -685,6 +685,7 @@ type ProposalRow = {
   status: ProposalStatus;
   createdAt: string;
   updatedAt?: string;
+  paidAt?: string | null;
   assignedUser?: {
     id: string;
     name: string;

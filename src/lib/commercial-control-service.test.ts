@@ -229,6 +229,31 @@ describe("getCommercialControlOverview", () => {
     );
   });
 
+  it("usa paidAt para contratos do dia com fallback legado para updatedAt", async () => {
+    const capturedWhere: unknown[] = [];
+
+    await getCommercialControlOverview({
+      companyId: "company-1",
+      requesterId: "user-1",
+      requesterRole: "ADMIN",
+      now: new Date("2026-08-07T15:00:00.000Z"),
+      db: createEmptyDb(capturedWhere) as never,
+      opportunityQueue: emptyQueue as never
+    });
+
+    const paidContractWhere = capturedWhere.filter((where) =>
+      JSON.stringify(where).includes('"status":"PAID"')
+    );
+
+    assert.ok(paidContractWhere.length >= 2);
+    assert.ok(
+      paidContractWhere.every((where) => JSON.stringify(where).includes('"paidAt"'))
+    );
+    assert.ok(
+      paidContractWhere.every((where) => JSON.stringify(where).includes('"updatedAt"'))
+    );
+  });
+
   it("calcula agenda, propostas, campanhas, oportunidades e funil com dados existentes", async () => {
     const now = new Date("2026-08-07T15:00:00.000Z");
     const dueToday = new Date("2026-08-07T18:00:00.000Z");

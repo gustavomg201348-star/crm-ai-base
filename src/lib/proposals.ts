@@ -82,6 +82,7 @@ export function mapProposal(proposal: ProposalWithRelations) {
     status: proposal.status as ProposalStatus,
     createdAt: proposal.createdAt,
     updatedAt: proposal.updatedAt,
+    paidAt: proposal.paidAt,
     assignedUser: proposal.assignedUser
       ? {
           id: proposal.assignedUser.id,

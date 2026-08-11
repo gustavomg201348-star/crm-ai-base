@@ -665,6 +665,7 @@ model Proposal {
   commissionReceived Decimal?
   notes             String?
   status            String            @default("DRAFT")
+  paidAt            DateTime?
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @default(now()) @updatedAt
   company           Company           @relation(fields: [companyId], references: [id])
@@ -675,6 +676,7 @@ model Proposal {
 
   @@index([companyId, createdAt])
   @@index([companyId, status, createdAt])
+  @@index([companyId, status, paidAt])
   @@index([companyId, bank])
   @@index([companyId, product])
   @@index([assignedUserId])
