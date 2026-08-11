@@ -26,6 +26,7 @@ import { MotorCommercialPage } from "@/app/components/opportunities/MotorCommerc
 import { NextBestActionPage } from "@/app/components/opportunities/NextBestActionPage";
 import { TemplateLibraryPage } from "@/app/components/templates/TemplateLibraryPage";
 import { useNewMessageSound } from "@/app/hooks/use-new-message-sound";
+import type { CommercialObserverResultV1 } from "@/lib/commercial-observer-types";
 import { resolveConversationChannelId } from "@/lib/conversation-channel.service";
 import type { OpportunitySummary } from "@/lib/opportunity-summary-types";
 import type {
@@ -133,6 +134,56 @@ const navigationGroups: NavigationGroup[] = [
 ];
 
 const INBOUND_MESSAGE_NOTIFICATION_TYPE = "NEW_INBOUND_MESSAGE";
+
+const commercialObserverStageLabels: Record<
+  CommercialObserverResultV1["stage"]["value"],
+  string
+> = {
+  NEW: "Novo atendimento",
+  INTEREST: "Interesse identificado",
+  SIMULATION: "Simulacao",
+  NEGOTIATION: "Negociacao",
+  FORMALIZATION: "Formalizacao",
+  CLOSED_WON: "Fechado com sucesso",
+  CLOSED_LOST: "Fechado perdido",
+  UNKNOWN: "Nao foi possivel determinar com seguranca"
+};
+
+const commercialObserverInterestLabels: Record<
+  CommercialObserverResultV1["interest"]["value"],
+  string
+> = {
+  LOW: "Baixo",
+  MEDIUM: "Medio",
+  HIGH: "Alto",
+  UNKNOWN: "Nao foi possivel determinar com seguranca"
+};
+
+const commercialObserverRiskLabels: Record<
+  CommercialObserverResultV1["risk"]["value"],
+  string
+> = {
+  NONE: "Sem risco evidente",
+  LOW: "Baixo",
+  MEDIUM: "Medio",
+  HIGH: "Alto",
+  UNKNOWN: "Nao foi possivel determinar com seguranca"
+};
+
+const commercialObserverActionLabels: Record<
+  CommercialObserverResultV1["nextBestAction"]["action"],
+  string
+> = {
+  RESPOND: "Responder",
+  CALL: "Ligar",
+  SEND_SIMULATION: "Enviar simulacao",
+  FOLLOW_UP: "Fazer acompanhamento",
+  REQUEST_DOCUMENTS: "Solicitar documentos",
+  FORMALIZE: "Formalizar",
+  WAIT: "Aguardar",
+  CLOSE_LOST: "Encerrar como perdido",
+  NO_ACTION: "Sem acao sugerida"
+};
 
 type Session = {
   user: {
@@ -6948,6 +6999,10 @@ function Atendimento({
   const [opportunitySummary, setOpportunitySummary] = useState<OpportunitySummary | null>(null);
   const [opportunityLoading, setOpportunityLoading] = useState(false);
   const [opportunityError, setOpportunityError] = useState("");
+  const [commercialObserverAnalysis, setCommercialObserverAnalysis] =
+    useState<CommercialObserverResultV1 | null>(null);
+  const [commercialObserverLoading, setCommercialObserverLoading] = useState(false);
+  const [commercialObserverError, setCommercialObserverError] = useState("");
   const [mobileConversationOpen, setMobileConversationOpen] = useState(false);
   const [mobileDetailsOpen, setMobileDetailsOpen] = useState(false);
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
@@ -6961,6 +7016,7 @@ function Atendimento({
   const draftsByConversationRef = useRef<Record<string, string>>({});
   const selectedConversationIdRef = useRef<string | null>(selectedConversation?.id ?? null);
   const opportunityRequestIdRef = useRef(0);
+  const commercialObserverRequestIdRef = useRef(0);
   const activeConversationId = selectedConversation?.id ?? null;
 
   useEffect(() => {
@@ -7006,6 +7062,10 @@ function Atendimento({
     setTemplatesOpen(false);
     setTemplates([]);
     setTemplatesLoading(false);
+    setCommercialObserverAnalysis(null);
+    setCommercialObserverError("");
+    setCommercialObserverLoading(false);
+    commercialObserverRequestIdRef.current += 1;
   }, [selectedConversation?.id]);
 
   useEffect(() => {
@@ -7134,6 +7194,63 @@ function Atendimento({
       }
     } finally {
       setSendingMessage(false);
+    }
+  }
+
+  async function analyzeWithCommercialObserver() {
+    if (!selectedConversation || !isAdmin || commercialObserverLoading) return;
+
+    const conversationId = selectedConversation.id;
+    const requestId = commercialObserverRequestIdRef.current + 1;
+    commercialObserverRequestIdRef.current = requestId;
+
+    setCommercialObserverAnalysis(null);
+    setCommercialObserverError("");
+    setCommercialObserverLoading(true);
+
+    try {
+      const response = await fetch("/api/commercial-observer/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId })
+      });
+
+      const data = (await response.json().catch(() => null)) as
+        | { analysis?: CommercialObserverResultV1; error?: string }
+        | null;
+
+      if (!response.ok) {
+        throw new Error(data?.error ?? "Nao foi possivel analisar a conversa.");
+      }
+
+      if (!data?.analysis) {
+        throw new Error("A analise retornou uma resposta inesperada.");
+      }
+
+      if (
+        commercialObserverRequestIdRef.current === requestId &&
+        selectedConversationIdRef.current === conversationId
+      ) {
+        setCommercialObserverAnalysis(data.analysis);
+      }
+    } catch (error) {
+      if (
+        commercialObserverRequestIdRef.current === requestId &&
+        selectedConversationIdRef.current === conversationId
+      ) {
+        setCommercialObserverError(
+          error instanceof Error
+            ? error.message
+            : "Nao foi possivel analisar a conversa."
+        );
+      }
+    } finally {
+      if (
+        commercialObserverRequestIdRef.current === requestId &&
+        selectedConversationIdRef.current === conversationId
+      ) {
+        setCommercialObserverLoading(false);
+      }
     }
   }
 
@@ -7728,6 +7845,15 @@ function Atendimento({
           }
           onOpenTemplates={() => void openTemplates()}
         />
+        {isAdmin && (
+          <CommercialObserverPanel
+            analysis={commercialObserverAnalysis}
+            disabled={!selectedConversation}
+            error={commercialObserverError}
+            loading={commercialObserverLoading}
+            onAnalyze={() => void analyzeWithCommercialObserver()}
+          />
+        )}
         <div className="rounded border border-line bg-white p-4 shadow-soft">
           <div className="flex items-center justify-between gap-3">
             <h3 className="font-bold">Observacao interna</h3>
@@ -19085,6 +19211,152 @@ function Metric({ icon, label }: { icon: React.ReactNode; label: string }) {
       {label}
     </div>
   );
+}
+
+function CommercialObserverPanel({
+  analysis,
+  disabled,
+  error,
+  loading,
+  onAnalyze
+}: {
+  analysis: CommercialObserverResultV1 | null;
+  disabled: boolean;
+  error: string;
+  loading: boolean;
+  onAnalyze: () => void;
+}) {
+  return (
+    <aside className="rounded border border-line bg-white p-4 shadow-soft">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-brand" />
+            <h3 className="font-bold text-slate-950">IA Observadora</h3>
+          </div>
+          <p className="mt-1 text-xs font-medium text-slate-500">
+            Analise manual e sem alteracoes no atendimento.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 text-xs font-bold text-primary transition hover:border-blue-200 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={disabled || loading}
+          onClick={onAnalyze}
+        >
+          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+          {loading ? "Analisando" : "Analisar com IA"}
+        </button>
+      </div>
+
+      {error && (
+        <p className="mt-3 rounded-xl border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
+          {error}
+        </p>
+      )}
+
+      {!analysis && !error && (
+        <p className="mt-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+          Use quando quiser uma leitura comercial da conversa atual.
+        </p>
+      )}
+
+      {analysis && (
+        <div className="mt-4 space-y-3">
+          <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-3">
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-primary">
+              Resumo
+            </p>
+            <p className="mt-1 text-sm leading-5 text-slate-700">{analysis.summary}</p>
+          </div>
+
+          <div className="grid gap-2">
+            <CommercialObserverInfo
+              label="Etapa"
+              value={commercialObserverStageLabels[analysis.stage.value]}
+              confidence={analysis.stage.confidence}
+            />
+            <CommercialObserverInfo
+              label="Interesse"
+              value={commercialObserverInterestLabels[analysis.interest.value]}
+              confidence={analysis.interest.confidence}
+            />
+            <CommercialObserverInfo
+              label="Objecao"
+              value={formatCommercialObserverText(analysis.objection.value)}
+              confidence={analysis.objection.confidence}
+            />
+            <CommercialObserverInfo
+              label="Necessidade"
+              value={formatCommercialObserverText(analysis.customerNeed.value)}
+              confidence={analysis.customerNeed.confidence}
+            />
+            <CommercialObserverInfo
+              label="Risco"
+              value={commercialObserverRiskLabels[analysis.risk.value]}
+              confidence={analysis.risk.confidence}
+            />
+          </div>
+
+          <div className="rounded-2xl border border-line bg-slate-50 p-3">
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">
+              Proxima melhor acao
+            </p>
+            <p className="mt-1 text-sm font-semibold text-slate-900">
+              {commercialObserverActionLabels[analysis.nextBestAction.action]}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-slate-600">
+              {analysis.nextBestAction.reason}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-amber-100 bg-amber-50 p-3">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.12em] text-amber-800">
+              <AlertTriangle className="h-3.5 w-3.5" />
+              Limitacoes
+            </div>
+            <ul className="mt-2 space-y-1 text-xs leading-5 text-amber-900">
+              {(analysis.limitations.length > 0
+                ? analysis.limitations
+                : ["Nao foi possivel determinar com seguranca."]
+              ).map((limitation) => (
+                <li key={limitation}>{limitation}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+    </aside>
+  );
+}
+
+function CommercialObserverInfo({
+  label,
+  value,
+  confidence
+}: {
+  label: string;
+  value: string;
+  confidence: number;
+}) {
+  return (
+    <div className="rounded-xl border border-line bg-white px-3 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">
+          {label}
+        </span>
+        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+          {Math.round(confidence * 100)}%
+        </span>
+      </div>
+      <p className="mt-1 text-sm font-semibold text-slate-850">{value}</p>
+    </div>
+  );
+}
+
+function formatCommercialObserverText(value: string | null) {
+  const normalized = value?.trim();
+  return normalized || "Nao foi possivel determinar com seguranca";
 }
 
 function CollapsedAiSidebar({
