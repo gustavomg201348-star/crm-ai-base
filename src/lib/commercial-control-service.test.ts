@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  buildGoalPace,
   getCommercialControlDateRanges,
   getCommercialControlOverview
 } from "@/lib/commercial-control-service";
@@ -58,6 +59,12 @@ function createEmptyDb(capturedWhere: unknown[] = []) {
     },
     pipelineStage: {
       findMany: () => Promise.resolve([])
+    },
+    company: {
+      findUnique: ({ where }: { where: unknown }) => {
+        capturedWhere.push(where);
+        return Promise.resolve(null);
+      }
     }
   };
 }
@@ -73,6 +80,105 @@ describe("getCommercialControlDateRanges", () => {
     assert.equal(ranges.todayEnd.toISOString(), "2026-08-08T03:00:00.000Z");
     assert.equal(ranges.tomorrowStart.toISOString(), "2026-08-08T03:00:00.000Z");
     assert.equal(ranges.tomorrowEnd.toISOString(), "2026-08-09T03:00:00.000Z");
+  });
+});
+
+describe("buildGoalPace", () => {
+  it("retorna nao configurado sem meta ou expediente valido", () => {
+    const goalPace = buildGoalPace({
+      dailyRevenueGoal: null,
+      businessDayStart: "09:00",
+      businessDayEnd: "18:00",
+      realizedAmount: 0,
+      contractsToday: 0,
+      averageTicketToday: null,
+      now: new Date("2026-08-07T15:00:00.000Z"),
+      timeZone: "America/Sao_Paulo"
+    });
+
+    assert.equal(goalPace.status, "NOT_CONFIGURED");
+    assert.equal(goalPace.configured, false);
+  });
+
+  it("mantem expediente configurado como HH:mm e calcula dia nao iniciado", () => {
+    const goalPace = buildGoalPace({
+      dailyRevenueGoal: 1000,
+      businessDayStart: "09:00",
+      businessDayEnd: "17:00",
+      realizedAmount: 0,
+      contractsToday: 0,
+      averageTicketToday: null,
+      now: new Date("2026-08-07T11:59:00.000Z"),
+      timeZone: "America/Sao_Paulo"
+    });
+
+    assert.equal(goalPace.status, "NOT_STARTED");
+    assert.equal(goalPace.businessHours.start, "09:00");
+    assert.equal(goalPace.businessHours.end, "17:00");
+    assert.equal(goalPace.businessHours.elapsedPercent, 0);
+  });
+
+  it("classifica ritmo com base na diferenca entre realizado e expediente transcorrido", () => {
+    const common = {
+      dailyRevenueGoal: 1000,
+      businessDayStart: "09:00",
+      businessDayEnd: "17:00",
+      contractsToday: 1,
+      averageTicketToday: 250,
+      now: new Date("2026-08-07T15:00:00.000Z"),
+      timeZone: "America/Sao_Paulo"
+    };
+
+    assert.equal(buildGoalPace({ ...common, realizedAmount: 400 }).status, "NO_RITMO");
+    assert.equal(buildGoalPace({ ...common, realizedAmount: 250 }).status, "ATENCAO");
+    assert.equal(
+      buildGoalPace({ ...common, realizedAmount: 100 }).status,
+      "ABAIXO_DO_RITMO"
+    );
+  });
+
+  it("calcula valor faltante e contratos necessarios pelo ticket medio do dia", () => {
+    const goalPace = buildGoalPace({
+      dailyRevenueGoal: 1000,
+      businessDayStart: "09:00",
+      businessDayEnd: "17:00",
+      realizedAmount: 450,
+      contractsToday: 2,
+      averageTicketToday: 200,
+      now: new Date("2026-08-07T15:00:00.000Z"),
+      timeZone: "America/Sao_Paulo"
+    });
+
+    assert.equal(goalPace.missingAmount, 550);
+    assert.equal(goalPace.missingContracts, 3);
+  });
+
+  it("marca meta atingida e final de expediente", () => {
+    const common = {
+      dailyRevenueGoal: 1000,
+      businessDayStart: "09:00",
+      businessDayEnd: "17:00",
+      contractsToday: 2,
+      averageTicketToday: 500,
+      timeZone: "America/Sao_Paulo"
+    };
+
+    assert.equal(
+      buildGoalPace({
+        ...common,
+        realizedAmount: 1000,
+        now: new Date("2026-08-07T15:00:00.000Z")
+      }).status,
+      "GOAL_REACHED"
+    );
+    assert.equal(
+      buildGoalPace({
+        ...common,
+        realizedAmount: 900,
+        now: new Date("2026-08-07T21:01:00.000Z")
+      }).status,
+      "FINAL"
+    );
   });
 });
 
@@ -324,6 +430,14 @@ describe("getCommercialControlOverview", () => {
             { stageId: "stage-1", _count: { _all: 12 } },
             { stageId: null, _count: { _all: 3 } }
           ])
+      },
+      company: {
+        findUnique: () =>
+          Promise.resolve({
+            dailyRevenueGoal: null,
+            businessDayStart: null,
+            businessDayEnd: null
+          })
       }
     };
 

@@ -15,6 +15,9 @@ model Company {
   segment       String?
   aiMode        String          @default("COPILOT")
   aiInstructions String?
+  dailyRevenueGoal Decimal?
+  businessDayStart String?
+  businessDayEnd   String?
   createdAt     DateTime        @default(now())
   users         User[]
   contacts      Contact[]
