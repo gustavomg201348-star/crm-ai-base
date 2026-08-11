@@ -258,6 +258,12 @@ type LeadAssignmentSettings = {
   fallback?: boolean;
 };
 
+type CommercialControlSettings = {
+  dailyRevenueGoal: number | null;
+  businessDayStart: string | null;
+  businessDayEnd: string | null;
+};
+
 type AiMode = "OFF" | "COPILOT" | "AUTO" | "HYBRID";
 
 type AiSettings = {
@@ -1686,6 +1692,12 @@ export default function Home() {
       allowAttendantClaim: true,
       redistributeWhenOffline: false
     });
+  const [commercialControlSettings, setCommercialControlSettings] =
+    useState<CommercialControlSettings>({
+      dailyRevenueGoal: null,
+      businessDayStart: null,
+      businessDayEnd: null
+    });
   const [aiSettings, setAiSettings] = useState<AiSettings>({
     mode: "COPILOT",
     instructions: ""
@@ -2060,6 +2072,16 @@ export default function Home() {
     setLeadAssignmentSettings(data.settings);
   }, [session]);
 
+  const loadCommercialControlSettings = useCallback(async () => {
+    if (!userIsAdmin(session)) return;
+
+    const response = await fetch("/api/settings/commercial-control");
+    if (!response.ok) return;
+
+    const data = (await response.json()) as { settings: CommercialControlSettings };
+    setCommercialControlSettings(data.settings);
+  }, [session]);
+
   const loadAiSettings = useCallback(async () => {
     if (!session) return;
 
@@ -2181,6 +2203,27 @@ export default function Home() {
       const data = (await response.json()) as { settings: LeadAssignmentSettings };
       setLeadAssignmentSettings(data.settings);
     }
+  }
+
+  async function saveCommercialControlSettings(settings: CommercialControlSettings) {
+    const response = await fetch("/api/settings/commercial-control", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(settings)
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string; message?: string }
+        | null;
+      setAppError(
+        data?.message ?? data?.error ?? "Nao foi possivel salvar a meta da Sala de Controle."
+      );
+      return;
+    }
+
+    const data = (await response.json()) as { settings: CommercialControlSettings };
+    setCommercialControlSettings(data.settings);
   }
 
   async function saveAiSettings(settings: AiSettings) {
@@ -4108,6 +4151,7 @@ export default function Home() {
       void loadChannels();
       void loadCampaigns();
       void loadLeadAssignmentSettings();
+      void loadCommercialControlSettings();
       void loadProposals(proposalFilters);
       void loadMulticredClients(multicredClientSearch);
       void loadMulticredProducts();
@@ -4120,6 +4164,7 @@ export default function Home() {
     loadAiSettings,
     loadSettingsTags,
     loadAttendants,
+    loadCommercialControlSettings,
     loadLeadAssignmentSettings,
     loadMulticredClients,
     loadMulticredProducts,
@@ -4966,8 +5011,10 @@ export default function Home() {
               attendants={attendants}
               aiSettings={aiSettings}
               leadAssignmentSettings={leadAssignmentSettings}
+              commercialControlSettings={commercialControlSettings}
               onSaveAiSettings={saveAiSettings}
               onSaveLeadAssignmentSettings={saveLeadAssignmentSettings}
+              onSaveCommercialControlSettings={saveCommercialControlSettings}
               onUpdateAttendantStatus={updateAttendantStatus}
               onCreateOrigin={handleCreateOrigin}
               onCreateStage={handleCreateStage}
@@ -17879,13 +17926,26 @@ function TagEditorModal({
   );
 }
 
+const COMMERCIAL_CONTROL_TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+function commercialControlTimeToMinutes(value: string | null) {
+  if (!value) return null;
+
+  const match = COMMERCIAL_CONTROL_TIME_PATTERN.exec(value);
+  if (!match) return null;
+
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
 function Configuracoes({
   reference,
   attendants,
   aiSettings,
   leadAssignmentSettings,
+  commercialControlSettings,
   onSaveAiSettings,
   onSaveLeadAssignmentSettings,
+  onSaveCommercialControlSettings,
   onUpdateAttendantStatus,
   onCreateOrigin,
   onCreateStage,
@@ -17904,8 +17964,10 @@ function Configuracoes({
   attendants: AttendantRow[];
   aiSettings: AiSettings;
   leadAssignmentSettings: LeadAssignmentSettings;
+  commercialControlSettings: CommercialControlSettings;
   onSaveAiSettings: (settings: AiSettings) => Promise<void>;
   onSaveLeadAssignmentSettings: (settings: LeadAssignmentSettings) => Promise<void>;
+  onSaveCommercialControlSettings: (settings: CommercialControlSettings) => Promise<void>;
   onUpdateAttendantStatus: (userId: string, status: AvailabilityStatus) => Promise<void>;
   onCreateOrigin: (name: string) => Promise<void>;
   onCreateStage: (payload: {
@@ -17975,11 +18037,19 @@ function Configuracoes({
   } | null>(null);
   const [assignmentForm, setAssignmentForm] =
     useState<LeadAssignmentSettings>(leadAssignmentSettings);
+  const [commercialControlForm, setCommercialControlForm] =
+    useState<CommercialControlSettings>(commercialControlSettings);
+  const [commercialControlError, setCommercialControlError] = useState("");
   const [aiForm, setAiForm] = useState<AiSettings>(aiSettings);
 
   useEffect(() => {
     setAssignmentForm(leadAssignmentSettings);
   }, [leadAssignmentSettings]);
+
+  useEffect(() => {
+    setCommercialControlForm(commercialControlSettings);
+    setCommercialControlError("");
+  }, [commercialControlSettings]);
 
   useEffect(() => {
     setAiForm(aiSettings);
@@ -18026,6 +18096,34 @@ function Configuracoes({
 
     await onCreateTag(tagForm);
     setTagForm({ name: "", color: "#0f766e" });
+  }
+
+  async function submitCommercialControlSettings() {
+    const startMinutes = commercialControlTimeToMinutes(
+      commercialControlForm.businessDayStart
+    );
+    const endMinutes = commercialControlTimeToMinutes(commercialControlForm.businessDayEnd);
+
+    if (
+      commercialControlForm.dailyRevenueGoal === null ||
+      commercialControlForm.dailyRevenueGoal <= 0
+    ) {
+      setCommercialControlError("Informe uma meta diaria maior que zero.");
+      return;
+    }
+
+    if (startMinutes === null || endMinutes === null) {
+      setCommercialControlError("Informe os horarios no formato HH:mm.");
+      return;
+    }
+
+    if (endMinutes <= startMinutes) {
+      setCommercialControlError("O fim do expediente precisa ser maior que o inicio.");
+      return;
+    }
+
+    setCommercialControlError("");
+    await onSaveCommercialControlSettings(commercialControlForm);
   }
 
   return (
@@ -18089,6 +18187,91 @@ function Configuracoes({
             />
           </label>
         </div>
+      </section>
+
+      <section className="rounded-[1.5rem] border border-line bg-white p-5 shadow-soft">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-brand">
+              Sala de Controle
+            </p>
+            <h3 className="mt-1 text-xl font-bold text-slate-950">
+              Meta e ritmo comercial
+            </h3>
+            <p className="mt-1 max-w-2xl text-sm text-slate-500">
+              Configure a meta diaria e o expediente usado para comparar o
+              percentual realizado com o percentual transcorrido do dia.
+            </p>
+          </div>
+          <button
+            className="h-10 rounded-full bg-brand px-4 text-sm font-semibold text-white shadow-soft"
+            onClick={() => void submitCommercialControlSettings()}
+            type="button"
+          >
+            Salvar meta
+          </button>
+        </div>
+
+        <div className="mt-5 grid gap-4 lg:grid-cols-3">
+          <label className="text-sm font-semibold text-slate-800">
+            Meta diaria de receita
+            <input
+              className="mt-2 h-11 w-full rounded-2xl border border-line bg-white px-3 text-sm outline-none"
+              min={0.01}
+              placeholder="Ex: 50000"
+              step={0.01}
+              type="number"
+              value={commercialControlForm.dailyRevenueGoal ?? ""}
+              onChange={(event) =>
+                setCommercialControlForm((current) => ({
+                  ...current,
+                  dailyRevenueGoal: event.target.value
+                    ? Number(event.target.value)
+                    : null
+                }))
+              }
+            />
+          </label>
+          <label className="text-sm font-semibold text-slate-800">
+            Inicio do expediente
+            <input
+              className="mt-2 h-11 w-full rounded-2xl border border-line bg-white px-3 text-sm outline-none"
+              type="time"
+              value={commercialControlForm.businessDayStart ?? ""}
+              onChange={(event) =>
+                setCommercialControlForm((current) => ({
+                  ...current,
+                  businessDayStart: event.target.value || null
+                }))
+              }
+            />
+          </label>
+          <label className="text-sm font-semibold text-slate-800">
+            Fim do expediente
+            <input
+              className="mt-2 h-11 w-full rounded-2xl border border-line bg-white px-3 text-sm outline-none"
+              type="time"
+              value={commercialControlForm.businessDayEnd ?? ""}
+              onChange={(event) =>
+                setCommercialControlForm((current) => ({
+                  ...current,
+                  businessDayEnd: event.target.value || null
+                }))
+              }
+            />
+          </label>
+        </div>
+
+        {commercialControlError && (
+          <p className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+            {commercialControlError}
+          </p>
+        )}
+
+        <p className="mt-4 rounded-2xl border border-line bg-slate-50 px-4 py-3 text-xs text-slate-500">
+          A Sala de Controle usa apenas contratos com proposta paga hoje para calcular
+          realizado, ticket medio e contratos necessarios.
+        </p>
       </section>
 
       <section className="rounded-[1.5rem] border border-line bg-white p-5 shadow-soft">

@@ -8,9 +8,12 @@ export type CommercialControlMetric = {
 
 export type CommercialControlGoalPaceStatus =
   | "NOT_CONFIGURED"
+  | "NOT_STARTED"
   | "NO_RITMO"
   | "ATENCAO"
-  | "ABAIXO_DO_RITMO";
+  | "ABAIXO_DO_RITMO"
+  | "GOAL_REACHED"
+  | "FINAL";
 
 export type CommercialControlGoalPace = {
   configured: boolean;

@@ -6,12 +6,20 @@ import type { OpportunityQueueResult } from "@/lib/opportunity-queue-types";
 import type {
   CommercialControlOperationalItem,
   CommercialControlOverview,
+  CommercialControlGoalPace,
   CommercialControlTaskItem
 } from "@/lib/commercial-control-types";
 
 type CommercialControlDb = Pick<
   PrismaClient,
-  "conversation" | "task" | "proposal" | "campaign" | "campaignRecipient" | "contact" | "pipelineStage"
+  | "company"
+  | "conversation"
+  | "task"
+  | "proposal"
+  | "campaign"
+  | "campaignRecipient"
+  | "contact"
+  | "pipelineStage"
 >;
 
 type CommercialControlInput = {
@@ -33,6 +41,9 @@ const RECENT_CAMPAIGN_LIMIT = 6;
 const OPERATIONAL_ITEM_LIMIT = 8;
 const RETURN_TASK_PREFIX = "Retorno:";
 const FORGOTTEN_CLIENT_THRESHOLD_MS = 1000 * 60 * 60 * 4;
+const PACE_ON_TRACK_TOLERANCE_PERCENT = 5;
+const PACE_ATTENTION_TOLERANCE_PERCENT = 15;
+type ActiveGoalPaceStatus = "NO_RITMO" | "ATENCAO" | "ABAIXO_DO_RITMO";
 const GOAL_PACE_NOT_CONFIGURED_MESSAGE =
   "Meta diaria ainda nao configurada. Acompanhe o realizado de hoje, mas o ritmo nao pode ser classificado com seguranca.";
 
@@ -322,6 +333,217 @@ function decimalToNumber(value: { toNumber(): number } | number | null | undefin
   return value?.toNumber() ?? 0;
 }
 
+function parseBusinessTime(value?: string | null) {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value ?? "");
+  if (!match) return null;
+
+  return {
+    label: `${match[1]}:${match[2]}`,
+    minutes: Number(match[1]) * 60 + Number(match[2])
+  };
+}
+
+function roundPercent(value: number) {
+  return Math.round(value * 10) / 10;
+}
+
+function buildUnconfiguredGoalPace({
+  realizedAmount,
+  contractsToday,
+  averageTicketToday
+}: {
+  realizedAmount: number;
+  contractsToday: number;
+  averageTicketToday: number | null;
+}): CommercialControlGoalPace {
+  return {
+    configured: false,
+    status: "NOT_CONFIGURED",
+    statusLabel: "Meta nao configurada",
+    message: GOAL_PACE_NOT_CONFIGURED_MESSAGE,
+    targetAmount: null,
+    realizedAmount,
+    missingAmount: null,
+    achievedPercent: null,
+    expectedPercent: null,
+    paceDifferencePercent: null,
+    contractsToday,
+    averageTicketToday,
+    missingContracts: null,
+    businessHours: {
+      configured: false,
+      start: null,
+      end: null,
+      elapsedPercent: null
+    },
+    limitation: "Nao existe meta diaria ou horario comercial persistidos de forma confiavel no schema atual."
+  };
+}
+
+export function buildGoalPace({
+  dailyRevenueGoal,
+  businessDayStart,
+  businessDayEnd,
+  realizedAmount,
+  contractsToday,
+  averageTicketToday,
+  now,
+  timeZone
+}: {
+  dailyRevenueGoal?: { toNumber(): number } | number | null;
+  businessDayStart?: string | null;
+  businessDayEnd?: string | null;
+  realizedAmount: number;
+  contractsToday: number;
+  averageTicketToday: number | null;
+  now: Date;
+  timeZone: string;
+}): CommercialControlGoalPace {
+  const targetAmount = decimalToNumber(dailyRevenueGoal);
+  const start = parseBusinessTime(businessDayStart);
+  const end = parseBusinessTime(businessDayEnd);
+
+  if (!targetAmount || targetAmount <= 0 || !start || !end || end.minutes <= start.minutes) {
+    return buildUnconfiguredGoalPace({
+      realizedAmount,
+      contractsToday,
+      averageTicketToday
+    });
+  }
+
+  const nowParts = getTimeZoneParts(now, timeZone);
+  const currentMinutes = nowParts.hour * 60 + nowParts.minute + nowParts.second / 60;
+  const businessDuration = end.minutes - start.minutes;
+  const elapsedPercent =
+    currentMinutes <= start.minutes
+      ? 0
+      : currentMinutes >= end.minutes
+        ? 100
+        : roundPercent(((currentMinutes - start.minutes) / businessDuration) * 100);
+  const achievedPercent = roundPercent((realizedAmount / targetAmount) * 100);
+  const missingAmount = Math.max(targetAmount - realizedAmount, 0);
+  const paceDifferencePercent = roundPercent(achievedPercent - elapsedPercent);
+  const missingContracts =
+    missingAmount > 0 && averageTicketToday && averageTicketToday > 0
+      ? Math.ceil(missingAmount / averageTicketToday)
+      : null;
+
+  if (missingAmount <= 0) {
+    return {
+      configured: true,
+      status: "GOAL_REACHED",
+      statusLabel: "Meta atingida",
+      message: "A meta diaria ja foi atingida com base nos contratos pagos de hoje.",
+      targetAmount,
+      realizedAmount,
+      missingAmount,
+      achievedPercent,
+      expectedPercent: elapsedPercent,
+      paceDifferencePercent,
+      contractsToday,
+      averageTicketToday,
+      missingContracts,
+      businessHours: {
+        configured: true,
+        start: start.label,
+        end: end.label,
+        elapsedPercent
+      },
+      limitation: null
+    };
+  }
+
+  if (currentMinutes < start.minutes) {
+    return {
+      configured: true,
+      status: "NOT_STARTED",
+      statusLabel: "Expediente nao iniciado",
+      message: "A meta esta configurada, mas o expediente comercial ainda nao comecou.",
+      targetAmount,
+      realizedAmount,
+      missingAmount,
+      achievedPercent,
+      expectedPercent: elapsedPercent,
+      paceDifferencePercent,
+      contractsToday,
+      averageTicketToday,
+      missingContracts,
+      businessHours: {
+        configured: true,
+        start: start.label,
+        end: end.label,
+        elapsedPercent
+      },
+      limitation: null
+    };
+  }
+
+  if (currentMinutes >= end.minutes) {
+    return {
+      configured: true,
+      status: "FINAL",
+      statusLabel: "Dia finalizado",
+      message: "O expediente configurado ja terminou. O resultado final considera contratos pagos hoje.",
+      targetAmount,
+      realizedAmount,
+      missingAmount,
+      achievedPercent,
+      expectedPercent: elapsedPercent,
+      paceDifferencePercent,
+      contractsToday,
+      averageTicketToday,
+      missingContracts,
+      businessHours: {
+        configured: true,
+        start: start.label,
+        end: end.label,
+        elapsedPercent
+      },
+      limitation: null
+    };
+  }
+
+  const status: ActiveGoalPaceStatus =
+    paceDifferencePercent >= -PACE_ON_TRACK_TOLERANCE_PERCENT
+      ? "NO_RITMO"
+      : paceDifferencePercent >= -PACE_ATTENTION_TOLERANCE_PERCENT
+        ? "ATENCAO"
+        : "ABAIXO_DO_RITMO";
+  const statusLabels = {
+    NO_RITMO: "No ritmo",
+    ATENCAO: "Atencao",
+    ABAIXO_DO_RITMO: "Abaixo do ritmo"
+  } satisfies Record<typeof status, string>;
+  const statusMessages = {
+    NO_RITMO: "O realizado acompanha o percentual esperado para este momento do expediente.",
+    ATENCAO: "O realizado esta levemente abaixo do ritmo esperado. Vale acompanhar de perto.",
+    ABAIXO_DO_RITMO: "O realizado esta abaixo do ritmo esperado para este horario."
+  } satisfies Record<typeof status, string>;
+
+  return {
+    configured: true,
+    status,
+    statusLabel: statusLabels[status],
+    message: statusMessages[status],
+    targetAmount,
+    realizedAmount,
+    missingAmount,
+    achievedPercent,
+    expectedPercent: elapsedPercent,
+    paceDifferencePercent,
+    contractsToday,
+    averageTicketToday,
+    missingContracts,
+    businessHours: {
+      configured: true,
+      start: start.label,
+      end: end.label,
+      elapsedPercent
+    },
+    limitation: null
+  };
+}
+
 export async function getCommercialControlOverview({
   companyId,
   requesterId,
@@ -406,7 +628,8 @@ export async function getCommercialControlOverview({
     overdueAppointments,
     overdueOperationalTasks,
     riskyNegotiations,
-    riskyProposalCandidates
+    riskyProposalCandidates,
+    companySettings
   ] = await Promise.all([
     db.conversation.count({
       where: {
@@ -609,6 +832,14 @@ export async function getCommercialControlOverview({
           }
         }
       }
+    }),
+    db.company.findUnique({
+      where: { id: companyId },
+      select: {
+        dailyRevenueGoal: true,
+        businessDayStart: true,
+        businessDayEnd: true
+      }
     })
   ]);
 
@@ -670,6 +901,19 @@ export async function getCommercialControlOverview({
       .map((proposal) => mapRiskyProposalItem({ proposal, now }))
       .filter((item): item is CommercialControlOperationalItem => Boolean(item))
   ).slice(0, OPERATIONAL_ITEM_LIMIT);
+  const realizedAmount = decimalToNumber(productionToday._sum.amount);
+  const averageTicketToday =
+    contractsClosed > 0 ? decimalToNumber(productionToday._avg.amount) : null;
+  const goalPace = buildGoalPace({
+    dailyRevenueGoal: companySettings?.dailyRevenueGoal ?? null,
+    businessDayStart: companySettings?.businessDayStart ?? null,
+    businessDayEnd: companySettings?.businessDayEnd ?? null,
+    realizedAmount,
+    contractsToday: contractsClosed,
+    averageTicketToday,
+    now,
+    timeZone
+  });
 
   return {
     generatedAt: toIso(now),
@@ -687,28 +931,7 @@ export async function getCommercialControlOverview({
       contractsClosed,
       priorityOpportunities: priorityQueue.total
     },
-    goalPace: {
-      configured: false,
-      status: "NOT_CONFIGURED",
-      statusLabel: "Meta nao configurada",
-      message: GOAL_PACE_NOT_CONFIGURED_MESSAGE,
-      targetAmount: null,
-      realizedAmount: decimalToNumber(productionToday._sum.amount),
-      missingAmount: null,
-      achievedPercent: null,
-      expectedPercent: null,
-      paceDifferencePercent: null,
-      contractsToday: contractsClosed,
-      averageTicketToday: contractsClosed > 0 ? decimalToNumber(productionToday._avg.amount) : null,
-      missingContracts: null,
-      businessHours: {
-        configured: false,
-        start: null,
-        end: null,
-        elapsedPercent: null
-      },
-      limitation: "Nao existe meta diaria ou horario comercial persistidos de forma confiavel no schema atual."
-    },
+    goalPace,
     attention: {
       overdueTasks,
       todayTasks,
