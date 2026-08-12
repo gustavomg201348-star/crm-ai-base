@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
       companyId: session.companyId
     });
 
-    await upsertCommercialObservationResult({
+    const observation = await upsertCommercialObservationResult({
       companyId: session.companyId,
       conversationId,
       result: analysis,
@@ -42,7 +42,15 @@ export async function POST(request: NextRequest) {
       sourceUpdatedAt: input.conversation.updatedAt
     });
 
-    return NextResponse.json({ analysis });
+    return NextResponse.json({
+      analysis,
+      observation: {
+        status: observation.status,
+        analyzedAt: observation.analyzedAt,
+        sourceUpdatedAt: observation.sourceUpdatedAt,
+        structuredResult: observation.structuredResult
+      }
+    });
   } catch (error) {
     if (error instanceof CommercialObserverError) {
       if (error.code === "NOT_FOUND") {

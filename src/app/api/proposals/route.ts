@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { getSessionFromRequest } from "@/lib/auth";
 import { createActivity } from "@/lib/activities";
+import { markLatestCommercialObservationForContactStale } from "@/lib/commercial-observer-persistence";
 import { getContactNormalizedPhone } from "@/lib/contacts";
 import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
@@ -557,6 +558,12 @@ export async function POST(request: NextRequest) {
         where: { id: created.id },
         include: proposalInclude
       });
+    });
+
+    await markLatestCommercialObservationForContactStale({
+      companyId: session.companyId,
+      contactId: proposal.contactId,
+      sourceUpdatedAt: proposal.updatedAt
     });
 
     return NextResponse.json({ proposal: mapProposal(proposal) }, { status: 201 });

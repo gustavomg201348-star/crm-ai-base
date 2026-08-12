@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { createActivity } from "@/lib/activities";
+import { markCommercialObservationStale } from "@/lib/commercial-observer-persistence";
 import {
   getConversationIntegration,
   saveOutboundMessage
@@ -101,7 +102,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         detail: messageBody
       });
 
-      return tx.conversation.update({
+      await tx.conversation.update({
         where: { id: conversation.id },
         data: {
           status: conversation.status,
@@ -116,7 +117,18 @@ export async function POST(request: NextRequest, context: RouteContext) {
               lastMessage: messageBody
             }
           }
-        },
+        }
+      });
+
+      await markCommercialObservationStale({
+        companyId: session.companyId,
+        conversationId: conversation.id,
+        sourceUpdatedAt: now,
+        db: tx as never
+      });
+
+      return tx.conversation.findUniqueOrThrow({
+        where: { id: conversation.id },
         include: conversationInclude
       });
     });

@@ -2,6 +2,7 @@ import { Prisma, type Conversation } from "@prisma/client";
 import { LEGACY_WHATSAPP_CHANNEL } from "@/lib/conversation-channel.service";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { findOrCreateConversationForChannel } from "@/lib/conversation-lifecycle.service";
+import { markCommercialObservationStale } from "@/lib/commercial-observer-persistence";
 import { prisma } from "@/lib/db";
 import { maybeSendAutomaticAiReply } from "@/lib/ai-attendant.service";
 import { maybeAutoAssignConversation } from "@/lib/lead-assignment";
@@ -330,6 +331,12 @@ export async function processInboundMessage({
       updatedAt: receivedAt
     },
     include: conversationInclude
+  });
+
+  await markCommercialObservationStale({
+    companyId,
+    conversationId: updated.id,
+    sourceUpdatedAt: receivedAt
   });
 
   safeLogWarn("whatsapp-inbound-audit-result", "inbound message persisted", {

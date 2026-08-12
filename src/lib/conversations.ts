@@ -18,6 +18,14 @@ export const conversationInclude = {
   },
   messages: {
     orderBy: { createdAt: "asc" }
+  },
+  commercialObservation: {
+    select: {
+      status: true,
+      analyzedAt: true,
+      sourceUpdatedAt: true,
+      structuredResult: true
+    }
   }
 } satisfies Prisma.ConversationInclude;
 
@@ -70,6 +78,14 @@ export const conversationListSelect = {
       name: true,
       email: true,
       role: true
+    }
+  },
+  commercialObservation: {
+    select: {
+      status: true,
+      analyzedAt: true,
+      sourceUpdatedAt: true,
+      structuredResult: true
     }
   },
   tags: {
@@ -129,6 +145,14 @@ export function mapConversation(conversation: ConversationWithRelations) {
     lastReadAt: conversation.lastReadAt,
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
+    commercialObservation: conversation.commercialObservation
+      ? {
+          status: conversation.commercialObservation.status,
+          analyzedAt: conversation.commercialObservation.analyzedAt,
+          sourceUpdatedAt: conversation.commercialObservation.sourceUpdatedAt,
+          structuredResult: conversation.commercialObservation.structuredResult
+        }
+      : null,
     agent: conversation.agent
       ? {
           id: conversation.agent.id,
@@ -218,6 +242,14 @@ export function mapConversationListItem(conversation: ConversationListWithRelati
     lastReadAt: conversation.lastReadAt,
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
+    commercialObservation: conversation.commercialObservation
+      ? {
+          status: conversation.commercialObservation.status,
+          analyzedAt: conversation.commercialObservation.analyzedAt,
+          sourceUpdatedAt: conversation.commercialObservation.sourceUpdatedAt,
+          structuredResult: conversation.commercialObservation.structuredResult
+        }
+      : null,
     agent: conversation.agent
       ? {
           id: conversation.agent.id,

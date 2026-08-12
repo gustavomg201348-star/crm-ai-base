@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { createActivity } from "@/lib/activities";
 import { resolveConversationChannelId } from "@/lib/conversation-channel.service";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
+import { markCommercialObservationStale } from "@/lib/commercial-observer-persistence";
 import { prisma } from "@/lib/db";
 
 export type ConversationIntegration = {
@@ -132,7 +133,7 @@ export async function saveOutboundMessage({
 
     const sentAt = new Date();
 
-    return tx.conversation.update({
+    const updated = await tx.conversation.update({
       where: { id: conversationId },
       data: {
         ...(userId && !conversation.agentId
@@ -148,6 +149,15 @@ export async function saveOutboundMessage({
       },
       include: conversationInclude
     });
+
+    await markCommercialObservationStale({
+      companyId: conversation.contact.companyId,
+      conversationId,
+      sourceUpdatedAt: sentAt,
+      db: tx as never
+    });
+
+    return updated;
   });
 
   return mapConversation(updated);

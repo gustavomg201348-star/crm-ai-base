@@ -26,7 +26,10 @@ import { MotorCommercialPage } from "@/app/components/opportunities/MotorCommerc
 import { NextBestActionPage } from "@/app/components/opportunities/NextBestActionPage";
 import { TemplateLibraryPage } from "@/app/components/templates/TemplateLibraryPage";
 import { useNewMessageSound } from "@/app/hooks/use-new-message-sound";
-import type { CommercialObserverResultV1 } from "@/lib/commercial-observer-types";
+import type {
+  CommercialObservationStatus,
+  CommercialObserverResultV1
+} from "@/lib/commercial-observer-types";
 import { resolveConversationChannelId } from "@/lib/conversation-channel.service";
 import type { OpportunitySummary } from "@/lib/opportunity-summary-types";
 import type {
@@ -322,6 +325,13 @@ type AiSettings = {
   instructions: string;
 };
 
+type CommercialObservationRow = {
+  status: CommercialObservationStatus;
+  analyzedAt?: string | null;
+  sourceUpdatedAt?: string | null;
+  structuredResult?: string | null;
+};
+
 type KanbanStage = {
   id: string;
   name: string;
@@ -346,6 +356,7 @@ type ConversationRow = {
   lastReadAt?: string | null;
   createdAt: string;
   updatedAt: string;
+  commercialObservation?: CommercialObservationRow | null;
   agent: { id: string; name: string; email: string; role?: string } | null;
   assignmentStatus: "ASSIGNED" | "UNASSIGNED";
   contact: {
@@ -1917,7 +1928,7 @@ export default function Home() {
 
   useEffect(() => {
     selectedConversationRef.current = selectedConversation?.id ?? null;
-  }, [selectedConversation?.id]);
+  }, [selectedConversation?.commercialObservation, selectedConversation?.id]);
 
   useEffect(() => {
     conversationListRef.current = conversationList;
@@ -7001,6 +7012,8 @@ function Atendimento({
   const [opportunityError, setOpportunityError] = useState("");
   const [commercialObserverAnalysis, setCommercialObserverAnalysis] =
     useState<CommercialObserverResultV1 | null>(null);
+  const [commercialObserverObservation, setCommercialObserverObservation] =
+    useState<CommercialObservationRow | null>(null);
   const [commercialObserverLoading, setCommercialObserverLoading] = useState(false);
   const [commercialObserverError, setCommercialObserverError] = useState("");
   const [mobileConversationOpen, setMobileConversationOpen] = useState(false);
@@ -7018,6 +7031,10 @@ function Atendimento({
   const opportunityRequestIdRef = useRef(0);
   const commercialObserverRequestIdRef = useRef(0);
   const activeConversationId = selectedConversation?.id ?? null;
+  const activeCommercialObserverObservation = getLatestCommercialObserverObservation(
+    commercialObserverObservation,
+    selectedConversation?.commercialObservation ?? null
+  );
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ block: "end" });
@@ -7025,7 +7042,7 @@ function Atendimento({
 
   useEffect(() => {
     setFollowUpSuccess("");
-  }, [selectedConversation?.id]);
+  }, [selectedConversation?.commercialObservation, selectedConversation?.id]);
 
   useEffect(() => {
     if (!selectedConversation) {
@@ -7062,11 +7079,15 @@ function Atendimento({
     setTemplatesOpen(false);
     setTemplates([]);
     setTemplatesLoading(false);
-    setCommercialObserverAnalysis(null);
+    const persistedObservation = selectedConversation?.commercialObservation ?? null;
+    setCommercialObserverObservation(persistedObservation);
+    setCommercialObserverAnalysis(
+      parsePersistedCommercialObserverAnalysis(persistedObservation?.structuredResult)
+    );
     setCommercialObserverError("");
     setCommercialObserverLoading(false);
     commercialObserverRequestIdRef.current += 1;
-  }, [selectedConversation?.id]);
+  }, [selectedConversation?.commercialObservation, selectedConversation?.id]);
 
   useEffect(() => {
     setInternalNote(selectedConversation?.contact.internalNote ?? "");
@@ -7216,7 +7237,11 @@ function Atendimento({
       });
 
       const data = (await response.json().catch(() => null)) as
-        | { analysis?: CommercialObserverResultV1; error?: string }
+        | {
+            analysis?: CommercialObserverResultV1;
+            observation?: CommercialObservationRow | null;
+            error?: string;
+          }
         | null;
 
       if (!response.ok) {
@@ -7232,6 +7257,7 @@ function Atendimento({
         selectedConversationIdRef.current === conversationId
       ) {
         setCommercialObserverAnalysis(data.analysis);
+        setCommercialObserverObservation(data.observation ?? null);
       }
     } catch (error) {
       if (
@@ -7851,6 +7877,7 @@ function Atendimento({
             disabled={!selectedConversation}
             error={commercialObserverError}
             loading={commercialObserverLoading}
+            observation={activeCommercialObserverObservation}
             onAnalyze={() => void analyzeWithCommercialObserver()}
           />
         )}
@@ -19218,14 +19245,18 @@ function CommercialObserverPanel({
   disabled,
   error,
   loading,
+  observation,
   onAnalyze
 }: {
   analysis: CommercialObserverResultV1 | null;
   disabled: boolean;
   error: string;
   loading: boolean;
+  observation: CommercialObservationRow | null;
   onAnalyze: () => void;
 }) {
+  const status = observation?.status ?? null;
+
   return (
     <aside className="rounded border border-line bg-white p-4 shadow-soft">
       <div className="flex items-start justify-between gap-3">
@@ -19254,6 +19285,8 @@ function CommercialObserverPanel({
           {error}
         </p>
       )}
+
+      {status && <CommercialObserverStatusNotice status={status} />}
 
       {!analysis && !error && (
         <p className="mt-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-500">
@@ -19330,6 +19363,50 @@ function CommercialObserverPanel({
   );
 }
 
+function CommercialObserverStatusNotice({ status }: { status: CommercialObservationStatus }) {
+  if (status === "CURRENT") {
+    return (
+      <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
+        <span className="h-2 w-2 rounded-full bg-emerald-500" />
+        Atualizada
+      </div>
+    );
+  }
+
+  if (status === "STALE") {
+    return (
+      <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+        <p className="font-bold">Análise desatualizada</p>
+        <p className="mt-1 leading-5">
+          Houve novas informações nesta conversa desde a última análise.
+        </p>
+      </div>
+    );
+  }
+
+  if (status === "PENDING") {
+    return (
+      <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
+        Análise pendente. Use o botão manual para gerar uma nova leitura.
+      </div>
+    );
+  }
+
+  if (status === "PROCESSING") {
+    return (
+      <div className="mt-3 rounded-2xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700">
+        Análise em processamento.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
+      A última análise não está disponível como atual. Execute uma nova análise manualmente.
+    </div>
+  );
+}
+
 function CommercialObserverInfo({
   label,
   value,
@@ -19357,6 +19434,33 @@ function CommercialObserverInfo({
 function formatCommercialObserverText(value: string | null) {
   const normalized = value?.trim();
   return normalized || "Nao foi possivel determinar com seguranca";
+}
+
+function parsePersistedCommercialObserverAnalysis(value?: string | null) {
+  if (!value) return null;
+
+  try {
+    return JSON.parse(value) as CommercialObserverResultV1;
+  } catch {
+    return null;
+  }
+}
+
+function getLatestCommercialObserverObservation(
+  localObservation: CommercialObservationRow | null,
+  persistedObservation: CommercialObservationRow | null
+) {
+  if (!localObservation) return persistedObservation;
+  if (!persistedObservation) return localObservation;
+
+  const localTime = Date.parse(localObservation.sourceUpdatedAt ?? "");
+  const persistedTime = Date.parse(persistedObservation.sourceUpdatedAt ?? "");
+
+  if (Number.isFinite(localTime) && Number.isFinite(persistedTime)) {
+    return persistedTime > localTime ? persistedObservation : localObservation;
+  }
+
+  return persistedObservation;
 }
 
 function CollapsedAiSidebar({
