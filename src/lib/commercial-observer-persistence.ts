@@ -8,6 +8,8 @@ import { normalizeCommercialObserverResult } from "@/lib/commercial-observer-ser
 
 type CommercialObservationDb = Pick<typeof prisma, "commercialObservation" | "conversation">;
 
+export const COMMERCIAL_OBSERVER_REANALYSIS_DEBOUNCE_MS = 60_000;
+
 type CommercialObservationFreshnessInput = {
   observation:
     | {
@@ -337,6 +339,9 @@ export async function markCommercialObservationStale({
 
   const eventSourceUpdatedAt =
     toDate(sourceUpdatedAt) ?? toDate(conversation.updatedAt) ?? new Date();
+  const resolvedNextEligibleAt =
+    toDate(nextEligibleAt) ??
+    new Date(eventSourceUpdatedAt.getTime() + COMMERCIAL_OBSERVER_REANALYSIS_DEBOUNCE_MS);
   const currentSourceUpdatedAt = toDate(existing.sourceUpdatedAt);
 
   if (
@@ -358,7 +363,7 @@ export async function markCommercialObservationStale({
     data: {
       status: nextStatus,
       sourceUpdatedAt: eventSourceUpdatedAt,
-      nextEligibleAt: toDate(nextEligibleAt),
+      nextEligibleAt: resolvedNextEligibleAt,
       lastError: null
     }
   });

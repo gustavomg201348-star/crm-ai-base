@@ -4,7 +4,10 @@ import {
   analyzeConversationWithCommercialObserver,
   CommercialObserverError
 } from "@/lib/commercial-observer-service";
-import { upsertCommercialObservationResult } from "@/lib/commercial-observer-persistence";
+import {
+  getCommercialObservationForConversation,
+  upsertCommercialObservationResult
+} from "@/lib/commercial-observer-persistence";
 import { requireAdmin } from "@/lib/permissions";
 import { safeLogError } from "@/lib/safe-logger";
 
@@ -27,6 +30,18 @@ export async function POST(request: NextRequest) {
 
     if (!conversationId) {
       return NextResponse.json({ error: "conversationId obrigatorio." }, { status: 400 });
+    }
+
+    const existingObservation = await getCommercialObservationForConversation({
+      companyId: session.companyId,
+      conversationId
+    });
+
+    if (existingObservation?.status === "PROCESSING") {
+      return NextResponse.json(
+        { error: "Analise em processamento." },
+        { status: 409 }
+      );
     }
 
     const { analysis, input } = await analyzeConversationWithCommercialObserver({
