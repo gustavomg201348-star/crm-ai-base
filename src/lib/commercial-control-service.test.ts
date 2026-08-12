@@ -1,4 +1,4 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   buildGoalPace,
@@ -64,6 +64,16 @@ function createEmptyDb(capturedWhere: unknown[] = []) {
       findUnique: ({ where }: { where: unknown }) => {
         capturedWhere.push(where);
         return Promise.resolve(null);
+      }
+    },
+    commercialObservation: {
+      groupBy: ({ where }: { where: unknown }) => {
+        capturedWhere.push(where);
+        return Promise.resolve([]);
+      },
+      findMany: ({ where }: { where: unknown }) => {
+        capturedWhere.push(where);
+        return Promise.resolve([]);
       }
     }
   };
@@ -463,6 +473,10 @@ describe("getCommercialControlOverview", () => {
             businessDayStart: null,
             businessDayEnd: null
           })
+      },
+      commercialObservation: {
+        groupBy: () => Promise.resolve([]),
+        findMany: () => Promise.resolve([])
       }
     };
 

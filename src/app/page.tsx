@@ -2560,6 +2560,12 @@ export default function Home() {
       if (response.ok) {
         const data = (await response.json()) as { conversation: ConversationRow };
         setActive("atendimento");
+        setConversationFilters({
+          search: "",
+          status: data.conversation.status,
+          tagIds: [],
+          assignedTo: "default"
+        });
         mergeConversation(data.conversation, "open-notification");
         setSelectedConversation(data.conversation);
         await markConversationRead(conversationId);
