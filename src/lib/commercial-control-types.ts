@@ -1,3 +1,10 @@
+﻿import type {
+  CommercialObservationStatus,
+  CommercialObserverInterestValue,
+  CommercialObserverNextBestAction,
+  CommercialObserverRiskValue,
+  CommercialObserverStageValue
+} from "@/lib/commercial-observer-types";
 import type { OpportunityPriorityLevel } from "@/lib/opportunity-summary-types";
 
 export type CommercialControlMetric = {
@@ -112,6 +119,57 @@ export type CommercialControlCampaignItem = {
   updatedAt: string;
 };
 
+
+export type CommercialControlAiAttentionItem = {
+  id: string;
+  conversationId: string;
+  contact: {
+    id: string;
+    name: string;
+  };
+  owner: {
+    id: string;
+    name: string;
+  } | null;
+  stage: CommercialObserverStageValue;
+  interest: CommercialObserverInterestValue;
+  risk: CommercialObserverRiskValue;
+  primaryReason: string;
+  nextBestAction: {
+    action: CommercialObserverNextBestAction;
+    reason: string;
+  };
+  confidence: number;
+  analyzedAt: string | null;
+};
+
+export type CommercialControlAiStaleItem = {
+  id: string;
+  conversationId: string;
+  contact: {
+    id: string;
+    name: string;
+  };
+  owner: {
+    id: string;
+    name: string;
+  } | null;
+  staleSince: string;
+  status: CommercialObservationStatus;
+};
+
+export type CommercialControlAiIntelligence = {
+  current: number;
+  stale: number;
+  pending: number;
+  processing: number;
+  errors: number;
+  highInterest: number;
+  atRisk: number;
+  attention: CommercialControlAiAttentionItem[];
+  staleItems: CommercialControlAiStaleItem[];
+  limitation: string | null;
+};
 export type CommercialControlPipelineStage = {
   id: string | null;
   name: string;
@@ -137,6 +195,7 @@ export type CommercialControlOverview = {
     priorityOpportunities: number;
   };
   goalPace: CommercialControlGoalPace;
+  aiIntelligence: CommercialControlAiIntelligence;
   attention: {
     overdueTasks: number;
     todayTasks: number;

@@ -1,5 +1,6 @@
-import type { PrismaClient } from "@prisma/client";
+﻿import type { PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { getCommercialControlAiIntelligence } from "@/lib/commercial-observer-control-room";
 import { ACTIVE_PROPOSAL_STATUS_VALUES } from "@/lib/opportunity-summary-rules";
 import { listOpportunityQueue } from "@/lib/opportunity-queue-service";
 import type { OpportunityQueueResult } from "@/lib/opportunity-queue-types";
@@ -20,6 +21,7 @@ type CommercialControlDb = Pick<
   | "campaignRecipient"
   | "contact"
   | "pipelineStage"
+  | "commercialObservation"
 >;
 
 type CommercialControlInput = {
@@ -635,7 +637,8 @@ export async function getCommercialControlOverview({
     overdueOperationalTasks,
     riskyNegotiations,
     riskyProposalCandidates,
-    companySettings
+    companySettings,
+    aiIntelligence
   ] = await Promise.all([
     db.conversation.count({
       where: {
@@ -846,7 +849,8 @@ export async function getCommercialControlOverview({
         businessDayStart: true,
         businessDayEnd: true
       }
-    })
+    }),
+    getCommercialControlAiIntelligence({ companyId, db })
   ]);
 
   const overdueItems = agendaTasks
@@ -938,6 +942,7 @@ export async function getCommercialControlOverview({
       priorityOpportunities: priorityQueue.total
     },
     goalPace,
+    aiIntelligence,
     attention: {
       overdueTasks,
       todayTasks,

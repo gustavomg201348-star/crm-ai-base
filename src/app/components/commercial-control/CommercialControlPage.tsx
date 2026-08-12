@@ -1,7 +1,8 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, RefreshCw } from "lucide-react";
+import { ControlRoomAiIntelligence } from "@/app/components/commercial-control/ControlRoomAiIntelligence";
 import { ControlRoomAttentionList } from "@/app/components/commercial-control/ControlRoomAttentionList";
 import { ControlRoomGoalPace } from "@/app/components/commercial-control/ControlRoomGoalPace";
 import { ControlRoomMetric } from "@/app/components/commercial-control/ControlRoomMetric";
@@ -112,7 +113,12 @@ export function CommercialControlPage({
       overview.agenda.tomorrow.total === 0 &&
       overview.opportunities.total === 0 &&
       overview.campaigns.todayTotal === 0 &&
-      overview.pipeline.totalContacts === 0
+      overview.pipeline.totalContacts === 0 &&
+      overview.aiIntelligence.current === 0 &&
+      overview.aiIntelligence.stale === 0 &&
+      overview.aiIntelligence.pending === 0 &&
+      overview.aiIntelligence.processing === 0 &&
+      overview.aiIntelligence.errors === 0
     );
   }, [overview]);
 
@@ -285,6 +291,15 @@ export function CommercialControlPage({
           </ControlRoomSection>
 
           <ControlRoomSection
+            title="Inteligencia da IA"
+            description="Leitura das observacoes comerciais ja persistidas. Esta tela nao chama OpenAI nem executa acoes."
+          >
+            <ControlRoomAiIntelligence
+              aiIntelligence={overview.aiIntelligence}
+              onOpenConversation={onOpenConversation}
+            />
+          </ControlRoomSection>
+          <ControlRoomSection
             title="Agenda"
             description="Retornos e tarefas pendentes separados por vencidas, hoje e amanha."
           >
@@ -325,7 +340,7 @@ export function CommercialControlPage({
                           <p className="font-bold text-ink">{item.contactName}</p>
                           <p className="mt-1 text-sm text-slate-600">{item.reason}</p>
                           <p className="mt-2 text-xs font-semibold text-slate-500">
-                            {item.productLabel} · {item.ownerName}
+                            {item.productLabel} Â· {item.ownerName}
                           </p>
                         </div>
                         <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
@@ -398,7 +413,7 @@ export function CommercialControlPage({
                       <p className="mt-1 text-xs font-semibold text-slate-500">{statusLabel(campaign.status)}</p>
                     </div>
                     <p className="text-sm text-slate-600">
-                      Total {campaign.total} · Enviados {campaign.sent} · Falhas {campaign.failed}
+                      Total {campaign.total} Â· Enviados {campaign.sent} Â· Falhas {campaign.failed}
                     </p>
                   </div>
                 ))
