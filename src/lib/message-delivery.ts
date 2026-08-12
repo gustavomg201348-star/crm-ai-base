@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { markCommercialObservationStale } from "@/lib/commercial-observer-persistence";
 
 const statusMap: Record<string, string> = {
   sent: "sent",
@@ -76,7 +77,7 @@ export async function saveFailedOutboundMessage({
 }) {
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    select: { id: true, contactId: true }
+    select: { id: true, contactId: true, contact: { select: { companyId: true } } }
   });
 
   if (!conversation) return null;
@@ -108,6 +109,13 @@ export async function saveFailedOutboundMessage({
         updatedAt: failedAt,
         contact: { update: { lastMessage: detail } }
       }
+    });
+
+    await markCommercialObservationStale({
+      companyId: conversation.contact.companyId,
+      conversationId,
+      sourceUpdatedAt: failedAt,
+      db: tx as never
     });
 
     return message;

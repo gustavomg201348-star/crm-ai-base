@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { createActivity } from "@/lib/activities";
+import { markCommercialObservationStale } from "@/lib/commercial-observer-persistence";
 import { findOrCreateConversationForChannel } from "@/lib/conversation-lifecycle.service";
 import { renderCampaignMessage } from "@/lib/contact-import.service";
 import { prisma } from "@/lib/db";
@@ -392,6 +393,13 @@ export async function processCampaign(campaignId: string) {
             lastMessagePreview: historyBody,
             updatedAt: sentAt
           }
+        });
+
+        await markCommercialObservationStale({
+          companyId: campaign.companyId,
+          conversationId: conversation.id,
+          sourceUpdatedAt: sentAt,
+          db: tx as never
         });
 
         await createActivity(tx, {

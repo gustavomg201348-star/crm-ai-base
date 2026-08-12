@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { createActivity } from "@/lib/activities";
+import { markLatestCommercialObservationForContactStale } from "@/lib/commercial-observer-persistence";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import {
   contactInclude,
@@ -300,6 +301,14 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
       return updated;
     });
+
+    if (body?.stageId !== undefined && body.stageId !== existing.stageId) {
+      await markLatestCommercialObservationForContactStale({
+        companyId: session.companyId,
+        contactId: contact.id,
+        sourceUpdatedAt: contact.updatedAt
+      });
+    }
 
     return NextResponse.json({ contact: mapContact(contact) });
   } catch (error) {

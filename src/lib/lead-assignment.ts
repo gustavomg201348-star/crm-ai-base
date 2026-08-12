@@ -1,6 +1,7 @@
 import type { UserAvailability } from "@prisma/client";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
+import { markCommercialObservationStale } from "@/lib/commercial-observer-persistence";
 
 export type AssignmentMode = "CLAIM_FIRST" | "ROUND_ROBIN" | "ADMIN_MANUAL";
 export type AvailabilityStatus = "ONLINE" | "BUSY" | "OFFLINE" | "PAUSED";
@@ -297,6 +298,13 @@ export async function assignConversationToUser({
       include: conversationInclude
     });
 
+    await markCommercialObservationStale({
+      companyId,
+      conversationId,
+      sourceUpdatedAt: updated.updatedAt,
+      db: tx as never
+    });
+
     return mapConversation(updated);
   });
 
@@ -335,6 +343,13 @@ export async function unassignConversation({
       where: { id: conversation.id },
       data: { agentId: null, updatedAt: new Date() },
       include: conversationInclude
+    });
+
+    await markCommercialObservationStale({
+      companyId,
+      conversationId,
+      sourceUpdatedAt: updated.updatedAt,
+      db: tx as never
     });
 
     return mapConversation(updated);

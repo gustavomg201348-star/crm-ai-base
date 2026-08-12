@@ -248,6 +248,23 @@ export async function upsertCommercialObservationResult({
   const structuredResult = serializeCommercialObserverResultForPersistence(result);
   const representedSourceUpdatedAt =
     toDate(sourceUpdatedAt) ?? toDate(conversation.updatedAt) ?? analyzedAt;
+  const existing = await db.commercialObservation.findUnique({
+    where: { conversationId },
+    select: {
+      status: true,
+      sourceUpdatedAt: true
+    }
+  });
+
+  if (
+    existing?.sourceUpdatedAt &&
+    representedSourceUpdatedAt &&
+    existing.sourceUpdatedAt.getTime() > representedSourceUpdatedAt.getTime()
+  ) {
+    return db.commercialObservation.findUniqueOrThrow({
+      where: { conversationId }
+    });
+  }
 
   return db.commercialObservation.upsert({
     where: { conversationId },
@@ -271,6 +288,126 @@ export async function upsertCommercialObservationResult({
       structuredResult,
       lastError: null
     }
+  });
+}
+
+export async function markCommercialObservationStale({
+  companyId,
+  conversationId,
+  sourceUpdatedAt,
+  nextEligibleAt,
+  db = prisma
+}: {
+  companyId: string;
+  conversationId: string;
+  sourceUpdatedAt?: Date | string | null;
+  nextEligibleAt?: Date | string | null;
+  db?: CommercialObservationDb;
+}) {
+  const conversation = await db.conversation.findFirst({
+    where: {
+      id: conversationId,
+      contact: { companyId }
+    },
+    select: {
+      id: true,
+      updatedAt: true
+    }
+  });
+
+  if (!conversation) {
+    throw new CommercialObservationPersistenceError(
+      "Conversa nao encontrada.",
+      "CONVERSATION_NOT_FOUND"
+    );
+  }
+
+  const existing = await db.commercialObservation.findUnique({
+    where: { conversationId },
+    select: {
+      id: true,
+      status: true,
+      sourceUpdatedAt: true
+    }
+  });
+
+  if (!existing) {
+    return { updated: false, reason: "NO_OBSERVATION" as const };
+  }
+
+  const eventSourceUpdatedAt =
+    toDate(sourceUpdatedAt) ?? toDate(conversation.updatedAt) ?? new Date();
+  const currentSourceUpdatedAt = toDate(existing.sourceUpdatedAt);
+
+  if (
+    currentSourceUpdatedAt &&
+    eventSourceUpdatedAt.getTime() <= currentSourceUpdatedAt.getTime()
+  ) {
+    return {
+      updated: false,
+      reason: "EVENT_NOT_NEWER" as const,
+      observationId: existing.id
+    };
+  }
+
+  const nextStatus: CommercialObservationStatus =
+    existing.status === "PENDING" ? "PENDING" : "STALE";
+
+  const updated = await db.commercialObservation.update({
+    where: { conversationId },
+    data: {
+      status: nextStatus,
+      sourceUpdatedAt: eventSourceUpdatedAt,
+      nextEligibleAt: toDate(nextEligibleAt),
+      lastError: null
+    }
+  });
+
+  return {
+    updated: true,
+    reason: "MARKED_STALE" as const,
+    observation: updated
+  };
+}
+
+export async function markLatestCommercialObservationForContactStale({
+  companyId,
+  contactId,
+  sourceUpdatedAt,
+  nextEligibleAt,
+  db = prisma
+}: {
+  companyId: string;
+  contactId: string;
+  sourceUpdatedAt?: Date | string | null;
+  nextEligibleAt?: Date | string | null;
+  db?: CommercialObservationDb;
+}) {
+  const conversation = await db.conversation.findFirst({
+    where: {
+      contactId,
+      status: { not: "RESOLVED" },
+      contact: { companyId },
+      commercialObservation: { isNot: null }
+    },
+    select: { id: true },
+    orderBy: [
+      { lastMessageAt: { sort: "desc", nulls: "last" } },
+      { updatedAt: "desc" },
+      { createdAt: "desc" }
+    ]
+  });
+
+  if (!conversation) {
+    return { updated: false, reason: "NO_OBSERVED_CONVERSATION" as const };
+  }
+
+  return markCommercialObservationStale({
+    companyId,
+    conversationId: conversation.id,
+    sourceUpdatedAt,
+    nextEligibleAt,
+    db
   });
 }
 

@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { createActivity } from "@/lib/activities";
+import { markLatestCommercialObservationForContactStale } from "@/lib/commercial-observer-persistence";
 import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { safeLogError } from "@/lib/safe-logger";
@@ -96,6 +97,12 @@ export async function PATCH(
       }
 
       return updated;
+    });
+
+    await markLatestCommercialObservationForContactStale({
+      companyId: session.companyId,
+      contactId: task.contactId,
+      sourceUpdatedAt: task.updatedAt
     });
 
     return NextResponse.json({ task: mapTask(task) });

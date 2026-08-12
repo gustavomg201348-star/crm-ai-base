@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
+import { markCommercialObservationStale } from "@/lib/commercial-observer-persistence";
 import {
   conversationInclude,
   mapConversation,
@@ -87,6 +88,14 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       },
       include: conversationInclude
     });
+
+    if (body?.status && body.status !== existing.status) {
+      await markCommercialObservationStale({
+        companyId: session.companyId,
+        conversationId: conversation.id,
+        sourceUpdatedAt: conversation.updatedAt
+      });
+    }
 
     return NextResponse.json({ conversation: mapConversation(conversation) });
   } catch {

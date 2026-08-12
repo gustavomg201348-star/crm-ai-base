@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
+import { markLatestCommercialObservationForContactStale } from "@/lib/commercial-observer-persistence";
 import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
@@ -229,6 +230,12 @@ export async function PATCH(
       }
 
       return updated;
+    });
+
+    await markLatestCommercialObservationForContactStale({
+      companyId: session.companyId,
+      contactId: proposal.contactId,
+      sourceUpdatedAt: proposal.updatedAt
     });
 
     return NextResponse.json({ proposal: mapProposal(proposal) });

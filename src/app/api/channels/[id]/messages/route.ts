@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import type { Contact, Conversation } from "@prisma/client";
 import { getSessionFromRequest } from "@/lib/auth";
 import { createActivity } from "@/lib/activities";
+import { markCommercialObservationStale } from "@/lib/commercial-observer-persistence";
 import { conversationMatchesChannel } from "@/lib/conversation-channel.service";
 import { findOrCreateConversationForChannel } from "@/lib/conversation-lifecycle.service";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
@@ -215,7 +216,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         detail: message
       });
 
-      return tx.conversation.update({
+      const updated = await tx.conversation.update({
         where: { id: conversation.id },
         data: {
           status: conversation.status === "PENDING" ? "OPEN" : conversation.status,
@@ -228,6 +229,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
         },
         include: conversationInclude
       });
+
+      await markCommercialObservationStale({
+        companyId: session.companyId,
+        conversationId: conversation.id,
+        sourceUpdatedAt: sentAt,
+        db: tx as never
+      });
+
+      return updated;
     });
 
     return NextResponse.json({
