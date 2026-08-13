@@ -6215,62 +6215,113 @@ function LoginScreen({
   }
 
   return (
-    <main className="grid min-h-screen place-items-center bg-paper p-4 text-ink">
-      <form
-        className="w-full max-w-md rounded border border-line bg-white p-6 shadow-soft"
-        onSubmit={handleSubmit}
-      >
-        <div className="flex items-center gap-3">
-          <div className="grid h-11 w-11 place-items-center rounded bg-brand text-base font-bold text-white">
-            AI
+    <main className="min-h-screen overflow-x-hidden bg-slate-100 text-ink">
+      <div className="mx-auto grid min-h-screen w-full max-w-7xl grid-cols-1 overflow-hidden bg-slate-50 lg:grid-cols-[1.24fr_1fr]">
+        <section className="relative hidden min-h-screen overflow-hidden bg-slate-950 px-10 py-10 text-white lg:flex lg:flex-col lg:justify-between xl:px-14">
+          <div className="pointer-events-none absolute -left-28 -top-28 h-72 w-72 rounded-full border border-blue-400/20" />
+          <div className="pointer-events-none absolute -bottom-36 right-8 h-96 w-96 rounded-full border border-blue-300/10" />
+          <div className="pointer-events-none absolute right-20 top-20 h-2 w-2 rounded-full bg-blue-300/60" />
+          <div className="pointer-events-none absolute right-36 top-48 h-1.5 w-1.5 rounded-full bg-blue-200/40" />
+          <div className="pointer-events-none absolute bottom-28 left-20 h-px w-40 bg-blue-200/20" />
+
+          <div className="relative max-w-2xl">
+            <p className="text-4xl font-black uppercase tracking-[0.22em] text-white xl:text-5xl">
+              QE<span className="text-blue-300">V</span>ORA
+            </p>
+            <p className="mt-4 text-xs font-bold uppercase tracking-[0.34em] text-blue-200/80">
+              Inteligencia para operacoes comerciais
+            </p>
+
+            <div className="mt-16 max-w-xl xl:mt-20">
+              <h1 className="text-4xl font-bold leading-tight text-white xl:text-5xl">
+                Operacoes comerciais, com{" "}
+                <span className="text-blue-300">inteligencia</span> e contexto.
+              </h1>
+              <p className="mt-6 max-w-md text-base leading-7 text-slate-300">
+                Conecte conversas, oportunidades e decisoes em uma unica operacao.
+              </p>
+            </div>
           </div>
-          <div>
-            <p className="text-sm font-semibold uppercase text-brand">CRM</p>
-            <h1 className="text-xl font-bold">Entrar na operacao</h1>
+
+          <div className="relative max-w-2xl">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-3 border-t border-white/10 pt-6 text-xs font-bold uppercase tracking-[0.22em] text-slate-300">
+              {["Conversas", "Oportunidades", "Inteligencia", "Contexto"].map(
+                (item, index) => (
+                  <div className="flex items-center gap-4" key={item}>
+                    {index > 0 && <span className="h-1.5 w-1.5 rounded-full bg-blue-300/70" />}
+                    <span>{item}</span>
+                  </div>
+                )
+              )}
+            </div>
           </div>
-        </div>
+        </section>
 
-        <div className="mt-6 space-y-4">
-          <label className="block text-sm font-semibold">
-            Email
-            <input
-              className="mt-2 h-11 w-full rounded border border-line px-3 font-normal outline-none focus:border-brand"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="admin@crm.local"
-              type="email"
-            />
-          </label>
-          <label className="block text-sm font-semibold">
-            Senha
-            <input
-              className="mt-2 h-11 w-full rounded border border-line px-3 font-normal outline-none focus:border-brand"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="Digite sua senha"
-              type="password"
-            />
-          </label>
-        </div>
+        <section className="relative flex min-h-screen items-center justify-center bg-slate-50 px-4 py-8 sm:px-6 lg:px-10">
+          <div className="pointer-events-none absolute right-8 top-10 hidden h-44 w-44 rounded-full border border-slate-200/70 lg:block" />
+          <div className="pointer-events-none absolute bottom-10 left-10 hidden h-28 w-28 rounded-full border border-blue-100/80 lg:block" />
 
-        {error && (
-          <div className="mt-4 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-            {error}
-          </div>
-        )}
+          <form
+            className="relative w-full max-w-md rounded border border-slate-200/80 bg-white p-6 shadow-none sm:p-8 sm:shadow-[0_24px_70px_rgba(15,23,42,0.08)]"
+            onSubmit={handleSubmit}
+          >
+            <div>
+              <p className="text-sm font-black uppercase tracking-[0.18em] text-slate-950">
+                QE<span className="text-brand">V</span>ORA
+              </p>
+              <h1 className="mt-5 text-2xl font-bold text-slate-950">
+                Acesse sua operacao
+              </h1>
+              <p className="mt-2 text-sm text-slate-500">
+                Entre com seus dados para continuar.
+              </p>
+            </div>
 
-        <button
-          className="mt-6 h-11 w-full rounded bg-brand font-semibold text-white disabled:opacity-60"
-          disabled={loading}
-          type="submit"
-        >
-          {loading ? "Entrando..." : "Entrar"}
-        </button>
+            <div className="mt-8 space-y-5">
+              <label className="block text-sm font-semibold text-slate-800">
+                E-mail
+                <input
+                  className="mt-2 h-12 w-full rounded border border-slate-300 bg-white px-3 font-normal text-slate-950 outline-none placeholder:text-slate-400 focus:border-brand focus:ring-2 focus:ring-blue-100"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="seu@email.com"
+                  type="email"
+                />
+              </label>
+              <label className="block text-sm font-semibold text-slate-800">
+                Senha
+                <input
+                  className="mt-2 h-12 w-full rounded border border-slate-300 bg-white px-3 font-normal text-slate-950 outline-none placeholder:text-slate-400 focus:border-brand focus:ring-2 focus:ring-blue-100"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder="Digite sua senha"
+                  type="password"
+                />
+              </label>
+            </div>
 
-        <p className="mt-4 text-sm text-slate-500">
-          Use o usuario administrador criado para sua empresa.
-        </p>
-      </form>
+            {error && (
+              <div className="mt-5 rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-950">
+                {error}
+              </div>
+            )}
+
+            <button
+              className="mt-6 h-12 w-full rounded bg-brand font-semibold text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-200 focus:ring-offset-2 disabled:opacity-60"
+              disabled={loading}
+              type="submit"
+            >
+              {loading ? "Entrando..." : "Entrar"}
+            </button>
+
+            <div className="mt-6 flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+              <span className="h-px flex-1 bg-slate-200" />
+              Acesso seguro
+              <span className="h-px flex-1 bg-slate-200" />
+            </div>
+          </form>
+        </section>
+      </div>
     </main>
   );
 }
