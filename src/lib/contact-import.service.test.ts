@@ -11,14 +11,17 @@ import {
 
 function buildIndexes({
   byCpf = [],
-  byPhone = []
+  byPhone = [],
+  ambiguousPhones = []
 }: {
   byCpf?: Array<[string, string]>;
   byPhone?: Array<[string, string]>;
+  ambiguousPhones?: string[];
 }): ExistingImportContactIndexes {
   return {
     byCpf: new Map(byCpf),
-    byPhone: new Map(byPhone)
+    byPhone: new Map(byPhone),
+    ambiguousPhones: new Set(ambiguousPhones)
   };
 }
 
@@ -55,14 +58,14 @@ function buildContactLookupDb({
   byLegacyEquivalentPhone?: Array<[string, { id: string; name?: string; phone?: string }]>;
 }) {
   const cpfContacts = new Map(byCpf);
-  const normalizedPhoneContacts = new Map(byNormalizedPhone);
-  const legacyEquivalentContacts = new Map(byLegacyEquivalentPhone);
+  const normalizedPhoneContacts = byNormalizedPhone;
+  const legacyEquivalentContacts = byLegacyEquivalentPhone;
   const contactsById = new Map<string, { id: string; name: string; phone: string }>();
 
   for (const contact of [
     ...Array.from(cpfContacts.values()),
-    ...Array.from(normalizedPhoneContacts.values()),
-    ...Array.from(legacyEquivalentContacts.values())
+    ...normalizedPhoneContacts.map(([, contact]) => contact),
+    ...legacyEquivalentContacts.map(([, contact]) => contact)
   ]) {
     contactsById.set(contact.id, {
       id: contact.id,
@@ -73,22 +76,11 @@ function buildContactLookupDb({
 
   return {
     contact: {
-      findMany({ where, select }: { where: { cpf?: { in: string[] } }; select: Record<string, boolean> }) {
-        if (!where.cpf?.in) return [];
-        return where.cpf.in
-          .map((cpf) => {
-            const contact = cpfContacts.get(cpf);
-            if (!contact) return null;
-            return {
-              ...(select.id ? { id: contact.id } : {}),
-              ...(select.cpf ? { cpf } : {})
-            };
-          })
-          .filter(Boolean);
-      },
       findFirst({ where }: { where: { normalizedPhone?: string } }) {
         if (!where.normalizedPhone) return null;
-        const contact = normalizedPhoneContacts.get(where.normalizedPhone);
+        const contact = normalizedPhoneContacts.find(
+          ([normalizedPhone]) => normalizedPhone === where.normalizedPhone
+        )?.[1];
         return contact
           ? {
               id: contact.id,
@@ -96,6 +88,33 @@ function buildContactLookupDb({
               phone: contact.phone ?? where.normalizedPhone
             }
           : null;
+      },
+      findMany({
+        where,
+        select
+      }: {
+        where: { normalizedPhone?: string; cpf?: { in: string[] } };
+        select: Record<string, boolean>;
+      }) {
+        if (where.cpf?.in) {
+          return where.cpf.in
+            .map((cpf) => {
+              const contact = cpfContacts.get(cpf);
+              if (!contact) return null;
+              return {
+                ...(select.id ? { id: contact.id } : {}),
+                ...(select.cpf ? { cpf } : {})
+              };
+            })
+            .filter(Boolean);
+        }
+        if (!where.normalizedPhone) return [];
+        return normalizedPhoneContacts
+          .filter(([normalizedPhone]) => normalizedPhone === where.normalizedPhone)
+          .map(([, contact]) => ({
+            ...(select.id ? { id: contact.id } : {}),
+            ...(select.normalizedPhone ? { normalizedPhone: where.normalizedPhone } : {})
+          }));
       },
       findUnique({ where }: { where: { id: string } }) {
         return contactsById.get(where.id) ?? null;
@@ -105,11 +124,10 @@ function buildContactLookupDb({
       const phoneValues = values.filter(
         (value): value is string => typeof value === "string" && /^\d{10,13}$/.test(value)
       );
-      const contact =
-        phoneValues
-          .map((phone) => legacyEquivalentContacts.get(phone))
-          .find(Boolean) ?? null;
-      return contact ? [{ id: contact.id }] : [];
+      const contacts = legacyEquivalentContacts
+        .filter(([phone]) => phoneValues.includes(phone))
+        .map(([, contact]) => ({ id: contact.id }));
+      return contacts;
     }
   };
 }
@@ -300,7 +318,7 @@ test("detecta conflito quando CPF aponta para A e telefone legado aponta para B"
   });
 });
 
-test("nao cria equivalencia automatica de nono digito", async () => {
+test("resolve candidato 8 para 9 quando o match alternativo e unico", async () => {
   const db = buildContactLookupDb({
     byNormalizedPhone: [
       [
@@ -320,7 +338,43 @@ test("nao cria equivalencia automatica de nono digito", async () => {
   const indexes = await findExistingContactIndexes(db as never, "company-1", [row]);
 
   assert.deepEqual(resolveContactImportIdentityForRow(row, indexes), {
-    existingContactId: null,
+    existingContactId: "contact-nine-digit",
     conflictReason: null
+  });
+});
+
+test("match exato vence mesmo quando existe candidato alternativo", async () => {
+  const db = buildContactLookupDb({
+    byNormalizedPhone: [
+      ["557381208676", { id: "contact-exact", phone: "557381208676" }],
+      ["5573981208676", { id: "contact-alternate", phone: "5573981208676" }]
+    ]
+  });
+
+  const row = buildRow({ whatsapp: "557381208676" });
+  const indexes = await findExistingContactIndexes(db as never, "company-1", [row]);
+
+  assert.deepEqual(resolveContactImportIdentityForRow(row, indexes), {
+    existingContactId: "contact-exact",
+    conflictReason: null
+  });
+});
+
+test("nao escolhe silenciosamente candidato alternativo ambiguo", async () => {
+  const db = buildContactLookupDb({
+    byNormalizedPhone: [
+      ["5573981208676", { id: "contact-normalized", phone: "5573981208676" }]
+    ],
+    byLegacyEquivalentPhone: [
+      ["73981208676", { id: "contact-legacy", phone: "73981208676" }]
+    ]
+  });
+
+  const row = buildRow({ whatsapp: "557381208676" });
+  const indexes = await findExistingContactIndexes(db as never, "company-1", [row]);
+
+  assert.deepEqual(resolveContactImportIdentityForRow(row, indexes), {
+    existingContactId: null,
+    conflictReason: "CPF e telefone pertencem a contatos diferentes."
   });
 });

@@ -1,7 +1,7 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { createActivity } from "@/lib/activities";
 import {
-  findContactByNormalizedPhone,
+  findContactPhoneIdentityMatch,
   getAutomaticContactNameUpdate,
   logContactNameMutationAttempt
 } from "@/lib/contacts";
@@ -97,6 +97,7 @@ export class ContactImportConflictError extends Error {
 export type ExistingImportContactIndexes = {
   byCpf: Map<string, string>;
   byPhone: Map<string, string>;
+  ambiguousPhones: Set<string>;
 };
 
 function normalizeHeader(value: string) {
@@ -231,7 +232,8 @@ export async function findExistingContactIndexes(
 
   const indexes: ExistingImportContactIndexes = {
     byCpf: new Map(),
-    byPhone: new Map()
+    byPhone: new Map(),
+    ambiguousPhones: new Set()
   };
 
   if (!cpfs.length && !phones.length) return indexes;
@@ -250,13 +252,18 @@ export async function findExistingContactIndexes(
   });
 
   for (const phone of phones) {
-    const contact = await findContactByNormalizedPhone(db, {
+    const phoneIdentity = await findContactPhoneIdentityMatch(db, {
       companyId,
       phone,
-      archived: true
+      archived: true,
+      source: "contact-import-preview",
+      allowBrazilianWhatsappAlternate: true
     });
-    if (contact) {
-      indexes.byPhone.set(phone, contact.id);
+    if (phoneIdentity.contact) {
+      indexes.byPhone.set(phone, phoneIdentity.contact.id);
+    }
+    if (phoneIdentity.matchType === "ambiguous") {
+      indexes.ambiguousPhones.add(phone);
     }
   }
 
@@ -271,6 +278,13 @@ export function resolveContactImportIdentityForRow(
   const phoneContactId = row.whatsapp
     ? indexes.byPhone.get(row.whatsapp) ?? null
     : null;
+
+  if (row.whatsapp && indexes.ambiguousPhones.has(row.whatsapp)) {
+    return {
+      existingContactId: null,
+      conflictReason: CONTACT_IMPORT_IDENTITY_CONFLICT_MESSAGE
+    };
+  }
 
   if (cpfContactId && phoneContactId && cpfContactId !== phoneContactId) {
     return {
@@ -435,19 +449,26 @@ async function findContactForImport(
       select: { id: true, name: true, phone: true }
     });
 
-    if (contactByCpf) return contactByCpf;
+    if (contactByCpf) return { ...contactByCpf, phoneIdentityMatchType: "exact" as const };
   }
 
   if (!row.whatsapp) return null;
 
-  const contactByPhone = await findContactByNormalizedPhone(db, {
+  const contactByPhone = await findContactPhoneIdentityMatch(db, {
     companyId,
     phone: row.whatsapp,
-    archived: true
+    archived: true,
+    source: "contact-import-confirm",
+    allowBrazilianWhatsappAlternate: true
   });
 
-  return contactByPhone
-    ? { id: contactByPhone.id, name: contactByPhone.name, phone: contactByPhone.phone }
+  return contactByPhone.contact
+    ? {
+        id: contactByPhone.contact.id,
+        name: contactByPhone.contact.name,
+        phone: contactByPhone.contact.phone,
+        phoneIdentityMatchType: contactByPhone.matchType
+      }
     : null;
 }
 
@@ -489,11 +510,15 @@ export async function confirmContactImport({
     for (const row of validRows) {
       const existing = await findContactForImport(tx, companyId, row);
       if (existing) {
-        const nameUpdate = getAutomaticContactNameUpdate({
-          currentName: existing.name,
-          incomingName: row.name,
-          phone: existing.phone || row.whatsapp
-        });
+        const isAlternatePhoneIdentityMatch =
+          existing.phoneIdentityMatchType === "alternate";
+        const nameUpdate = isAlternatePhoneIdentityMatch
+          ? null
+          : getAutomaticContactNameUpdate({
+              currentName: existing.name,
+              incomingName: row.name,
+              phone: existing.phone || row.whatsapp
+            });
         logContactNameMutationAttempt({
           origin: "importacao",
           file: "src/lib/contact-import.service.ts",
@@ -507,16 +532,18 @@ export async function confirmContactImport({
             : "nome da planilha bloqueado porque contato ja possui nome salvo",
           allowed: Boolean(nameUpdate)
         });
-        const contact = await tx.contact.update({
-          where: { id: existing.id },
-          data: {
-            ...(nameUpdate ? { name: nameUpdate.nextName } : {}),
-            cpf: row.cpf,
-            phone: row.whatsapp,
-            normalizedPhone: row.whatsapp
-          },
-          select: { id: true }
-        });
+        const contact = isAlternatePhoneIdentityMatch
+          ? { id: existing.id }
+          : await tx.contact.update({
+              where: { id: existing.id },
+              data: {
+                ...(nameUpdate ? { name: nameUpdate.nextName } : {}),
+                cpf: row.cpf,
+                phone: row.whatsapp,
+                normalizedPhone: row.whatsapp
+              },
+              select: { id: true }
+            });
         updated += 1;
         contactIds.push(contact.id);
         confirmedRows.push({

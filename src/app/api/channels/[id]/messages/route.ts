@@ -126,7 +126,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
       let createdContactForSend = false;
       const existingContact = await findContactByNormalizedPhone(prisma, {
         companyId: session.companyId,
-        phone: normalizedPhone
+        phone: normalizedPhone,
+        source: "channel-message-send",
+        allowBrazilianWhatsappAlternate: true
       });
       let contact = existingContact;
 
@@ -157,7 +159,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
           ) {
             contact = await findContactByNormalizedPhone(prisma, {
               companyId: session.companyId,
-              phone: normalizedPhone
+              phone: normalizedPhone,
+              source: "channel-message-conflict-recovery",
+              allowBrazilianWhatsappAlternate: true
             });
           }
 

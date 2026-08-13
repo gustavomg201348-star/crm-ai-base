@@ -171,7 +171,8 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         ? await findContactByNormalizedPhone(prisma, {
             companyId: session.companyId,
             phone: normalizedPhone,
-            archived: true
+            archived: true,
+            source: "contact-update"
           })
         : null;
       const duplicateByCpf = normalizedCpf

@@ -3,7 +3,11 @@ import {
   LEGACY_WHATSAPP_CHANNEL
 } from "@/lib/conversation-channel.service";
 import { resolveReferencedInboundMessage } from "@/lib/inbound-message-resolution";
-import { conversationInclude, mapConversation } from "@/lib/conversations";
+import {
+  conversationInclude,
+  mapConversation,
+  type ConversationWithRelations
+} from "@/lib/conversations";
 import { findOrCreateConversationForChannel } from "@/lib/conversation-lifecycle.service";
 import { prisma } from "@/lib/db";
 import { maybeSendAutomaticAiReply } from "@/lib/ai-attendant.service";
@@ -13,7 +17,7 @@ import { createInboundMessageNotification, mapNotification } from "@/lib/notific
 import { createActivity } from "@/lib/activities";
 import {
   formatContactDisplayName,
-  findContactByNormalizedPhone,
+  findContactPhoneIdentityMatch,
   getAutomaticContactNameUpdate,
   getContactNormalizedPhone,
   logContactNameMutationAttempt,
@@ -24,6 +28,15 @@ import {
   isPrismaUniqueViolationForTarget
 } from "@/lib/prisma-errors";
 import { safeLogError, safeLogWarn } from "@/lib/safe-logger";
+
+type InboundContact = ConversationWithRelations["contact"];
+
+async function readInboundContact(contactId: string): Promise<InboundContact | null> {
+  return prisma.contact.findUnique({
+    where: { id: contactId },
+    include: conversationInclude.contact.include
+  });
+}
 
 export async function processInboundMessage({
   companyId,
@@ -117,14 +130,25 @@ export async function processInboundMessage({
     })
   ]);
 
-  let contact =
+  let phoneIdentityMatchType = "none";
+  let contact: InboundContact | null =
     referencedMessage && referencedResolution.shouldUseReferencedConversation
       ? referencedMessage.conversation.contact
-      : await findContactByNormalizedPhone(prisma, {
+      : null;
+
+  if (!contact) {
+    const phoneIdentity = await findContactPhoneIdentityMatch(prisma, {
           companyId,
           phone: normalizedPhone,
-          archived: true
-        });
+          archived: true,
+          source: "webhook-inbound",
+          allowBrazilianWhatsappAlternate: true
+    });
+    contact = phoneIdentity.contact
+      ? await readInboundContact(phoneIdentity.contact.id)
+      : null;
+    phoneIdentityMatchType = phoneIdentity.matchType;
+  }
   let contactCreated = false;
 
   safeLogWarn("whatsapp-inbound-audit", "inbound message contact resolution", {
@@ -156,7 +180,7 @@ export async function processInboundMessage({
     });
 
     try {
-      contact = await prisma.contact.create({
+      const createdContact = await prisma.contact.create({
         data: {
           companyId,
           name: name?.trim().replace(/\s+/g, " ") || normalizedPhone,
@@ -166,8 +190,13 @@ export async function processInboundMessage({
           stageId: stage?.id ?? null,
           temperature: "WARM",
           lastMessage: messageBody
-        }
+        },
+        select: { id: true }
       });
+      contact = await readInboundContact(createdContact.id);
+      if (!contact) {
+        throw new Error("Contato criado nao encontrado.");
+      }
       contactCreated = true;
     } catch (error) {
       if (
@@ -175,11 +204,17 @@ export async function processInboundMessage({
         (isPrismaUniqueViolationForTarget(error, "normalizedPhone") ||
           isPrismaUniqueViolationForTarget(error, ["companyId", "normalizedPhone"]))
       ) {
-        contact = await findContactByNormalizedPhone(prisma, {
+        const phoneIdentity = await findContactPhoneIdentityMatch(prisma, {
           companyId,
           phone: normalizedPhone,
-          archived: true
+          archived: true,
+          source: "webhook-inbound-conflict-recovery",
+          allowBrazilianWhatsappAlternate: true
         });
+        contact = phoneIdentity.contact
+          ? await readInboundContact(phoneIdentity.contact.id)
+          : null;
+        phoneIdentityMatchType = phoneIdentity.matchType;
       }
 
       if (!contact) {
@@ -189,11 +224,14 @@ export async function processInboundMessage({
   }
 
   if (!contactCreated) {
-    const nameUpdate = getAutomaticContactNameUpdate({
-      currentName: contact.name,
-      incomingName: name,
-      phone: normalizedPhone
-    });
+    const nameUpdate =
+      phoneIdentityMatchType === "alternate"
+        ? null
+        : getAutomaticContactNameUpdate({
+            currentName: contact.name,
+            incomingName: name,
+            phone: normalizedPhone
+          });
 
     logContactNameMutationAttempt({
       origin: "webhook",
@@ -209,14 +247,19 @@ export async function processInboundMessage({
       allowed: Boolean(nameUpdate)
     });
 
-    contact = await prisma.contact.update({
+    const updatedContact = await prisma.contact.update({
       where: { id: contact.id },
       data: {
         ...(nameUpdate ? { name: nameUpdate.nextName } : {}),
         lastMessage: messageBody,
         archivedAt: null
-      }
+      },
+      select: { id: true }
     });
+    contact = await readInboundContact(updatedContact.id);
+    if (!contact) {
+      throw new Error("Contato atualizado nao encontrado.");
+    }
 
     if (nameUpdate) {
       await createActivity(prisma, {

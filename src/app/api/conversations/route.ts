@@ -13,7 +13,7 @@ import { prisma } from "@/lib/db";
 import { maybeAutoAssignConversation } from "@/lib/lead-assignment";
 import { conversationVisibilityWhere, isAdmin } from "@/lib/permissions";
 import {
-  findContactByNormalizedPhone,
+  findContactPhoneIdentityMatch,
   getContactNormalizedPhone,
   logContactNameMutationAttempt,
   normalizeContactCpf,
@@ -181,11 +181,15 @@ export async function POST(request: NextRequest) {
         })
       : null;
 
+    let phoneIdentityMatchType = "none";
     if (!contact && normalizedPhone) {
-      contact = await findContactByNormalizedPhone(prisma, {
+      const phoneIdentity = await findContactPhoneIdentityMatch(prisma, {
         companyId: session.companyId,
-        phone: normalizedPhone
+        phone: normalizedPhone,
+        source: "conversation-create"
       });
+      contact = phoneIdentity.contact;
+      phoneIdentityMatchType = phoneIdentity.matchType;
 
       if (!contact && normalizedCpf) {
         contact = await prisma.contact.findFirst({
@@ -219,7 +223,12 @@ export async function POST(request: NextRequest) {
       contact = contactByCpf;
     }
 
-    if (contact && normalizedCpf && contact.cpf !== normalizedCpf) {
+    if (
+      contact &&
+      normalizedCpf &&
+      contact.cpf !== normalizedCpf &&
+      phoneIdentityMatchType !== "alternate"
+    ) {
       contact = await prisma.contact.update({
         where: { id: contact.id },
         data: { cpf: normalizedCpf }
