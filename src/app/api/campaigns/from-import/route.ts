@@ -3,11 +3,25 @@ import { campaignInclude, mapCampaign } from "@/lib/campaigns";
 import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { getSessionOrUnauthorized, requireCompanyAdmin } from "@/lib/permissions";
-import { digitsOnlyPhone } from "@/lib/phone-normalization.service";
+import {
+  digitsOnlyPhone,
+  normalizeBrazilianPhoneForIdentity
+} from "@/lib/phone-normalization.service";
 import { safeLogError } from "@/lib/safe-logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+function resolveCampaignRecipientPhone(contact: {
+  phone: string;
+  normalizedPhone?: string | null;
+}) {
+  return (
+    contact.normalizedPhone ??
+    normalizeBrazilianPhoneForIdentity(contact.phone).normalizedPhone ??
+    digitsOnlyPhone(contact.phone)
+  );
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -81,7 +95,7 @@ export async function POST(request: NextRequest) {
         companyId: session.companyId,
         archivedAt: null
       },
-      select: { id: true, phone: true, name: true }
+      select: { id: true, phone: true, normalizedPhone: true, name: true }
     });
 
     if (!contacts.length) {
@@ -111,7 +125,7 @@ export async function POST(request: NextRequest) {
         recipients: {
           create: contacts.map((contact) => ({
             contactId: contact.id,
-            phone: digitsOnlyPhone(contact.phone)
+            phone: resolveCampaignRecipientPhone(contact)
           }))
         }
       },

@@ -1,6 +1,10 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { createActivity } from "@/lib/activities";
-import { getAutomaticContactNameUpdate, logContactNameMutationAttempt } from "@/lib/contacts";
+import {
+  findContactByNormalizedPhone,
+  getAutomaticContactNameUpdate,
+  logContactNameMutationAttempt
+} from "@/lib/contacts";
 import { prisma } from "@/lib/db";
 import { classifyPhoneNormalization, type PhoneNormalizationReason } from "@/lib/phone-normalization.service";
 import { upsertRetirementLeadForContact } from "@/lib/retirement-leads";
@@ -217,13 +221,13 @@ export function renderCampaignMessage(
     .replace(/\{\{\s*telefone\s*\}\}/gi, contact.phone);
 }
 
-async function findExistingContactIndexes(
+export async function findExistingContactIndexes(
   db: DbClient,
   companyId: string,
   rows: ImportPreviewRow[]
 ): Promise<ExistingImportContactIndexes> {
   const cpfs = rows.map((row) => row.cpf).filter(Boolean);
-  const phones = rows.map((row) => row.whatsapp).filter(Boolean);
+  const phones = Array.from(new Set(rows.map((row) => row.whatsapp).filter(Boolean)));
 
   const indexes: ExistingImportContactIndexes = {
     byCpf: new Map(),
@@ -245,32 +249,15 @@ async function findExistingContactIndexes(
     if (contact.cpf) indexes.byCpf.set(contact.cpf, contact.id);
   });
 
-  if (phones.length) {
-    const contactsByNormalizedPhone = await db.contact.findMany({
-      where: {
-        companyId,
-        normalizedPhone: { in: phones }
-      },
-      select: { id: true, normalizedPhone: true }
+  for (const phone of phones) {
+    const contact = await findContactByNormalizedPhone(db, {
+      companyId,
+      phone,
+      archived: true
     });
-    contactsByNormalizedPhone.forEach((contact) => {
-      if (contact.normalizedPhone) {
-        indexes.byPhone.set(contact.normalizedPhone, contact.id);
-      }
-    });
-
-    const contactsByLegacyPhone = await db.contact.findMany({
-      where: {
-        companyId,
-        phone: { in: phones }
-      },
-      select: { id: true, phone: true }
-    });
-    contactsByLegacyPhone.forEach((contact) => {
-      if (contact.phone && !indexes.byPhone.has(contact.phone)) {
-        indexes.byPhone.set(contact.phone, contact.id);
-      }
-    });
+    if (contact) {
+      indexes.byPhone.set(phone, contact.id);
+    }
   }
 
   return indexes;
@@ -453,23 +440,15 @@ async function findContactForImport(
 
   if (!row.whatsapp) return null;
 
-  const contactByNormalizedPhone = await db.contact.findFirst({
-    where: {
-      companyId,
-      normalizedPhone: row.whatsapp
-    },
-    select: { id: true, name: true, phone: true }
+  const contactByPhone = await findContactByNormalizedPhone(db, {
+    companyId,
+    phone: row.whatsapp,
+    archived: true
   });
 
-  if (contactByNormalizedPhone) return contactByNormalizedPhone;
-
-  return db.contact.findFirst({
-    where: {
-      companyId,
-      phone: row.whatsapp
-    },
-    select: { id: true, name: true, phone: true }
-  });
+  return contactByPhone
+    ? { id: contactByPhone.id, name: contactByPhone.name, phone: contactByPhone.phone }
+    : null;
 }
 
 export async function confirmContactImport({

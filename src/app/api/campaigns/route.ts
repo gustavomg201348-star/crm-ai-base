@@ -17,7 +17,10 @@ import {
 import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
-import { digitsOnlyPhone } from "@/lib/phone-normalization.service";
+import {
+  digitsOnlyPhone,
+  normalizeBrazilianPhoneForIdentity
+} from "@/lib/phone-normalization.service";
 import { safeLogError } from "@/lib/safe-logger";
 import {
   deserializeTemplateVariableMappingV1,
@@ -29,6 +32,17 @@ import { findReadyLocalMetaTemplate } from "@/lib/whatsapp-template.service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+function resolveCampaignRecipientPhone(contact: {
+  phone: string;
+  normalizedPhone?: string | null;
+}) {
+  return (
+    contact.normalizedPhone ??
+    normalizeBrazilianPhoneForIdentity(contact.phone).normalizedPhone ??
+    digitsOnlyPhone(contact.phone)
+  );
+}
 
 function safeFileName(fileName: string) {
   const ext = path.extname(fileName).toLowerCase();
@@ -334,7 +348,7 @@ export async function POST(request: NextRequest) {
 
             return {
               contactId: contact.id,
-              phone: digitsOnlyPhone(contact.phone),
+              phone: resolveCampaignRecipientPhone(contact),
               resolvedTemplateVariables: resolved
                 ? serializeCampaignRecipientResolvedVariables(resolved)
                 : null
