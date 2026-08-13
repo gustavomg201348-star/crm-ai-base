@@ -6215,83 +6215,126 @@ function LoginScreen({
   }
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-slate-100 text-ink">
-      <div className="mx-auto grid min-h-screen w-full max-w-7xl grid-cols-1 overflow-hidden bg-slate-50 lg:grid-cols-[1.24fr_1fr]">
-        <section className="relative hidden min-h-screen overflow-hidden bg-slate-950 px-10 py-10 text-white lg:flex lg:flex-col lg:justify-between xl:px-14">
-          <div className="pointer-events-none absolute -left-28 -top-28 h-72 w-72 rounded-full border border-blue-400/20" />
-          <div className="pointer-events-none absolute -bottom-36 right-8 h-96 w-96 rounded-full border border-blue-300/10" />
-          <div className="pointer-events-none absolute right-20 top-20 h-2 w-2 rounded-full bg-blue-300/60" />
-          <div className="pointer-events-none absolute right-36 top-48 h-1.5 w-1.5 rounded-full bg-blue-200/40" />
-          <div className="pointer-events-none absolute bottom-28 left-20 h-px w-40 bg-blue-200/20" />
+    <main className="min-h-screen overflow-x-hidden bg-white font-sans text-ink">
+      <div className="grid min-h-screen w-full grid-cols-1 overflow-hidden bg-white lg:grid-cols-[52.5%_47.5%]">
+        <section className="relative hidden min-h-screen overflow-hidden bg-[#06152d] px-12 py-11 text-white lg:flex lg:flex-col lg:justify-between xl:px-16">
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_72%_8%,rgba(45,122,255,0.18),transparent_28%),radial-gradient(circle_at_12%_82%,rgba(34,96,190,0.16),transparent_32%)]" />
+          <div className="pointer-events-none absolute -right-24 -top-28 h-72 w-72 rounded-full border border-blue-400/10" />
+          <div className="pointer-events-none absolute bottom-0 right-0 h-64 w-[34rem] bg-[radial-gradient(circle,rgba(61,138,255,0.24)_1px,transparent_1.5px)] bg-[length:16px_16px] opacity-20 [transform:perspective(520px)_rotateX(62deg)_rotateZ(-10deg)]" />
 
           <div className="relative max-w-2xl">
-            <p className="text-4xl font-black uppercase tracking-[0.22em] text-white xl:text-5xl">
+            <p className="text-[2.6rem] font-black uppercase leading-none tracking-[0.1em] text-white drop-shadow-sm xl:text-[2.9rem]">
               QE<span className="text-blue-300">V</span>ORA
             </p>
-            <p className="mt-4 text-xs font-bold uppercase tracking-[0.34em] text-blue-200/80">
-              Inteligencia para operacoes comerciais
+            <p className="mt-5 text-sm font-semibold uppercase tracking-[0.2em] text-blue-200/80">
+              INTELIGÊNCIA PARA OPERAÇÕES COMERCIAIS
             </p>
 
-            <div className="mt-16 max-w-xl xl:mt-20">
-              <h1 className="text-4xl font-bold leading-tight text-white xl:text-5xl">
-                Operacoes comerciais, com{" "}
-                <span className="text-blue-300">inteligencia</span> e contexto.
+            <div className="mt-[3.25rem] max-w-2xl xl:mt-14">
+              <h1 className="text-[2.55rem] font-bold leading-[1.18] text-white xl:text-[3rem]">
+                Operações comerciais, com{" "}
+                <span className="text-blue-400">inteligência</span> e contexto.
               </h1>
-              <p className="mt-6 max-w-md text-base leading-7 text-slate-300">
-                Conecte conversas, oportunidades e decisoes em uma unica operacao.
+              <p className="mt-5 max-w-md text-base leading-7 text-slate-200/90">
+                Conecte conversas, oportunidades e decisões em uma única operação.
               </p>
             </div>
           </div>
 
           <div className="relative max-w-2xl">
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-3 border-t border-white/10 pt-6 text-xs font-bold uppercase tracking-[0.22em] text-slate-300">
-              {["Conversas", "Oportunidades", "Inteligencia", "Contexto"].map(
-                (item, index) => (
-                  <div className="flex items-center gap-4" key={item}>
-                    {index > 0 && <span className="h-1.5 w-1.5 rounded-full bg-blue-300/70" />}
-                    <span>{item}</span>
+            <div className="grid grid-cols-3 gap-0">
+              {[
+                {
+                  description: "Conversas em um só lugar",
+                  marker: "chat",
+                  title: "Atendimento centralizado"
+                },
+                {
+                  description: "Priorização comercial",
+                  marker: "bars",
+                  title: "Oportunidades inteligentes"
+                },
+                {
+                  description: "Histórico da operação",
+                  marker: "shield",
+                  title: "Contexto preservado"
+                }
+              ].map((benefit, index) => (
+                <div
+                  className={clsx(
+                    "min-w-0 px-7 first:pl-0 last:pr-0",
+                    index > 0 && "border-l border-white/[0.08]"
+                  )}
+                  key={benefit.title}
+                >
+                  <div className="mb-4 flex h-8 items-end text-blue-300">
+                    {benefit.marker === "chat" && (
+                      <span className="relative block h-6 w-7 rounded-md border-2 border-current">
+                        <span className="absolute -bottom-2 left-2 h-3 w-3 rounded-bl-md border-b-2 border-l-2 border-current bg-[#06152d]" />
+                        <span className="absolute -bottom-2 -right-2 h-3.5 w-3.5 rounded-full border-2 border-[#06152d] bg-blue-400" />
+                      </span>
+                    )}
+                    {benefit.marker === "bars" && (
+                      <span className="flex h-7 items-end gap-1.5">
+                        <span className="h-3 w-2 rounded-sm border-2 border-current" />
+                        <span className="h-[1.125rem] w-2 rounded-sm border-2 border-current" />
+                        <span className="h-7 w-2 rounded-sm border-2 border-current" />
+                      </span>
+                    )}
+                    {benefit.marker === "shield" && (
+                      <span className="relative block h-8 w-7 rounded-b-xl rounded-t-md border-2 border-current">
+                        <span className="absolute left-2 top-3 h-2 w-2.5 rotate-[-45deg] border-b-2 border-l-2 border-current" />
+                      </span>
+                    )}
                   </div>
-                )
-              )}
+                  <h2 className="text-base font-semibold leading-snug text-white">
+                    {benefit.title}
+                  </h2>
+                  <p className="mt-2.5 text-sm leading-6 text-slate-300">
+                    {benefit.description}
+                  </p>
+                </div>
+              ))}
+            </div>
+            <div className="mt-9 border-t border-white/[0.12] pt-6 text-sm font-medium text-slate-300">
+              <span className="mr-3 inline-block h-1.5 w-1.5 rounded-full bg-blue-300 align-middle" />
+              Tecnologia para uma operação mais organizada
             </div>
           </div>
         </section>
 
-        <section className="relative flex min-h-screen items-center justify-center bg-slate-50 px-4 py-8 sm:px-6 lg:px-10">
-          <div className="pointer-events-none absolute right-8 top-10 hidden h-44 w-44 rounded-full border border-slate-200/70 lg:block" />
-          <div className="pointer-events-none absolute bottom-10 left-10 hidden h-28 w-28 rounded-full border border-blue-100/80 lg:block" />
-
+        <section className="flex min-h-screen items-center justify-start bg-white px-5 py-8 sm:justify-center sm:px-8 lg:px-12 xl:px-16">
           <form
-            className="relative w-full max-w-md rounded border border-slate-200/80 bg-white p-6 shadow-none sm:p-8 sm:shadow-[0_24px_70px_rgba(15,23,42,0.08)]"
+            className="w-full max-w-[21rem] bg-white sm:max-w-md"
             onSubmit={handleSubmit}
           >
             <div>
-              <p className="text-sm font-black uppercase tracking-[0.18em] text-slate-950">
+              <p className="text-sm font-black uppercase tracking-[0.2em] text-slate-950">
                 QE<span className="text-brand">V</span>ORA
               </p>
-              <h1 className="mt-5 text-2xl font-bold text-slate-950">
-                Acesse sua operacao
+              <h1 className="mt-6 text-3xl font-bold tracking-normal text-slate-950 sm:text-[2.15rem]">
+                Bem-vindo à QEVORA
               </h1>
-              <p className="mt-2 text-sm text-slate-500">
-                Entre com seus dados para continuar.
+              <p className="mt-3 text-base leading-7 text-slate-500">
+                Acesse sua operação para continuar.
               </p>
             </div>
 
-            <div className="mt-8 space-y-5">
-              <label className="block text-sm font-semibold text-slate-800">
+            <div className="mt-9 space-y-5">
+              <label className="block text-sm font-semibold text-slate-900">
                 E-mail
                 <input
-                  className="mt-2 h-12 w-full rounded border border-slate-300 bg-white px-3 font-normal text-slate-950 outline-none placeholder:text-slate-400 focus:border-brand focus:ring-2 focus:ring-blue-100"
+                  className="mt-3 h-14 w-full rounded border border-slate-200 bg-white px-4 font-normal text-slate-950 outline-none placeholder:text-slate-400 focus:border-blue-700 focus:ring-2 focus:ring-blue-100"
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
                   placeholder="seu@email.com"
                   type="email"
                 />
               </label>
-              <label className="block text-sm font-semibold text-slate-800">
+              <label className="block text-sm font-semibold text-slate-900">
                 Senha
                 <input
-                  className="mt-2 h-12 w-full rounded border border-slate-300 bg-white px-3 font-normal text-slate-950 outline-none placeholder:text-slate-400 focus:border-brand focus:ring-2 focus:ring-blue-100"
+                  className="mt-3 h-14 w-full rounded border border-slate-200 bg-white px-4 font-normal text-slate-950 outline-none placeholder:text-slate-400 focus:border-blue-700 focus:ring-2 focus:ring-blue-100"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
                   placeholder="Digite sua senha"
@@ -6307,17 +6350,15 @@ function LoginScreen({
             )}
 
             <button
-              className="mt-6 h-12 w-full rounded bg-brand font-semibold text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-200 focus:ring-offset-2 disabled:opacity-60"
+              className="mt-7 h-14 w-full rounded bg-[#082f7a] font-bold text-white transition hover:bg-[#062864] focus:outline-none focus:ring-2 focus:ring-blue-200 focus:ring-offset-2 disabled:opacity-60"
               disabled={loading}
               type="submit"
             >
               {loading ? "Entrando..." : "Entrar"}
             </button>
 
-            <div className="mt-6 flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-              <span className="h-px flex-1 bg-slate-200" />
+            <div className="mt-6 text-center text-sm font-medium text-slate-500">
               Acesso seguro
-              <span className="h-px flex-1 bg-slate-200" />
             </div>
           </form>
         </section>
