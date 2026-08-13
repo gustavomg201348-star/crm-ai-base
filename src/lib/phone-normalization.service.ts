@@ -58,6 +58,41 @@ export function normalizeBrazilianPhoneForIdentity(
   return classifyPhoneNormalization(input);
 }
 
+export type BrazilianWhatsappPhoneCandidates = {
+  exact: string | null;
+  alternate: string | null;
+};
+
+export function getBrazilianWhatsappPhoneCandidates(
+  input?: string | null
+): BrazilianWhatsappPhoneCandidates {
+  const classification = classifyPhoneNormalization(input);
+  const exact = classification.normalizedPhone;
+
+  if (!exact || classification.country !== "BR" || !exact.startsWith("55")) {
+    return { exact, alternate: null };
+  }
+
+  const ddd = exact.slice(2, 4);
+  const localNumber = exact.slice(4);
+
+  if (exact.length === 12 && localNumber.length === 8) {
+    return {
+      exact,
+      alternate: `55${ddd}9${localNumber}`
+    };
+  }
+
+  if (exact.length === 13 && localNumber.length === 9 && localNumber.startsWith("9")) {
+    return {
+      exact,
+      alternate: `55${ddd}${localNumber.slice(1)}`
+    };
+  }
+
+  return { exact, alternate: null };
+}
+
 export function classifyPhoneNormalization(input?: string | null): PhoneNormalizationResult {
   const raw = String(input ?? "").trim();
   const digits = digitsOnlyPhone(raw);

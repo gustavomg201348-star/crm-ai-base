@@ -1,10 +1,14 @@
-import { Prisma, type PrismaClient } from "@prisma/client";
-import { classifyPhoneNormalization } from "@/lib/phone-normalization.service";
+import { Prisma, type Contact, type PrismaClient } from "@prisma/client";
+import {
+  classifyPhoneNormalization,
+  getBrazilianWhatsappPhoneCandidates
+} from "@/lib/phone-normalization.service";
 import { safeLogWarn } from "@/lib/safe-logger";
 
 export type LeadTemperature = "HOT" | "WARM" | "COLD";
 
 type ContactLookupDbClient = Prisma.TransactionClient | PrismaClient;
+export type ContactPhoneIdentityMatchType = "exact" | "alternate" | "ambiguous" | "none";
 
 export function normalizeContactPhone(phone?: string | null) {
   return phone?.replace(/\D/g, "") ?? "";
@@ -12,6 +16,13 @@ export function normalizeContactPhone(phone?: string | null) {
 
 export function getContactNormalizedPhone(phone?: string | null) {
   return classifyPhoneNormalization(phone).normalizedPhone;
+}
+
+function getPhoneWithoutCountryCode(phone?: string | null) {
+  const normalizedPhone = normalizeContactPhone(phone);
+  return normalizedPhone.startsWith("55") && normalizedPhone.length > 11
+    ? normalizedPhone.slice(2)
+    : "";
 }
 
 export function normalizeContactCpf(cpf?: string | null) {
@@ -69,21 +80,39 @@ export function getAutomaticContactNameUpdate({
 
 export async function findContactByNormalizedPhone(
   db: ContactLookupDbClient,
+  options: {
+    companyId: string;
+    phone?: string | null;
+    archived?: boolean;
+    source?: string;
+    allowBrazilianWhatsappAlternate?: boolean;
+  }
+) {
+  const result = await findContactPhoneIdentityMatch(db, options);
+  return result.contact;
+}
+
+export async function findContactPhoneIdentityMatch(
+  db: ContactLookupDbClient,
   {
     companyId,
     phone,
-    archived = false
+    archived = false,
+    source = "contact-phone-lookup",
+    allowBrazilianWhatsappAlternate = false
   }: {
     companyId: string;
     phone?: string | null;
     archived?: boolean;
+    source?: string;
+    allowBrazilianWhatsappAlternate?: boolean;
   }
-) {
+): Promise<{ contact: Contact | null; matchType: ContactPhoneIdentityMatchType }> {
   const normalizedPhone = normalizeContactPhone(phone);
   const contactNormalizedPhone = getContactNormalizedPhone(phone);
 
   if (!normalizedPhone && !contactNormalizedPhone) {
-    return null;
+    return { contact: null, matchType: "none" };
   }
 
   if (contactNormalizedPhone) {
@@ -97,18 +126,15 @@ export async function findContactByNormalizedPhone(
     });
 
     if (contact) {
-      return contact;
+      return { contact, matchType: "exact" };
     }
   }
 
   if (!normalizedPhone) {
-    return null;
+    return { contact: null, matchType: "none" };
   }
 
-  const phoneWithoutCountryCode =
-    normalizedPhone.startsWith("55") && normalizedPhone.length > 11
-      ? normalizedPhone.slice(2)
-      : "";
+  const phoneWithoutCountryCode = getPhoneWithoutCountryCode(normalizedPhone);
 
   const matches = await db.$queryRaw<Array<{ id: string }>>`
     SELECT "id"
@@ -136,10 +162,102 @@ export async function findContactByNormalizedPhone(
   `;
 
   if (matches[0]?.id) {
-    return db.contact.findUnique({ where: { id: matches[0].id } });
+    return {
+      contact: await db.contact.findUnique({ where: { id: matches[0].id } }),
+      matchType: "exact"
+    };
   }
 
-  return null;
+  if (!allowBrazilianWhatsappAlternate) {
+    return { contact: null, matchType: "none" };
+  }
+
+  const candidates = getBrazilianWhatsappPhoneCandidates(phone);
+  const alternatePhone = candidates.alternate;
+
+  if (!alternatePhone) {
+    return { contact: null, matchType: "none" };
+  }
+
+  const alternatePhoneWithoutCountryCode = getPhoneWithoutCountryCode(alternatePhone);
+  const alternateNormalizedMatches = await db.contact.findMany({
+    where: {
+      companyId,
+      normalizedPhone: alternatePhone,
+      ...(archived ? {} : { archivedAt: null })
+    },
+    select: { id: true },
+    orderBy: { updatedAt: "desc" },
+    take: 2
+  });
+  const alternateLegacyMatches = await db.$queryRaw<Array<{ id: string }>>`
+    SELECT "id"
+    FROM "Contact"
+    WHERE "companyId" = ${companyId}
+      ${archived ? Prisma.empty : Prisma.sql`AND "archivedAt" IS NULL`}
+      AND (
+        regexp_replace("phone", '\\D', '', 'g') = ${alternatePhone}
+        ${
+          alternatePhoneWithoutCountryCode
+            ? Prisma.sql`OR regexp_replace("phone", '\\D', '', 'g') = ${alternatePhoneWithoutCountryCode}`
+            : Prisma.empty
+        }
+      )
+    ORDER BY
+      CASE
+        WHEN NULLIF(trim(COALESCE("cpf", '')), '') IS NOT NULL THEN -1
+        WHEN NULLIF(trim("name"), '') IS NULL THEN 2
+        WHEN trim("name") = regexp_replace("phone", '\\D', '', 'g') THEN 1
+        ELSE 0
+      END ASC,
+      CASE WHEN regexp_replace("phone", '\\D', '', 'g') = ${alternatePhone} THEN 0 ELSE 1 END ASC,
+      "updatedAt" DESC
+    LIMIT 2
+  `;
+  const alternateIds = Array.from(
+    new Set([
+      ...alternateNormalizedMatches.map((match) => match.id),
+      ...alternateLegacyMatches.map((match) => match.id)
+    ])
+  );
+
+  if (alternateIds.length === 1) {
+    logContactPhoneLookup({
+      companyId,
+      source,
+      matchType: "alternate"
+    });
+    return {
+      contact: await db.contact.findUnique({ where: { id: alternateIds[0] } }),
+      matchType: "alternate"
+    };
+  }
+
+  if (alternateIds.length > 1) {
+    logContactPhoneLookup({
+      companyId,
+      source,
+      matchType: "ambiguous"
+    });
+  }
+
+  return { contact: null, matchType: alternateIds.length > 1 ? "ambiguous" : "none" };
+}
+
+function logContactPhoneLookup({
+  companyId,
+  source,
+  matchType
+}: {
+  companyId: string;
+  source: string;
+  matchType: ContactPhoneIdentityMatchType;
+}) {
+  safeLogWarn("phone-identity-audit", "phone identity alternate lookup", {
+    companyId,
+    source,
+    matchType
+  });
 }
 
 export function logContactNameMutationAttempt(input: {

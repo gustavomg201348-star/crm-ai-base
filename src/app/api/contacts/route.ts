@@ -130,7 +130,8 @@ export async function POST(request: NextRequest) {
       (await findContactByNormalizedPhone(prisma, {
         companyId: session.companyId,
         phone,
-        archived: true
+        archived: true,
+        source: "contact-create"
       })) ??
       (cpf
         ? await prisma.contact.findFirst({
