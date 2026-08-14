@@ -6305,7 +6305,7 @@ function LoginScreen({
 
         <section className="flex min-h-screen items-center justify-start bg-white px-5 py-8 sm:justify-center sm:px-8 lg:px-12 xl:px-16">
           <form
-            className="w-full max-w-[21rem] bg-white sm:max-w-md"
+            className="w-full max-w-[21rem] rounded-2xl bg-white p-6 shadow-[0_24px_70px_rgba(15,23,42,0.10)] ring-1 ring-slate-200/45 sm:max-w-[28rem] sm:p-9"
             onSubmit={handleSubmit}
           >
             <div>
