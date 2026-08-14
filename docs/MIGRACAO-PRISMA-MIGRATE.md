@@ -2,7 +2,9 @@
 
 ## Escopo
 
-Este documento registra o plano tecnico para preparar a migracao de `prisma db push` para `prisma migrate deploy`.
+Este documento registra o plano tecnico usado para preparar a migracao de `prisma db push` para `prisma migrate deploy`.
+
+Status atual: o startup de producao deve usar `prisma migrate deploy` via `scripts/railway-start.mjs`; `prisma db push` nao deve ser usado como caminho automatico de producao.
 
 Regras desta etapa:
 
@@ -27,7 +29,7 @@ Os schemas estao praticamente alinhados. As diferencas atuais sao:
 | Datasource | `provider = "sqlite"` | `provider = "postgresql"` | Esperado: local SQLite e producao Postgres. |
 | `User.email` | `@unique(map: "sqlite_autoindex_User_2")` | `@unique` | Diferenca de nome de constraint/index. Para Postgres, pode ser interessante nomear constraints criticas no futuro. |
 
-O maior risco nao e o desenho atual do schema, mas sim a ausencia de historico versionado de migrations e a possibilidade de drift em producao causado pelo uso de `prisma db push`.
+O maior risco original nao era o desenho do schema, mas sim a ausencia de historico versionado de migrations e a possibilidade de drift em producao causado pelo uso anterior de `prisma db push`.
 
 ## 1. Tabelas criticas
 
@@ -394,4 +396,3 @@ Antes de criar qualquer migration real:
 3. Corrigir duplicidades de forma planejada.
 4. Criar baseline do schema atual.
 5. So entao avaliar indices e constraints adicionais.
-

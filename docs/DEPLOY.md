@@ -36,13 +36,14 @@ META_GRAPH_VERSION=v25.0
 OPENAI_API_KEY=
 ```
 
-O `railway.toml` roda automaticamente antes do deploy:
+O `railway.toml` inicia o app por `node scripts/railway-start.mjs`.
+Esse script aplica migrations Prisma de Postgres de forma bloqueante antes de iniciar o Next:
 
 ```bash
-npm run prisma:push:prod && npm run prisma:seed:prod
+npm run prisma:migrate:prod
 ```
 
-E inicia o app com:
+Somente se as migrations terminarem com sucesso, o script inicia o app com:
 
 ```bash
 npm run start

@@ -13,11 +13,9 @@
     "verify": "npm run prisma:validate && npm run typecheck && npm run lint:ci",
     "prisma:generate": "prisma generate",
     "prisma:generate:prod": "prisma generate --schema prisma/schema.postgres.prisma",
+    "prisma:migrate:prod": "prisma migrate deploy --schema prisma/schema.postgres.prisma",
     "prisma:push": "prisma db push",
-    "prisma:push:prod": "prisma db push --schema prisma/schema.postgres.prisma",
     "prisma:seed": "prisma db seed",
-    "prisma:seed:prod": "node prisma/seed.mjs",
-    "railway:predeploy": "node prisma/retry-command.mjs npm run prisma:push:prod && node prisma/retry-command.mjs npm run prisma:seed:prod",
     "db:setup": "node prisma/setup-sqlite.mjs && npm run prisma:seed"
   },
   "prisma": {

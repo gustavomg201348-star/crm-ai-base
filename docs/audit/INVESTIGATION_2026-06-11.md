@@ -35,8 +35,7 @@ Para uso proprio ou primeiras operacoes pequenas, a base esta bem encaminhada. P
 ## Prioridades recomendadas
 
 1. Formalizar docs Yntelli iniciais.
-2. Migrar producao de `prisma db push` para `prisma migrate deploy`.
+2. Manter producao no fluxo de `prisma migrate deploy` e nao reintroduzir `prisma db push` automatico.
 3. Criar testes minimos anti-quebra.
 4. Criar CI no GitHub.
 5. Implementar LGPD minima: opt-out, retencao, exclusao/anonymizacao e criptografia de segredos.
-

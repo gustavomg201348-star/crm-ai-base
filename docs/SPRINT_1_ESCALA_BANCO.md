@@ -183,7 +183,7 @@ Resultado:
 
 Observacao: o primeiro `prisma:push` sincronizou o banco, mas o `generate` automatico encontrou um arquivo do engine Prisma bloqueado pelo Windows (`EPERM`). Em seguida, foi executado `npm.cmd run prisma:push -- --skip-generate`, que confirmou o banco em sincronia. O build passou normalmente.
 
-`npm run prisma:push:prod` nao foi executado neste ambiente porque o `.env` local aponta para SQLite (`file:./dev.db`). Rodar o schema Postgres com essa URL nao e seguro nem valido. Para aplicar em producao, executar `npm run prisma:push:prod` somente em ambiente com `DATABASE_URL` Postgres correto da Railway.
+Historicamente, esta etapa citava um script legado de `db push` para producao. Esse caminho nao deve mais ser usado. O fluxo operacional atual para producao deve aplicar schema por migrations com `npm run prisma:migrate:prod`, executado de forma bloqueante pelo startup Railway antes de iniciar o app.
 
 ## Proximos passos recomendados
 
