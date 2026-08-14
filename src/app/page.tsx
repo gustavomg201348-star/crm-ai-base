@@ -1407,6 +1407,10 @@ function formatPhoneForHeader(value?: string | null) {
   return raw;
 }
 
+function normalizeMaskedValueForClipboard(value?: string | null) {
+  return value?.replace(/[^0-9A-Za-z]/g, "") ?? "";
+}
+
 function buildShortChannelLabel(name?: string | null) {
   const compactName = name?.trim().replace(/\s+/g, " ") ?? "";
   if (!compactName) return "WhatsApp";
@@ -6951,6 +6955,7 @@ function Atendimento({
   const [mobileConversationOpen, setMobileConversationOpen] = useState(false);
   const [mobileDetailsOpen, setMobileDetailsOpen] = useState(false);
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
+  const [copyToast, setCopyToast] = useState<{ message: string; tone: "success" | "error" } | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const mobileInputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -6961,6 +6966,7 @@ function Atendimento({
   const draftsByConversationRef = useRef<Record<string, string>>({});
   const selectedConversationIdRef = useRef<string | null>(selectedConversation?.id ?? null);
   const opportunityRequestIdRef = useRef(0);
+  const copyToastTimeoutRef = useRef<number | null>(null);
   const activeConversationId = selectedConversation?.id ?? null;
 
   useEffect(() => {
@@ -6970,6 +6976,14 @@ function Atendimento({
   useEffect(() => {
     setFollowUpSuccess("");
   }, [selectedConversation?.id]);
+
+  useEffect(() => {
+    return () => {
+      if (copyToastTimeoutRef.current) {
+        window.clearTimeout(copyToastTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!selectedConversation) {
@@ -7507,6 +7521,44 @@ function Atendimento({
     setMobileConversationOpen(true);
   }
 
+  function showCopyToast(message: string, tone: "success" | "error" = "success") {
+    setCopyToast({ message, tone });
+    if (copyToastTimeoutRef.current) {
+      window.clearTimeout(copyToastTimeoutRef.current);
+    }
+    copyToastTimeoutRef.current = window.setTimeout(() => {
+      setCopyToast(null);
+      copyToastTimeoutRef.current = null;
+    }, 1800);
+  }
+
+  async function copyConversationHeaderValue({
+    label,
+    successMessage,
+    value
+  }: {
+    label: "CPF" | "telefone";
+    successMessage: string;
+    value?: string | null;
+  }) {
+    const clipboardValue =
+      label === "telefone"
+        ? (formatPhoneForHeader(value) || value || "").replace(/\D/g, "")
+        : normalizeMaskedValueForClipboard(value);
+
+    if (!clipboardValue || !navigator.clipboard?.writeText) {
+      showCopyToast("Nao foi possivel copiar.", "error");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(clipboardValue);
+      showCopyToast(successMessage);
+    } catch {
+      showCopyToast("Nao foi possivel copiar.", "error");
+    }
+  }
+
   async function submitTransfer(userId: string) {
     if (!selectedConversation) return;
     setTransferSaving(true);
@@ -7918,10 +7970,22 @@ function Atendimento({
 
       <section
         className={clsx(
-          "min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-line/80 bg-white shadow-soft",
+          "relative min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-line/80 bg-white shadow-soft",
           showMobileConversationDetail ? "flex" : "hidden xl:flex"
         )}
       >
+        {copyToast && (
+          <div
+            className={clsx(
+              "pointer-events-none absolute right-4 top-14 z-30 rounded-full border px-3 py-2 text-xs font-semibold shadow-soft",
+              copyToast.tone === "success"
+                ? "border-emerald-100 bg-emerald-50 text-emerald-700"
+                : "border-rose-100 bg-rose-50 text-rose-700"
+            )}
+          >
+            {copyToast.message}
+          </div>
+        )}
         {selectedConversation && (
           <div className="flex shrink-0 flex-col gap-2 border-b border-line/70 px-3 py-2 xl:hidden">
             <div className="flex min-w-0 items-center gap-2">
@@ -7948,7 +8012,25 @@ function Atendimento({
                   {formatContactNameForUi(selectedConversation.contact.name)}
                 </h3>
                 <p className="truncate text-xs font-medium text-slate-500">
-                  {selectedConversation.contact.phone}
+                  {selectedConversation.contact.phone ? (
+                    <button
+                      type="button"
+                      className="min-w-0 truncate rounded-sm text-left hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-100"
+                      title="Clique para copiar"
+                      aria-label={`Copiar telefone ${formatPhoneForHeader(selectedConversation.contact.phone) || selectedConversation.contact.phone}`}
+                      onClick={() =>
+                        void copyConversationHeaderValue({
+                          label: "telefone",
+                          successMessage: "Telefone copiado",
+                          value: selectedConversation.contact.phone
+                        })
+                      }
+                    >
+                      {selectedConversation.contact.phone}
+                    </button>
+                  ) : (
+                    selectedConversation.contact.phone
+                  )}
                 </p>
               </div>
               <button
@@ -8042,10 +8124,28 @@ function Atendimento({
           <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden 2xl:gap-2">
             <p
               className="inline-flex min-w-0 basis-[6.25rem] items-center gap-1 truncate text-xs font-semibold text-slate-700 2xl:basis-[8.75rem]"
-              title={selectedContactPhoneTitle}
+              title={selectedConversation?.contact.phone ? "Clique para copiar" : selectedContactPhoneTitle}
             >
                 {selectedConversation && <Phone className="h-3.5 w-3.5 shrink-0 text-slate-500" />}
-                <span className="min-w-0 truncate">{selectedContactPhoneLabel}</span>
+                {selectedConversation?.contact.phone ? (
+                  <button
+                    type="button"
+                    className="min-w-0 truncate rounded-sm text-left hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-100"
+                    title="Clique para copiar"
+                    aria-label={`Copiar telefone ${selectedContactPhoneLabel}`}
+                    onClick={() =>
+                      void copyConversationHeaderValue({
+                        label: "telefone",
+                        successMessage: "Telefone copiado",
+                        value: selectedConversation.contact.phone
+                      })
+                    }
+                  >
+                    {selectedContactPhoneLabel}
+                  </button>
+                ) : (
+                  <span className="min-w-0 truncate">{selectedContactPhoneLabel}</span>
+                )}
               </p>
               {selectedConversation && (
                 <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden 2xl:gap-2">
@@ -8054,12 +8154,30 @@ function Atendimento({
                     className="inline-flex min-w-[2rem] basis-[6rem] items-center gap-1 truncate text-xs font-semibold text-slate-700 2xl:basis-[7.75rem]"
                     title={
                       selectedConversation.contact.cpf
-                        ? formatCpf(selectedConversation.contact.cpf)
+                        ? "Clique para copiar"
                         : "CPF nao informado"
                     }
                   >
                     <IdCard className="h-3.5 w-3.5 shrink-0 text-slate-500" />
-                    <span className="min-w-0 truncate">{selectedContactCpfLabel}</span>
+                    {selectedConversation.contact.cpf ? (
+                      <button
+                        type="button"
+                        className="min-w-0 truncate rounded-sm text-left hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-100"
+                        title="Clique para copiar"
+                        aria-label={`Copiar CPF ${selectedContactCpfLabel}`}
+                        onClick={() =>
+                          void copyConversationHeaderValue({
+                            label: "CPF",
+                            successMessage: "CPF copiado",
+                            value: selectedConversation.contact.cpf
+                          })
+                        }
+                      >
+                        {selectedContactCpfLabel}
+                      </button>
+                    ) : (
+                      <span className="min-w-0 truncate">{selectedContactCpfLabel}</span>
+                    )}
                   </span>
                   <span className="h-5 w-px shrink-0 bg-slate-200/80" aria-hidden="true" />
                   <span
