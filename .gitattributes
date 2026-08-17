@@ -1,0 +1,2 @@
+prisma/migrations/**/*.sql text eol=lf
+prisma/migrations/00000000000000_baseline/migration.sql -text !eol
