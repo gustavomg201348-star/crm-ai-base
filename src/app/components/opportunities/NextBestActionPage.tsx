@@ -11,10 +11,7 @@ import {
   X,
   UserRound
 } from "lucide-react";
-import type {
-  OpportunityQueueItem,
-  OpportunityQueueResponse
-} from "@/app/components/opportunities/types";
+import type { OpportunityQueueItem } from "@/app/components/opportunities/types";
 
 type ActionNotice = {
   tone: "success" | "info";
@@ -65,25 +62,61 @@ const ACTION_RESULTS: ActionResult[] = [
   }
 ];
 
-async function loadNextBestActionQueue(signal: AbortSignal) {
-  const response = await fetch("/api/opportunities/queue?limit=50", {
+type NextOpportunityResponse = {
+  opportunity: OpportunityQueueItem | null;
+  empty: boolean;
+  scanned: number;
+  skipped: number;
+  claimed?: boolean;
+  claimStatus?: "CLAIMED" | "ALREADY_OWNED" | "TAKEN" | "MISSING";
+  message?: string;
+};
+
+async function requestNextOpportunity({
+  signal,
+  excludeConversationIds
+}: {
+  signal: AbortSignal;
+  excludeConversationIds: string[];
+}) {
+  const response = await fetch("/api/opportunities/next", {
+    method: "POST",
     signal,
     headers: {
-      Accept: "application/json"
-    }
+      Accept: "application/json",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ action: "peek", excludeConversationIds })
   });
 
   if (!response.ok) {
     throw new Error("Não foi possível carregar a próxima melhor ação.");
   }
 
-  return (await response.json()) as OpportunityQueueResponse;
+  return (await response.json()) as NextOpportunityResponse;
 }
 
-function moveFirstToEnd(items: OpportunityQueueItem[]) {
-  if (items.length <= 1) return items;
-  const [current, ...rest] = items;
-  return [...rest, current];
+async function claimVisibleOpportunity({
+  conversationId,
+  excludeConversationIds
+}: {
+  conversationId: string;
+  excludeConversationIds: string[];
+}) {
+  const response = await fetch("/api/opportunities/next", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ action: "claim", conversationId, excludeConversationIds })
+  });
+
+  if (!response.ok) {
+    throw new Error("Não foi possível assumir esta oportunidade.");
+  }
+
+  return (await response.json()) as NextOpportunityResponse;
 }
 
 function ActionField({ label, value }: { label: string; value: string }) {
@@ -102,18 +135,18 @@ export function NextBestActionPage({
 }: {
   onOpenConversation: (conversationId: string) => void | Promise<void>;
 }) {
-  const [items, setItems] = useState<OpportunityQueueItem[]>([]);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [currentOpportunity, setCurrentOpportunity] = useState<OpportunityQueueItem | null>(null);
+  const [excludedConversationIds, setExcludedConversationIds] = useState<string[]>([]);
+  const [queueMeta, setQueueMeta] = useState({ scanned: 0, skipped: 0 });
   const [loading, setLoading] = useState(true);
+  const [claimLoading, setClaimLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<ActionNotice>(null);
   const [isResultModalOpen, setIsResultModalOpen] = useState(false);
   const [selectedResultId, setSelectedResultId] = useState<string | null>(null);
   const requestRef = useRef(0);
 
-  const currentOpportunity = items[0] ?? null;
-
-  const loadQueue = useCallback(() => {
+  const loadNextOpportunity = useCallback((excludeConversationIdsSnapshot: string[]) => {
     const controller = new AbortController();
     const requestId = requestRef.current + 1;
     requestRef.current = requestId;
@@ -122,17 +155,20 @@ export function NextBestActionPage({
     setError(null);
     setNotice(null);
 
-    void loadNextBestActionQueue(controller.signal)
+    void requestNextOpportunity({
+      signal: controller.signal,
+      excludeConversationIds: excludeConversationIdsSnapshot
+    })
       .then((data) => {
         if (requestRef.current !== requestId) return;
-        setItems(data.items);
-        setNextCursor(data.nextCursor);
+        setCurrentOpportunity(data.opportunity);
+        setQueueMeta({ scanned: data.scanned, skipped: data.skipped });
       })
       .catch((loadError: unknown) => {
         if (controller.signal.aborted || requestRef.current !== requestId) return;
         setError(loadError instanceof Error ? loadError.message : "Não foi possível carregar a próxima melhor ação.");
-        setItems([]);
-        setNextCursor(null);
+        setCurrentOpportunity(null);
+        setQueueMeta({ scanned: 0, skipped: 0 });
       })
       .finally(() => {
         if (requestRef.current === requestId) {
@@ -145,7 +181,21 @@ export function NextBestActionPage({
     };
   }, []);
 
-  useEffect(() => loadQueue(), [loadQueue]);
+  useEffect(() => loadNextOpportunity([]), [loadNextOpportunity]);
+
+  const reloadFromStart = useCallback(() => {
+    setExcludedConversationIds([]);
+    loadNextOpportunity([]);
+  }, [loadNextOpportunity]);
+
+  const dismissCurrentLocally = useCallback(() => {
+    if (!currentOpportunity) return;
+
+    const nextExcluded = [...excludedConversationIds, currentOpportunity.conversationId];
+    setExcludedConversationIds(nextExcluded);
+    setCurrentOpportunity(null);
+    loadNextOpportunity(nextExcluded);
+  }, [currentOpportunity, excludedConversationIds, loadNextOpportunity]);
 
   useEffect(() => {
     if (!isResultModalOpen) return;
@@ -164,13 +214,45 @@ export function NextBestActionPage({
     };
   }, [isResultModalOpen]);
 
-  const queueInfo = useMemo(() => {
-    if (nextCursor) {
-      return `${items.length} oportunidades carregadas nesta rodada. Existem outras oportunidades além desta visão.`;
-    }
+  const queueInfo = useMemo(
+    () => `${queueMeta.scanned} conversas analisadas. ${queueMeta.skipped} ignorada(s) nesta rodada local.`,
+    [queueMeta.scanned, queueMeta.skipped]
+  );
 
-    return `${items.length} oportunidades carregadas nesta rodada.`;
-  }, [items.length, nextCursor]);
+  const handleWorkOpportunity = useCallback(async () => {
+    if (!currentOpportunity || claimLoading) return;
+
+    setClaimLoading(true);
+    setError(null);
+    setNotice(null);
+
+    try {
+      const data = await claimVisibleOpportunity({
+        conversationId: currentOpportunity.conversationId,
+        excludeConversationIds: excludedConversationIds
+      });
+
+      setQueueMeta({ scanned: data.scanned, skipped: data.skipped });
+
+      if (data.claimed && data.opportunity) {
+        await onOpenConversation(data.opportunity.conversationId);
+        setNotice({ tone: "success", message: "Oportunidade assumida. Conversa aberta para atendimento." });
+        return;
+      }
+
+      const nextExcluded = [...excludedConversationIds, currentOpportunity.conversationId];
+      setExcludedConversationIds(nextExcluded);
+      setCurrentOpportunity(data.opportunity);
+      setNotice({
+        tone: "info",
+        message: data.message ?? "Essa oportunidade foi assumida por outro operador. Preparamos a próxima opção."
+      });
+    } catch (claimError) {
+      setError(claimError instanceof Error ? claimError.message : "Não foi possível assumir esta oportunidade.");
+    } finally {
+      setClaimLoading(false);
+    }
+  }, [claimLoading, currentOpportunity, excludedConversationIds, onOpenConversation]);
 
   const handleComplete = useCallback(() => {
     setSelectedResultId(null);
@@ -186,30 +268,30 @@ export function NextBestActionPage({
   const handleConfirmResult = useCallback(() => {
     if (!selectedResultId) return;
 
-    setItems((current) => current.slice(1));
     setIsResultModalOpen(false);
     setSelectedResultId(null);
+    dismissCurrentLocally();
     setNotice({
       tone: "success",
-      message: "Resultado registrado. Próxima oportunidade preparada."
+      message: "Resultado registrado somente nesta rodada local. Próxima oportunidade preparada."
     });
-  }, [selectedResultId]);
+  }, [dismissCurrentLocally, selectedResultId]);
 
   const handleSkip = useCallback(() => {
-    setItems((current) => moveFirstToEnd(current));
+    dismissCurrentLocally();
     setNotice({
       tone: "info",
-      message: "Oportunidade pulada nesta rodada. Ela continua disponível na fila local."
+      message: "Oportunidade pulada nesta rodada local. Nenhuma conversa foi assumida."
     });
-  }, []);
+  }, [dismissCurrentLocally]);
 
   const handleReturnToQueue = useCallback(() => {
-    setItems((current) => moveFirstToEnd(current));
+    dismissCurrentLocally();
     setNotice({
       tone: "info",
-      message: "Oportunidade devolvida para o fim da fila local."
+      message: "Oportunidade devolvida nesta rodada local. Nenhuma atribuição foi criada."
     });
-  }, []);
+  }, [dismissCurrentLocally]);
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
@@ -219,12 +301,12 @@ export function NextBestActionPage({
           <div>
             <h1 className="text-3xl font-bold text-ink">Próxima Melhor Ação</h1>
             <p className="mt-2 max-w-2xl text-sm text-slate-500">
-              O CRM entrega uma oportunidade por vez para manter o operador focado na próxima ação comercial.
+              O CRM apresenta uma oportunidade por vez. A conversa só é assumida quando o operador decide trabalhar nela.
             </p>
           </div>
           <button
             type="button"
-            onClick={() => loadQueue()}
+            onClick={reloadFromStart}
             className="inline-flex items-center justify-center gap-2 rounded-2xl border border-line bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-brand/40 hover:text-brand"
           >
             <RotateCcw className="h-4 w-4" />
@@ -261,7 +343,7 @@ export function NextBestActionPage({
             </div>
             <button
               type="button"
-              onClick={() => loadQueue()}
+              onClick={reloadFromStart}
               className="rounded-2xl bg-amber-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-800"
             >
               Tentar novamente
@@ -333,16 +415,18 @@ export function NextBestActionPage({
               <div className="flex w-full flex-col gap-3 lg:w-56">
                 <button
                   type="button"
-                  onClick={() => void onOpenConversation(currentOpportunity.conversationId)}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-brand px-4 py-3 text-sm font-semibold text-white shadow-soft transition hover:bg-brand/90"
+                  onClick={() => void handleWorkOpportunity()}
+                  disabled={claimLoading}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-brand px-4 py-3 text-sm font-semibold text-white shadow-soft transition hover:bg-brand/90 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
                 >
-                  Abrir conversa
+                  {claimLoading ? "Assumindo..." : "Trabalhar esta oportunidade"}
                   <ArrowRight className="h-4 w-4" />
                 </button>
                 <button
                   type="button"
                   onClick={handleComplete}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100"
+                  disabled={claimLoading}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <CheckCircle2 className="h-4 w-4" />
                   Concluir
@@ -350,7 +434,8 @@ export function NextBestActionPage({
                 <button
                   type="button"
                   onClick={handleSkip}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-line bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-brand/40 hover:text-brand"
+                  disabled={claimLoading}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-line bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-brand/40 hover:text-brand disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <SkipForward className="h-4 w-4" />
                   Pular
@@ -358,7 +443,8 @@ export function NextBestActionPage({
                 <button
                   type="button"
                   onClick={handleReturnToQueue}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-line bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-brand/40 hover:text-brand"
+                  disabled={claimLoading}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-line bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-brand/40 hover:text-brand disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <RotateCcw className="h-4 w-4" />
                   Voltar para fila
