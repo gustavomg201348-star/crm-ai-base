@@ -366,8 +366,8 @@ Nunca executar rollback manual sem plano revisado.
   `Conversation.channel`.
 - Ausencia de baseline Prisma Migrate torna migrations formais mais arriscadas
   neste momento.
-- O deploy atual ainda pode usar `prisma db push` em fluxo Railway; isso deve ser
-  tratado em fase propria de governanca de migrations.
+- O fluxo legado de Railway que podia usar `prisma db push` foi tratado em fase
+  propria de governanca de migrations; producao deve seguir `prisma migrate deploy`.
 
 ## 12. Checklist final de execucao
 

@@ -17,50 +17,41 @@ function runAndWait(command, args) {
   });
 }
 
-const app = run("npm", ["run", "start"]);
+let app;
 
-async function runDatabaseMaintenance() {
-  const dbSyncCode = await runAndWait("node", [
+async function main() {
+  console.log("Running database migrations.");
+
+  const migrationCode = await runAndWait("node", [
     "prisma/retry-command.mjs",
     "npm",
     "run",
-    "prisma:push:prod"
+    "prisma:migrate:prod"
   ]);
 
-  if (dbSyncCode !== 0) {
-    console.error(`Database schema sync exited with code ${dbSyncCode}. App remains running.`);
-    return;
+  if (migrationCode !== 0) {
+    console.error(`Database migrations exited with code ${migrationCode}. Application will not start.`);
+    process.exit(migrationCode);
   }
 
-  console.log("Database schema sync completed.");
+  console.log("Database migrations completed. Starting application.");
 
-  if (process.env.SEED_ADMIN_PASSWORD) {
-    const seedCode = await runAndWait("node", [
-      "prisma/retry-command.mjs",
-      "npm",
-      "run",
-      "prisma:seed:prod"
-    ]);
-
-    if (seedCode === 0) {
-      console.log("Seed completed.");
-    } else {
-      console.error(`Seed exited with code ${seedCode}. App remains running.`);
-    }
-  }
+  app = run("npm", ["run", "start"]);
+  app.on("exit", (code) => {
+    process.exit(code ?? 0);
+  });
 }
 
-runDatabaseMaintenance().catch((error) => {
-  console.error("Database maintenance failed.", error);
+main().catch((error) => {
+  console.error("Startup failed.", error);
+  process.exit(1);
 });
 
 function shutdown(signal) {
-  app.kill(signal);
+  if (app) {
+    app.kill(signal);
+  }
 }
 
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
-
-app.on("exit", (code) => {
-  process.exit(code ?? 0);
-});

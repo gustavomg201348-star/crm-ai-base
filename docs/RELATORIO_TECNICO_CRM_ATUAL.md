@@ -34,9 +34,8 @@ Este documento descreve o estado atual do CRM `crm-ai-base` com base no codigo p
 - Cliente Prisma centralizado em `src/lib/db.ts`.
 - Scripts:
   - `npm run prisma:push`
-  - `npm run prisma:push:prod`
   - `npm run prisma:seed`
-  - `npm run prisma:seed:prod`
+  - `npm run prisma:migrate:prod`
 
 ### Autenticacao
 
@@ -58,7 +57,8 @@ Este documento descreve o estado atual do CRM `crm-ai-base` com base no codigo p
   - `docker-compose.production.yml`
   - `docs/DEPLOY.md`
 - Fluxo de deploy por GitHub.
-- Predeploy Railway executa `prisma db push` de producao e seed via `prisma/retry-command.mjs`.
+- Startup Railway executa `prisma migrate deploy` de producao de forma bloqueante via `scripts/railway-start.mjs`.
+- Seed nao roda automaticamente em producao.
 
 ### Servicos externos integrados
 
@@ -1851,4 +1851,3 @@ O CRM atual ja e uma base operacional forte para atendimento WhatsApp com IA, ca
 5. Implementar paginacao real de mensagens/conversas/contatos.
 6. Criar auditoria e observabilidade.
 7. Fortalecer isolamento multiempresa com testes automatizados.
-
