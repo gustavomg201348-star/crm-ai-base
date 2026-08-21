@@ -70,6 +70,7 @@ export async function POST(request: NextRequest) {
         skipped: result.skipped,
         claimed: result.claimed,
         claimStatus: result.claimStatus,
+        ownershipCreatedByNba: result.ownershipCreatedByNba,
         message: result.claimed
           ? "Oportunidade assumida para atendimento."
           : "Essa oportunidade ja foi assumida. Preparamos a proxima opcao."
@@ -91,6 +92,7 @@ export async function POST(request: NextRequest) {
         scanned: result.scanned,
         skipped: result.skipped,
         claimed: false,
+        ownershipCreatedByNba: false,
         message: "Nenhuma oportunidade disponivel para assumir agora."
       });
     }
@@ -100,7 +102,8 @@ export async function POST(request: NextRequest) {
       empty: false,
       scanned: result.scanned,
       skipped: result.skipped,
-      claimed: false
+      claimed: false,
+      ownershipCreatedByNba: false
     });
   } catch (error) {
     if (error instanceof NextBestActionError) {

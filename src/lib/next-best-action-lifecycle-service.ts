@@ -51,6 +51,28 @@ type ClaimValidationResult = {
   candidate: OpportunityQueueItem | null;
 };
 
+type LifecycleDb = Pick<
+  typeof prisma,
+  "conversation" | "leadAssignmentHistory" | "nextBestActionEvent" | "$transaction"
+>;
+
+type LifecycleTransactionDb = Pick<
+  typeof prisma,
+  "conversation" | "leadAssignmentHistory" | "nextBestActionEvent"
+>;
+
+type FindQueueCandidate = (input: {
+  companyId: string;
+  requesterId: string;
+  requesterRole: string;
+  conversationId: string;
+}) => Promise<OpportunityQueueItem | null>;
+
+type LifecycleDependencies = {
+  db: LifecycleDb;
+  findQueueCandidate: FindQueueCandidate;
+};
+
 export function getSuppressedUntil(action: NextBestActionEventAction, now = new Date()) {
   if (action === NEXT_BEST_ACTION_COMPLETED) {
     return new Date(now.getTime() + COMPLETED_SUPPRESSION_HOURS * 60 * 60 * 1000);
@@ -154,13 +176,15 @@ function buildEventData({
 }
 
 async function getExistingEvent({
+  db,
   companyId,
   idempotencyKey
 }: {
+  db: LifecycleDb;
   companyId: string;
   idempotencyKey: string;
 }) {
-  return prisma.nextBestActionEvent.findUnique({
+  return db.nextBestActionEvent.findUnique({
     where: {
       companyId_idempotencyKey: {
         companyId,
@@ -179,17 +203,21 @@ function isUniqueConstraintError(error: unknown) {
 }
 
 async function validateActiveClaim({
+  db,
+  findQueueCandidate,
   companyId,
   requesterId,
   requesterRole,
   conversationId
 }: {
+  db: LifecycleDb | LifecycleTransactionDb;
+  findQueueCandidate: FindQueueCandidate;
   companyId: string;
   requesterId: string;
   requesterRole: string;
   conversationId: string;
 }): Promise<ClaimValidationResult> {
-  const conversation = await prisma.conversation.findFirst({
+  const conversation = await db.conversation.findFirst({
     where: {
       id: conversationId,
       contact: { companyId }
@@ -213,7 +241,7 @@ async function validateActiveClaim({
     );
   }
 
-  const claim = await prisma.nextBestActionEvent.findFirst({
+  const claim = await db.nextBestActionEvent.findFirst({
     where: {
       companyId,
       conversationId,
@@ -228,7 +256,7 @@ async function validateActiveClaim({
     }
   });
 
-  if (!claim?.assignmentHistoryId) {
+  if (!claim) {
     throw new NextBestActionError(
       "NBA_CLAIM_REQUIRED",
       409,
@@ -236,7 +264,7 @@ async function validateActiveClaim({
     );
   }
 
-  const resolvedEvent = await prisma.nextBestActionEvent.findFirst({
+  const resolvedEvent = await db.nextBestActionEvent.findFirst({
     where: {
       companyId,
       conversationId,
@@ -254,7 +282,7 @@ async function validateActiveClaim({
     );
   }
 
-  const latestAssignment = await prisma.leadAssignmentHistory.findFirst({
+  const latestAssignment = await db.leadAssignmentHistory.findFirst({
     where: {
       companyId,
       conversationId
@@ -264,17 +292,26 @@ async function validateActiveClaim({
       id: true,
       assignedToUserId: true,
       mode: true,
-      action: true
+      action: true,
+      createdAt: true
     }
   });
 
-  if (
-    !latestAssignment ||
-    latestAssignment.id !== claim.assignmentHistoryId ||
-    latestAssignment.assignedToUserId !== requesterId ||
-    latestAssignment.mode !== "NEXT_BEST_ACTION" ||
-    latestAssignment.action !== NEXT_BEST_ACTION_CLAIMED
-  ) {
+  if (claim.assignmentHistoryId) {
+    if (
+      !latestAssignment ||
+      latestAssignment.id !== claim.assignmentHistoryId ||
+      latestAssignment.assignedToUserId !== requesterId ||
+      latestAssignment.mode !== "NEXT_BEST_ACTION" ||
+      latestAssignment.action !== NEXT_BEST_ACTION_CLAIMED
+    ) {
+      throw new NextBestActionError(
+        "STALE_OWNERSHIP",
+        409,
+        "Esta oportunidade teve uma atribuicao posterior."
+      );
+    }
+  } else if (latestAssignment && latestAssignment.createdAt > claim.createdAt) {
     throw new NextBestActionError(
       "STALE_OWNERSHIP",
       409,
@@ -296,9 +333,9 @@ async function validateActiveClaim({
   };
 }
 
-async function recordSkipped(input: Required<Pick<RecordNextBestActionInput, "companyId" | "requesterId" | "requesterRole" | "conversationId" | "idempotencyKey" | "reason" | "now">>) {
+async function recordSkipped(dependencies: LifecycleDependencies, input: Required<Pick<RecordNextBestActionInput, "companyId" | "requesterId" | "requesterRole" | "conversationId" | "idempotencyKey" | "reason" | "now">>) {
   const reason = requireText(input.reason, "REASON_REQUIRED", "Informe o motivo para pular.");
-  const candidate = await findQueueCandidate(input);
+  const candidate = await dependencies.findQueueCandidate(input);
 
   if (!candidate) {
     throw new NextBestActionError(
@@ -310,7 +347,7 @@ async function recordSkipped(input: Required<Pick<RecordNextBestActionInput, "co
 
   const suppressedUntil = getSuppressedUntil(NEXT_BEST_ACTION_SKIPPED, input.now);
 
-  await prisma.nextBestActionEvent.create({
+  await dependencies.db.nextBestActionEvent.create({
     data: buildEventData({
       ...input,
       contactId: candidate.contact.id,
@@ -325,12 +362,16 @@ async function recordSkipped(input: Required<Pick<RecordNextBestActionInput, "co
   return suppressedUntil;
 }
 
-async function recordCompleted(input: Required<Pick<RecordNextBestActionInput, "companyId" | "requesterId" | "requesterRole" | "conversationId" | "idempotencyKey" | "outcome" | "now">>) {
+async function recordCompleted(dependencies: LifecycleDependencies, input: Required<Pick<RecordNextBestActionInput, "companyId" | "requesterId" | "requesterRole" | "conversationId" | "idempotencyKey" | "outcome" | "now">>) {
   const outcome = requireText(input.outcome, "OUTCOME_REQUIRED", "Informe o resultado da acao.");
-  const { conversation, candidate } = await validateActiveClaim(input);
+  const { conversation, candidate } = await validateActiveClaim({
+    ...input,
+    db: dependencies.db,
+    findQueueCandidate: dependencies.findQueueCandidate
+  });
   const suppressedUntil = getSuppressedUntil(NEXT_BEST_ACTION_COMPLETED, input.now);
 
-  await prisma.nextBestActionEvent.create({
+  await dependencies.db.nextBestActionEvent.create({
     data: buildEventData({
       ...input,
       contactId: conversation.contact.id,
@@ -345,12 +386,25 @@ async function recordCompleted(input: Required<Pick<RecordNextBestActionInput, "
   return suppressedUntil;
 }
 
-async function recordReturned(input: Required<Pick<RecordNextBestActionInput, "companyId" | "requesterId" | "requesterRole" | "conversationId" | "idempotencyKey" | "reason" | "now">>) {
+async function recordReturned(dependencies: LifecycleDependencies, input: Required<Pick<RecordNextBestActionInput, "companyId" | "requesterId" | "requesterRole" | "conversationId" | "idempotencyKey" | "reason" | "now">>) {
   const reason = requireText(input.reason, "REASON_REQUIRED", "Informe o motivo para devolver.");
-  const { conversation, claim, candidate } = await validateActiveClaim(input);
+  const { conversation, claim, candidate } = await validateActiveClaim({
+    ...input,
+    db: dependencies.db,
+    findQueueCandidate: dependencies.findQueueCandidate
+  });
+
+  if (!claim.assignmentHistoryId) {
+    throw new NextBestActionError(
+      "NBA_PREEXISTING_OWNERSHIP",
+      409,
+      "Esta conversa ja era sua antes da Proxima Melhor Acao e nao pode ser devolvida por este fluxo."
+    );
+  }
+
   const suppressedUntil = getSuppressedUntil(NEXT_BEST_ACTION_RETURNED, input.now);
 
-  await prisma.$transaction(async (tx) => {
+  await dependencies.db.$transaction(async (tx) => {
     const latestAssignment = await tx.leadAssignmentHistory.findFirst({
       where: {
         companyId: input.companyId,
@@ -427,10 +481,17 @@ async function recordReturned(input: Required<Pick<RecordNextBestActionInput, "c
   return suppressedUntil;
 }
 
-export async function recordNextBestAction(input: RecordNextBestActionInput): Promise<RecordNextBestActionResult> {
+async function recordNextBestActionWithDependencies(
+  dependencies: LifecycleDependencies,
+  input: RecordNextBestActionInput
+): Promise<RecordNextBestActionResult> {
   const now = input.now ?? new Date();
   const idempotencyKey = normalizeIdempotencyKey(input.idempotencyKey);
-  const existingEvent = await getExistingEvent({ companyId: input.companyId, idempotencyKey });
+  const existingEvent = await getExistingEvent({
+    db: dependencies.db,
+    companyId: input.companyId,
+    idempotencyKey
+  });
 
   if (existingEvent) {
     if (existingEvent.action !== input.action) {
@@ -453,7 +514,7 @@ export async function recordNextBestAction(input: RecordNextBestActionInput): Pr
 
   try {
     if (input.action === NEXT_BEST_ACTION_SKIPPED) {
-      suppressedUntil = await recordSkipped({
+      suppressedUntil = await recordSkipped(dependencies, {
         companyId: input.companyId,
         requesterId: input.requesterId,
         requesterRole: input.requesterRole,
@@ -463,7 +524,7 @@ export async function recordNextBestAction(input: RecordNextBestActionInput): Pr
         now
       });
     } else if (input.action === NEXT_BEST_ACTION_COMPLETED) {
-      suppressedUntil = await recordCompleted({
+      suppressedUntil = await recordCompleted(dependencies, {
         companyId: input.companyId,
         requesterId: input.requesterId,
         requesterRole: input.requesterRole,
@@ -473,7 +534,7 @@ export async function recordNextBestAction(input: RecordNextBestActionInput): Pr
         now
       });
     } else {
-      suppressedUntil = await recordReturned({
+      suppressedUntil = await recordReturned(dependencies, {
         companyId: input.companyId,
         requesterId: input.requesterId,
         requesterRole: input.requesterRole,
@@ -488,7 +549,11 @@ export async function recordNextBestAction(input: RecordNextBestActionInput): Pr
       throw error;
     }
 
-    const duplicatedEvent = await getExistingEvent({ companyId: input.companyId, idempotencyKey });
+    const duplicatedEvent = await getExistingEvent({
+      db: dependencies.db,
+      companyId: input.companyId,
+      idempotencyKey
+    });
 
     if (duplicatedEvent?.action === input.action) {
       return {
@@ -508,4 +573,21 @@ export async function recordNextBestAction(input: RecordNextBestActionInput): Pr
     suppressedUntil,
     message: "Acao registrada."
   };
+}
+
+export async function recordNextBestActionForTest(
+  dependencies: LifecycleDependencies,
+  input: RecordNextBestActionInput
+): Promise<RecordNextBestActionResult> {
+  return recordNextBestActionWithDependencies(dependencies, input);
+}
+
+export async function recordNextBestAction(input: RecordNextBestActionInput): Promise<RecordNextBestActionResult> {
+  return recordNextBestActionWithDependencies(
+    {
+      db: prisma,
+      findQueueCandidate
+    },
+    input
+  );
 }

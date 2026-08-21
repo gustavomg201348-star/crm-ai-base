@@ -89,12 +89,14 @@ export type ConversationClaimDb = {
         action: true;
         conversationId: true;
         userId: true;
+        assignmentHistoryId: true;
       };
     }): Promise<{
       id: string;
       action: string;
       conversationId: string;
       userId: string;
+      assignmentHistoryId: string | null;
     } | null>;
     create(args: {
       data: NextBestActionEventCreateData;
@@ -118,6 +120,7 @@ export type ClaimOpportunityCandidateInput = {
 export type ClaimOpportunityCandidateResult = {
   status: OpportunityClaimStatus;
   opportunity: OpportunityQueueItem | null;
+  ownershipCreatedByNba: boolean;
 };
 
 export type GetNextOpportunityInput = {
@@ -160,6 +163,7 @@ export type GetNextOpportunityResult = {
 export type ClaimVisibleOpportunityResult = GetNextOpportunityResult & {
   claimed: boolean;
   claimStatus: OpportunityClaimStatus;
+  ownershipCreatedByNba: boolean;
 };
 
 export function buildNextBestActionEventSnapshot(
@@ -242,7 +246,8 @@ async function claimOpportunityCandidateInTransaction(
       id: true,
       action: true,
       conversationId: true,
-      userId: true
+      userId: true,
+      assignmentHistoryId: true
     }
   });
 
@@ -254,7 +259,8 @@ async function claimOpportunityCandidateInTransaction(
     ) {
       return {
         status: "IDEMPOTENT",
-        opportunity: withClaimedOwner(candidate, { id: requesterId, name: requesterName })
+        opportunity: withClaimedOwner(candidate, { id: requesterId, name: requesterName }),
+        ownershipCreatedByNba: Boolean(existingEvent.assignmentHistoryId)
       };
     }
 
@@ -304,7 +310,8 @@ async function claimOpportunityCandidateInTransaction(
 
     return {
       status: "CLAIMED",
-      opportunity: withClaimedOwner(candidate, { id: requesterId, name: requesterName })
+      opportunity: withClaimedOwner(candidate, { id: requesterId, name: requesterName }),
+      ownershipCreatedByNba: true
     };
   }
 
@@ -317,17 +324,32 @@ async function claimOpportunityCandidateInTransaction(
   });
 
   if (!current) {
-    return { status: "MISSING", opportunity: null };
+    return { status: "MISSING", opportunity: null, ownershipCreatedByNba: false };
   }
 
   if (current.agentId === requesterId) {
+    await db.nextBestActionEvent.create({
+      data: {
+        companyId,
+        conversationId: candidate.conversationId,
+        contactId: candidate.contact.id,
+        userId: requesterId,
+        assignmentHistoryId: null,
+        action: NEXT_BEST_ACTION_CLAIMED,
+        idempotencyKey: normalizedIdempotencyKey,
+        createdAt: now,
+        ...buildNextBestActionEventSnapshot(candidate)
+      }
+    });
+
     return {
       status: "ALREADY_OWNED",
-      opportunity: withClaimedOwner(candidate, { id: requesterId, name: requesterName })
+      opportunity: withClaimedOwner(candidate, { id: requesterId, name: requesterName }),
+      ownershipCreatedByNba: false
     };
   }
 
-  return { status: "TAKEN", opportunity: null };
+  return { status: "TAKEN", opportunity: null, ownershipCreatedByNba: false };
 }
 
 export async function claimOpportunityCandidate(
@@ -396,7 +418,8 @@ export async function claimVisibleOpportunityFromCandidates({
     return {
       ...selectNextOpportunityFromCandidates({ candidates, scanned, excludeConversationIds: excluded }),
       claimed: false,
-      claimStatus: "MISSING"
+      claimStatus: "MISSING",
+      ownershipCreatedByNba: false
     };
   }
 
@@ -414,7 +437,8 @@ export async function claimVisibleOpportunityFromCandidates({
       scanned,
       skipped: excluded.length,
       claimed: true,
-      claimStatus: claim.status
+      claimStatus: claim.status,
+      ownershipCreatedByNba: claim.ownershipCreatedByNba
     };
   }
 
@@ -425,7 +449,8 @@ export async function claimVisibleOpportunityFromCandidates({
       excludeConversationIds: [...excluded, conversationId]
     }),
     claimed: false,
-    claimStatus: claim.status
+    claimStatus: claim.status,
+    ownershipCreatedByNba: false
   };
 }
 

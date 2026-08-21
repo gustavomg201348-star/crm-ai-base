@@ -78,6 +78,7 @@ type NextOpportunityResponse = {
   skipped: number;
   claimed?: boolean;
   claimStatus?: "CLAIMED" | "ALREADY_OWNED" | "TAKEN" | "MISSING" | "IDEMPOTENT";
+  ownershipCreatedByNba?: boolean;
   message?: string;
 };
 
@@ -219,6 +220,7 @@ export function NextBestActionPage({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<ActionNotice>(null);
   const [claimedConversationId, setClaimedConversationId] = useState<string | null>(null);
+  const [claimedOwnershipCreatedByNba, setClaimedOwnershipCreatedByNba] = useState(false);
   const [isResultModalOpen, setIsResultModalOpen] = useState(false);
   const [selectedResultId, setSelectedResultId] = useState<string | null>(null);
   const [resultIdempotencyKey, setResultIdempotencyKey] = useState<string | null>(null);
@@ -245,6 +247,7 @@ export function NextBestActionPage({
         if (requestRef.current !== requestId) return;
         setCurrentOpportunity(data.opportunity);
         setClaimedConversationId(null);
+        setClaimedOwnershipCreatedByNba(false);
         claimIdempotencyKeyRef.current = data.opportunity
           ? createIdempotencyKey(`nba-claim-${data.opportunity.conversationId}`)
           : null;
@@ -272,6 +275,7 @@ export function NextBestActionPage({
   const reloadFromStart = useCallback(() => {
     setExcludedConversationIds([]);
     setClaimedConversationId(null);
+    setClaimedOwnershipCreatedByNba(false);
     loadNextOpportunity([]);
   }, [loadNextOpportunity]);
 
@@ -322,7 +326,13 @@ export function NextBestActionPage({
       if (data.claimed && data.opportunity) {
         setCurrentOpportunity(data.opportunity);
         setClaimedConversationId(data.opportunity.conversationId);
-        setNotice({ tone: "success", message: "Oportunidade assumida. Agora você pode abrir a conversa, concluir ou devolver." });
+        setClaimedOwnershipCreatedByNba(Boolean(data.ownershipCreatedByNba));
+        setNotice({
+          tone: "success",
+          message: data.ownershipCreatedByNba
+            ? "Oportunidade assumida. Agora você pode abrir a conversa, concluir ou devolver."
+            : "Oportunidade iniciada. A conversa já era sua; agora você pode abrir ou concluir."
+        });
         return;
       }
 
@@ -407,7 +417,13 @@ export function NextBestActionPage({
   }, [claimedConversationId, currentOpportunity]);
 
   const handleReturnToQueue = useCallback(() => {
-    if (!currentOpportunity || claimedConversationId !== currentOpportunity.conversationId) return;
+    if (
+      !currentOpportunity ||
+      claimedConversationId !== currentOpportunity.conversationId ||
+      !claimedOwnershipCreatedByNba
+    ) {
+      return;
+    }
 
     setReasonText("");
     setReasonIdempotencyKey(createIdempotencyKey(`nba-return-${currentOpportunity.conversationId}`));
@@ -418,7 +434,7 @@ export function NextBestActionPage({
       confirmLabel: "Devolver para fila"
     });
     setNotice(null);
-  }, [claimedConversationId, currentOpportunity]);
+  }, [claimedConversationId, claimedOwnershipCreatedByNba, currentOpportunity]);
 
   const handleCloseReasonModal = useCallback(() => {
     setReasonModal(null);
@@ -467,6 +483,7 @@ export function NextBestActionPage({
   const isCurrentClaimed = Boolean(
     currentOpportunity && claimedConversationId === currentOpportunity.conversationId
   );
+  const canReturnCurrentOpportunity = isCurrentClaimed && claimedOwnershipCreatedByNba;
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
@@ -608,15 +625,17 @@ export function NextBestActionPage({
                       <CheckCircle2 className="h-4 w-4" />
                       Concluir
                     </button>
-                    <button
-                      type="button"
-                      onClick={handleReturnToQueue}
-                      disabled={Boolean(actionLoading)}
-                      className="inline-flex items-center justify-center gap-2 rounded-2xl border border-line bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-brand/40 hover:text-brand disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      <RotateCcw className="h-4 w-4" />
-                      Voltar para fila
-                    </button>
+                    {canReturnCurrentOpportunity && (
+                      <button
+                        type="button"
+                        onClick={handleReturnToQueue}
+                        disabled={Boolean(actionLoading)}
+                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-line bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-brand/40 hover:text-brand disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                        Voltar para fila
+                      </button>
+                    )}
                   </>
                 ) : (
                   <>

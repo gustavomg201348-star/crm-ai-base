@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   claimOpportunityCandidate,
@@ -12,7 +13,8 @@ import {
 } from "./opportunity-next-service";
 import {
   getSuppressedUntil,
-  parseLifecycleAction
+  parseLifecycleAction,
+  recordNextBestActionForTest
 } from "./next-best-action-lifecycle-service";
 import type { OpportunityQueueItem } from "./opportunity-queue-types";
 
@@ -129,7 +131,8 @@ function createDb(initialConversations: ConversationState[], options: { failHist
           id: `event-${events.indexOf(event) + 1}`,
           action: event.action,
           conversationId: event.conversationId,
-          userId: event.userId
+          userId: event.userId,
+          assignmentHistoryId: event.assignmentHistoryId ?? null
         };
       },
       async create(args: EventCreateArgs) {
@@ -159,6 +162,155 @@ function createDb(initialConversations: ConversationState[], options: { failHist
   };
 
   return { db, conversations, history, events };
+}
+
+type LifecycleEventState = EventCreateArgs["data"] & { id?: string };
+type LifecycleAssignmentState = HistoryCreateArgs["data"] & { id: string; createdAt: Date };
+
+function createLifecycleDb({
+  conversation = { id: "conversation-1", companyId: "company-1", agentId: "user-1", contactId: "contact-1" },
+  events = [],
+  assignments = []
+}: {
+  conversation?: ConversationState & { contactId: string };
+  events?: LifecycleEventState[];
+  assignments?: LifecycleAssignmentState[];
+} = {}) {
+  const currentConversation = { ...conversation };
+  const storedEvents = [...events];
+  const storedAssignments = [...assignments];
+
+  const txClient = {
+    conversation: {
+      async findFirst(args: { where: { id: string; contact: { companyId: string } } }) {
+        if (
+          currentConversation.id !== args.where.id ||
+          currentConversation.companyId !== args.where.contact.companyId
+        ) {
+          return null;
+        }
+
+        return {
+          id: currentConversation.id,
+          agentId: currentConversation.agentId,
+          contact: { id: currentConversation.contactId }
+        };
+      },
+      async updateMany(args: {
+        where: { id: string; agentId: string | null; contact: { companyId: string } };
+        data: { agentId: string | null; updatedAt: Date };
+      }) {
+        if (
+          currentConversation.id === args.where.id &&
+          currentConversation.companyId === args.where.contact.companyId &&
+          currentConversation.agentId === args.where.agentId
+        ) {
+          currentConversation.agentId = args.data.agentId;
+          return { count: 1 };
+        }
+
+        return { count: 0 };
+      }
+    },
+    leadAssignmentHistory: {
+      async findFirst(args: { where: { companyId: string; conversationId: string } }) {
+        return (
+          storedAssignments
+            .filter(
+              (assignment) =>
+                assignment.companyId === args.where.companyId &&
+                assignment.conversationId === args.where.conversationId
+            )
+            .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id))[0] ??
+          null
+        );
+      },
+      async create(args: HistoryCreateArgs) {
+        const assignment = {
+          ...args.data,
+          id: `history-${storedAssignments.length + 1}`,
+          createdAt: args.data.createdAt ?? baseDate
+        };
+        storedAssignments.push(assignment);
+        return { id: assignment.id };
+      }
+    },
+    nextBestActionEvent: {
+      async findUnique(args: EventFindUniqueArgs) {
+        const event = storedEvents.find(
+          (item) =>
+            item.companyId === args.where.companyId_idempotencyKey.companyId &&
+            item.idempotencyKey === args.where.companyId_idempotencyKey.idempotencyKey
+        );
+
+        if (!event) return null;
+
+        return {
+          id: event.id ?? `event-${storedEvents.indexOf(event) + 1}`,
+          action: event.action,
+          suppressedUntil: event.suppressedUntil ?? null
+        };
+      },
+      async findFirst(args: {
+        where: {
+          companyId: string;
+          conversationId: string;
+          userId?: string;
+          action: string | { in: string[] };
+          createdAt?: { gt: Date };
+        };
+      }) {
+        const actions =
+          typeof args.where.action === "string" ? [args.where.action] : args.where.action.in;
+
+        return (
+          storedEvents
+            .filter(
+              (event) =>
+                event.companyId === args.where.companyId &&
+                event.conversationId === args.where.conversationId &&
+                (!args.where.userId || event.userId === args.where.userId) &&
+                actions.includes(event.action) &&
+                (!args.where.createdAt?.gt || (event.createdAt ?? baseDate) > args.where.createdAt.gt)
+            )
+            .sort(
+              (a, b) =>
+                (b.createdAt ?? baseDate).getTime() - (a.createdAt ?? baseDate).getTime()
+            )[0] ?? null
+        );
+      },
+      async create(args: EventCreateArgs) {
+        storedEvents.push(args.data);
+        return args.data;
+      }
+    }
+  };
+
+  const db = {
+    ...txClient,
+    async $transaction<T>(fn: (tx: typeof txClient) => Promise<T>) {
+      const beforeConversation = { ...currentConversation };
+      const beforeEvents = [...storedEvents];
+      const beforeAssignments = [...storedAssignments];
+
+      try {
+        return await fn(txClient);
+      } catch (error) {
+        Object.assign(currentConversation, beforeConversation);
+        storedEvents.splice(0, storedEvents.length, ...beforeEvents);
+        storedAssignments.splice(0, storedAssignments.length, ...beforeAssignments);
+        throw error;
+      }
+    }
+  };
+
+  return {
+    db,
+    conversation: currentConversation,
+    events: storedEvents,
+    assignments: storedAssignments,
+    findQueueCandidate: async () => queueItem()
+  };
 }
 
 test("abrir NBA e carregar candidata nao altera agentId nem cria historico", () => {
@@ -227,6 +379,7 @@ test("acao explicita faz claim atomico e cria LeadAssignmentHistory e evento NBA
 
   assert.equal(result.claimed, true);
   assert.equal(result.claimStatus, "CLAIMED");
+  assert.equal(result.ownershipCreatedByNba, true);
   assert.equal(result.opportunity?.owner?.id, "user-1");
   assert.equal(conversations.get("conversation-1")?.agentId, "user-1");
   assert.equal(history.length, 1);
@@ -338,8 +491,8 @@ test("companyId permanece isolado no claim", async () => {
   assert.equal(history.length, 0);
 });
 
-test("conversa ja pertencente legitimamente ao proprio operador e tratada como propria", async () => {
-  const { db, history } = createDb([
+test("conversa ja pertencente ao proprio operador cria claim NBA sem historico", async () => {
+  const { db, conversations, history, events } = createDb([
     { id: "conversation-1", companyId: "company-1", agentId: "user-1" }
   ]);
 
@@ -352,8 +505,18 @@ test("conversa ja pertencente legitimamente ao proprio operador e tratada como p
   });
 
   assert.equal(result.status, "ALREADY_OWNED");
+  assert.equal(result.ownershipCreatedByNba, false);
   assert.equal(result.opportunity?.conversationId, "conversation-1");
+  assert.equal(conversations.get("conversation-1")?.agentId, "user-1");
   assert.equal(history.length, 0);
+  assert.equal(events.length, 1);
+  assert.equal(events[0]?.action, "CLAIMED");
+  assert.equal(events[0]?.assignmentHistoryId, null);
+  assert.equal(events[0]?.idempotencyKey, "claim-owned");
+  assert.equal(events[0]?.opportunityReason, "Cliente aguardando resposta");
+  assert.equal(events[0]?.recommendedAction, "Responder agora");
+  assert.equal(events[0]?.probableProduct, "FGTS");
+  assert.equal(events[0]?.priority, "Prioridade urgente");
 });
 
 test("fluxo local nunca usa agentId null para release inseguro", async () => {
@@ -377,6 +540,34 @@ test("fluxo local nunca usa agentId null para release inseguro", async () => {
 
   assert.equal(result.status, "ALREADY_OWNED");
   assert.equal(conversations.get("conversation-1")?.agentId, "user-1");
+});
+
+test("claim de conversa ja propria e idempotente e nao duplica evento", async () => {
+  const { db, history, events } = createDb([
+    { id: "conversation-1", companyId: "company-1", agentId: "user-1" }
+  ]);
+
+  const first = await claimOpportunityCandidate(db, {
+    companyId: "company-1",
+    requesterId: "user-1",
+    requesterName: "Operador 1",
+    candidate: queueItem({ owner: { id: "user-1", name: "Operador 1" } }),
+    idempotencyKey: "claim-owned-idempotent"
+  });
+  const second = await claimOpportunityCandidate(db, {
+    companyId: "company-1",
+    requesterId: "user-1",
+    requesterName: "Operador 1",
+    candidate: queueItem({ owner: { id: "user-1", name: "Operador 1" } }),
+    idempotencyKey: "claim-owned-idempotent"
+  });
+
+  assert.equal(first.status, "ALREADY_OWNED");
+  assert.equal(first.ownershipCreatedByNba, false);
+  assert.equal(second.status, "IDEMPOTENT");
+  assert.equal(second.ownershipCreatedByNba, false);
+  assert.equal(history.length, 0);
+  assert.equal(events.length, 1);
 });
 
 test("fila vazia retorna resposta apropriada sem mutation", () => {
@@ -418,7 +609,9 @@ test("claim repetido com mesma chave idempotente nao duplica historico nem event
   });
 
   assert.equal(first.status, "CLAIMED");
+  assert.equal(first.ownershipCreatedByNba, true);
   assert.equal(second.status, "IDEMPOTENT");
+  assert.equal(second.ownershipCreatedByNba, true);
   assert.equal(history.length, 1);
   assert.equal(events.length, 1);
 });
@@ -515,4 +708,225 @@ test("returned suprime usuario por 4 horas", () => {
 
 test("claimed nao cria janela de supressao", () => {
   assert.equal(getSuppressedUntil("CLAIMED", baseDate), null);
+});
+
+test("completed apos claim de ownership preexistente funciona e mantem agentId", async () => {
+  const { db, conversation, events, findQueueCandidate } = createLifecycleDb({
+    events: [
+      {
+        id: "event-claim-owned",
+        companyId: "company-1",
+        conversationId: "conversation-1",
+        contactId: "contact-1",
+        userId: "user-1",
+        assignmentHistoryId: null,
+        action: "CLAIMED",
+        idempotencyKey: "claim-owned",
+        createdAt: baseDate
+      }
+    ]
+  });
+
+  const result = await recordNextBestActionForTest(
+    { db: db as never, findQueueCandidate },
+    {
+      companyId: "company-1",
+      requesterId: "user-1",
+      requesterRole: "ADMIN",
+      conversationId: "conversation-1",
+      action: "COMPLETED",
+      idempotencyKey: "complete-owned",
+      outcome: "Cliente respondeu",
+      now: baseDate
+    }
+  );
+
+  assert.equal(result.action, "COMPLETED");
+  assert.equal(result.suppressedUntil?.toISOString(), "2026-08-21T12:00:00.000Z");
+  assert.equal(conversation.agentId, "user-1");
+  assert.equal(events.at(-1)?.action, "COMPLETED");
+  assert.equal(events.at(-1)?.outcome, "Cliente respondeu");
+});
+
+test("returned apos claim de ownership preexistente e bloqueado sem alterar agentId", async () => {
+  const { db, conversation, events, findQueueCandidate } = createLifecycleDb({
+    events: [
+      {
+        id: "event-claim-owned",
+        companyId: "company-1",
+        conversationId: "conversation-1",
+        contactId: "contact-1",
+        userId: "user-1",
+        assignmentHistoryId: null,
+        action: "CLAIMED",
+        idempotencyKey: "claim-owned-return",
+        createdAt: baseDate
+      }
+    ]
+  });
+
+  await assert.rejects(
+    recordNextBestActionForTest(
+      { db: db as never, findQueueCandidate },
+      {
+        companyId: "company-1",
+        requesterId: "user-1",
+        requesterRole: "ADMIN",
+        conversationId: "conversation-1",
+        action: "RETURNED",
+        idempotencyKey: "return-owned",
+        reason: "Nao devo atender agora",
+        now: baseDate
+      }
+    ),
+    (error) => error instanceof NextBestActionError && error.code === "NBA_PREEXISTING_OWNERSHIP"
+  );
+
+  assert.equal(conversation.agentId, "user-1");
+  assert.equal(events.length, 1);
+});
+
+test("returned apos claim NBA normal continua liberando ownership", async () => {
+  const { db, conversation, events, assignments, findQueueCandidate } = createLifecycleDb({
+    events: [
+      {
+        id: "event-claim",
+        companyId: "company-1",
+        conversationId: "conversation-1",
+        contactId: "contact-1",
+        userId: "user-1",
+        assignmentHistoryId: "history-1",
+        action: "CLAIMED",
+        idempotencyKey: "claim-normal",
+        createdAt: baseDate
+      }
+    ],
+    assignments: [
+      {
+        id: "history-1",
+        companyId: "company-1",
+        conversationId: "conversation-1",
+        assignedToUserId: "user-1",
+        assignedByUserId: "user-1",
+        mode: "NEXT_BEST_ACTION",
+        action: "CLAIMED",
+        createdAt: baseDate
+      }
+    ]
+  });
+
+  const result = await recordNextBestActionForTest(
+    { db: db as never, findQueueCandidate },
+    {
+      companyId: "company-1",
+      requesterId: "user-1",
+      requesterRole: "ADMIN",
+      conversationId: "conversation-1",
+      action: "RETURNED",
+      idempotencyKey: "return-normal",
+      reason: "Sem prioridade agora",
+      now: baseDate
+    }
+  );
+
+  assert.equal(result.action, "RETURNED");
+  assert.equal(conversation.agentId, null);
+  assert.equal(assignments.length, 2);
+  assert.equal(assignments[1]?.action, "RETURNED");
+  assert.equal(events.at(-1)?.action, "RETURNED");
+});
+
+test("transferencia posterior ao claim preexistente gera stale ownership", async () => {
+  const { db, findQueueCandidate } = createLifecycleDb({
+    events: [
+      {
+        id: "event-claim-owned",
+        companyId: "company-1",
+        conversationId: "conversation-1",
+        contactId: "contact-1",
+        userId: "user-1",
+        assignmentHistoryId: null,
+        action: "CLAIMED",
+        idempotencyKey: "claim-owned-stale",
+        createdAt: baseDate
+      }
+    ],
+    assignments: [
+      {
+        id: "history-later",
+        companyId: "company-1",
+        conversationId: "conversation-1",
+        assignedToUserId: "user-1",
+        assignedByUserId: "user-2",
+        mode: "MANUAL",
+        action: "ASSIGNED",
+        createdAt: new Date(baseDate.getTime() + 60 * 1000)
+      }
+    ]
+  });
+
+  await assert.rejects(
+    recordNextBestActionForTest(
+      { db: db as never, findQueueCandidate },
+      {
+        companyId: "company-1",
+        requesterId: "user-1",
+        requesterRole: "ADMIN",
+        conversationId: "conversation-1",
+        action: "COMPLETED",
+        idempotencyKey: "complete-stale",
+        outcome: "Cliente respondeu",
+        now: baseDate
+      }
+    ),
+    (error) => error instanceof NextBestActionError && error.code === "STALE_OWNERSHIP"
+  );
+});
+
+test("lifecycle permanece isolado por companyId", async () => {
+  const { db, findQueueCandidate } = createLifecycleDb({
+    conversation: {
+      id: "conversation-1",
+      companyId: "company-2",
+      agentId: "user-1",
+      contactId: "contact-1"
+    }
+  });
+
+  await assert.rejects(
+    recordNextBestActionForTest(
+      { db: db as never, findQueueCandidate },
+      {
+        companyId: "company-1",
+        requesterId: "user-1",
+        requesterRole: "ADMIN",
+        conversationId: "conversation-1",
+        action: "COMPLETED",
+        idempotencyKey: "complete-company",
+        outcome: "Cliente respondeu",
+        now: baseDate
+      }
+    ),
+    (error) => error instanceof NextBestActionError && error.code === "OPPORTUNITY_NOT_FOUND"
+  );
+});
+
+test("frontend oculta voltar para fila quando ownership nao foi criado pela NBA", () => {
+  const source = readFileSync(
+    new URL("../app/components/opportunities/NextBestActionPage.tsx", import.meta.url),
+    "utf8"
+  );
+
+  assert.match(source, /const canReturnCurrentOpportunity = isCurrentClaimed && claimedOwnershipCreatedByNba/);
+  assert.match(source, /\{canReturnCurrentOpportunity && \(/);
+});
+
+test("frontend usa origem do ownership retornada pelo backend", () => {
+  const source = readFileSync(
+    new URL("../app/components/opportunities/NextBestActionPage.tsx", import.meta.url),
+    "utf8"
+  );
+
+  assert.match(source, /ownershipCreatedByNba\?: boolean/);
+  assert.match(source, /setClaimedOwnershipCreatedByNba\(Boolean\(data\.ownershipCreatedByNba\)\)/);
 });
