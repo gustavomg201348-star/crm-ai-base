@@ -2,7 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import {
   claimVisibleOpportunity,
-  getNextOpportunityCandidate
+  getNextOpportunityCandidate,
+  NextBestActionError
 } from "@/lib/opportunity-next-service";
 import { OpportunityQueueValidationError } from "@/lib/opportunity-queue-service";
 import { safeLogError } from "@/lib/safe-logger";
@@ -13,6 +14,7 @@ export const dynamic = "force-dynamic";
 type NextOpportunityRequestBody = {
   action?: "peek" | "claim";
   conversationId?: string;
+  idempotencyKey?: string;
   excludeConversationIds?: unknown;
 };
 
@@ -41,9 +43,14 @@ export async function POST(request: NextRequest) {
 
     if (body.action === "claim") {
       const conversationId = body.conversationId?.trim();
+      const idempotencyKey = body.idempotencyKey?.trim();
 
       if (!conversationId) {
         return NextResponse.json({ error: "Informe a oportunidade." }, { status: 400 });
+      }
+
+      if (!idempotencyKey) {
+        return NextResponse.json({ error: "Informe a chave da acao." }, { status: 400 });
       }
 
       const result = await claimVisibleOpportunity({
@@ -52,6 +59,7 @@ export async function POST(request: NextRequest) {
         requesterName: session.name,
         requesterRole: session.role,
         conversationId,
+        idempotencyKey,
         excludeConversationIds
       });
 
@@ -95,6 +103,13 @@ export async function POST(request: NextRequest) {
       claimed: false
     });
   } catch (error) {
+    if (error instanceof NextBestActionError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: error.status }
+      );
+    }
+
     if (error instanceof OpportunityQueueValidationError) {
       return NextResponse.json({ error: "Parametros invalidos." }, { status: 400 });
     }

@@ -5,7 +5,52 @@ import type { OpportunityQueueItem } from "@/lib/opportunity-queue-types";
 const DEFAULT_NEXT_ACTION_CANDIDATE_LIMIT = 50;
 const MAX_EXCLUDED_CONVERSATIONS = 100;
 
-export type OpportunityClaimStatus = "CLAIMED" | "ALREADY_OWNED" | "TAKEN" | "MISSING";
+export const NEXT_BEST_ACTION_CLAIMED = "CLAIMED";
+export const NEXT_BEST_ACTION_COMPLETED = "COMPLETED";
+export const NEXT_BEST_ACTION_SKIPPED = "SKIPPED";
+export const NEXT_BEST_ACTION_RETURNED = "RETURNED";
+
+export type NextBestActionEventAction =
+  | typeof NEXT_BEST_ACTION_CLAIMED
+  | typeof NEXT_BEST_ACTION_COMPLETED
+  | typeof NEXT_BEST_ACTION_SKIPPED
+  | typeof NEXT_BEST_ACTION_RETURNED;
+
+export type OpportunityClaimStatus =
+  | "CLAIMED"
+  | "ALREADY_OWNED"
+  | "TAKEN"
+  | "MISSING"
+  | "IDEMPOTENT";
+
+export class NextBestActionError extends Error {
+  constructor(
+    public readonly code: string,
+    public readonly status: number,
+    message: string
+  ) {
+    super(message);
+    this.name = "NextBestActionError";
+  }
+}
+
+export type NextBestActionEventCreateData = {
+  companyId: string;
+  conversationId: string;
+  contactId: string;
+  userId: string;
+  assignmentHistoryId?: string | null;
+  action: NextBestActionEventAction;
+  reason?: string | null;
+  outcome?: string | null;
+  opportunityReason?: string | null;
+  recommendedAction?: string | null;
+  probableProduct?: string | null;
+  priority?: string | null;
+  idempotencyKey: string;
+  suppressedUntil?: Date | null;
+  createdAt?: Date;
+};
 
 export type ConversationClaimDb = {
   conversation: {
@@ -31,7 +76,28 @@ export type ConversationClaimDb = {
         assignedByUserId: string | null;
         mode: string;
         action: string;
+        createdAt?: Date;
       };
+      select?: { id: true };
+    }): Promise<{ id: string }>;
+  };
+  nextBestActionEvent: {
+    findUnique(args: {
+      where: { companyId_idempotencyKey: { companyId: string; idempotencyKey: string } };
+      select: {
+        id: true;
+        action: true;
+        conversationId: true;
+        userId: true;
+      };
+    }): Promise<{
+      id: string;
+      action: string;
+      conversationId: string;
+      userId: string;
+    } | null>;
+    create(args: {
+      data: NextBestActionEventCreateData;
     }): Promise<unknown>;
   };
 };
@@ -45,6 +111,7 @@ export type ClaimOpportunityCandidateInput = {
   requesterId: string;
   requesterName: string;
   candidate: OpportunityQueueItem;
+  idempotencyKey: string;
   now?: Date;
 };
 
@@ -63,6 +130,7 @@ export type GetNextOpportunityInput = {
 
 export type ClaimVisibleOpportunityInput = GetNextOpportunityInput & {
   conversationId: string;
+  idempotencyKey: string;
 };
 
 export type SelectNextOpportunityFromCandidatesInput = {
@@ -79,6 +147,7 @@ export type ClaimVisibleOpportunityFromCandidatesInput = {
   candidates: OpportunityQueueItem[];
   scanned: number;
   conversationId: string;
+  idempotencyKey: string;
   excludeConversationIds?: string[];
 };
 
@@ -93,6 +162,20 @@ export type ClaimVisibleOpportunityResult = GetNextOpportunityResult & {
   claimStatus: OpportunityClaimStatus;
 };
 
+export function buildNextBestActionEventSnapshot(
+  candidate: OpportunityQueueItem
+): Pick<
+  NextBestActionEventCreateData,
+  "opportunityReason" | "recommendedAction" | "probableProduct" | "priority"
+> {
+  return {
+    opportunityReason: candidate.queueReason,
+    recommendedAction: candidate.primaryAction.title,
+    probableProduct: candidate.product.label,
+    priority: candidate.priority.label
+  };
+}
+
 function withClaimedOwner(item: OpportunityQueueItem, owner: { id: string; name: string }) {
   return {
     ...item,
@@ -103,11 +186,13 @@ function withClaimedOwner(item: OpportunityQueueItem, owner: { id: string; name:
 function buildClaimHistory({
   companyId,
   conversationId,
-  requesterId
+  requesterId,
+  now
 }: {
   companyId: string;
   conversationId: string;
   requesterId: string;
+  now: Date;
 }) {
   return {
     companyId,
@@ -115,8 +200,23 @@ function buildClaimHistory({
     assignedToUserId: requesterId,
     assignedByUserId: requesterId,
     mode: "NEXT_BEST_ACTION",
-    action: "CLAIMED"
+    action: NEXT_BEST_ACTION_CLAIMED,
+    createdAt: now
   };
+}
+
+function requireIdempotencyKey(idempotencyKey: string) {
+  const normalized = idempotencyKey.trim();
+
+  if (!normalized) {
+    throw new NextBestActionError(
+      "IDEMPOTENCY_KEY_REQUIRED",
+      400,
+      "Informe a chave de idempotencia."
+    );
+  }
+
+  return normalized;
 }
 
 async function claimOpportunityCandidateInTransaction(
@@ -126,9 +226,45 @@ async function claimOpportunityCandidateInTransaction(
     requesterId,
     requesterName,
     candidate,
+    idempotencyKey,
     now = new Date()
   }: ClaimOpportunityCandidateInput
 ): Promise<ClaimOpportunityCandidateResult> {
+  const normalizedIdempotencyKey = requireIdempotencyKey(idempotencyKey);
+  const existingEvent = await db.nextBestActionEvent.findUnique({
+    where: {
+      companyId_idempotencyKey: {
+        companyId,
+        idempotencyKey: normalizedIdempotencyKey
+      }
+    },
+    select: {
+      id: true,
+      action: true,
+      conversationId: true,
+      userId: true
+    }
+  });
+
+  if (existingEvent) {
+    if (
+      existingEvent.action === NEXT_BEST_ACTION_CLAIMED &&
+      existingEvent.conversationId === candidate.conversationId &&
+      existingEvent.userId === requesterId
+    ) {
+      return {
+        status: "IDEMPOTENT",
+        opportunity: withClaimedOwner(candidate, { id: requesterId, name: requesterName })
+      };
+    }
+
+    throw new NextBestActionError(
+      "IDEMPOTENCY_CONFLICT",
+      409,
+      "Esta acao ja foi registrada para outra oportunidade."
+    );
+  }
+
   const claimed = await db.conversation.updateMany({
     where: {
       id: candidate.conversationId,
@@ -142,12 +278,28 @@ async function claimOpportunityCandidateInTransaction(
   });
 
   if (claimed.count === 1) {
-    await db.leadAssignmentHistory.create({
+    const assignment = await db.leadAssignmentHistory.create({
       data: buildClaimHistory({
         companyId,
         conversationId: candidate.conversationId,
-        requesterId
-      })
+        requesterId,
+        now
+      }),
+      select: { id: true }
+    });
+
+    await db.nextBestActionEvent.create({
+      data: {
+        companyId,
+        conversationId: candidate.conversationId,
+        contactId: candidate.contact.id,
+        userId: requesterId,
+        assignmentHistoryId: assignment.id,
+        action: NEXT_BEST_ACTION_CLAIMED,
+        idempotencyKey: normalizedIdempotencyKey,
+        createdAt: now,
+        ...buildNextBestActionEventSnapshot(candidate)
+      }
     });
 
     return {
@@ -232,6 +384,7 @@ export async function claimVisibleOpportunityFromCandidates({
   candidates,
   scanned,
   conversationId,
+  idempotencyKey,
   excludeConversationIds
 }: ClaimVisibleOpportunityFromCandidatesInput): Promise<ClaimVisibleOpportunityResult> {
   const excluded = normalizeExcludedConversationIds(excludeConversationIds);
@@ -251,7 +404,8 @@ export async function claimVisibleOpportunityFromCandidates({
     companyId,
     requesterId,
     requesterName,
-    candidate: visibleCandidate
+    candidate: visibleCandidate,
+    idempotencyKey
   });
 
   if (claim.opportunity) {
@@ -301,6 +455,7 @@ export async function claimVisibleOpportunity({
   requesterName,
   requesterRole,
   conversationId,
+  idempotencyKey,
   excludeConversationIds
 }: ClaimVisibleOpportunityInput): Promise<ClaimVisibleOpportunityResult> {
   const queue = await listOpportunityQueue({
@@ -318,6 +473,7 @@ export async function claimVisibleOpportunity({
     candidates: queue.items,
     scanned: queue.scanned,
     conversationId,
+    idempotencyKey,
     excludeConversationIds
   });
 }

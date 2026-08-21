@@ -36,6 +36,7 @@ model Company {
   userAvailabilities UserAvailability[]
   leadAssignmentSetting LeadAssignmentSetting?
   leadAssignmentHistory LeadAssignmentHistory[]
+  nextBestActionEvents NextBestActionEvent[]
   metaTemplates MetaTemplate[]
   mediaAssets   MediaAsset[]
 }
@@ -149,6 +150,7 @@ model User {
   availability  UserAvailability?
   assignedLeadHistory LeadAssignmentHistory[] @relation("AssignedLeadHistory")
   createdLeadAssignments LeadAssignmentHistory[] @relation("CreatedLeadAssignments")
+  nextBestActionEvents NextBestActionEvent[]
   retirementLeadEvents RetirementLeadEvent[]
   createdMulticredClients MulticredClient[] @relation("CreatedMulticredClients")
   assignedProposals Proposal[] @relation("AssignedProposals")
@@ -198,11 +200,43 @@ model LeadAssignmentHistory {
   conversation     Conversation @relation(fields: [conversationId], references: [id])
   assignedTo       User?        @relation("AssignedLeadHistory", fields: [assignedToUserId], references: [id])
   assignedBy       User?        @relation("CreatedLeadAssignments", fields: [assignedByUserId], references: [id])
+  nextBestActionEvent NextBestActionEvent?
 
   @@index([companyId])
   @@index([conversationId])
   @@index([assignedToUserId])
   @@index([assignedByUserId])
+}
+
+model NextBestActionEvent {
+  id                  String                 @id @default(cuid())
+  companyId           String
+  conversationId      String
+  contactId           String
+  userId              String
+  assignmentHistoryId String?                @unique
+  action              String
+  reason              String?
+  outcome             String?
+  opportunityReason   String?
+  recommendedAction   String?
+  probableProduct     String?
+  priority            String?
+  idempotencyKey      String
+  suppressedUntil     DateTime?
+  createdAt           DateTime               @default(now())
+  company             Company                @relation(fields: [companyId], references: [id])
+  conversation        Conversation           @relation(fields: [conversationId], references: [id])
+  contact             Contact                @relation(fields: [contactId], references: [id])
+  user                User                   @relation(fields: [userId], references: [id])
+  assignmentHistory   LeadAssignmentHistory? @relation(fields: [assignmentHistoryId], references: [id])
+
+  @@unique([companyId, idempotencyKey])
+  @@index([companyId, conversationId, createdAt])
+  @@index([companyId, contactId, createdAt])
+  @@index([companyId, userId, createdAt])
+  @@index([companyId, action, createdAt])
+  @@index([companyId, suppressedUntil])
 }
 
 model Contact {
@@ -236,6 +270,7 @@ model Contact {
   cltSimulationLogs  CltSimulationLog[]
   retirementLeads    RetirementLead[]
   multicredClients    MulticredClient[]
+  nextBestActionEvents NextBestActionEvent[]
 
   @@index([companyId])
   @@index([companyId, phone])
@@ -498,6 +533,7 @@ model Conversation {
   notifications Notification[]
   tags          ConversationTag[]
   assignmentHistory LeadAssignmentHistory[]
+  nextBestActionEvents NextBestActionEvent[]
 
   @@index([contactId])
   @@index([channelId])
