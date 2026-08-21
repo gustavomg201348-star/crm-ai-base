@@ -29,6 +29,9 @@ const MAX_CANDIDATE_CONVERSATIONS = 600;
 const RECENT_INBOUND_HOURS = 72;
 const RECENT_CLT_SIMULATION_DAYS = 30;
 const WAITING_CUSTOMER_DAYS = 14;
+const NEXT_BEST_ACTION_COMPLETED = "COMPLETED";
+const NEXT_BEST_ACTION_SKIPPED = "SKIPPED";
+const NEXT_BEST_ACTION_RETURNED = "RETURNED";
 
 type QueueConversation = Prisma.ConversationGetPayload<{
   include: {
@@ -64,12 +67,14 @@ function buildCandidateWhere({
   requesterId,
   requesterRole,
   ownerId,
+  suppressedConversationIds,
   now
 }: {
   companyId: string;
   requesterId: string;
   requesterRole: string;
   ownerId?: string | null;
+  suppressedConversationIds?: string[];
   now: Date;
 }): Prisma.ConversationWhereInput {
   const recentInboundSince = new Date(now.getTime() - RECENT_INBOUND_HOURS * 60 * 60 * 1000);
@@ -85,6 +90,11 @@ function buildCandidateWhere({
           archivedAt: null
         }
       },
+      suppressedConversationIds?.length
+        ? {
+            id: { notIn: suppressedConversationIds }
+          }
+        : {},
       isAdmin
         ? {}
         : {
@@ -200,12 +210,31 @@ export async function listOpportunityQueue(
     }
   }
 
+  const suppressedEvents = await prisma.nextBestActionEvent.findMany({
+    where: {
+      companyId: filters.companyId,
+      suppressedUntil: { gt: now },
+      OR: [
+        { action: NEXT_BEST_ACTION_COMPLETED },
+        {
+          action: { in: [NEXT_BEST_ACTION_SKIPPED, NEXT_BEST_ACTION_RETURNED] },
+          userId: filters.requesterId
+        }
+      ]
+    },
+    select: { conversationId: true }
+  });
+  const suppressedConversationIds = Array.from(
+    new Set(suppressedEvents.map((event) => event.conversationId))
+  );
+
   const conversations = await prisma.conversation.findMany({
     where: buildCandidateWhere({
       companyId: filters.companyId,
       requesterId: filters.requesterId,
       requesterRole: filters.requesterRole,
       ownerId: filters.ownerId,
+      suppressedConversationIds,
       now
     }),
     include: {
