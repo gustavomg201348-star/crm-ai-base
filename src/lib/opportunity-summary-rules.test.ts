@@ -527,5 +527,6 @@ test("montagem do resumo não cria tarefa nem persiste oportunidade", () => {
 
   assert.equal(input.pendingTasks.length, beforeTasks);
   assert.equal(summary.pendingReturn?.id, "task-1");
-  assert.equal("id" in summary && summary.contactId === "contact-1", true);
+  assert.equal(summary.contactId, "contact-1");
+  assert.equal(summary.conversationId, "conversation-1");
 });
