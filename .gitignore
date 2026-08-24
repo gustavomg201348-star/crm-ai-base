@@ -12,3 +12,19 @@ ngrok.log
 cloudflared.log
 npm-debug.log*
 public/uploads/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
+
+# Local Prisma / SQLite databases used for development and validation
+prisma/dev*.db
+prisma/*validation*.db
+
+# Local SQLite backup artifacts
+prisma/*.db.backup*
+prisma/*.backup*
+
+# Local SQLite transient files
+prisma/*.db-journal
+prisma/*.db-wal
+prisma/*.db-shm
