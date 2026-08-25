@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { generateAiSuggestion } from "@/lib/ai-attendant.service";
 import { getSessionFromRequest } from "@/lib/auth";
+import { resolveConversationAccess } from "@/lib/conversation-access-control";
 import { prisma } from "@/lib/db";
 
 type RouteContext = {
@@ -15,19 +16,22 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
 
-    const conversation = await prisma.conversation.findFirst({
-      where: {
-        id: context.params.id,
-        contact: { companyId: session.companyId }
-      }
+    const access = await resolveConversationAccess({
+      db: prisma,
+      session,
+      conversationId: context.params.id
     });
 
-    if (!conversation) {
+    if (access.status === "not_found") {
       return NextResponse.json({ error: "Conversa nao encontrada." }, { status: 404 });
     }
 
+    if (access.status === "forbidden") {
+      return NextResponse.json({ error: "Conversa atribuida a outro atendente." }, { status: 403 });
+    }
+
     const { suggestion, conversation: updatedConversation } = await generateAiSuggestion({
-      conversationId: conversation.id,
+      conversationId: access.conversation.id,
       companyId: session.companyId
     });
 

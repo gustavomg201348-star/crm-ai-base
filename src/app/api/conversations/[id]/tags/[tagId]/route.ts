@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
+import { resolveConversationAccess } from "@/lib/conversation-access-control";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
 
@@ -15,17 +16,21 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
 
-    const conversation = await prisma.conversation.findFirst({
-      where: {
-        id: context.params.id,
-        contact: { companyId: session.companyId }
-      },
-      select: { id: true }
+    const access = await resolveConversationAccess({
+      db: prisma,
+      session,
+      conversationId: context.params.id
     });
 
-    if (!conversation) {
+    if (access.status === "not_found") {
       return NextResponse.json({ error: "Conversa nao encontrada." }, { status: 404 });
     }
+
+    if (access.status === "forbidden") {
+      return NextResponse.json({ error: "Conversa atribuida a outro atendente." }, { status: 403 });
+    }
+
+    const { conversation } = access;
 
     const tag = await prisma.tag.findFirst({
       where: { id: context.params.tagId, companyId: session.companyId },
