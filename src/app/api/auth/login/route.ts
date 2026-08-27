@@ -1,19 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createSessionToken, hashPassword, sessionCookie, verifyPassword } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-
-function isSeedPasswordResetAllowed(email: string, password: string) {
-  const allowedEmails = (process.env.PLATFORM_ADMIN_EMAILS || "admin@crm.local")
-    .split(",")
-    .map((item) => item.trim().toLowerCase())
-    .filter(Boolean);
-
-  return (
-    Boolean(process.env.SEED_ADMIN_PASSWORD) &&
-    process.env.SEED_ADMIN_PASSWORD === password &&
-    allowedEmails.includes(email.toLowerCase())
-  );
-}
+import { isSeedPasswordResetAllowed } from "@/lib/seed-admin-login";
 
 export async function POST(request: NextRequest) {
   try {
@@ -73,7 +61,7 @@ export async function POST(request: NextRequest) {
     return response;
   } catch {
     return NextResponse.json(
-      { error: "Banco nao configurado. Confira DATABASE_URL e rode prisma:push." },
+      { error: "Nao foi possivel concluir o login." },
       { status: 500 }
     );
   }
