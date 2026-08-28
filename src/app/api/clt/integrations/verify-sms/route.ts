@@ -1,6 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
-import { ensureCltIntegrations, mapCltIntegration } from "@/lib/clt-settings";
+import {
+  ensureCltIntegrations,
+  mapCltIntegration,
+  resolveSensitiveTextUpdate
+} from "@/lib/clt-settings";
 import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
@@ -34,10 +38,6 @@ export async function POST(request: NextRequest) {
       return publicErrorResponse({ code: "CLT_INVALID_REQUEST", status: 400 });
     }
 
-    if (!body.digitadorCode?.trim() || !body.certifiedAgentCpf?.trim() || !body.actingUf?.trim()) {
-      return publicErrorResponse({ code: "CLT_INVALID_REQUEST", status: 400 });
-    }
-
     await ensureCltIntegrations(session.companyId);
 
     const current = await prisma.cltIntegration.findUnique({
@@ -48,13 +48,28 @@ export async function POST(request: NextRequest) {
       return publicErrorResponse({ code: "NOT_FOUND", status: 404 });
     }
 
+    const newcorbanIdentifier = resolveSensitiveTextUpdate(
+      current.newcorbanIdentifier,
+      body.newcorbanIdentifier
+    );
+    const digitadorCode = resolveSensitiveTextUpdate(current.digitadorCode, body.digitadorCode);
+    const certifiedAgentCpf = resolveSensitiveTextUpdate(
+      current.certifiedAgentCpf,
+      body.certifiedAgentCpf
+    );
+    const actingUf = body.actingUf?.trim().toUpperCase() || current.actingUf;
+
+    if (!digitadorCode || !certifiedAgentCpf || !actingUf) {
+      return publicErrorResponse({ code: "CLT_INVALID_REQUEST", status: 400 });
+    }
+
     const updated = await prisma.cltIntegration.update({
       where: { id: current.id },
       data: {
-        newcorbanIdentifier: body.newcorbanIdentifier?.trim() || current.newcorbanIdentifier,
-        digitadorCode: body.digitadorCode.trim(),
-        certifiedAgentCpf: body.certifiedAgentCpf.trim(),
-        actingUf: body.actingUf.trim().toUpperCase(),
+        newcorbanIdentifier,
+        digitadorCode,
+        certifiedAgentCpf,
+        actingUf,
         authType: "login-sms",
         status: "ASSISTED",
         smsStatus: "VERIFIED",

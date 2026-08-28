@@ -1,7 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { cltBanks } from "@/lib/clt-integration";
-import { ensureCltIntegrations, mapCltIntegration } from "@/lib/clt-settings";
+import {
+  ensureCltIntegrations,
+  mapCltIntegration,
+  resolveSensitivePasswordUpdate,
+  resolveSensitiveTextUpdate
+} from "@/lib/clt-settings";
 import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
@@ -32,11 +37,13 @@ function fallbackIntegrations() {
     authType: bank.provider === "newcorban" ? "login-sms" : "none",
     hasApiKey: false,
     apiKeyPreview: null,
-    username: null,
+    hasUsername: false,
+    usernamePreview: null,
     hasPassword: false,
-    newcorbanIdentifier: null,
-    digitadorCode: null,
-    certifiedAgentCpf: null,
+    hasNewcorbanIdentifier: false,
+    hasDigitadorCode: false,
+    hasCertifiedAgentCpf: false,
+    certifiedAgentCpfPreview: null,
     actingUf: null,
     smsStatus: null,
     smsRequestedAt: null,
@@ -116,19 +123,13 @@ export async function PATCH(request: NextRequest) {
             ? "https://viva.newcorban.com.br"
             : null),
         authType: body.authType || current.authType,
-        apiKey: body.apiKey === undefined ? current.apiKey : body.apiKey.trim() || null,
-        username: body.username === undefined ? current.username : body.username.trim() || null,
-        password: body.password === undefined ? current.password : body.password || null,
+        apiKey: resolveSensitiveTextUpdate(current.apiKey, body.apiKey),
+        username: resolveSensitiveTextUpdate(current.username, body.username),
+        password: resolveSensitivePasswordUpdate(current.password, body.password),
         newcorbanIdentifier:
-          body.newcorbanIdentifier === undefined
-            ? current.newcorbanIdentifier
-            : body.newcorbanIdentifier.trim() || null,
-        digitadorCode:
-          body.digitadorCode === undefined ? current.digitadorCode : body.digitadorCode.trim() || null,
-        certifiedAgentCpf:
-          body.certifiedAgentCpf === undefined
-            ? current.certifiedAgentCpf
-            : body.certifiedAgentCpf.trim() || null,
+          resolveSensitiveTextUpdate(current.newcorbanIdentifier, body.newcorbanIdentifier),
+        digitadorCode: resolveSensitiveTextUpdate(current.digitadorCode, body.digitadorCode),
+        certifiedAgentCpf: resolveSensitiveTextUpdate(current.certifiedAgentCpf, body.certifiedAgentCpf),
         actingUf:
           body.actingUf === undefined ? current.actingUf : body.actingUf.trim().toUpperCase() || null,
         status: body.status || (body.provider === "newcorban" ? "ASSISTED" : current.status)
@@ -169,11 +170,13 @@ export async function PATCH(request: NextRequest) {
             : "none"),
         hasApiKey: Boolean(fallbackBody?.apiKey),
         apiKeyPreview: fallbackBody?.apiKey ? "****" : null,
-        username: null,
+        hasUsername: Boolean(fallbackBody?.username),
+        usernamePreview: fallbackBody?.username ? "****" : null,
         hasPassword: Boolean(fallbackBody?.password),
-        newcorbanIdentifier: null,
-        digitadorCode: null,
-        certifiedAgentCpf: null,
+        hasNewcorbanIdentifier: Boolean(fallbackBody?.newcorbanIdentifier),
+        hasDigitadorCode: Boolean(fallbackBody?.digitadorCode),
+        hasCertifiedAgentCpf: Boolean(fallbackBody?.certifiedAgentCpf),
+        certifiedAgentCpfPreview: fallbackBody?.certifiedAgentCpf ? "****" : null,
         actingUf: fallbackBody?.actingUf || null,
         smsStatus: null,
         smsRequestedAt: null,

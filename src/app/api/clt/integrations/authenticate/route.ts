@@ -1,6 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
-import { ensureCltIntegrations, mapCltIntegration } from "@/lib/clt-settings";
+import {
+  ensureCltIntegrations,
+  mapCltIntegration,
+  resolveSensitivePasswordUpdate,
+  resolveSensitiveTextUpdate
+} from "@/lib/clt-settings";
 import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
@@ -37,8 +42,8 @@ export async function POST(request: NextRequest) {
       return publicErrorResponse({ code: "CLT_PROVIDER_REJECTED", status: 400 });
     }
 
-    const username = body.username?.trim() || current.username?.trim();
-    const password = body.password || current.password;
+    const username = resolveSensitiveTextUpdate(current.username, body.username);
+    const password = resolveSensitivePasswordUpdate(current.password, body.password);
 
     if (!username || !password) {
       return publicErrorResponse({ code: "CLT_INVALID_REQUEST", status: 400 });
