@@ -603,11 +603,13 @@ type CltIntegrationRow = {
   authType: string;
   hasApiKey: boolean;
   apiKeyPreview?: string | null;
-  username?: string | null;
+  hasUsername: boolean;
+  usernamePreview?: string | null;
   hasPassword: boolean;
-  newcorbanIdentifier?: string | null;
-  digitadorCode?: string | null;
-  certifiedAgentCpf?: string | null;
+  hasNewcorbanIdentifier: boolean;
+  hasDigitadorCode: boolean;
+  hasCertifiedAgentCpf: boolean;
+  certifiedAgentCpfPreview?: string | null;
   actingUf?: string | null;
   smsStatus?: string | null;
   smsRequestedAt?: string | null;
@@ -11290,12 +11292,12 @@ function SimulacaoClt({
           baseUrl: first.baseUrl || "",
           authType: first.authType,
           apiKey: "",
-          username: first.username || "",
+          username: "",
           password: "",
-          newcorbanIdentifier: first.newcorbanIdentifier || "",
+          newcorbanIdentifier: "",
           smsCode: "",
-          digitadorCode: first.digitadorCode || "",
-          certifiedAgentCpf: first.certifiedAgentCpf || "",
+          digitadorCode: "",
+          certifiedAgentCpf: "",
           actingUf: first.actingUf || "",
           status: first.status
         });
@@ -11463,23 +11465,58 @@ function SimulacaoClt({
       baseUrl: integration.baseUrl || "",
       authType: integration.authType,
       apiKey: "",
-      username: integration.username || "",
+      username: "",
       password: "",
-      newcorbanIdentifier: integration.newcorbanIdentifier || "",
+      newcorbanIdentifier: "",
       smsCode: "",
-      digitadorCode: integration.digitadorCode || "",
-      certifiedAgentCpf: integration.certifiedAgentCpf || "",
+      digitadorCode: "",
+      certifiedAgentCpf: "",
       actingUf: integration.actingUf || "",
       status: integration.status
     });
   }
 
+  function cltSensitiveValue(value: string) {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : undefined;
+  }
+
+  function cltSensitivePasswordValue(value: string) {
+    return value.trim() ? value : undefined;
+  }
+
   async function saveIntegration() {
     setMessage("");
+    const payload = {
+      bankId: integrationForm.bankId,
+      provider: integrationForm.provider,
+      baseUrl: integrationForm.baseUrl,
+      authType: integrationForm.authType,
+      ...(cltSensitiveValue(integrationForm.apiKey)
+        ? { apiKey: cltSensitiveValue(integrationForm.apiKey) }
+        : {}),
+      ...(cltSensitiveValue(integrationForm.username)
+        ? { username: cltSensitiveValue(integrationForm.username) }
+        : {}),
+      ...(cltSensitivePasswordValue(integrationForm.password)
+        ? { password: cltSensitivePasswordValue(integrationForm.password) }
+        : {}),
+      ...(cltSensitiveValue(integrationForm.newcorbanIdentifier)
+        ? { newcorbanIdentifier: cltSensitiveValue(integrationForm.newcorbanIdentifier) }
+        : {}),
+      ...(cltSensitiveValue(integrationForm.digitadorCode)
+        ? { digitadorCode: cltSensitiveValue(integrationForm.digitadorCode) }
+        : {}),
+      ...(cltSensitiveValue(integrationForm.certifiedAgentCpf)
+        ? { certifiedAgentCpf: cltSensitiveValue(integrationForm.certifiedAgentCpf) }
+        : {}),
+      actingUf: integrationForm.actingUf,
+      status: integrationForm.status
+    };
     const response = await fetch("/api/clt/integrations", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(integrationForm)
+      body: JSON.stringify(payload)
     });
     const data = (await response.json().catch(() => null)) as
       | { error?: string }
@@ -11495,21 +11532,30 @@ function SimulacaoClt({
 
   async function authenticateNewcorban() {
     if (!integrationForm.bankId) return;
-    if (!integrationForm.password && !selectedIntegration?.hasPassword) {
+    if (!integrationForm.username.trim() && !selectedIntegration?.hasUsername) {
+      setMessage("Informe o usuario do banco ou salve a integracao com o usuario antes de entrar no perfil.");
+      return;
+    }
+    if (!integrationForm.password.trim() && !selectedIntegration?.hasPassword) {
       setMessage("Informe a senha do banco ou salve a integracao com a senha antes de entrar no perfil.");
       return;
     }
     setAuthenticatingBankId(integrationForm.bankId);
     setMessage("");
+    const payload = {
+      bankId: integrationForm.bankId,
+      ...(cltSensitiveValue(integrationForm.username)
+        ? { username: cltSensitiveValue(integrationForm.username) }
+        : {}),
+      ...(cltSensitivePasswordValue(integrationForm.password)
+        ? { password: cltSensitivePasswordValue(integrationForm.password) }
+        : {})
+    };
     try {
       const response = await fetch("/api/clt/integrations/authenticate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          bankId: integrationForm.bankId,
-          username: integrationForm.username,
-          password: integrationForm.password
-        })
+        body: JSON.stringify(payload)
       });
       const data = (await response.json().catch(() => null)) as
         | { error?: string; message?: string; integration?: CltIntegrationRow }
@@ -11539,17 +11585,24 @@ function SimulacaoClt({
     if (!integrationForm.bankId) return;
     setVerifyingSmsBankId(integrationForm.bankId);
     setMessage("");
+    const payload = {
+      bankId: integrationForm.bankId,
+      smsCode: integrationForm.smsCode,
+      ...(cltSensitiveValue(integrationForm.newcorbanIdentifier)
+        ? { newcorbanIdentifier: cltSensitiveValue(integrationForm.newcorbanIdentifier) }
+        : {}),
+      ...(cltSensitiveValue(integrationForm.digitadorCode)
+        ? { digitadorCode: cltSensitiveValue(integrationForm.digitadorCode) }
+        : {}),
+      ...(cltSensitiveValue(integrationForm.certifiedAgentCpf)
+        ? { certifiedAgentCpf: cltSensitiveValue(integrationForm.certifiedAgentCpf) }
+        : {}),
+      actingUf: integrationForm.actingUf
+    };
     const response = await fetch("/api/clt/integrations/verify-sms", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        bankId: integrationForm.bankId,
-        smsCode: integrationForm.smsCode,
-        newcorbanIdentifier: integrationForm.newcorbanIdentifier,
-        digitadorCode: integrationForm.digitadorCode,
-        certifiedAgentCpf: integrationForm.certifiedAgentCpf,
-        actingUf: integrationForm.actingUf
-      })
+      body: JSON.stringify(payload)
     });
     const data = (await response.json().catch(() => null)) as
       | { error?: string; message?: string; integration?: CltIntegrationRow }
@@ -11727,7 +11780,13 @@ function SimulacaoClt({
                   }
                 />
                 <ContactInput
-                  placeholder="Usuário"
+                  placeholder={
+                    selectedIntegration?.usernamePreview
+                      ? `Usuario (${selectedIntegration.usernamePreview})`
+                      : selectedIntegration?.hasUsername
+                        ? "Usuario cadastrado"
+                        : "Usuario"
+                  }
                   value={integrationForm.username}
                   onChange={(value) =>
                     setIntegrationForm((current) => ({ ...current, username: value }))
@@ -11757,8 +11816,8 @@ function SimulacaoClt({
                       className="h-10 flex-1 rounded-2xl bg-primary px-4 text-sm font-bold text-white shadow-soft disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
                       disabled={
                         !integrationForm.bankId ||
-                        !integrationForm.username ||
-                        (!integrationForm.password && !selectedIntegration?.hasPassword) ||
+                        (!integrationForm.username.trim() && !selectedIntegration?.hasUsername) ||
+                        (!integrationForm.password.trim() && !selectedIntegration?.hasPassword) ||
                         authenticatingBankId === integrationForm.bankId
                       }
                       onClick={() => void authenticateNewcorban()}
@@ -11778,21 +11837,35 @@ function SimulacaoClt({
                       }
                     />
                     <ContactInput
-                      placeholder="Identificador (opcional)"
+                      placeholder={
+                        selectedIntegration?.hasNewcorbanIdentifier
+                          ? "Identificador ja configurado"
+                          : "Identificador (opcional)"
+                      }
                       value={integrationForm.newcorbanIdentifier}
                       onChange={(value) =>
                         setIntegrationForm((current) => ({ ...current, newcorbanIdentifier: value }))
                       }
                     />
                     <ContactInput
-                      placeholder="Cod. Usuario Digitador"
+                      placeholder={
+                        selectedIntegration?.hasDigitadorCode
+                          ? "Cod. Usuario Digitador cadastrado"
+                          : "Cod. Usuario Digitador"
+                      }
                       value={integrationForm.digitadorCode}
                       onChange={(value) =>
                         setIntegrationForm((current) => ({ ...current, digitadorCode: value }))
                       }
                     />
                     <ContactInput
-                      placeholder="CPF Agente Certificado"
+                      placeholder={
+                        selectedIntegration?.certifiedAgentCpfPreview
+                          ? `CPF Agente Certificado (${selectedIntegration.certifiedAgentCpfPreview})`
+                          : selectedIntegration?.hasCertifiedAgentCpf
+                            ? "CPF Agente Certificado cadastrado"
+                            : "CPF Agente Certificado"
+                      }
                       value={integrationForm.certifiedAgentCpf}
                       onChange={(value) =>
                         setIntegrationForm((current) => ({ ...current, certifiedAgentCpf: value }))
@@ -11810,10 +11883,11 @@ function SimulacaoClt({
                       className="h-10 rounded-2xl bg-emerald-600 px-4 text-sm font-bold text-white disabled:opacity-60"
                       disabled={
                         !integrationForm.bankId ||
-                        !integrationForm.smsCode ||
-                        !integrationForm.digitadorCode ||
-                        !integrationForm.certifiedAgentCpf ||
-                        !integrationForm.actingUf ||
+                        !integrationForm.smsCode.trim() ||
+                        (!integrationForm.digitadorCode.trim() && !selectedIntegration?.hasDigitadorCode) ||
+                        (!integrationForm.certifiedAgentCpf.trim() &&
+                          !selectedIntegration?.hasCertifiedAgentCpf) ||
+                        !integrationForm.actingUf.trim() ||
                         verifyingSmsBankId === integrationForm.bankId
                       }
                       onClick={() => void verifyNewcorbanSms()}

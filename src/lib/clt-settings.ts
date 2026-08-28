@@ -154,6 +154,25 @@ export function maskSecret(value?: string | null) {
   return `${value.slice(0, 2)}****${value.slice(-2)}`;
 }
 
+export function maskCpfPreview(value?: string | null) {
+  const digits = value?.replace(/\D/g, "") ?? "";
+  if (digits.length < 2) return null;
+  return `***.***.***-${digits.slice(-2)}`;
+}
+
+export function resolveSensitiveTextUpdate(current: string | null, next?: string) {
+  if (next === undefined) return current;
+  const trimmed = next.trim();
+  if (trimmed.includes("****")) return current;
+  return trimmed || current;
+}
+
+export function resolveSensitivePasswordUpdate(current: string | null, next?: string) {
+  if (next === undefined) return current;
+  if (next.includes("****")) return current;
+  return next.trim() ? next : current;
+}
+
 export function mapCltIntegration(integration: {
   id: string;
   bankId: string;
@@ -177,6 +196,7 @@ export function mapCltIntegration(integration: {
   updatedAt: Date;
 }, viewerRole: CltIntegrationViewerRole = "ADMIN") {
   const shouldMaskSensitiveFields = viewerRole === "AGENT";
+  const showSensitivePreviews = !shouldMaskSensitiveFields;
 
   return {
     id: integration.id,
@@ -187,11 +207,13 @@ export function mapCltIntegration(integration: {
     authType: integration.authType,
     hasApiKey: Boolean(integration.apiKey),
     apiKeyPreview: shouldMaskSensitiveFields ? null : maskSecret(integration.apiKey),
-    username: shouldMaskSensitiveFields ? null : integration.username,
+    hasUsername: Boolean(integration.username),
+    usernamePreview: showSensitivePreviews ? maskSecret(integration.username) : null,
     hasPassword: Boolean(integration.password),
-    newcorbanIdentifier: shouldMaskSensitiveFields ? null : integration.newcorbanIdentifier,
-    digitadorCode: shouldMaskSensitiveFields ? null : integration.digitadorCode,
-    certifiedAgentCpf: shouldMaskSensitiveFields ? null : integration.certifiedAgentCpf,
+    hasNewcorbanIdentifier: Boolean(integration.newcorbanIdentifier),
+    hasDigitadorCode: Boolean(integration.digitadorCode),
+    hasCertifiedAgentCpf: Boolean(integration.certifiedAgentCpf),
+    certifiedAgentCpfPreview: showSensitivePreviews ? maskCpfPreview(integration.certifiedAgentCpf) : null,
     actingUf: integration.actingUf,
     smsStatus: integration.smsStatus,
     smsRequestedAt: integration.smsRequestedAt,
