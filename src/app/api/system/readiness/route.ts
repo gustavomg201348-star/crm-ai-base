@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { requireCompanyAdmin } from "@/lib/permissions";
+import { getSecretEncryptionKeyStatus } from "@/lib/secret-encryption-env";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -94,6 +95,7 @@ export async function GET(request: NextRequest) {
     ]);
 
     const metaChannels = channels.filter((channel) => channel.provider === "meta");
+    const channelSecretEncryption = getSecretEncryptionKeyStatus();
     const readyMetaChannels = metaChannels.filter(
       (channel) =>
         channel.phoneNumberId &&
@@ -129,7 +131,8 @@ export async function GET(request: NextRequest) {
           ok: readyMetaChannels.length > 0 || metaChannels.length === 0,
           count: channels.length,
           metaCount: metaChannels.length,
-          readyMetaCount: readyMetaChannels.length
+          readyMetaCount: readyMetaChannels.length,
+          channelSecretEncryption
         }
       }
     });

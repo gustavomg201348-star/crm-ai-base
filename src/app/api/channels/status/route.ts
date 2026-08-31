@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
+import { resolveChannelAccessToken } from "@/lib/channel-secrets";
 import { buildConversationChannelWhere } from "@/lib/conversation-channel.service";
 import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
@@ -113,7 +114,9 @@ export async function GET(request: NextRequest) {
           channel.provider === "meta"
             ? checkMetaPhone({
                 phoneNumberId: channel.phoneNumberId,
-                accessToken: channel.accessToken
+                accessToken: resolveChannelAccessToken(channel.accessToken, {
+                  channelId: channel.id
+                })
               })
             : Promise.resolve<MetaPhoneStatus>({ ok: channel.status === "ACTIVE" })
         ]);

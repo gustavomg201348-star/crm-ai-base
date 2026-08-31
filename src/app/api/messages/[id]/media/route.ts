@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
+import { resolveChannelAccessToken } from "@/lib/channel-secrets";
 import { resolveConversationChannelId } from "@/lib/conversation-channel.service";
 import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
@@ -105,7 +106,11 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
     const resolvedChannel = Array.isArray(channel) ? channel[0] : channel;
 
-    if (!resolvedChannel?.accessToken) {
+    const accessToken = resolveChannelAccessToken(resolvedChannel?.accessToken, {
+      channelId: resolvedChannel?.id
+    });
+
+    if (!accessToken) {
       return NextResponse.json(
         { error: "Canal WhatsApp sem token para recuperar midia." },
         { status: 400 }
@@ -114,12 +119,12 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
     const media = await getMetaMediaUrl({
       mediaId: message.mediaId,
-      accessToken: resolvedChannel.accessToken
+      accessToken
     });
 
     const mediaResponse = await fetch(media.url, {
       headers: {
-        Authorization: `Bearer ${resolvedChannel.accessToken}`
+        Authorization: `Bearer ${accessToken}`
       },
       cache: "no-store"
     });

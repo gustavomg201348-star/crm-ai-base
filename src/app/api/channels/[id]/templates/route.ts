@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
+import { resolveChannelAccessToken } from "@/lib/channel-secrets";
 import { prisma } from "@/lib/db";
 import { requireCompanyAdmin } from "@/lib/permissions";
 import { safeLogError } from "@/lib/safe-logger";
@@ -448,7 +449,9 @@ export async function POST(
       });
     }
 
-    const accessToken = channel.accessToken?.trim();
+    const accessToken = resolveChannelAccessToken(channel.accessToken, {
+      channelId: channel.id
+    })?.trim();
     const wabaId = channel.wabaId?.trim();
     const appId = process.env.META_APP_ID?.trim();
 

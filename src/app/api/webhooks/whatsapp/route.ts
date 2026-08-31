@@ -10,6 +10,10 @@ import { updateCampaignDeliveryStatus } from "@/lib/campaigns";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { updateMessageDeliveryStatus } from "@/lib/message-delivery";
 import { safeLogError, safeLogInfo } from "@/lib/safe-logger";
+import {
+  resolveWebhookAcceptedVerifyTokens,
+  resolveWebhookAppSecret
+} from "@/lib/webhook-channel-secrets";
 
 type MetaWebhookPayload = {
   object?: string;
@@ -58,32 +62,36 @@ function logWebhookAudit(event: string, details: Record<string, unknown>) {
 }
 
 export async function GET(request: NextRequest) {
-  const mode = request.nextUrl.searchParams.get("hub.mode");
-  const challenge = request.nextUrl.searchParams.get("hub.challenge");
-  const verifyToken = request.nextUrl.searchParams.get("hub.verify_token");
+  try {
+    const mode = request.nextUrl.searchParams.get("hub.mode");
+    const challenge = request.nextUrl.searchParams.get("hub.challenge");
+    const verifyToken = request.nextUrl.searchParams.get("hub.verify_token");
 
-  if (mode === "subscribe" && challenge) {
-    const configuredTokens = await prisma.channel.findMany({
-      where: {
-        type: "whatsapp",
-        status: { in: ["ACTIVE", "CONNECTED"] },
-        verifyToken: { not: null }
-      },
-      select: { verifyToken: true }
-    });
-    const accepted = [
-      process.env.META_VERIFY_TOKEN,
-      ...configuredTokens.map((channel) => channel.verifyToken)
-    ].filter(Boolean);
+    if (mode === "subscribe" && challenge) {
+      const configuredTokens = await prisma.channel.findMany({
+        where: {
+          type: "whatsapp",
+          status: { in: ["ACTIVE", "CONNECTED"] },
+          verifyToken: { not: null }
+        },
+        select: { id: true, verifyToken: true }
+      });
+      const accepted = resolveWebhookAcceptedVerifyTokens(configuredTokens);
 
-    if (!accepted.length || accepted.includes(verifyToken)) {
-      return new NextResponse(challenge, { status: 200 });
+      if (!accepted.length || (verifyToken && accepted.includes(verifyToken))) {
+        return new NextResponse(challenge, { status: 200 });
+      }
+
+      return publicErrorResponse({ code: "FORBIDDEN", status: 403 });
     }
 
+    return NextResponse.json({ ok: true, mode: "whatsapp" });
+  } catch (error) {
+    safeLogError("whatsapp-webhook-audit", error, {
+      operation: "webhook-get"
+    });
     return publicErrorResponse({ code: "FORBIDDEN", status: 403 });
   }
-
-  return NextResponse.json({ ok: true, mode: "whatsapp" });
 }
 
 export async function POST(request: NextRequest) {
@@ -142,7 +150,10 @@ export async function POST(request: NextRequest) {
         }
 
         const signatureOk = verifyMetaSignature({
-          appSecret: channel.appSecret ?? process.env.META_APP_SECRET,
+          appSecret: resolveWebhookAppSecret({
+            channelId: channel.id,
+            channelAppSecret: channel.appSecret
+          }),
           rawBody,
           signature: request.headers.get("x-hub-signature-256")
         });

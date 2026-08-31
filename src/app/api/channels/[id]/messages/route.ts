@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import type { Contact, Conversation } from "@prisma/client";
 import { getSessionFromRequest } from "@/lib/auth";
 import { createActivity } from "@/lib/activities";
+import { resolveChannelAccessToken } from "@/lib/channel-secrets";
 import { conversationMatchesChannel } from "@/lib/conversation-channel.service";
 import { findOrCreateConversationForChannel } from "@/lib/conversation-lifecycle.service";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
@@ -62,7 +63,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return publicErrorResponse({ code: "CHANNEL_INVALID_INPUT", status: 400 });
     }
 
-    if (!channel.phoneNumberId || !channel.accessToken) {
+    const accessToken = resolveChannelAccessToken(channel.accessToken, {
+      channelId: channel.id
+    });
+
+    if (!channel.phoneNumberId || !accessToken) {
       return publicErrorResponse({ code: "CHANNEL_INVALID_INPUT", status: 400 });
     }
 
@@ -102,7 +107,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     const sent = await sendMetaTextMessage({
       phoneNumberId: channel.phoneNumberId,
-      accessToken: channel.accessToken,
+      accessToken,
       to: conversation
         ? normalizeContactPhone(conversation.contact.phone)
         : normalizedPhone,
