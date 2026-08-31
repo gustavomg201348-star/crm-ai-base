@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { createActivity } from "@/lib/activities";
+import { resolveChannelAccessToken } from "@/lib/channel-secrets";
 import { resolveConversationChannelId } from "@/lib/conversation-channel.service";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
@@ -14,7 +15,7 @@ export type ConversationIntegration = {
     provider: string;
     phoneNumberId: string | null;
     wabaId: string | null;
-    accessToken: string | null;
+    accessToken: string;
   };
 };
 
@@ -59,11 +60,15 @@ export async function getConversationIntegration({
   if (!channel) throw new Error("Integração WhatsApp nao encontrada para esta conversa.");
   if (!resolvedChannel) throw new Error("Integracao WhatsApp nao encontrada para esta conversa.");
   if (resolvedChannel.provider !== "meta") throw new Error("A conversa nao esta vinculada a um canal Meta.");
-  if (!resolvedChannel.phoneNumberId || !resolvedChannel.accessToken) {
+  const accessToken = resolveChannelAccessToken(resolvedChannel.accessToken, {
+    channelId: resolvedChannel.id
+  });
+
+  if (!resolvedChannel.phoneNumberId || !accessToken) {
     throw new Error("Canal Meta sem Phone Number ID ou token.");
   }
 
-  return { conversation, channel: resolvedChannel };
+  return { conversation, channel: { ...resolvedChannel, accessToken } };
 }
 
 export async function saveOutboundMessage({

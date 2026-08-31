@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
+import { resolveChannelAccessToken } from "@/lib/channel-secrets";
 import {
   CAMPAIGN_IMAGE_MAX_BYTES,
   CAMPAIGN_IMAGE_TYPES,
@@ -169,7 +170,11 @@ export async function POST(request: NextRequest) {
         { status: 404 }
       );
     }
-    if (!channel.phoneNumberId || !channel.accessToken) {
+    const accessToken = resolveChannelAccessToken(channel.accessToken, {
+      channelId: channel.id
+    });
+
+    if (!channel.phoneNumberId || !accessToken) {
       return NextResponse.json(
         { error: "Canal Meta sem Phone Number ID ou token." },
         { status: 400 }

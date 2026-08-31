@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
+import { resolveChannelAccessToken } from "@/lib/channel-secrets";
 import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
@@ -28,7 +29,11 @@ export async function POST(
       return publicErrorResponse({ code: "CHANNEL_NOT_FOUND", status: 404 });
     }
 
-    if (!channel.wabaId || !channel.accessToken) {
+    const accessToken = resolveChannelAccessToken(channel.accessToken, {
+      channelId: channel.id
+    });
+
+    if (!channel.wabaId || !accessToken) {
       return publicErrorResponse({
         code: "CHANNEL_INVALID_INPUT",
         status: 400,
@@ -38,7 +43,7 @@ export async function POST(
 
     const result = await subscribeMetaWebhook({
       wabaId: channel.wabaId,
-      accessToken: channel.accessToken
+      accessToken
     });
 
     if (!result.ok) {

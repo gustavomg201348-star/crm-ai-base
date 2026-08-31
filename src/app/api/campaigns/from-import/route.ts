@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { campaignInclude, mapCampaign } from "@/lib/campaigns";
+import { resolveChannelAccessToken } from "@/lib/channel-secrets";
 import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { getSessionOrUnauthorized, requireCompanyAdmin } from "@/lib/permissions";
@@ -82,7 +83,11 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    if (!channel?.phoneNumberId || !channel.accessToken) {
+    const accessToken = channel
+      ? resolveChannelAccessToken(channel.accessToken, { channelId: channel.id })
+      : null;
+
+    if (!channel?.phoneNumberId || !accessToken) {
       return NextResponse.json(
         { error: "Canal WhatsApp Meta ativo nao encontrado ou incompleto." },
         { status: 400 }

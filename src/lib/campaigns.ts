@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { createActivity } from "@/lib/activities";
+import { resolveChannelAccessToken } from "@/lib/channel-secrets";
 import { findOrCreateConversationForChannel } from "@/lib/conversation-lifecycle.service";
 import { renderCampaignMessage } from "@/lib/contact-import.service";
 import { prisma } from "@/lib/db";
@@ -295,7 +296,11 @@ export async function processCampaign(campaignId: string) {
   if (campaign.channel.provider !== "meta") {
     throw new Error("Disparo real exige canal WhatsApp Meta.");
   }
-  if (!campaign.channel.phoneNumberId || !campaign.channel.accessToken) {
+  const accessToken = resolveChannelAccessToken(campaign.channel.accessToken, {
+    channelId: campaign.channel.id
+  });
+
+  if (!campaign.channel.phoneNumberId || !accessToken) {
     throw new Error("Canal Meta sem Phone Number ID ou token.");
   }
 
@@ -316,7 +321,7 @@ export async function processCampaign(campaignId: string) {
       const bytes = await readFile(campaign.imagePath);
       const uploaded = await uploadMetaMedia({
         phoneNumberId: campaign.channel.phoneNumberId,
-        accessToken: campaign.channel.accessToken,
+        accessToken,
         fileName: campaign.imageName,
         mimeType: campaign.imageMime,
         bytes
@@ -348,7 +353,7 @@ export async function processCampaign(campaignId: string) {
       const headerImage = await resolveCampaignTemplateHeaderMedia({
         companyId: campaign.companyId,
         phoneNumberId: campaign.channel.phoneNumberId,
-        accessToken: campaign.channel.accessToken,
+        accessToken,
         localTemplate: localTemplateContext.localTemplate,
         template: localTemplateContext.template
       });
@@ -428,7 +433,7 @@ export async function processCampaign(campaignId: string) {
         campaign.templateLanguage
           ? await sendMetaTemplateMessage({
               phoneNumberId: campaign.channel.phoneNumberId,
-              accessToken: campaign.channel.accessToken,
+              accessToken,
               to,
               name: campaign.templateName,
               language: campaign.templateLanguage,
@@ -440,14 +445,14 @@ export async function processCampaign(campaignId: string) {
           : mediaId
             ? await sendMetaImageMessage({
                 phoneNumberId: campaign.channel.phoneNumberId,
-                accessToken: campaign.channel.accessToken,
+                accessToken,
                 to,
                 mediaId,
                 caption: personalizedMessage
               })
             : await sendMetaTextMessage({
                 phoneNumberId: campaign.channel.phoneNumberId,
-                accessToken: campaign.channel.accessToken,
+                accessToken,
                 to,
                 body: personalizedMessage
               });
