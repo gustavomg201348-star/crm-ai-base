@@ -55,12 +55,14 @@ test("IV aleatorio gera envelopes diferentes para o mesmo plaintext", () => {
 test("tampering no ciphertext falha no decrypt", () => {
   const encrypted = encryptSecret(plaintext, options());
   const parts = encrypted.split(":");
-  const ciphertext = parts[6];
-  const tampered = replaceEnvelopePart(
-    encrypted,
-    6,
-    `${ciphertext.slice(0, -1)}${ciphertext.endsWith("A") ? "B" : "A"}`
-  );
+  const ciphertextBytes = Buffer.from(parts[6], "base64url");
+
+  ciphertextBytes[0] ^= 1;
+  const tamperedCiphertext = ciphertextBytes.toString("base64url");
+  const tampered = replaceEnvelopePart(encrypted, 6, tamperedCiphertext);
+
+  assert.equal(Buffer.from(tamperedCiphertext, "base64url").length, Buffer.from(parts[6], "base64url").length);
+  assert.equal(isEncryptedSecretEnvelope(tampered), true);
 
   assert.throws(() => decryptSecret(tampered, options()), (error) => {
     assertSecretError(error, "decryption_failed");
