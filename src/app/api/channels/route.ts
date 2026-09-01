@@ -6,6 +6,10 @@ import { requireCompanyAdmin } from "@/lib/permissions";
 import { safeLogError } from "@/lib/safe-logger";
 import { validateMetaWhatsAppCredentials } from "@/lib/meta-whatsapp-diagnostics";
 import { sanitizeMetaDiagnostics } from "@/lib/meta-diagnostics-sanitizer";
+import {
+  ChannelSecretStorageError,
+  prepareChannelSecretsForCreateStorage
+} from "@/lib/channel-secrets";
 
 function mapChannel(channel: {
   id: string;
@@ -142,6 +146,12 @@ export async function POST(request: NextRequest) {
     const provider = body.provider?.trim() || "sandbox";
     const phoneNumberId = body.phoneNumberId?.trim() || null;
     const externalId = body.externalId?.trim() || phoneNumberId;
+    const rawSecrets = {
+      accessToken: body.accessToken?.trim() || null,
+      verifyToken: body.verifyToken?.trim() || null,
+      appSecret: body.appSecret?.trim() || null
+    };
+    const preparedSecrets = prepareChannelSecretsForCreateStorage(rawSecrets);
 
     if (provider === "meta") {
       const conflict = await findMetaIdentifierConflict({
@@ -154,7 +164,7 @@ export async function POST(request: NextRequest) {
       }
 
       const diagnostics = await validateMetaWhatsAppCredentials({
-        accessToken: body.accessToken,
+        accessToken: rawSecrets.accessToken ?? undefined,
         wabaId: body.wabaId,
         phoneNumberId: body.phoneNumberId
       });
@@ -185,15 +195,23 @@ export async function POST(request: NextRequest) {
         phoneNumberId,
         wabaId: body.wabaId?.trim() || null,
         displayPhone: body.displayPhone?.trim() || null,
-        accessToken: body.accessToken?.trim() || null,
-        verifyToken: body.verifyToken?.trim() || null,
-        appSecret: body.appSecret?.trim() || null,
+        ...preparedSecrets,
         status: "ACTIVE"
       }
     });
 
     return NextResponse.json({ channel: mapChannel(channel) }, { status: 201 });
   } catch (error) {
+    if (error instanceof ChannelSecretStorageError) {
+      return publicErrorResponse({
+        code:
+          error.code === "reserved_envelope"
+            ? "CHANNEL_INVALID_INPUT"
+            : "CHANNEL_CREATE_FAILED",
+        status: error.code === "reserved_envelope" ? 400 : 500
+      });
+    }
+
     safeLogError("http-api", error, {
       route: "/api/channels",
       method: "POST",

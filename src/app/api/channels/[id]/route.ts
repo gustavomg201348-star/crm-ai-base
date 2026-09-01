@@ -4,6 +4,10 @@ import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
 import { safeLogError } from "@/lib/safe-logger";
+import {
+  ChannelSecretStorageError,
+  prepareChannelSecretsForUpdateStorage
+} from "@/lib/channel-secrets";
 
 function mapChannel(channel: {
   id: string;
@@ -163,6 +167,8 @@ export async function PATCH(
       }
     }
 
+    const preparedSecrets = prepareChannelSecretsForUpdateStorage(body ?? {});
+
     const channel = await prisma.channel.update({
       where: { id },
       data: {
@@ -179,15 +185,23 @@ export async function PATCH(
           : body?.phoneNumberId !== undefined
             ? { externalId: effectiveExternalId }
             : {}),
-        ...(body?.accessToken?.trim() ? { accessToken: body.accessToken.trim() } : {}),
-        ...(body?.verifyToken?.trim() ? { verifyToken: body.verifyToken.trim() } : {}),
-        ...(body?.appSecret?.trim() ? { appSecret: body.appSecret.trim() } : {}),
+        ...preparedSecrets,
         ...(status !== undefined ? { status } : {})
       }
     });
 
     return NextResponse.json({ channel: mapChannel(channel) });
   } catch (error) {
+    if (error instanceof ChannelSecretStorageError) {
+      return publicErrorResponse({
+        code:
+          error.code === "reserved_envelope"
+            ? "CHANNEL_INVALID_INPUT"
+            : "CHANNEL_UPDATE_FAILED",
+        status: error.code === "reserved_envelope" ? 400 : 500
+      });
+    }
+
     safeLogError("http-api", error, {
       route: "/api/channels/[id]",
       method: "PATCH",
