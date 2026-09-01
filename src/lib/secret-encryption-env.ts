@@ -1,6 +1,7 @@
 import type { SecretEncryptionOptions } from "@/lib/secret-encryption";
 
 export const CHANNEL_SECRET_ENCRYPTION_KEY_V1_ENV = "QEVORA_DATA_ENCRYPTION_KEY_V1";
+export const CHANNEL_SECRET_ENCRYPTED_WRITES_ENV = "QEVORA_ENCRYPT_CHANNEL_SECRETS";
 
 export type SecretEncryptionKeyStatus =
   | { configured: false; status: "missing" }
@@ -8,6 +9,12 @@ export type SecretEncryptionKeyStatus =
   | { configured: true; status: "invalid" };
 
 type SecretEncryptionEnv = Record<string, string | undefined>;
+
+export function isChannelSecretEncryptedWritesEnabled(
+  env: SecretEncryptionEnv = process.env
+) {
+  return env[CHANNEL_SECRET_ENCRYPTED_WRITES_ENV]?.toLowerCase() === "true";
+}
 
 function isValidBase64EncodedKey(value: string) {
   const normalized = value.trim();
@@ -50,4 +57,20 @@ export function getSecretEncryptionKeyStatus(
   }
 
   return { configured: true, status: "configured" };
+}
+
+export function getChannelSecretEncryptionReadiness(
+  env: SecretEncryptionEnv = process.env
+) {
+  const encryptedWritesEnabled = isChannelSecretEncryptedWritesEnabled(env);
+  const keyV1 = getSecretEncryptionKeyStatus(env);
+
+  return {
+    encryptedWrites: {
+      enabled: encryptedWritesEnabled,
+      status: encryptedWritesEnabled ? "enabled" : "disabled"
+    },
+    keyV1,
+    ok: !encryptedWritesEnabled || keyV1.status === "configured"
+  };
 }

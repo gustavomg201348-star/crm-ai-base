@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { requireCompanyAdmin } from "@/lib/permissions";
-import { getSecretEncryptionKeyStatus } from "@/lib/secret-encryption-env";
+import { getChannelSecretEncryptionReadiness } from "@/lib/secret-encryption-env";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -95,7 +95,7 @@ export async function GET(request: NextRequest) {
     ]);
 
     const metaChannels = channels.filter((channel) => channel.provider === "meta");
-    const channelSecretEncryption = getSecretEncryptionKeyStatus();
+    const channelSecretEncryption = getChannelSecretEncryptionReadiness();
     const readyMetaChannels = metaChannels.filter(
       (channel) =>
         channel.phoneNumberId &&
