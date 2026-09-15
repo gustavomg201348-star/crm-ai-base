@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 import {
   classifyChannelSecret,
   encryptChannelSecretForBackfill,
   getBackfillEncryptionOptions,
+  isDirectRun,
   runChannelSecretBackfill,
   sanitizeCliError
 } from "../../scripts/backfill-channel-secrets.mjs";
@@ -122,6 +125,60 @@ function replaceEnvelopePart(envelope, partIndex, value) {
   parts[partIndex] = value;
   return parts.join(":");
 }
+test("direct-run guard reconhece caminho Windows com espaco", () => {
+  const entrypoint = String.raw`C:\Users\Micro\Documents\New project 2\scripts\backfill-channel-secrets.mjs`;
+
+  assert.equal(isDirectRun(entrypoint, pathToFileURL(entrypoint).href), true);
+});
+
+test("direct-run guard reconhece caminho Windows sem espaco", () => {
+  const entrypoint = String.raw`C:\qevora\scripts\backfill-channel-secrets.mjs`;
+
+  assert.equal(isDirectRun(entrypoint, pathToFileURL(entrypoint).href), true);
+});
+
+test("direct-run guard reconhece caminho POSIX canonicalizado pelo Node", () => {
+  const entrypoint = "/app/scripts/backfill-channel-secrets.mjs";
+
+  assert.equal(isDirectRun(entrypoint, pathToFileURL(entrypoint).href), true);
+});
+
+test("direct-run guard rejeita URL diferente", () => {
+  const entrypoint = String.raw`C:\Users\Micro\Documents\New project 2\scripts\backfill-channel-secrets.mjs`;
+
+  assert.equal(isDirectRun(entrypoint, "file:///C:/other/scripts/backfill-channel-secrets.mjs"), false);
+});
+
+test("importar modulo nao executa main automaticamente", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      "import './scripts/backfill-channel-secrets.mjs'; console.log('IMPORT_OK')"
+    ],
+    { cwd: process.cwd(), encoding: "utf8" }
+  );
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout.trim(), "IMPORT_OK");
+  assert.equal(result.stderr.trim(), "");
+});
+
+test("execucao direta em path com espaco entra no main", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["scripts/backfill-channel-secrets.mjs", "--entrypoint-probe"],
+    { cwd: process.cwd(), encoding: "utf8" }
+  );
+
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout.trim(), "");
+  assert.deepEqual(JSON.parse(result.stderr), {
+    ok: false,
+    code: "UNKNOWN_ARGUMENT"
+  });
+});
 
 test("classifica plaintext accessToken como conversao necessaria", async () => {
   const prisma = createFakePrisma([

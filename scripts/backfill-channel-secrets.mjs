@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { pathToFileURL } from "node:url";
 import { PrismaClient } from "@prisma/client";
 
 const ENVELOPE_PREFIX = "enc";
@@ -516,6 +517,10 @@ export function sanitizeCliError(error) {
   return "UNEXPECTED_ERROR";
 }
 
+export function isDirectRun(entrypoint = process.argv[1], moduleUrl = import.meta.url) {
+  return Boolean(entrypoint && moduleUrl === pathToFileURL(entrypoint).href);
+}
+
 async function main() {
   const args = parseCliArgs(process.argv.slice(2));
   const prisma = new PrismaClient();
@@ -530,7 +535,7 @@ async function main() {
   }
 }
 
-if (process.argv[1] && import.meta.url === `file:///${process.argv[1].replace(/\\/g, "/")}`) {
+if (isDirectRun()) {
   main().catch((error) => {
     console.error(
       JSON.stringify({
