@@ -3,6 +3,7 @@ import { getSessionFromRequest } from "@/lib/auth";
 import {
   ensureCltIntegrations,
   mapCltIntegration,
+  resolveCltIntegrationSecrets,
   resolveSensitivePasswordUpdate,
   resolveSensitiveTextUpdate
 } from "@/lib/clt-settings";
@@ -42,8 +43,11 @@ export async function POST(request: NextRequest) {
       return publicErrorResponse({ code: "CLT_PROVIDER_REJECTED", status: 400 });
     }
 
-    const username = resolveSensitiveTextUpdate(current.username, body.username);
-    const password = resolveSensitivePasswordUpdate(current.password, body.password);
+    const resolvedCurrent = resolveCltIntegrationSecrets(current);
+    const username = resolveSensitiveTextUpdate(resolvedCurrent.username, body.username);
+    const password = resolveSensitivePasswordUpdate(resolvedCurrent.password, body.password);
+    const storedUsername = resolveSensitiveTextUpdate(current.username, body.username);
+    const storedPassword = resolveSensitivePasswordUpdate(current.password, body.password);
 
     if (!username || !password) {
       return publicErrorResponse({ code: "CLT_INVALID_REQUEST", status: 400 });
@@ -52,8 +56,8 @@ export async function POST(request: NextRequest) {
     const updated = await prisma.cltIntegration.update({
       where: { id: current.id },
       data: {
-        username,
-        password,
+        username: storedUsername,
+        password: storedPassword,
         authType: "login-sms",
         status: "SMS_PENDING",
         smsStatus: "SMS_SENT",

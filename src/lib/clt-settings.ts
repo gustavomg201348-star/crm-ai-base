@@ -1,4 +1,12 @@
 import { cltBanks } from "@/lib/clt-integration";
+import {
+  resolveCltApiKey,
+  resolveCltCertifiedAgentCpf,
+  resolveCltDigitadorCode,
+  resolveCltNewcorbanIdentifier,
+  resolveCltPassword,
+  resolveCltUsername
+} from "@/lib/clt-secrets";
 import { prisma } from "@/lib/db";
 
 type CltIntegrationViewerRole = "ADMIN" | "SUPERVISOR" | "AGENT";
@@ -173,6 +181,24 @@ export function resolveSensitivePasswordUpdate(current: string | null, next?: st
   return next.trim() ? next : current;
 }
 
+export function resolveCltIntegrationSecrets(integration: {
+  apiKey?: string | null;
+  username?: string | null;
+  password?: string | null;
+  newcorbanIdentifier?: string | null;
+  digitadorCode?: string | null;
+  certifiedAgentCpf?: string | null;
+}) {
+  return {
+    apiKey: resolveCltApiKey(integration.apiKey),
+    username: resolveCltUsername(integration.username),
+    password: resolveCltPassword(integration.password),
+    newcorbanIdentifier: resolveCltNewcorbanIdentifier(integration.newcorbanIdentifier),
+    digitadorCode: resolveCltDigitadorCode(integration.digitadorCode),
+    certifiedAgentCpf: resolveCltCertifiedAgentCpf(integration.certifiedAgentCpf)
+  };
+}
+
 export function mapCltIntegration(integration: {
   id: string;
   bankId: string;
@@ -197,6 +223,7 @@ export function mapCltIntegration(integration: {
 }, viewerRole: CltIntegrationViewerRole = "ADMIN") {
   const shouldMaskSensitiveFields = viewerRole === "AGENT";
   const showSensitivePreviews = !shouldMaskSensitiveFields;
+  const resolvedSecrets = resolveCltIntegrationSecrets(integration);
 
   return {
     id: integration.id,
@@ -205,15 +232,15 @@ export function mapCltIntegration(integration: {
     provider: integration.provider,
     baseUrl: integration.baseUrl,
     authType: integration.authType,
-    hasApiKey: Boolean(integration.apiKey),
-    apiKeyPreview: shouldMaskSensitiveFields ? null : maskSecret(integration.apiKey),
-    hasUsername: Boolean(integration.username),
-    usernamePreview: showSensitivePreviews ? maskSecret(integration.username) : null,
-    hasPassword: Boolean(integration.password),
-    hasNewcorbanIdentifier: Boolean(integration.newcorbanIdentifier),
-    hasDigitadorCode: Boolean(integration.digitadorCode),
-    hasCertifiedAgentCpf: Boolean(integration.certifiedAgentCpf),
-    certifiedAgentCpfPreview: showSensitivePreviews ? maskCpfPreview(integration.certifiedAgentCpf) : null,
+    hasApiKey: Boolean(resolvedSecrets.apiKey),
+    apiKeyPreview: shouldMaskSensitiveFields ? null : maskSecret(resolvedSecrets.apiKey),
+    hasUsername: Boolean(resolvedSecrets.username),
+    usernamePreview: showSensitivePreviews ? maskSecret(resolvedSecrets.username) : null,
+    hasPassword: Boolean(resolvedSecrets.password),
+    hasNewcorbanIdentifier: Boolean(resolvedSecrets.newcorbanIdentifier),
+    hasDigitadorCode: Boolean(resolvedSecrets.digitadorCode),
+    hasCertifiedAgentCpf: Boolean(resolvedSecrets.certifiedAgentCpf),
+    certifiedAgentCpfPreview: showSensitivePreviews ? maskCpfPreview(resolvedSecrets.certifiedAgentCpf) : null,
     actingUf: integration.actingUf,
     smsStatus: integration.smsStatus,
     smsRequestedAt: integration.smsRequestedAt,
