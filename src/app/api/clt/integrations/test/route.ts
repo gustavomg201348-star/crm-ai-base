@@ -1,7 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { getCltBank } from "@/lib/clt-integration";
-import { ensureCltIntegrations, mapCltIntegration } from "@/lib/clt-settings";
+import {
+  ensureCltIntegrations,
+  mapCltIntegration,
+  resolveCltIntegrationSecrets
+} from "@/lib/clt-settings";
 import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
@@ -35,10 +39,14 @@ export async function POST(request: NextRequest) {
 
     const isManual = current.provider === "manual";
     const isNewcorban = current.provider === "newcorban";
+    const resolvedSecrets = resolveCltIntegrationSecrets(current);
     const hasMinimumConfig =
       isManual ||
       isNewcorban ||
-      Boolean(current.baseUrl && (current.authType === "none" || current.apiKey || current.username));
+      Boolean(
+        current.baseUrl &&
+          (current.authType === "none" || resolvedSecrets.apiKey || resolvedSecrets.username)
+      );
     const updated = await prisma.cltIntegration.update({
       where: { id: current.id },
       data: {

@@ -3,6 +3,7 @@ import { getSessionFromRequest } from "@/lib/auth";
 import {
   ensureCltIntegrations,
   mapCltIntegration,
+  resolveCltIntegrationSecrets,
   resolveSensitiveTextUpdate
 } from "@/lib/clt-settings";
 import { prisma } from "@/lib/db";
@@ -48,12 +49,22 @@ export async function POST(request: NextRequest) {
       return publicErrorResponse({ code: "NOT_FOUND", status: 404 });
     }
 
+    const resolvedCurrent = resolveCltIntegrationSecrets(current);
     const newcorbanIdentifier = resolveSensitiveTextUpdate(
+      resolvedCurrent.newcorbanIdentifier,
+      body.newcorbanIdentifier
+    );
+    const digitadorCode = resolveSensitiveTextUpdate(resolvedCurrent.digitadorCode, body.digitadorCode);
+    const certifiedAgentCpf = resolveSensitiveTextUpdate(
+      resolvedCurrent.certifiedAgentCpf,
+      body.certifiedAgentCpf
+    );
+    const storedNewcorbanIdentifier = resolveSensitiveTextUpdate(
       current.newcorbanIdentifier,
       body.newcorbanIdentifier
     );
-    const digitadorCode = resolveSensitiveTextUpdate(current.digitadorCode, body.digitadorCode);
-    const certifiedAgentCpf = resolveSensitiveTextUpdate(
+    const storedDigitadorCode = resolveSensitiveTextUpdate(current.digitadorCode, body.digitadorCode);
+    const storedCertifiedAgentCpf = resolveSensitiveTextUpdate(
       current.certifiedAgentCpf,
       body.certifiedAgentCpf
     );
@@ -66,9 +77,9 @@ export async function POST(request: NextRequest) {
     const updated = await prisma.cltIntegration.update({
       where: { id: current.id },
       data: {
-        newcorbanIdentifier,
-        digitadorCode,
-        certifiedAgentCpf,
+        newcorbanIdentifier: storedNewcorbanIdentifier,
+        digitadorCode: storedDigitadorCode,
+        certifiedAgentCpf: storedCertifiedAgentCpf,
         actingUf,
         authType: "login-sms",
         status: "ASSISTED",
