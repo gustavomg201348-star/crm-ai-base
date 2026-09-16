@@ -3,10 +3,13 @@ import { getSessionFromRequest } from "@/lib/auth";
 import { cltBanks } from "@/lib/clt-integration";
 import {
   ensureCltIntegrations,
-  mapCltIntegration,
-  resolveSensitivePasswordUpdate,
-  resolveSensitiveTextUpdate
+  mapCltIntegration
 } from "@/lib/clt-settings";
+import {
+  CltSecretStorageError,
+  prepareCltSecretPasswordUpdate,
+  prepareCltSecretTextUpdate
+} from "@/lib/clt-secrets";
 import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
@@ -113,6 +116,27 @@ export async function PATCH(request: NextRequest) {
       return publicErrorResponse({ code: "NOT_FOUND", status: 404 });
     }
 
+    const preparedSecrets = {
+      apiKey: prepareCltSecretTextUpdate(current.apiKey, body.apiKey, "apiKey"),
+      username: prepareCltSecretTextUpdate(current.username, body.username, "username"),
+      password: prepareCltSecretPasswordUpdate(current.password, body.password),
+      newcorbanIdentifier: prepareCltSecretTextUpdate(
+        current.newcorbanIdentifier,
+        body.newcorbanIdentifier,
+        "newcorbanIdentifier"
+      ),
+      digitadorCode: prepareCltSecretTextUpdate(
+        current.digitadorCode,
+        body.digitadorCode,
+        "digitadorCode"
+      ),
+      certifiedAgentCpf: prepareCltSecretTextUpdate(
+        current.certifiedAgentCpf,
+        body.certifiedAgentCpf,
+        "certifiedAgentCpf"
+      )
+    };
+
     const updated = await prisma.cltIntegration.update({
       where: { id: current.id },
       data: {
@@ -123,13 +147,7 @@ export async function PATCH(request: NextRequest) {
             ? "https://viva.newcorban.com.br"
             : null),
         authType: body.authType || current.authType,
-        apiKey: resolveSensitiveTextUpdate(current.apiKey, body.apiKey),
-        username: resolveSensitiveTextUpdate(current.username, body.username),
-        password: resolveSensitivePasswordUpdate(current.password, body.password),
-        newcorbanIdentifier:
-          resolveSensitiveTextUpdate(current.newcorbanIdentifier, body.newcorbanIdentifier),
-        digitadorCode: resolveSensitiveTextUpdate(current.digitadorCode, body.digitadorCode),
-        certifiedAgentCpf: resolveSensitiveTextUpdate(current.certifiedAgentCpf, body.certifiedAgentCpf),
+        ...preparedSecrets,
         actingUf:
           body.actingUf === undefined ? current.actingUf : body.actingUf.trim().toUpperCase() || null,
         status: body.status || (body.provider === "newcorban" ? "ASSISTED" : current.status)
@@ -138,6 +156,16 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json({ integration: mapCltIntegration(updated) });
   } catch (error) {
+    if (error instanceof CltSecretStorageError) {
+      return publicErrorResponse({
+        code:
+          error.code === "reserved_envelope"
+            ? "CLT_INVALID_REQUEST"
+            : "CLT_PROVIDER_UNAVAILABLE",
+        status: error.code === "reserved_envelope" ? 400 : 500
+      });
+    }
+
     const session = getSessionFromRequest(request);
     const bank = cltBanks.find((item) => item.id === fallbackBody?.bankId) ?? cltBanks[0];
 
