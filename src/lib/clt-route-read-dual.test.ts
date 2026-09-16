@@ -14,10 +14,12 @@ test("authenticate route resolve username/password before validation and preserv
   assert.match(code, /const resolvedCurrent = resolveCltIntegrationSecrets\(current\)/);
   assert.match(code, /resolveSensitiveTextUpdate\(resolvedCurrent\.username, body\.username\)/);
   assert.match(code, /resolveSensitivePasswordUpdate\(resolvedCurrent\.password, body\.password\)/);
-  assert.match(code, /const storedUsername = resolveSensitiveTextUpdate\(current\.username, body\.username\)/);
-  assert.match(code, /const storedPassword = resolveSensitivePasswordUpdate\(current\.password, body\.password\)/);
+  assert.match(code, /const storedUsername = prepareCltSecretTextUpdate\(current\.username, body\.username, "username"\)/);
+  assert.match(code, /const storedPassword = prepareCltSecretPasswordUpdate\(current\.password, body\.password\)/);
   assert.match(code, /username: storedUsername/);
   assert.match(code, /password: storedPassword/);
+  assert.ok(code.indexOf("const updated = await prisma.cltIntegration.update") > code.indexOf("const storedPassword"));
+  assert.equal(code.includes("encryptSecret("), false);
 });
 
 test("verify-sms route resolve CLT operational secrets before validation and preserves stored value on write", () => {
@@ -28,12 +30,17 @@ test("verify-sms route resolve CLT operational secrets before validation and pre
   assert.match(code, /resolvedCurrent\.newcorbanIdentifier/);
   assert.match(code, /resolvedCurrent\.digitadorCode/);
   assert.match(code, /resolvedCurrent\.certifiedAgentCpf/);
-  assert.match(code, /const storedNewcorbanIdentifier = resolveSensitiveTextUpdate/);
-  assert.match(code, /const storedDigitadorCode = resolveSensitiveTextUpdate/);
-  assert.match(code, /const storedCertifiedAgentCpf = resolveSensitiveTextUpdate/);
+  assert.match(code, /const storedNewcorbanIdentifier = prepareCltSecretTextUpdate/);
+  assert.match(code, /const storedDigitadorCode = prepareCltSecretTextUpdate/);
+  assert.match(code, /const storedCertifiedAgentCpf = prepareCltSecretTextUpdate/);
   assert.match(code, /newcorbanIdentifier: storedNewcorbanIdentifier/);
   assert.match(code, /digitadorCode: storedDigitadorCode/);
   assert.match(code, /certifiedAgentCpf: storedCertifiedAgentCpf/);
+  assert.ok(
+    code.indexOf("const updated = await prisma.cltIntegration.update") >
+      code.indexOf("const storedCertifiedAgentCpf")
+  );
+  assert.equal(code.includes("encryptSecret("), false);
 });
 
 test("test route evaluates minimum config from resolved apiKey/username", () => {
@@ -45,11 +52,17 @@ test("test route evaluates minimum config from resolved apiKey/username", () => 
   assert.match(code, /resolvedSecrets\.username/);
 });
 
-test("integrations PATCH keeps plaintext write behavior and does not call encryption runtime", () => {
+test("integrations PATCH prepara os seis secrets CLT antes do Prisma update sem encrypt direto na rota", () => {
   const code = source("src/app/api/clt/integrations/route.ts");
 
-  assert.match(code, /apiKey: resolveSensitiveTextUpdate\(current\.apiKey, body\.apiKey\)/);
-  assert.match(code, /username: resolveSensitiveTextUpdate\(current\.username, body\.username\)/);
-  assert.match(code, /password: resolveSensitivePasswordUpdate\(current\.password, body\.password\)/);
+  assert.match(code, /const preparedSecrets = \{/);
+  assert.match(code, /apiKey: prepareCltSecretTextUpdate\(current\.apiKey, body\.apiKey, "apiKey"\)/);
+  assert.match(code, /username: prepareCltSecretTextUpdate\(current\.username, body\.username, "username"\)/);
+  assert.match(code, /password: prepareCltSecretPasswordUpdate\(current\.password, body\.password\)/);
+  assert.match(code, /newcorbanIdentifier: prepareCltSecretTextUpdate/);
+  assert.match(code, /digitadorCode: prepareCltSecretTextUpdate/);
+  assert.match(code, /certifiedAgentCpf: prepareCltSecretTextUpdate/);
+  assert.ok(code.indexOf("const updated = await prisma.cltIntegration.update") > code.indexOf("const preparedSecrets"));
+  assert.match(code, /\.\.\.preparedSecrets/);
   assert.equal(code.includes("encryptSecret("), false);
 });

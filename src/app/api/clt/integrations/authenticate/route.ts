@@ -7,6 +7,11 @@ import {
   resolveSensitivePasswordUpdate,
   resolveSensitiveTextUpdate
 } from "@/lib/clt-settings";
+import {
+  CltSecretStorageError,
+  prepareCltSecretPasswordUpdate,
+  prepareCltSecretTextUpdate
+} from "@/lib/clt-secrets";
 import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
@@ -46,8 +51,8 @@ export async function POST(request: NextRequest) {
     const resolvedCurrent = resolveCltIntegrationSecrets(current);
     const username = resolveSensitiveTextUpdate(resolvedCurrent.username, body.username);
     const password = resolveSensitivePasswordUpdate(resolvedCurrent.password, body.password);
-    const storedUsername = resolveSensitiveTextUpdate(current.username, body.username);
-    const storedPassword = resolveSensitivePasswordUpdate(current.password, body.password);
+    const storedUsername = prepareCltSecretTextUpdate(current.username, body.username, "username");
+    const storedPassword = prepareCltSecretPasswordUpdate(current.password, body.password);
 
     if (!username || !password) {
       return publicErrorResponse({ code: "CLT_INVALID_REQUEST", status: 400 });
@@ -75,6 +80,16 @@ export async function POST(request: NextRequest) {
         "Fluxo assistido preparado. O envio real do SMS ainda precisa ser solicitado no Newcorban."
     });
   } catch (error) {
+    if (error instanceof CltSecretStorageError) {
+      return publicErrorResponse({
+        code:
+          error.code === "reserved_envelope"
+            ? "CLT_INVALID_REQUEST"
+            : "CLT_PROVIDER_UNAVAILABLE",
+        status: error.code === "reserved_envelope" ? 400 : 500
+      });
+    }
+
     const session = getSessionFromRequest(request);
 
     safeLogError("http-api", error, {

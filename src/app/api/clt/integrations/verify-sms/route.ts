@@ -6,6 +6,10 @@ import {
   resolveCltIntegrationSecrets,
   resolveSensitiveTextUpdate
 } from "@/lib/clt-settings";
+import {
+  CltSecretStorageError,
+  prepareCltSecretTextUpdate
+} from "@/lib/clt-secrets";
 import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
@@ -59,14 +63,20 @@ export async function POST(request: NextRequest) {
       resolvedCurrent.certifiedAgentCpf,
       body.certifiedAgentCpf
     );
-    const storedNewcorbanIdentifier = resolveSensitiveTextUpdate(
+    const storedNewcorbanIdentifier = prepareCltSecretTextUpdate(
       current.newcorbanIdentifier,
-      body.newcorbanIdentifier
+      body.newcorbanIdentifier,
+      "newcorbanIdentifier"
     );
-    const storedDigitadorCode = resolveSensitiveTextUpdate(current.digitadorCode, body.digitadorCode);
-    const storedCertifiedAgentCpf = resolveSensitiveTextUpdate(
+    const storedDigitadorCode = prepareCltSecretTextUpdate(
+      current.digitadorCode,
+      body.digitadorCode,
+      "digitadorCode"
+    );
+    const storedCertifiedAgentCpf = prepareCltSecretTextUpdate(
       current.certifiedAgentCpf,
-      body.certifiedAgentCpf
+      body.certifiedAgentCpf,
+      "certifiedAgentCpf"
     );
     const actingUf = body.actingUf?.trim().toUpperCase() || current.actingUf;
 
@@ -96,6 +106,16 @@ export async function POST(request: NextRequest) {
       message: "Credenciais Mercantil/Newcorban salvas."
     });
   } catch (error) {
+    if (error instanceof CltSecretStorageError) {
+      return publicErrorResponse({
+        code:
+          error.code === "reserved_envelope"
+            ? "CLT_INVALID_REQUEST"
+            : "CLT_PROVIDER_REJECTED",
+        status: error.code === "reserved_envelope" ? 400 : 500
+      });
+    }
+
     const session = getSessionFromRequest(request);
 
     safeLogError("http-api", error, {

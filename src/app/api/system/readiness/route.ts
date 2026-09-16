@@ -2,7 +2,10 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { requireCompanyAdmin } from "@/lib/permissions";
-import { getChannelSecretEncryptionReadiness } from "@/lib/secret-encryption-env";
+import {
+  getChannelSecretEncryptionReadiness,
+  getCltSecretEncryptionReadiness
+} from "@/lib/secret-encryption-env";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -96,6 +99,7 @@ export async function GET(request: NextRequest) {
 
     const metaChannels = channels.filter((channel) => channel.provider === "meta");
     const channelSecretEncryption = getChannelSecretEncryptionReadiness();
+    const cltSecretEncryption = getCltSecretEncryptionReadiness();
     const readyMetaChannels = metaChannels.filter(
       (channel) =>
         channel.phoneNumberId &&
@@ -105,7 +109,10 @@ export async function GET(request: NextRequest) {
         ["ACTIVE", "CONNECTED"].includes(channel.status)
     );
     const failedChecks = checks.filter((check) => !check.ok);
-    const ok = Boolean(currentCompany) && failedChecks.length === 0;
+    const ok =
+      Boolean(currentCompany) &&
+      failedChecks.length === 0 &&
+      cltSecretEncryption.ok;
 
     return NextResponse.json({
       ok,
@@ -133,7 +140,8 @@ export async function GET(request: NextRequest) {
           metaCount: metaChannels.length,
           readyMetaCount: readyMetaChannels.length,
           channelSecretEncryption
-        }
+        },
+        cltSecretEncryption
       }
     });
   } catch {
