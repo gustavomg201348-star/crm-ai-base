@@ -16,7 +16,8 @@
     "prisma:migrate:prod": "prisma migrate deploy --schema prisma/schema.postgres.prisma",
     "prisma:push": "prisma db push",
     "prisma:seed": "prisma db seed",
-    "db:setup": "node prisma/setup-sqlite.mjs && npm run prisma:seed"
+    "db:setup": "node prisma/setup-sqlite.mjs && npm run prisma:seed",
+    "clt:secrets:backfill": "node scripts/run-backfill-clt-secrets.mjs"
   },
   "prisma": {
     "seed": "node prisma/seed.mjs"
