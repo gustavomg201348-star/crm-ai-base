@@ -1,9 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
+import { resolveConversationAccess } from "@/lib/conversation-access-control";
 import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { saveFailedOutboundMessage } from "@/lib/message-delivery";
-import { canAccessConversation } from "@/lib/permissions";
 import { safeLogError } from "@/lib/safe-logger";
 import { maxMediaSize, sendConversationMedia } from "@/lib/whatsapp-media.service";
 
@@ -12,11 +12,29 @@ type RouteContext = {
 };
 
 export async function POST(request: NextRequest, context: RouteContext) {
+  let authorizedConversation: { id: string; companyId: string } | null = null;
+
   try {
     const session = getSessionFromRequest(request);
     if (!session) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
+
+    const access = await resolveConversationAccess({
+      db: prisma,
+      session,
+      conversationId: context.params.id
+    });
+
+    if (access.status === "not_found") {
+      return NextResponse.json({ error: "Conversa nao encontrada." }, { status: 404 });
+    }
+
+    if (access.status === "forbidden") {
+      return NextResponse.json({ error: "Conversa atribuida a outro atendente." }, { status: 403 });
+    }
+
+    authorizedConversation = { id: access.conversation.id, companyId: session.companyId };
 
     const formData = await request.formData();
     const file = formData.get("file");
@@ -24,19 +42,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "Arquivo obrigatorio." }, { status: 400 });
-    }
-
-    const current = await prisma.conversation.findFirst({
-      where: { id: context.params.id, contact: { companyId: session.companyId } },
-      select: { agentId: true }
-    });
-
-    if (!current) {
-      return NextResponse.json({ error: "Conversa nao encontrada." }, { status: 404 });
-    }
-
-    if (!canAccessConversation({ session, agentId: current.agentId })) {
-      return NextResponse.json({ error: "Conversa atribuida a outro atendente." }, { status: 403 });
     }
 
     if (file.size > maxMediaSize) {
@@ -48,7 +53,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     const bytes = Buffer.from(await file.arrayBuffer());
     const conversation = await sendConversationMedia({
-      conversationId: context.params.id,
+      conversationId: authorizedConversation.id,
       companyId: session.companyId,
       userId: session.id,
       fileName: file.name || "arquivo",
@@ -61,12 +66,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
   } catch (error) {
     const message = "Falha ao enviar midia.";
 
-    await saveFailedOutboundMessage({
-      conversationId: context.params.id,
-      body: "Falha ao enviar midia.",
-      type: "document",
-      errorMessage: message
-    }).catch(() => null);
+    if (authorizedConversation) {
+      await saveFailedOutboundMessage({
+        companyId: authorizedConversation.companyId,
+        conversationId: authorizedConversation.id,
+        body: "Falha ao enviar midia.",
+        type: "document",
+        errorMessage: message
+      }).catch(() => null);
+    }
 
     safeLogError("http-api", error, {
       operation: "conversation-media-send",

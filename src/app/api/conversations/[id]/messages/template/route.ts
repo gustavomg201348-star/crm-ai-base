@@ -12,6 +12,8 @@ type RouteContext = {
 };
 
 export async function POST(request: NextRequest, context: RouteContext) {
+  let authorizedConversation: { id: string; companyId: string } | null = null;
+
   try {
     const session = getSessionFromRequest(request);
     if (!session) {
@@ -46,6 +48,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Conversa atribuida a outro atendente." }, { status: 403 });
     }
 
+    authorizedConversation = { id: context.params.id, companyId: session.companyId };
+
     const conversation = await sendConversationTemplate({
       conversationId: context.params.id,
       companyId: session.companyId,
@@ -59,12 +63,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
   } catch (error) {
     const message = "Falha ao enviar template.";
 
-    await saveFailedOutboundMessage({
-      conversationId: context.params.id,
-      body: "Falha ao enviar template.",
-      type: "template",
-      errorMessage: message
-    }).catch(() => null);
+    if (authorizedConversation) {
+      await saveFailedOutboundMessage({
+        companyId: authorizedConversation.companyId,
+        conversationId: authorizedConversation.id,
+        body: "Falha ao enviar template.",
+        type: "template",
+        errorMessage: message
+      }).catch(() => null);
+    }
 
     safeLogError("http-api", error, {
       operation: "conversation-template-send",

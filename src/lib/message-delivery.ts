@@ -1,6 +1,21 @@
 import { prisma } from "@/lib/db";
 import { buildMessageDeliveryScope } from "@/lib/webhook-delivery-scope";
 
+export type FailedOutboundMessageDb = {
+  conversation: {
+    findFirst(args: {
+      where: { id: string; contact: { companyId: string } };
+      select: { id: true; contactId: true };
+    }): Promise<{ id: string; contactId: string } | null>;
+  };
+  $transaction<T>(
+    callback: (tx: {
+      message: { create(args: unknown): Promise<T> };
+      conversation: { update(args: unknown): Promise<unknown> };
+    }) => Promise<T>
+  ): Promise<T>;
+};
+
 const statusMap: Record<string, string> = {
   sent: "sent",
   delivered: "delivered",
@@ -62,6 +77,7 @@ export async function updateMessageDeliveryStatus({
 }
 
 export async function saveFailedOutboundMessage({
+  companyId,
   conversationId,
   body,
   type = "text",
@@ -71,6 +87,7 @@ export async function saveFailedOutboundMessage({
   templateName,
   templateLanguage
 }: {
+  companyId: string;
   conversationId: string;
   body: string;
   type?: string;
@@ -79,9 +96,9 @@ export async function saveFailedOutboundMessage({
   mimeType?: string | null;
   templateName?: string | null;
   templateLanguage?: string | null;
-}) {
-  const conversation = await prisma.conversation.findUnique({
-    where: { id: conversationId },
+}, db: FailedOutboundMessageDb = prisma as unknown as FailedOutboundMessageDb) {
+  const conversation = await db.conversation.findFirst({
+    where: { id: conversationId, contact: { companyId } },
     select: { id: true, contactId: true }
   });
 
@@ -90,7 +107,7 @@ export async function saveFailedOutboundMessage({
   const detail = `${body}\n\nFalha: ${errorMessage}`.trim();
   const failedAt = new Date();
 
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const message = await tx.message.create({
       data: {
         conversationId,
