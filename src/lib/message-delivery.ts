@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { buildMessageDeliveryScope } from "@/lib/webhook-delivery-scope";
 
 const statusMap: Record<string, string> = {
   sent: "sent",
@@ -14,25 +15,30 @@ export function normalizeDeliveryStatus(status: string) {
 }
 
 export async function updateMessageDeliveryStatus({
+  companyId,
+  channelId,
   providerMessageId,
   status,
   errorMessage
 }: {
+  companyId: string;
+  channelId: string;
   providerMessageId: string;
   status: string;
   errorMessage?: string | null;
 }) {
   const normalizedStatus = normalizeDeliveryStatus(status);
   const statusAt = new Date();
+  const scopedWhere = buildMessageDeliveryScope({ companyId, channelId, providerMessageId });
   const failedMessages = normalizedStatus === "failed" && errorMessage
     ? await prisma.message.findMany({
-        where: { providerMessageId },
+        where: { ...scopedWhere, status: { not: normalizedStatus } },
         select: { id: true, body: true }
       })
     : [];
 
   const updated = await prisma.message.updateMany({
-    where: { providerMessageId },
+    where: { ...scopedWhere, status: { not: normalizedStatus } },
     data: {
       status: normalizedStatus,
       ...(normalizedStatus === "read" ? { readAt: statusAt } : {})
