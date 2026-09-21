@@ -2,17 +2,17 @@ import { NextResponse, type NextRequest } from "next/server";
 import { processInboundMessage } from "@/lib/inbound-message";
 import {
   parseMetaWebhookMessages,
-  parseMetaWebhookStatuses,
-  verifyMetaSignature
+  parseMetaWebhookStatuses
 } from "@/lib/meta-whatsapp";
 import { prisma } from "@/lib/db";
 import { updateCampaignDeliveryStatus } from "@/lib/campaigns";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { updateMessageDeliveryStatus } from "@/lib/message-delivery";
 import { safeLogError, safeLogInfo } from "@/lib/safe-logger";
+import { applyWebhookDeliveryUpdates } from "@/lib/webhook-delivery-scope";
 import {
   resolveWebhookAcceptedVerifyTokens,
-  resolveWebhookAppSecret
+  resolveVerifiedMetaWebhookChannel
 } from "@/lib/webhook-channel-secrets";
 
 type MetaWebhookPayload = {
@@ -78,7 +78,7 @@ export async function GET(request: NextRequest) {
       });
       const accepted = resolveWebhookAcceptedVerifyTokens(configuredTokens);
 
-      if (!accepted.length || (verifyToken && accepted.includes(verifyToken))) {
+      if (verifyToken && accepted.includes(verifyToken)) {
         return new NextResponse(challenge, { status: 200 });
       }
 
@@ -123,51 +123,22 @@ export async function POST(request: NextRequest) {
           hasProviderMessageId: Boolean(message.messageId)
         });
 
-        const channel = await prisma.channel.findFirst({
-          where: {
-            type: "whatsapp",
-            provider: "meta",
-            status: { in: ["ACTIVE", "CONNECTED"] },
-            OR: [
-              { phoneNumberId: message.phoneNumberId },
-              { externalId: message.phoneNumberId }
-            ]
-          }
-        });
-
-        if (!channel) {
-          logWebhookAudit("message-discarded", {
-            reason: "channel-not-found",
-            hasChannelExternalId: Boolean(message.phoneNumberId),
-            hasSender: Boolean(message.from)
-          });
-          results.push({
-            phoneNumberId: message.phoneNumberId,
-            ok: false,
-            error: "Canal nao cadastrado."
-          });
-          continue;
-        }
-
-        const signatureOk = verifyMetaSignature({
-          appSecret: resolveWebhookAppSecret({
-            channelId: channel.id,
-            channelAppSecret: channel.appSecret
-          }),
+        const verified = await resolveVerifiedMetaWebhookChannel({
+          db: prisma,
+          phoneNumberId: message.phoneNumberId,
           rawBody,
           signature: request.headers.get("x-hub-signature-256")
         });
 
-        if (!signatureOk) {
+        if (!verified.ok) {
           logWebhookAudit("message-discarded", {
-            reason: "invalid-signature",
-            channelId: channel.id,
-            companyId: channel.companyId,
+            reason: verified.reason,
             hasChannelExternalId: Boolean(message.phoneNumberId),
             hasSender: Boolean(message.from)
           });
           return publicErrorResponse({ code: "FORBIDDEN", status: 403 });
         }
+        const channel = verified.channel;
 
         await prisma.channel.update({
           where: { id: channel.id },
@@ -213,57 +184,50 @@ export async function POST(request: NextRequest) {
           hasErrorMessage: Boolean(status.errorMessage)
         });
 
-        const channel = await prisma.channel.findFirst({
-          where: {
-            type: "whatsapp",
-            provider: "meta",
-            OR: [
-              { phoneNumberId: status.phoneNumberId },
-              { externalId: status.phoneNumberId }
-            ]
-          },
-          select: { id: true }
+        const verified = await resolveVerifiedMetaWebhookChannel({
+          db: prisma,
+          phoneNumberId: status.phoneNumberId,
+          rawBody,
+          signature: request.headers.get("x-hub-signature-256")
         });
 
-        if (channel) {
-          await prisma.channel.update({
-            where: { id: channel.id },
-            data: { lastWebhookReceivedAt: new Date() }
-          });
-        } else {
+        if (!verified.ok) {
           logWebhookAudit("status-discarded", {
-            reason: "channel-not-found",
+            reason: verified.reason,
             hasChannelExternalId: Boolean(status.phoneNumberId),
             hasMessageId: Boolean(status.messageId),
             status: status.status
           });
+          return publicErrorResponse({ code: "FORBIDDEN", status: 403 });
         }
+        const channel = verified.channel;
 
-        const [campaignUpdated, messageUpdated] = await Promise.all([
-          updateCampaignDeliveryStatus({
+        const errorMessage = status.errorMessage
+          ?.replace(/[\u0000-\u001f\u007f]/g, " ")
+          .trim()
+          .slice(0, 500) || null;
+
+        const updated = await applyWebhookDeliveryUpdates({
+          updateCampaign: () => updateCampaignDeliveryStatus({
+            companyId: channel.companyId,
+            channelId: channel.id,
             providerMessageId: status.messageId,
             status: status.status,
             errorCode: status.errorCode,
-            errorMessage: status.errorMessage
+            errorMessage
           }),
-          updateMessageDeliveryStatus({
+          updateMessage: () => updateMessageDeliveryStatus({
+            companyId: channel.companyId,
+            channelId: channel.id,
             providerMessageId: status.messageId,
             status: status.status,
-            errorMessage: status.errorMessage
+            errorMessage
+          }),
+          touchChannel: () => prisma.channel.update({
+            where: { id: channel.id },
+            data: { lastWebhookReceivedAt: new Date() }
           })
-        ]);
-
-        const updated =
-          Boolean(campaignUpdated) || Boolean(messageUpdated);
-
-        if (status.status.toLowerCase() === "failed" && !updated) {
-          await updateCampaignDeliveryStatus({
-            providerMessageId: status.messageId,
-            status: status.status,
-            errorCode: status.errorCode,
-            errorMessage: status.errorMessage
-          });
-        }
+        });
 
         results.push({
           phoneNumberId: status.phoneNumberId,

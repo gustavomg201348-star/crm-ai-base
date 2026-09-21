@@ -4,6 +4,7 @@ import { resolveChannelAccessToken } from "@/lib/channel-secrets";
 import { findOrCreateConversationForChannel } from "@/lib/conversation-lifecycle.service";
 import { renderCampaignMessage } from "@/lib/contact-import.service";
 import { prisma } from "@/lib/db";
+import { buildCampaignDeliveryScope } from "@/lib/webhook-delivery-scope";
 import {
   readMetaMessageId,
   MetaMediaUploadError,
@@ -570,11 +571,15 @@ export async function processCampaign(campaignId: string) {
 }
 
 export async function updateCampaignDeliveryStatus({
+  companyId,
+  channelId,
   providerMessageId,
   status,
   errorCode,
   errorMessage
 }: {
+  companyId: string;
+  channelId: string;
   providerMessageId: string;
   status: string;
   errorCode?: string | null;
@@ -592,10 +597,12 @@ export async function updateCampaignDeliveryStatus({
   if (!mappedStatus) return null;
 
   const recipient = await prisma.campaignRecipient.findFirst({
-    where: { providerMessageId }
+    where: buildCampaignDeliveryScope({ companyId, channelId, providerMessageId })
   });
 
   if (!recipient) return null;
+
+  if (recipient.status === mappedStatus) return null;
 
   const updated = await prisma.campaignRecipient.update({
     where: { id: recipient.id },
