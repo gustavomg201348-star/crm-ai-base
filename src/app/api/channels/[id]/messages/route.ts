@@ -31,6 +31,7 @@ type ConversationWithContact = Conversation & { contact: Contact };
 
 export async function POST(request: NextRequest, context: RouteContext) {
   let failedConversationId: string | undefined;
+  let failedCompanyId: string | undefined;
   let failedMessageBody: string | undefined;
   let metaAcceptedMessage = false;
 
@@ -102,6 +103,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       }
 
       failedConversationId = conversation.id;
+      failedCompanyId = session.companyId;
       failedMessageBody = message;
     }
 
@@ -250,8 +252,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
   } catch (error) {
     const errorMessage = "Falha ao enviar mensagem.";
 
-    if (!metaAcceptedMessage && failedConversationId && failedMessageBody) {
+    if (!metaAcceptedMessage && failedCompanyId && failedConversationId && failedMessageBody) {
       await saveFailedOutboundMessage({
+        companyId: failedCompanyId,
         conversationId: failedConversationId,
         body: failedMessageBody,
         errorMessage
