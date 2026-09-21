@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
+import { validateContactReferences } from "@/lib/contact-reference-validation";
 import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireAdmin } from "@/lib/permissions";
@@ -51,12 +52,15 @@ export async function PATCH(request: NextRequest) {
           select: { id: true }
         })
       : null;
-    const stage = body?.stageId
-      ? await prisma.pipelineStage.findFirst({
-          where: { id: body.stageId, companyId: session.companyId },
-          select: { id: true }
-        })
-      : null;
+    const references = await validateContactReferences({
+      db: prisma,
+      companyId: session.companyId,
+      stageId: body?.stageId
+    });
+
+    if (!references.ok) {
+      return NextResponse.json({ error: "Etapa invalida." }, { status: 400 });
+    }
     const tag = body?.tagId
       ? await prisma.tag.findFirst({
           where: { id: body.tagId, companyId: session.companyId },
@@ -70,7 +74,7 @@ export async function PATCH(request: NextRequest) {
           where: { id: { in: validIds }, companyId: session.companyId },
           data: {
             ...(body.ownerId !== undefined ? { ownerId: owner?.id ?? null } : {}),
-            ...(body.stageId !== undefined ? { stageId: stage?.id ?? null } : {}),
+            ...(references.stageId !== undefined ? { stageId: references.stageId } : {}),
             ...(body.archived !== undefined
               ? { archivedAt: body.archived ? new Date() : null }
               : {})

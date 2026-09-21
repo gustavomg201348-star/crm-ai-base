@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { getSessionFromRequest } from "@/lib/auth";
 import { createActivity } from "@/lib/activities";
+import { validateContactReferences } from "@/lib/contact-reference-validation";
 import {
   contactInclude,
   findContactByNormalizedPhone,
@@ -99,8 +100,8 @@ export async function POST(request: NextRequest) {
           phone?: string;
           email?: string;
           cpf?: string;
-          originId?: string;
-          stageId?: string;
+          originId?: string | null;
+          stageId?: string | null;
           ownerId?: string;
           tagIds?: string[];
           temperature?: LeadTemperature;
@@ -150,6 +151,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const references = await validateContactReferences({
+      db: prisma,
+      companyId: session.companyId,
+      stageId: body?.stageId,
+      originId: body?.originId
+    });
+
+    if (!references.ok) {
+      return NextResponse.json({ error: "Etapa ou origem invalida." }, { status: 400 });
+    }
+
     const owner = body?.ownerId
       ? await prisma.user.findFirst({
           where: { id: body.ownerId, companyId: session.companyId }
@@ -173,8 +185,8 @@ export async function POST(request: NextRequest) {
           normalizedPhone,
           email: body?.email?.trim() || null,
           cpf: cpf || null,
-          originId: body?.originId || null,
-          stageId: body?.stageId || null,
+          originId: references.originId ?? null,
+          stageId: references.stageId ?? null,
           temperature: body?.temperature || "WARM",
           tags: tags.length
             ? { create: tags.map((tag) => ({ tagId: tag.id })) }
