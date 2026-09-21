@@ -9,7 +9,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const { session, response } = getSessionOrUnauthorized(request);
+  const { session, response } = await getSessionOrUnauthorized(request);
   if (response) return response;
 
   const lead = await getRetirementLead(session.companyId, params.id);
@@ -25,7 +25,7 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
-    const { session, response } = getSessionOrUnauthorized(request);
+    const { session, response } = await getSessionOrUnauthorized(request);
     if (response) return response;
 
     const blocked = requireAdmin(session);

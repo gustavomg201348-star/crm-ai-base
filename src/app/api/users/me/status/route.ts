@@ -9,7 +9,7 @@ import { safeLogError } from "@/lib/safe-logger";
 
 export async function PATCH(request: NextRequest) {
   try {
-    const { session, response } = getSessionOrUnauthorized(request);
+    const { session, response } = await getSessionOrUnauthorized(request);
     if (!session) return response;
 
     const body = (await request.json().catch(() => null)) as
@@ -24,7 +24,7 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json({ status: result });
   } catch (error) {
-    const { session } = getSessionOrUnauthorized(request);
+    const { session } = await getSessionOrUnauthorized(request);
 
     safeLogError("http-api", error, {
       route: "/api/users/me/status",

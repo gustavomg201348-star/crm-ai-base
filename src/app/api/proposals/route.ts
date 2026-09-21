@@ -251,7 +251,7 @@ function buildMetrics(
 
 export async function GET(request: NextRequest) {
   try {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
 
     if (!session) {
       return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
@@ -287,7 +287,7 @@ export async function GET(request: NextRequest) {
       metrics: buildMetrics(metricRows)
     });
   } catch (error) {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
 
     safeLogError("http-api", error, {
       route: "/api/proposals",
@@ -304,7 +304,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
 
     if (!session) {
       return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
@@ -557,7 +557,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ proposal: mapProposal(proposal) }, { status: 201 });
   } catch (error) {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
 
     safeLogError("http-api", error, {
       route: "/api/proposals",

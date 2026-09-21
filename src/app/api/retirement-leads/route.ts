@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
-    const { session, response } = getSessionOrUnauthorized(request);
+    const { session, response } = await getSessionOrUnauthorized(request);
     if (response) return response;
 
     const result = await listRetirementLeads({
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const { session, response } = getSessionOrUnauthorized(request);
+    const { session, response } = await getSessionOrUnauthorized(request);
     if (response) return response;
 
     const blocked = requireAdmin(session);

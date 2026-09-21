@@ -25,7 +25,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const { session, response } = getSessionOrUnauthorized(request);
+  const { session, response } = await getSessionOrUnauthorized(request);
   if (response) return response;
 
   const events = await listRetirementLeadEvents(session.companyId, params.id);
@@ -51,7 +51,7 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
-    const { session, response } = getSessionOrUnauthorized(request);
+    const { session, response } = await getSessionOrUnauthorized(request);
     if (response) return response;
 
     const body = (await request.json().catch(() => null)) as

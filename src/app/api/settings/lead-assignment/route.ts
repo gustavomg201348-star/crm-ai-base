@@ -10,7 +10,7 @@ import { safeLogError } from "@/lib/safe-logger";
 
 export async function GET(request: NextRequest) {
   try {
-    const { session, response } = getSessionOrUnauthorized(request);
+    const { session, response } = await getSessionOrUnauthorized(request);
     if (!session) return response;
 
     const blocked = requireCompanyAdmin(session);
@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
     const settings = await getLeadAssignmentSettings(session.companyId);
     return NextResponse.json({ settings });
   } catch (error) {
-    const { session } = getSessionOrUnauthorized(request);
+    const { session } = await getSessionOrUnauthorized(request);
 
     safeLogError("http-api", error, {
       route: "/api/settings/lead-assignment",
@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const { session, response } = getSessionOrUnauthorized(request);
+    const { session, response } = await getSessionOrUnauthorized(request);
     if (!session) return response;
 
     const blocked = requireCompanyAdmin(session);
@@ -70,7 +70,7 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json({ settings });
   } catch (error) {
-    const { session } = getSessionOrUnauthorized(request);
+    const { session } = await getSessionOrUnauthorized(request);
 
     safeLogError("http-api", error, {
       route: "/api/settings/lead-assignment",

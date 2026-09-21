@@ -16,7 +16,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
 
     if (!session) {
       return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
@@ -100,7 +100,7 @@ export async function PATCH(
 
     return NextResponse.json({ task: mapTask(task) });
   } catch (error) {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
     const { id } = await params;
 
     safeLogError("http-api", error, {

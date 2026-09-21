@@ -13,7 +13,7 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
-    const { session, response } = getSessionOrUnauthorized(request);
+    const { session, response } = await getSessionOrUnauthorized(request);
     if (response) return response;
 
     const blocked = requireCompanyAdmin(session);

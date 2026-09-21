@@ -60,7 +60,7 @@ async function checkMetaPhone({
 
 export async function GET(request: NextRequest) {
   try {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
 
     if (!session) {
       return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });

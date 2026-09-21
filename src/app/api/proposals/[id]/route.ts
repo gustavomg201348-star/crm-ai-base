@@ -38,7 +38,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
 
     if (!session) {
       return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
@@ -229,7 +229,7 @@ export async function PATCH(
 
     return NextResponse.json({ proposal: mapProposal(proposal) });
   } catch (error) {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
     const { id } = await params;
 
     if (isPrismaKnownRequestError(error, "P2025")) {
@@ -255,7 +255,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
 
     if (!session) {
       return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
@@ -276,7 +276,7 @@ export async function DELETE(
 
     return NextResponse.json({ ok: true });
   } catch (error) {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
     const { id } = await params;
 
     if (isPrismaKnownRequestError(error, "P2025")) {

@@ -26,7 +26,7 @@ function resolveCampaignRecipientPhone(contact: {
 
 export async function POST(request: NextRequest) {
   try {
-    const { session, response } = getSessionOrUnauthorized(request);
+    const { session, response } = await getSessionOrUnauthorized(request);
     if (response) return response;
 
     const blocked = requireCompanyAdmin(session);

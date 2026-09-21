@@ -50,7 +50,7 @@ export async function POST(
   try {
     const resolvedParams = await params;
     requestedTemplateId = resolvedParams.id?.trim() || null;
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
 
     if (!session) {
       return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });

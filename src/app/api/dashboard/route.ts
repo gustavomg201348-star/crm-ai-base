@@ -102,7 +102,7 @@ function sumMoney<T extends { amount?: { toNumber: () => number }; commission?: 
 
 export async function GET(request: NextRequest) {
   try {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
 
     if (!session) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });

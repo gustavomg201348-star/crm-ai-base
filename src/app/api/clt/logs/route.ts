@@ -7,7 +7,7 @@ import { safeLogError } from "@/lib/safe-logger";
 
 export async function GET(request: NextRequest) {
   try {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
     if (!session) {
       return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ logs: logs.map(mapCltLog) });
   } catch (error) {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
 
     safeLogError("http-api", error, {
       route: "/api/clt/logs",

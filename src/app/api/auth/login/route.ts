@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
 
     response.cookies.set(
       sessionCookie.name,
-      createSessionToken(sessionUser),
+      createSessionToken(sessionUser, user.passwordHash),
       sessionCookie.options
     );
 

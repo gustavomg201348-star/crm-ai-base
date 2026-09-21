@@ -4,7 +4,7 @@ import { cltBanks } from "@/lib/clt-integration";
 import { publicErrorResponse } from "@/lib/http-error-response";
 
 export async function GET(request: NextRequest) {
-  const session = getSessionFromRequest(request);
+  const session = await getSessionFromRequest(request);
 
   if (!session) {
     return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });

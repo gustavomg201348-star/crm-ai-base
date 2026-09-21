@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
   let requestedBankId = "mercantil";
 
   try {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
     if (!session) {
       return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ integration: mapCltIntegration(updated) });
   } catch (error) {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
     const bank = getCltBank(requestedBankId);
 
     safeLogError("http-api", error, {
