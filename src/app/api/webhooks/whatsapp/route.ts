@@ -9,6 +9,7 @@ import { updateCampaignDeliveryStatus } from "@/lib/campaigns";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { updateMessageDeliveryStatus } from "@/lib/message-delivery";
 import { safeLogError, safeLogInfo } from "@/lib/safe-logger";
+import { applyWebhookDeliveryUpdates } from "@/lib/webhook-delivery-scope";
 import {
   resolveWebhookAcceptedVerifyTokens,
   resolveVerifiedMetaWebhookChannel
@@ -206,8 +207,8 @@ export async function POST(request: NextRequest) {
           .trim()
           .slice(0, 500) || null;
 
-        const [campaignUpdated, messageUpdated] = await Promise.all([
-          updateCampaignDeliveryStatus({
+        const updated = await applyWebhookDeliveryUpdates({
+          updateCampaign: () => updateCampaignDeliveryStatus({
             companyId: channel.companyId,
             channelId: channel.id,
             providerMessageId: status.messageId,
@@ -215,24 +216,18 @@ export async function POST(request: NextRequest) {
             errorCode: status.errorCode,
             errorMessage
           }),
-          updateMessageDeliveryStatus({
+          updateMessage: () => updateMessageDeliveryStatus({
             companyId: channel.companyId,
             channelId: channel.id,
             providerMessageId: status.messageId,
             status: status.status,
             errorMessage
-          })
-        ]);
-
-        const updated =
-          Boolean(campaignUpdated) || Boolean(messageUpdated);
-
-        if (updated) {
-          await prisma.channel.update({
+          }),
+          touchChannel: () => prisma.channel.update({
             where: { id: channel.id },
             data: { lastWebhookReceivedAt: new Date() }
-          });
-        }
+          })
+        });
 
         results.push({
           phoneNumberId: status.phoneNumberId,

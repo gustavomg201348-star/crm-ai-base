@@ -5,6 +5,7 @@ import test from "node:test";
 import { encryptSecret } from "@/lib/secret-encryption";
 import { resolveVerifiedMetaWebhookChannel } from "@/lib/webhook-channel-secrets";
 import {
+  applyWebhookDeliveryUpdates,
   buildCampaignDeliveryScope,
   buildMessageDeliveryScope
 } from "@/lib/webhook-delivery-scope";
@@ -210,7 +211,49 @@ test("status duplicado possui guards idempotentes", () => {
   const messageSource = readFileSync("src/lib/message-delivery.ts", "utf8");
   const campaignSource = readFileSync("src/lib/campaigns.ts", "utf8");
   assert.match(messageSource, /status: \{ not: normalizedStatus \}/);
-  assert.match(campaignSource, /recipient\.status === mappedStatus/);
+  assert.match(campaignSource, /recipient\.status === mappedStatus\) return null/);
+});
+
+test("status duplicado e no-op ate o Channel", async () => {
+  let campaignUpdates = 0;
+  let counterUpdates = 0;
+  let channelUpdates = 0;
+
+  const updated = await applyWebhookDeliveryUpdates({
+    updateCampaign: async () => null,
+    updateMessage: async () => 0,
+    touchChannel: async () => {
+      channelUpdates += 1;
+    }
+  });
+
+  assert.equal(updated, false);
+  assert.equal(campaignUpdates, 0);
+  assert.equal(counterUpdates, 0);
+  assert.equal(channelUpdates, 0);
+});
+
+test("mudanca real atualiza resultado e timestamp do Channel", async () => {
+  let campaignUpdates = 0;
+  let counterUpdates = 0;
+  let channelUpdates = 0;
+
+  const updated = await applyWebhookDeliveryUpdates({
+    updateCampaign: async () => {
+      campaignUpdates += 1;
+      counterUpdates += 1;
+      return { id: "recipient-a" };
+    },
+    updateMessage: async () => 0,
+    touchChannel: async () => {
+      channelUpdates += 1;
+    }
+  });
+
+  assert.equal(updated, true);
+  assert.equal(campaignUpdates, 1);
+  assert.equal(counterUpdates, 1);
+  assert.equal(channelUpdates, 1);
 });
 
 test("GET aceita challenge somente para verifyToken resolvido", () => {
@@ -227,16 +270,17 @@ test("fluxo de status verifica Channel e assinatura antes do primeiro write", ()
   const source = readFileSync("src/app/api/webhooks/whatsapp/route.ts", "utf8");
   const statusStart = source.indexOf("const metaStatuses");
   const resolver = source.indexOf("resolveVerifiedMetaWebhookChannel", statusStart);
-  const write = source.indexOf("await prisma.channel.update", resolver);
-  assert.ok(statusStart >= 0 && resolver > statusStart && write > resolver);
+  const delivery = source.indexOf("applyWebhookDeliveryUpdates", resolver);
+  const write = source.indexOf("touchChannel: () => prisma.channel.update", delivery);
+  assert.ok(statusStart >= 0 && resolver > statusStart && delivery > resolver && write > delivery);
 });
 
 test("status sem alvo scoped nao atualiza nem o Channel", () => {
   const source = readFileSync("src/app/api/webhooks/whatsapp/route.ts", "utf8");
   const statusStart = source.indexOf("const metaStatuses");
-  const updated = source.indexOf("if (updated)", statusStart);
-  const channelWrite = source.indexOf("await prisma.channel.update", updated);
-  assert.ok(updated > statusStart && channelWrite > updated);
+  const delivery = source.indexOf("applyWebhookDeliveryUpdates", statusStart);
+  const channelWrite = source.indexOf("touchChannel: () => prisma.channel.update", delivery);
+  assert.ok(delivery > statusStart && channelWrite > delivery);
 });
 
 test("fluxo de message usa o mesmo resolver fail-closed", () => {

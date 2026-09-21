@@ -30,3 +30,25 @@ export function buildCampaignDeliveryScope({
     campaign: { companyId, channelId }
   };
 }
+
+export async function applyWebhookDeliveryUpdates({
+  updateCampaign,
+  updateMessage,
+  touchChannel
+}: {
+  updateCampaign: () => Promise<unknown>;
+  updateMessage: () => Promise<unknown>;
+  touchChannel: () => Promise<unknown>;
+}) {
+  const [campaignUpdated, messageUpdated] = await Promise.all([
+    updateCampaign(),
+    updateMessage()
+  ]);
+  const updated = Boolean(campaignUpdated) || Boolean(messageUpdated);
+
+  if (updated) {
+    await touchChannel();
+  }
+
+  return updated;
+}

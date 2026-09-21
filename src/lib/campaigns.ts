@@ -602,7 +602,7 @@ export async function updateCampaignDeliveryStatus({
 
   if (!recipient) return null;
 
-  if (recipient.status === mappedStatus) return recipient;
+  if (recipient.status === mappedStatus) return null;
 
   const updated = await prisma.campaignRecipient.update({
     where: { id: recipient.id },
