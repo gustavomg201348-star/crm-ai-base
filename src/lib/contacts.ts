@@ -310,6 +310,9 @@ export type ContactWithRelations = Prisma.ContactGetPayload<{
 }>;
 
 export function mapContact(contact: ContactWithRelations) {
+  const origin = contact.origin?.companyId === contact.companyId ? contact.origin : null;
+  const stage = contact.stage?.companyId === contact.companyId ? contact.stage : null;
+
   return {
     id: contact.id,
     name: contact.name,
@@ -323,11 +326,11 @@ export function mapContact(contact: ContactWithRelations) {
     createdAt: contact.createdAt,
     updatedAt: contact.updatedAt,
     owner: contact.owner?.name ?? "Sem responsavel",
-    origin: contact.origin?.name ?? "Sem origem",
-    stage: contact.stage?.name ?? "Sem etapa",
+    origin: origin?.name ?? "Sem origem",
+    stage: stage?.name ?? "Sem etapa",
     ownerId: contact.ownerId,
-    originId: contact.originId,
-    stageId: contact.stageId,
+    originId: origin?.id ?? null,
+    stageId: stage?.id ?? null,
     tags: contact.tags.map((item) => ({
       id: item.tag.id,
       name: item.tag.name,

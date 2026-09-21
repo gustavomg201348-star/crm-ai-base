@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { createActivity } from "@/lib/activities";
+import { validateContactReferences } from "@/lib/contact-reference-validation";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import {
   contactInclude,
@@ -205,6 +206,17 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       );
     }
 
+    const references = await validateContactReferences({
+      db: prisma,
+      companyId: session.companyId,
+      stageId: body?.stageId,
+      originId: body?.originId
+    });
+
+    if (!references.ok) {
+      return NextResponse.json({ error: "Etapa ou origem invalida." }, { status: 400 });
+    }
+
     const contact = await prisma.$transaction(async (tx) => {
       const activityDetails: string[] = [];
       const manualName = body?.name?.trim().replace(/\s+/g, " ");
@@ -269,8 +281,8 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           ...(body?.internalNote !== undefined
             ? { internalNote: body.internalNote?.trim() || null }
             : {}),
-          ...(body?.originId !== undefined ? { originId: body.originId || null } : {}),
-          ...(body?.stageId !== undefined ? { stageId: body.stageId || null } : {}),
+          ...(references.originId !== undefined ? { originId: references.originId } : {}),
+          ...(references.stageId !== undefined ? { stageId: references.stageId } : {}),
           ...(body?.ownerId !== undefined ? { ownerId: owner?.id ?? null } : {}),
           ...(body?.temperature !== undefined
             ? { temperature: body.temperature }

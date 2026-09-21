@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
+import { validateContactReferences } from "@/lib/contact-reference-validation";
 import {
   contactInclude,
   getContactNormalizedPhone,
@@ -162,6 +163,16 @@ export async function POST(request: NextRequest) {
     const errors: Array<{ row: number; reason: string }> = [];
     const ignored: Array<{ row: number; reason: string }> = [];
     const createdContacts = [];
+    const defaultReferences = await validateContactReferences({
+      db: prisma,
+      companyId: session.companyId,
+      stageId: body?.defaults?.stageId,
+      originId: body?.defaults?.originId
+    });
+
+    if (!defaultReferences.ok) {
+      return NextResponse.json({ error: "Etapa ou origem padrao invalida." }, { status: 400 });
+    }
 
     for (let index = 0; index < rows.length; index += 1) {
       const row = rows[index];
@@ -222,8 +233,14 @@ export async function POST(request: NextRequest) {
           normalizedPhone: contactNormalizedPhone,
           email: email || null,
           cpf: cpf || null,
-          originId: (originName && originMap.get(normalize(originName))) || body?.defaults?.originId || null,
-          stageId: (stageName && stageMap.get(normalize(stageName))) || body?.defaults?.stageId || null,
+          originId:
+            (originName && originMap.get(normalize(originName))) ||
+            defaultReferences.originId ||
+            null,
+          stageId:
+            (stageName && stageMap.get(normalize(stageName))) ||
+            defaultReferences.stageId ||
+            null,
           temperature: parseTemperature(readField(row, "temperature")),
           tags: rowTags.length
             ? { create: rowTags.map((tag) => ({ tagId: tag.id })) }
