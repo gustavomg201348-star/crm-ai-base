@@ -3,6 +3,7 @@ import {
   getAuthenticatedSessionFromRequest,
   type SessionUser
 } from "@/lib/auth";
+import { prisma } from "@/lib/db";
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,6 +15,14 @@ export async function GET(request: NextRequest) {
     }
 
     const sessionUser: SessionUser = session;
+    const company = await prisma.company.findUnique({
+      where: { id: sessionUser.companyId },
+      select: { id: true, name: true, segment: true }
+    });
+
+    if (!company) {
+      return NextResponse.json({ user: null }, { status: 401 });
+    }
 
     const response = NextResponse.json({
       user: {
@@ -24,9 +33,9 @@ export async function GET(request: NextRequest) {
         role: sessionUser.role
       },
       company: {
-        id: authenticated.company.id,
-        name: authenticated.company.name,
-        segment: authenticated.company.segment
+        id: company.id,
+        name: company.name,
+        segment: company.segment
       }
     });
 

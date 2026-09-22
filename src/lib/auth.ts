@@ -17,16 +17,10 @@ type SessionTokenPayload = SessionUser & {
 
 export type SessionSecurityUser = SessionUser & {
   passwordHash: string;
-  company: {
-    id: string;
-    name: string;
-    segment: string | null;
-  };
 };
 
 export type AuthenticatedSession = {
   user: SessionUser;
-  company: SessionSecurityUser["company"];
 };
 
 const cookieName = "crm_session";
@@ -131,8 +125,7 @@ export async function validateSessionToken(
         name: true,
         email: true,
         role: true,
-        passwordHash: true,
-        company: { select: { id: true, name: true, segment: true } }
+        passwordHash: true
       }
     }) as Promise<SessionSecurityUser | null>
 ): Promise<AuthenticatedSession | null> {
@@ -156,8 +149,7 @@ export async function validateSessionToken(
       name: current.name,
       email: current.email,
       role: current.role as SessionUser["role"]
-    },
-    company: current.company
+    }
   };
 }
 

@@ -20,8 +20,7 @@ const baseUser: SessionSecurityUser = {
   name: "Admin Test",
   email: "admin@example.test",
   role: "ADMIN",
-  passwordHash: "pbkdf2$test-salt$test-hash",
-  company: { id: "company-a", name: "Company A", segment: null }
+  passwordHash: "pbkdf2$test-salt$test-hash"
 };
 
 function publicUser(user: SessionSecurityUser): SessionUser {
@@ -84,8 +83,7 @@ test("upgrade AGENT para ADMIN nao concede privilegio ao token antigo", async ()
 test("mudanca de company revoga token antigo", async () => {
   const current = {
     ...baseUser,
-    companyId: "company-b",
-    company: { id: "company-b", name: "Company B", segment: null }
+    companyId: "company-b"
   };
   assert.equal(await validateSessionToken(tokenFor(baseUser), async () => current), null);
 });
@@ -117,8 +115,7 @@ test("novo login apos cada mudanca produz nova sessao valida", async () => {
     { ...baseUser, role: "AGENT" },
     {
       ...baseUser,
-      companyId: "company-b",
-      company: { id: "company-b", name: "Company B", segment: null }
+      companyId: "company-b"
     },
     { ...baseUser, passwordHash: "pbkdf2$new-salt$new-hash" }
   ];
@@ -176,8 +173,7 @@ test("token ADMIN antigo rejeitado nao chega a autorizacao ADMIN", async () => {
 test("token da company antiga e rejeitado antes de acesso tenant", async () => {
   const transferred = {
     ...baseUser,
-    companyId: "company-b",
-    company: { id: "company-b", name: "Company B", segment: null }
+    companyId: "company-b"
   };
   const authenticated = await validateSessionToken(tokenFor(baseUser), async () => transferred);
   assert.equal(authenticated, null);
