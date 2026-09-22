@@ -1,6 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createSessionToken, hashPassword, sessionCookie, verifyPassword } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import {
+  enforceRateLimits,
+  getRequestIpKey,
+  rateLimitPolicies
+} from "@/lib/rate-limit";
 import { isSeedPasswordResetAllowed } from "@/lib/seed-admin-login";
 
 export async function POST(request: NextRequest) {
@@ -13,8 +18,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Informe email e senha." }, { status: 400 });
     }
 
+    const normalizedEmail = body.email.toLowerCase().trim();
+    const limited = await enforceRateLimits([
+      {
+        category: "login-ip",
+        identifiers: [getRequestIpKey(request)],
+        ...rateLimitPolicies.loginIp
+      },
+      {
+        category: "login-identity",
+        identifiers: [normalizedEmail],
+        ...rateLimitPolicies.loginIdentity
+      }
+    ]);
+    if (limited) return limited;
+
     let user = await prisma.user.findUnique({
-      where: { email: body.email.toLowerCase().trim() },
+      where: { email: normalizedEmail },
       include: { company: true }
     });
 

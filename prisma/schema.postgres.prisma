@@ -41,6 +41,16 @@ model Company {
   mediaAssets   MediaAsset[]
 }
 
+model RateLimitBucket {
+  key         String   @id
+  windowStart DateTime
+  count       Int      @default(0)
+  expiresAt   DateTime
+  updatedAt   DateTime @updatedAt
+
+  @@index([expiresAt])
+}
+
 model Channel {
   id            String     @id @default(cuid())
   companyId     String

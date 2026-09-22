@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { saveFailedOutboundMessage } from "@/lib/message-delivery";
 import { safeLogError } from "@/lib/safe-logger";
+import { enforceRateLimits, rateLimitPolicies } from "@/lib/rate-limit";
 import { maxMediaSize, sendConversationMedia } from "@/lib/whatsapp-media.service";
 
 type RouteContext = {
@@ -33,6 +34,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (access.status === "forbidden") {
       return NextResponse.json({ error: "Conversa atribuida a outro atendente." }, { status: 403 });
     }
+
+    const limited = await enforceRateLimits([
+      {
+        category: "media-upload",
+        identifiers: [session.companyId, session.id],
+        ...rateLimitPolicies.mediaUpload
+      }
+    ]);
+    if (limited) return limited;
 
     authorizedConversation = { id: access.conversation.id, companyId: session.companyId };
 
