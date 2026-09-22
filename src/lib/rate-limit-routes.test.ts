@@ -69,3 +69,52 @@ test("contador PostgreSQL usa upsert atomico sem read-then-write", () => {
   assert.match(text, /"RateLimitBucket"\."count" \+ 1/);
   assert.doesNotMatch(text, /\.rateLimitBucket\.find/);
 });
+
+test("cleanup PostgreSQL e limitado e revalida expiracao no DELETE", () => {
+  const text = source("src/lib/rate-limit.ts");
+  assert.match(text, /ORDER BY "expiresAt" ASC/);
+  assert.match(text, /LIMIT \$\{limit\}/);
+  assert.match(text, /FOR UPDATE SKIP LOCKED/);
+  assert.match(text, /DELETE FROM "RateLimitBucket" AS bucket/);
+  assert.match(text, /bucket\."expiresAt" <= \$\{before\}/);
+});
+
+test("migration e schemas Prisma permanecem alinhados", () => {
+  const migration = source(
+    "prisma/migrations/20260922120000_add_rate_limit_buckets/migration.sql"
+  );
+  assert.match(migration, /CREATE TABLE "RateLimitBucket"/);
+  assert.match(migration, /"key" TEXT NOT NULL/);
+  assert.match(migration, /"windowStart" TIMESTAMP\(3\) NOT NULL/);
+  assert.match(migration, /"count" INTEGER NOT NULL DEFAULT 0/);
+  assert.match(migration, /"expiresAt" TIMESTAMP\(3\) NOT NULL/);
+  assert.match(migration, /"updatedAt" TIMESTAMP\(3\) NOT NULL/);
+  assert.match(migration, /PRIMARY KEY \("key"\)/);
+  assert.match(migration, /CREATE INDEX "RateLimitBucket_expiresAt_idx"/);
+
+  for (const schemaPath of ["prisma/schema.prisma", "prisma/schema.postgres.prisma"]) {
+    const schema = source(schemaPath);
+    assert.match(schema, /model RateLimitBucket \{/);
+    assert.match(schema, /key\s+String\s+@id/);
+    assert.match(schema, /count\s+Int\s+@default\(0\)/);
+    assert.match(schema, /updatedAt\s+DateTime\s+@updatedAt/);
+    assert.match(schema, /@@index\(\[expiresAt\]\)/);
+  }
+});
+
+test("rotas autenticadas constroem quota somente com company e user da sessao", () => {
+  const paths = [
+    "src/app/api/conversations/[id]/ai/route.ts",
+    "src/app/api/conversations/[id]/messages/route.ts",
+    "src/app/api/conversations/[id]/messages/media/route.ts",
+    "src/app/api/conversations/[id]/messages/template/route.ts",
+    "src/app/api/channels/[id]/messages/route.ts",
+    "src/app/api/templates/[id]/header-media/route.ts",
+    "src/app/api/campaigns/[id]/start/route.ts",
+    "src/app/api/campaigns/[id]/resume/route.ts"
+  ];
+
+  for (const path of paths) {
+    assert.match(source(path), /identifiers: \[session\.companyId, session\.id\]/, path);
+  }
+});

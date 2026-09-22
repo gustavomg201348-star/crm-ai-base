@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHmac, randomInt } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
@@ -15,6 +15,7 @@ export type RateLimitStore = {
     expiresAt: Date;
     now: Date;
   }): Promise<RateLimitIncrement>;
+  cleanupExpired?(input: { before: Date; limit: number }): Promise<number>;
 };
 
 export type RateLimitRule = {
@@ -58,9 +59,9 @@ export function getRequestIpKey(request: NextRequest) {
     .filter(Boolean);
 
   return (
-    request.headers.get("cf-connecting-ip")?.trim() ||
-    request.headers.get("x-real-ip")?.trim() ||
     forwardedChain?.at(0) ||
+    request.headers.get("x-real-ip")?.trim() ||
+    request.headers.get("cf-connecting-ip")?.trim() ||
     "unknown"
   );
 }
@@ -90,15 +91,53 @@ export const prismaRateLimitStore: RateLimitStore = {
     const row = rows[0];
     if (!row) throw new Error("RATE_LIMIT_INCREMENT_FAILED");
     return row;
+  },
+  async cleanupExpired({ before, limit }) {
+    return prisma.$executeRaw(Prisma.sql`
+      WITH "expiredRateLimitBuckets" AS (
+        SELECT "key"
+        FROM "RateLimitBucket"
+        WHERE "expiresAt" <= ${before}
+        ORDER BY "expiresAt" ASC
+        LIMIT ${limit}
+        FOR UPDATE SKIP LOCKED
+      )
+      DELETE FROM "RateLimitBucket" AS bucket
+      USING "expiredRateLimitBuckets" AS expired
+      WHERE bucket."key" = expired."key"
+        AND bucket."expiresAt" <= ${before}
+    `);
   }
 };
 
+const CLEANUP_SAMPLE_SIZE = 256;
+const CLEANUP_BATCH_SIZE = 500;
+
+async function cleanupExpiredBuckets(
+  store: RateLimitStore,
+  now: Date,
+  shouldCleanup: () => boolean
+) {
+  if (!store.cleanupExpired || !shouldCleanup()) return;
+
+  try {
+    await store.cleanupExpired({ before: now, limit: CLEANUP_BATCH_SIZE });
+  } catch {
+    // Cleanup is best-effort and must not change the rate-limit decision.
+  }
+}
+
 export async function consumeRateLimits(
   rules: readonly RateLimitRule[],
-  options: { store?: RateLimitStore; now?: Date } = {}
+  options: {
+    store?: RateLimitStore;
+    now?: Date;
+    shouldCleanup?: () => boolean;
+  } = {}
 ): Promise<RateLimitDecision> {
   const store = options.store ?? prismaRateLimitStore;
   const now = options.now ?? new Date();
+  const shouldCleanup = options.shouldCleanup ?? (() => randomInt(CLEANUP_SAMPLE_SIZE) === 0);
 
   try {
     for (const rule of rules) {
@@ -113,6 +152,7 @@ export async function consumeRateLimits(
       });
 
       if (result.count > rule.limit) {
+        await cleanupExpiredBuckets(store, now, shouldCleanup);
         return {
           status: "limited",
           retryAfterSeconds: Math.max(
@@ -123,6 +163,7 @@ export async function consumeRateLimits(
       }
     }
 
+    await cleanupExpiredBuckets(store, now, shouldCleanup);
     return { status: "allowed" };
   } catch {
     return { status: "unavailable" };
