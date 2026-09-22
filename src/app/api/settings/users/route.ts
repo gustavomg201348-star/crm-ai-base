@@ -14,7 +14,7 @@ function isRole(value: unknown): value is (typeof roles)[number] {
 
 export async function POST(request: NextRequest) {
   try {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
 
     if (!session) {
       return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ user }, { status: 201 });
   } catch (error) {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
 
     if (isPrismaKnownRequestError(error, "P2002")) {
       return publicErrorResponse({ code: "USER_DUPLICATE", status: 409 });

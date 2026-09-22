@@ -8,7 +8,7 @@ import { safeLogError } from "@/lib/safe-logger";
 
 export async function GET(request: NextRequest) {
   try {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
 
     if (!session) {
       return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
       }
     });
   } catch (error) {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
 
     safeLogError("http-api", error, {
       route: "/api/settings/ai",
@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
 
     if (!session) {
       return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
@@ -72,7 +72,7 @@ export async function PATCH(request: NextRequest) {
       }
     });
   } catch (error) {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
 
     safeLogError("http-api", error, {
       route: "/api/settings/ai",

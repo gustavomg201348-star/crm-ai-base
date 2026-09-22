@@ -406,7 +406,7 @@ export async function POST(
   let requestedChannelId: string | null = null;
 
   try {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
 
     if (!session) {
       return errorResponse({

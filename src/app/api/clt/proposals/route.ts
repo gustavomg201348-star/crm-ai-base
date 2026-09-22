@@ -16,7 +16,7 @@ import { safeLogError } from "@/lib/safe-logger";
 
 export async function POST(request: NextRequest) {
   try {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
 
     if (!session) {
       return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
@@ -174,7 +174,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ proposal: mapProposal(proposal) }, { status: 201 });
   } catch (error) {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
 
     if (isPrismaKnownRequestError(error, "P2002")) {
       return publicErrorResponse({ code: "CLT_PROPOSAL_CONFLICT", status: 409 });

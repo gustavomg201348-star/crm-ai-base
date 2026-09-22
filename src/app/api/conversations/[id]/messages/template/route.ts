@@ -15,7 +15,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
   let authorizedConversation: { id: string; companyId: string } | null = null;
 
   try {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
     if (!session) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }

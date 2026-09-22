@@ -29,8 +29,8 @@ export function isAgent(session: SessionUser) {
   return session.role === "AGENT";
 }
 
-export function getSessionOrUnauthorized(request: NextRequest) {
-  const session = getSessionFromRequest(request);
+export async function getSessionOrUnauthorized(request: NextRequest) {
+  const session = await getSessionFromRequest(request);
 
   if (!session) {
     return {

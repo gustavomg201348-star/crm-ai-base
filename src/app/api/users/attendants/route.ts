@@ -6,13 +6,13 @@ import { safeLogError } from "@/lib/safe-logger";
 
 export async function GET(request: NextRequest) {
   try {
-    const { session, response } = getSessionOrUnauthorized(request);
+    const { session, response } = await getSessionOrUnauthorized(request);
     if (!session) return response;
 
     const attendants = await listAttendants(session.companyId);
     return NextResponse.json({ attendants });
   } catch (error) {
-    const { session } = getSessionOrUnauthorized(request);
+    const { session } = await getSessionOrUnauthorized(request);
 
     safeLogError("http-api", error, {
       route: "/api/users/attendants",

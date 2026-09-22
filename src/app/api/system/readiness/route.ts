@@ -21,7 +21,7 @@ async function runCheck(name: string, check: () => Promise<unknown>) {
 
 export async function GET(request: NextRequest) {
   try {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
 
     if (!session) {
       return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });

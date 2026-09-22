@@ -8,7 +8,7 @@ import { mapTask, taskInclude } from "@/lib/tasks";
 
 export async function GET(request: NextRequest) {
   try {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
 
     if (!session) {
       return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
 
     if (!session) {
       return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
@@ -113,8 +113,8 @@ export async function POST(request: NextRequest) {
     safeLogError("http-api", error, {
       route: "/api/tasks",
       method: "POST",
-      companyId: getSessionFromRequest(request)?.companyId,
-      currentUserId: getSessionFromRequest(request)?.id,
+      companyId: (await getSessionFromRequest(request))?.companyId,
+      currentUserId: (await getSessionFromRequest(request))?.id,
       publicErrorCode: "TASK_CREATE_FAILED",
       status: 500
     });

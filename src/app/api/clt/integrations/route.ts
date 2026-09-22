@@ -61,7 +61,7 @@ function fallbackIntegrations() {
 
 export async function GET(request: NextRequest) {
   try {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
     if (!session) {
       return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
@@ -72,7 +72,7 @@ export async function GET(request: NextRequest) {
       integrations: integrations.map((integration) => mapCltIntegration(integration, session.role))
     });
   } catch (error) {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
 
     safeLogError("http-api", error, {
       route: "/api/clt/integrations",
@@ -92,7 +92,7 @@ export async function PATCH(request: NextRequest) {
   let fallbackBody: IntegrationPayload | null = null;
 
   try {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
     if (!session) {
       return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
@@ -166,7 +166,7 @@ export async function PATCH(request: NextRequest) {
       });
     }
 
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
     const bank = cltBanks.find((item) => item.id === fallbackBody?.bankId) ?? cltBanks[0];
 
     safeLogError("http-api", error, {

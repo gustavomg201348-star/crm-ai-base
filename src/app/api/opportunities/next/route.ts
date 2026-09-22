@@ -32,7 +32,7 @@ function parseExcludedConversationIds(body: NextOpportunityRequestBody) {
 
 export async function POST(request: NextRequest) {
   try {
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
 
     if (!session) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Parametros invalidos." }, { status: 400 });
     }
 
-    const session = getSessionFromRequest(request);
+    const session = await getSessionFromRequest(request);
 
     safeLogError("opportunity-next-api", error, {
       route: "/api/opportunities/next",

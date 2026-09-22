@@ -1,36 +1,28 @@
 import { NextResponse, type NextRequest } from "next/server";
 import {
-  createSessionToken,
-  getSessionFromRequest,
-  sessionCookie,
+  getAuthenticatedSessionFromRequest,
   type SessionUser
 } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
 export async function GET(request: NextRequest) {
   try {
-    const session = getSessionFromRequest(request);
+    const authenticated = await getAuthenticatedSessionFromRequest(request);
+    const session = authenticated?.user;
 
     if (!session) {
       return NextResponse.json({ user: null }, { status: 401 });
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: session.id },
-      include: { company: true }
+    const sessionUser: SessionUser = session;
+    const company = await prisma.company.findUnique({
+      where: { id: sessionUser.companyId },
+      select: { id: true, name: true, segment: true }
     });
 
-    if (!user) {
+    if (!company) {
       return NextResponse.json({ user: null }, { status: 401 });
     }
-
-    const sessionUser: SessionUser = {
-      id: user.id,
-      companyId: user.companyId,
-      name: user.name,
-      email: user.email,
-      role: user.role as "ADMIN" | "SUPERVISOR" | "AGENT"
-    };
 
     const response = NextResponse.json({
       user: {
@@ -41,23 +33,11 @@ export async function GET(request: NextRequest) {
         role: sessionUser.role
       },
       company: {
-        id: user.company.id,
-        name: user.company.name,
-        segment: user.company.segment
+        id: company.id,
+        name: company.name,
+        segment: company.segment
       }
     });
-
-    if (
-      session.companyId !== sessionUser.companyId ||
-      session.role !== sessionUser.role ||
-      session.name !== sessionUser.name
-    ) {
-      response.cookies.set(
-        sessionCookie.name,
-        createSessionToken(sessionUser),
-        sessionCookie.options
-      );
-    }
 
     return response;
   } catch {
