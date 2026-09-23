@@ -46,3 +46,46 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  postgres-migrations:
+    name: PostgreSQL migrations and rate limiter
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: qevora_ci
+          POSTGRES_PASSWORD: qevora_ci_password
+          POSTGRES_DB: qevora_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U qevora_ci -d qevora_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://qevora_ci:qevora_ci_password@127.0.0.1:5432/qevora_ci?schema=public
+      AUTH_SECRET: ci-auth-secret-change-me
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate PostgreSQL Prisma Client
+        run: npm run prisma:generate:prod
+
+      - name: Apply migration chain to disposable PostgreSQL
+        run: npm run prisma:migrate:prod
+
+      - name: Validate RateLimitBucket and PostgreSQL limiter
+        run: npx --yes tsx@4.20.6 src/lib/rate-limit-postgres.integration.ts
