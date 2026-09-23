@@ -5,6 +5,7 @@ import { publicErrorResponse } from "@/lib/http-error-response";
 import { saveFailedOutboundMessage } from "@/lib/message-delivery";
 import { canAccessConversation } from "@/lib/permissions";
 import { safeLogError } from "@/lib/safe-logger";
+import { enforceRateLimits, rateLimitPolicies } from "@/lib/rate-limit";
 import { sendConversationTemplate } from "@/lib/whatsapp-template.service";
 
 type RouteContext = {
@@ -47,6 +48,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (!canAccessConversation({ session, agentId: current.agentId })) {
       return NextResponse.json({ error: "Conversa atribuida a outro atendente." }, { status: 403 });
     }
+
+    const limited = await enforceRateLimits([
+      {
+        category: "message-send",
+        identifiers: [session.companyId, session.id],
+        ...rateLimitPolicies.messageSend
+      }
+    ]);
+    if (limited) return limited;
 
     authorizedConversation = { id: context.params.id, companyId: session.companyId };
 

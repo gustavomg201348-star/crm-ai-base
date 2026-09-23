@@ -12,6 +12,7 @@ import { readMetaMessageId, sendMetaTextMessage } from "@/lib/meta-whatsapp";
 import { canAccessConversation } from "@/lib/permissions";
 import { digitsOnlyPhone } from "@/lib/phone-normalization.service";
 import { safeLogError } from "@/lib/safe-logger";
+import { enforceRateLimits, rateLimitPolicies } from "@/lib/rate-limit";
 
 type RouteContext = {
   params: { id: string };
@@ -57,6 +58,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const direction = body?.direction ?? "outbound";
 
     if (direction === "outbound") {
+      const limited = await enforceRateLimits([
+        {
+          category: "message-send",
+          identifiers: [session.companyId, session.id],
+          ...rateLimitPolicies.messageSend
+        }
+      ]);
+      if (limited) return limited;
+
       const { conversation: integrationConversation, channel } =
         await getConversationIntegration({
           conversationId: conversation.id,

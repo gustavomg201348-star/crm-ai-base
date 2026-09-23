@@ -22,6 +22,7 @@ import {
   isPrismaUniqueViolationForTarget
 } from "@/lib/prisma-errors";
 import { safeLogError } from "@/lib/safe-logger";
+import { enforceRateLimits, rateLimitPolicies } from "@/lib/rate-limit";
 
 type RouteContext = {
   params: { id: string };
@@ -41,6 +42,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (!session) {
       return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
+
+    const limited = await enforceRateLimits([
+      {
+        category: "message-send",
+        identifiers: [session.companyId, session.id],
+        ...rateLimitPolicies.messageSend
+      }
+    ]);
+    if (limited) return limited;
 
     const { id } = context.params;
     const body = (await request.json().catch(() => null)) as

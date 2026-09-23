@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { getSessionOrUnauthorized, requireCompanyAdmin } from "@/lib/permissions";
 import { safeLogError } from "@/lib/safe-logger";
+import { enforceRateLimits, rateLimitPolicies } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,6 +28,15 @@ export async function PATCH(
     if (!campaign) {
       return NextResponse.json({ error: "Campanha nao encontrada." }, { status: 404 });
     }
+
+    const limited = await enforceRateLimits([
+      {
+        category: "campaign-dispatch",
+        identifiers: [session.companyId, session.id],
+        ...rateLimitPolicies.campaignDispatch
+      }
+    ]);
+    if (limited) return limited;
 
     const processed = await processCampaign(campaign.id);
     return NextResponse.json({ campaign: mapCampaign(processed) });

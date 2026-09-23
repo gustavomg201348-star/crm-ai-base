@@ -3,6 +3,7 @@ import { generateAiSuggestion } from "@/lib/ai-attendant.service";
 import { getSessionFromRequest } from "@/lib/auth";
 import { resolveConversationAccess } from "@/lib/conversation-access-control";
 import { prisma } from "@/lib/db";
+import { enforceRateLimits, rateLimitPolicies } from "@/lib/rate-limit";
 
 type RouteContext = {
   params: { id: string };
@@ -29,6 +30,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (access.status === "forbidden") {
       return NextResponse.json({ error: "Conversa atribuida a outro atendente." }, { status: 403 });
     }
+
+    const limited = await enforceRateLimits([
+      {
+        category: "ai",
+        identifiers: [session.companyId, session.id],
+        ...rateLimitPolicies.ai
+      }
+    ]);
+    if (limited) return limited;
 
     const { suggestion, conversation: updatedConversation } = await generateAiSuggestion({
       conversationId: access.conversation.id,

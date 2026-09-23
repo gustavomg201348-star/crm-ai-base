@@ -3,6 +3,7 @@ import { getSessionFromRequest } from "@/lib/auth";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
 import { safeLogError } from "@/lib/safe-logger";
+import { enforceRateLimits, rateLimitPolicies } from "@/lib/rate-limit";
 import {
   MetaTemplateServiceError,
   uploadAndAssociateTemplateHeaderImage
@@ -74,6 +75,15 @@ export async function POST(
     if (!requestedTemplateId) {
       return publicErrorResponse({ code: "TEMPLATE_INVALID_INPUT", status: 400 });
     }
+
+    const limited = await enforceRateLimits([
+      {
+        category: "media-upload",
+        identifiers: [session.companyId, session.id],
+        ...rateLimitPolicies.mediaUpload
+      }
+    ]);
+    if (limited) return limited;
 
     const formData = await request.formData().catch(() => null);
     if (!formData) {
