@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { hashPassword } from "@/lib/auth";
+import { provisionCltIntegrations } from "@/lib/clt-settings";
 import { prisma } from "@/lib/db";
 
 const defaultOrigins = ["WhatsApp", "Trafego pago", "Carteira"];
@@ -154,6 +155,7 @@ export async function createTenantWithAdmin({
     });
 
     await seedTenantDefaults(tx, company.id);
+    await provisionCltIntegrations(company.id, tx);
 
     return {
       id: company.id,

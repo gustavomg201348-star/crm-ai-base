@@ -68,12 +68,61 @@ test("listCltIntegrations source contains no write, raw SQL, normalization or pr
 test("provisionCltIntegrations preserves functional provisioning without runtime DDL", () => {
   assert.match(cltSettingsSource, /findMany\(\{\s*where: \{ companyId \}/);
   assert.match(cltSettingsSource, /const missingBanks = cltBanks\.filter/);
-  assert.match(cltSettingsSource, /prisma\.cltIntegration\.upsert/);
+  assert.match(cltSettingsSource, /database\.cltIntegration\.upsert/);
   assert.match(cltSettingsSource, /where: \{ companyId_bankId: \{ companyId, bankId: bank\.id \} \}/);
   assert.match(cltSettingsSource, /bank\.provider === "newcorban"/);
-  assert.match(cltSettingsSource, /prisma\.cltIntegration\.updateMany/);
+  assert.match(cltSettingsSource, /database\.cltIntegration\.updateMany/);
   assert.match(cltSettingsSource, /provider: \{ not: "newcorban" \}/);
   assert.match(cltSettingsSource, /orderBy: \{ bankName: "asc" \}/);
+});
+
+test("provisionCltIntegrations uses an explicit transaction-compatible database", async () => {
+  const calls: string[] = [];
+  const database = {
+    cltIntegration: {
+      findMany: async (args: unknown) => {
+        calls.push("findMany");
+        assert.deepEqual(
+          args,
+          calls.length === 1
+            ? { where: { companyId: "company-transaction" } }
+            : {
+                where: { companyId: "company-transaction" },
+                orderBy: { bankName: "asc" }
+              }
+        );
+        return [];
+      },
+      upsert: async (args: unknown) => {
+        calls.push("upsert");
+        assert.equal(
+          (args as { create: { companyId: string } }).create.companyId,
+          "company-transaction"
+        );
+        return {};
+      },
+      updateMany: async (args: unknown) => {
+        calls.push("updateMany");
+        assert.equal(
+          (args as { where: { companyId: string } }).where.companyId,
+          "company-transaction"
+        );
+        return { count: 0 };
+      }
+    }
+  } as unknown as Parameters<typeof provisionCltIntegrations>[1];
+
+  await provisionCltIntegrations("company-transaction", database);
+
+  assert.deepEqual(calls, [
+    "findMany",
+    "upsert",
+    "upsert",
+    "upsert",
+    "upsert",
+    "updateMany",
+    "findMany"
+  ]);
 });
 
 test("provisionCltIntegrations provisions missing banks, normalizes Mercantil and preserves custom integrations", async () => {
