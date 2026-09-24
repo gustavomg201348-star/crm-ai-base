@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import {
-  ensureCltIntegrations,
+  provisionCltIntegrations,
   mapCltIntegration,
   resolveCltIntegrationSecrets,
   resolveSensitivePasswordUpdate,
@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
       return publicErrorResponse({ code: "CLT_INVALID_REQUEST", status: 400 });
     }
 
-    await ensureCltIntegrations(session.companyId);
+    await provisionCltIntegrations(session.companyId);
 
     const current = await prisma.cltIntegration.findUnique({
       where: { companyId_bankId: { companyId: session.companyId, bankId: body.bankId } }

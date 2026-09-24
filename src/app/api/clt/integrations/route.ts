@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { cltBanks } from "@/lib/clt-integration";
 import {
-  ensureCltIntegrations,
+  provisionCltIntegrations,
   mapCltIntegration
 } from "@/lib/clt-settings";
 import {
@@ -66,7 +66,7 @@ export async function GET(request: NextRequest) {
       return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
 
-    const integrations = await ensureCltIntegrations(session.companyId);
+    const integrations = await provisionCltIntegrations(session.companyId);
 
     return NextResponse.json({
       integrations: integrations.map((integration) => mapCltIntegration(integration, session.role))
@@ -106,7 +106,7 @@ export async function PATCH(request: NextRequest) {
       return publicErrorResponse({ code: "CLT_INVALID_REQUEST", status: 400 });
     }
 
-    await ensureCltIntegrations(session.companyId);
+    await provisionCltIntegrations(session.companyId);
 
     const current = await prisma.cltIntegration.findUnique({
       where: { companyId_bankId: { companyId: session.companyId, bankId: body.bankId } }
