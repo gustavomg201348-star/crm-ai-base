@@ -3,8 +3,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import {
-  ensureCltIntegrations,
+  listCltIntegrations,
   mapCltIntegration,
+  provisionCltIntegrations,
   resolveSensitivePasswordUpdate,
   resolveSensitiveTextUpdate
 } from "@/lib/clt-settings";
@@ -22,7 +23,49 @@ test("CLT requests do not execute runtime DDL", () => {
   assert.doesNotMatch(cltSettingsSource, /ALTER\s+TABLE/i);
 });
 
-test("ensureCltIntegrations preserves functional provisioning without runtime DDL", () => {
+test("listCltIntegrations is read-only and tenant-scoped", async () => {
+  const delegate = prisma.cltIntegration as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+  const methodNames = ["findMany", "create", "update", "updateMany", "upsert", "delete"] as const;
+  const originals = Object.fromEntries(methodNames.map((name) => [name, delegate[name]]));
+  const calls: string[] = [];
+  const rows = [{ id: "integration-1", bankId: "bmg", bankName: "BMG" }];
+
+  delegate.findMany = async (args) => {
+    calls.push("findMany");
+    assert.deepEqual(args, {
+      where: { companyId: "company-read-only" },
+      orderBy: { bankName: "asc" }
+    });
+    return rows;
+  };
+  for (const name of methodNames.filter((name) => name !== "findMany")) {
+    delegate[name] = async () => {
+      calls.push(name);
+      throw new Error(`${name} must not be called by listCltIntegrations`);
+    };
+  }
+
+  try {
+    assert.deepEqual(await listCltIntegrations("company-read-only"), rows);
+    assert.deepEqual(calls, ["findMany"]);
+  } finally {
+    for (const name of methodNames) delegate[name] = originals[name];
+  }
+});
+
+test("listCltIntegrations source contains no write, raw SQL, normalization or provider call", () => {
+  const readOnlySource = cltSettingsSource.slice(
+    cltSettingsSource.indexOf("export async function listCltIntegrations"),
+    cltSettingsSource.indexOf("export async function provisionCltIntegrations")
+  );
+
+  assert.match(readOnlySource, /cltIntegration\.findMany/);
+  assert.doesNotMatch(readOnlySource, /\.(?:create|update|updateMany|upsert|delete)\s*\(/);
+  assert.doesNotMatch(readOnlySource, /\$(?:executeRaw|executeRawUnsafe|queryRaw|queryRawUnsafe)/);
+  assert.doesNotMatch(readOnlySource, /cltBanks|provider|normaliz/i);
+});
+
+test("provisionCltIntegrations preserves functional provisioning without runtime DDL", () => {
   assert.match(cltSettingsSource, /findMany\(\{\s*where: \{ companyId \}/);
   assert.match(cltSettingsSource, /const missingBanks = cltBanks\.filter/);
   assert.match(cltSettingsSource, /prisma\.cltIntegration\.upsert/);
@@ -33,7 +76,7 @@ test("ensureCltIntegrations preserves functional provisioning without runtime DD
   assert.match(cltSettingsSource, /orderBy: \{ bankName: "asc" \}/);
 });
 
-test("ensureCltIntegrations provisions missing banks, normalizes Mercantil and preserves custom integrations", async () => {
+test("provisionCltIntegrations provisions missing banks, normalizes Mercantil and preserves custom integrations", async () => {
   const delegate = prisma.cltIntegration as unknown as {
     findMany: (args: unknown) => Promise<unknown[]>;
     upsert: (args: unknown) => Promise<unknown>;
@@ -72,7 +115,7 @@ test("ensureCltIntegrations provisions missing banks, normalizes Mercantil and p
   };
 
   try {
-    const result = await ensureCltIntegrations("company-1");
+    const result = await provisionCltIntegrations("company-1");
 
     assert.equal(reads, 2);
     assert.deepEqual(result, finalRows);
@@ -97,6 +140,106 @@ test("ensureCltIntegrations provisions missing banks, normalizes Mercantil and p
         }
       }
     ]);
+  } finally {
+    delegate.findMany = original.findMany;
+    delegate.upsert = original.upsert;
+    delegate.updateMany = original.updateMany;
+  }
+});
+
+test("provisionCltIntegrations handles complete, one missing, three missing and empty catalogs", async () => {
+  const delegate = prisma.cltIntegration as unknown as {
+    findMany: (args: unknown) => Promise<unknown[]>;
+    upsert: (args: unknown) => Promise<unknown>;
+    updateMany: (args: unknown) => Promise<unknown>;
+  };
+  const original = {
+    findMany: delegate.findMany,
+    upsert: delegate.upsert,
+    updateMany: delegate.updateMany
+  };
+  const scenarios = [
+    { name: "complete", existing: ["mercantil", "c6-ficsa", "bmg", "3rn"], expectedUpserts: 0 },
+    { name: "one missing", existing: ["mercantil", "c6-ficsa", "bmg"], expectedUpserts: 1 },
+    { name: "three missing", existing: ["mercantil"], expectedUpserts: 3 },
+    { name: "empty", existing: [], expectedUpserts: 4 }
+  ];
+
+  try {
+    for (const scenario of scenarios) {
+      let reads = 0;
+      const upserts: unknown[] = [];
+      delegate.findMany = async (args) => {
+        reads += 1;
+        const companyId = `company-${scenario.name}`;
+        assert.deepEqual(
+          args,
+          reads === 1
+            ? { where: { companyId } }
+            : { where: { companyId }, orderBy: { bankName: "asc" } }
+        );
+        return scenario.existing.map((bankId) => ({ bankId }));
+      };
+      delegate.upsert = async (args) => {
+        upserts.push(args);
+        return {};
+      };
+      delegate.updateMany = async (args) => {
+        assert.deepEqual((args as { where: { companyId: string } }).where.companyId, `company-${scenario.name}`);
+        return { count: 0 };
+      };
+
+      await provisionCltIntegrations(`company-${scenario.name}`);
+      assert.equal(reads, 2, scenario.name);
+      assert.equal(upserts.length, scenario.expectedUpserts, scenario.name);
+      for (const entry of upserts) {
+        assert.equal(
+          (entry as { create: { companyId: string } }).create.companyId,
+          `company-${scenario.name}`,
+          scenario.name
+        );
+      }
+    }
+  } finally {
+    delegate.findMany = original.findMany;
+    delegate.upsert = original.upsert;
+    delegate.updateMany = original.updateMany;
+  }
+});
+
+test("provisionCltIntegrations is idempotent and preserves disabled and custom integrations", async () => {
+  const delegate = prisma.cltIntegration as unknown as {
+    findMany: (args: unknown) => Promise<unknown[]>;
+    upsert: (args: unknown) => Promise<unknown>;
+    updateMany: (args: unknown) => Promise<unknown>;
+  };
+  const original = {
+    findMany: delegate.findMany,
+    upsert: delegate.upsert,
+    updateMany: delegate.updateMany
+  };
+  const stored = new Map<string, { bankId: string; status?: string }>([
+    ["custom-bank", { bankId: "custom-bank", status: "INACTIVE" }]
+  ]);
+  let upsertCount = 0;
+
+  delegate.findMany = async () => Array.from(stored.values());
+  delegate.upsert = async (args) => {
+    upsertCount += 1;
+    const create = (args as { create: { bankId: string; status: string } }).create;
+    stored.set(create.bankId, { bankId: create.bankId, status: create.status });
+    return create;
+  };
+  delegate.updateMany = async () => ({ count: 0 });
+
+  try {
+    await provisionCltIntegrations("company-idempotent");
+    assert.equal(upsertCount, 4);
+    assert.deepEqual(stored.get("custom-bank"), { bankId: "custom-bank", status: "INACTIVE" });
+
+    await provisionCltIntegrations("company-idempotent");
+    assert.equal(upsertCount, 4);
+    assert.deepEqual(stored.get("custom-bank"), { bankId: "custom-bank", status: "INACTIVE" });
   } finally {
     delegate.findMany = original.findMany;
     delegate.upsert = original.upsert;

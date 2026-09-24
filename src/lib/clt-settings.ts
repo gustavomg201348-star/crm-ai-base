@@ -11,7 +11,14 @@ import { prisma } from "@/lib/db";
 
 type CltIntegrationViewerRole = "ADMIN" | "SUPERVISOR" | "AGENT";
 
-export async function ensureCltIntegrations(companyId: string) {
+export async function listCltIntegrations(companyId: string) {
+  return prisma.cltIntegration.findMany({
+    where: { companyId },
+    orderBy: { bankName: "asc" }
+  });
+}
+
+export async function provisionCltIntegrations(companyId: string) {
   const existing = await prisma.cltIntegration.findMany({
     where: { companyId }
   });
@@ -56,10 +63,7 @@ export async function ensureCltIntegrations(companyId: string) {
       )
   );
 
-  return prisma.cltIntegration.findMany({
-    where: { companyId },
-    orderBy: { bankName: "asc" }
-  });
+  return listCltIntegrations(companyId);
 }
 
 export function maskSecret(value?: string | null) {
