@@ -2,8 +2,10 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { cltBanks } from "@/lib/clt-integration";
 import {
+  findCltIntegrationForPatch,
   provisionCltIntegrations,
-  mapCltIntegration
+  mapCltIntegration,
+  resolveCltIntegrationPatchMetadata
 } from "@/lib/clt-settings";
 import {
   CltSecretStorageError,
@@ -108,9 +110,7 @@ export async function PATCH(request: NextRequest) {
 
     await provisionCltIntegrations(session.companyId);
 
-    const current = await prisma.cltIntegration.findUnique({
-      where: { companyId_bankId: { companyId: session.companyId, bankId: body.bankId } }
-    });
+    const current = await findCltIntegrationForPatch(session.companyId, body.bankId);
 
     if (!current) {
       return publicErrorResponse({ code: "NOT_FOUND", status: 404 });
@@ -136,21 +136,15 @@ export async function PATCH(request: NextRequest) {
         "certifiedAgentCpf"
       )
     };
+    const metadata = resolveCltIntegrationPatchMetadata(current, body);
 
     const updated = await prisma.cltIntegration.update({
       where: { id: current.id },
       data: {
-        provider: body.provider || current.provider,
-        baseUrl:
-          body.baseUrl?.trim() ||
-          (body.provider === "newcorban" || current.provider === "newcorban"
-            ? "https://viva.newcorban.com.br"
-            : null),
-        authType: body.authType || current.authType,
+        ...metadata,
         ...preparedSecrets,
         actingUf:
-          body.actingUf === undefined ? current.actingUf : body.actingUf.trim().toUpperCase() || null,
-        status: body.status || (body.provider === "newcorban" ? "ASSISTED" : current.status)
+          body.actingUf === undefined ? current.actingUf : body.actingUf.trim().toUpperCase() || null
       }
     });
 
@@ -168,6 +162,21 @@ export async function PATCH(request: NextRequest) {
 
     const session = await getSessionFromRequest(request);
     const bank = cltBanks.find((item) => item.id === fallbackBody?.bankId) ?? cltBanks[0];
+    const fallbackMetadata = resolveCltIntegrationPatchMetadata(
+      {
+        bankId: bank.id,
+        provider: bank.provider,
+        baseUrl: bank.provider === "newcorban" ? "https://viva.newcorban.com.br" : null,
+        authType: bank.provider === "newcorban" ? "login-sms" : "none",
+        status:
+          bank.provider === "manual"
+            ? "MANUAL"
+            : bank.provider === "newcorban"
+              ? "ASSISTED"
+              : "PENDING"
+      },
+      fallbackBody ?? {}
+    );
 
     safeLogError("http-api", error, {
       route: "/api/clt/integrations",
@@ -185,17 +194,7 @@ export async function PATCH(request: NextRequest) {
         id: bank.id,
         bankId: bank.id,
         bankName: bank.name,
-        provider: fallbackBody?.provider || bank.provider,
-        baseUrl:
-          fallbackBody?.baseUrl ||
-          (fallbackBody?.provider === "newcorban" || bank.provider === "newcorban"
-            ? "https://viva.newcorban.com.br"
-            : null),
-        authType:
-          fallbackBody?.authType ||
-          (fallbackBody?.provider === "newcorban" || bank.provider === "newcorban"
-            ? "login-sms"
-            : "none"),
+        ...fallbackMetadata,
         hasApiKey: Boolean(fallbackBody?.apiKey),
         apiKeyPreview: fallbackBody?.apiKey ? "****" : null,
         hasUsername: Boolean(fallbackBody?.username),
@@ -208,11 +207,6 @@ export async function PATCH(request: NextRequest) {
         actingUf: fallbackBody?.actingUf || null,
         smsStatus: null,
         smsRequestedAt: null,
-        status:
-          fallbackBody?.status ||
-          (fallbackBody?.provider === "newcorban" || bank.provider === "newcorban"
-            ? "ASSISTED"
-            : "MANUAL"),
         lastTestAt: null,
         lastTestStatus: null,
         lastTestMessage: "Configuração recebida em modo temporário.",

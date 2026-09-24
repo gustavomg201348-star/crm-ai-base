@@ -3,9 +3,11 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  findCltIntegrationForPatch,
   listCltIntegrations,
   mapCltIntegration,
   provisionCltIntegrations,
+  resolveCltIntegrationPatchMetadata,
   resolveSensitivePasswordUpdate,
   resolveSensitiveTextUpdate
 } from "@/lib/clt-settings";
@@ -15,6 +17,107 @@ import { encryptSecret, type SecretEncryptionOptions } from "@/lib/secret-encryp
 const keyV1 = Buffer.from("c".repeat(32)).toString("base64url");
 
 const cltSettingsSource = readFileSync(join(process.cwd(), "src/lib/clt-settings.ts"), "utf8");
+
+test("Mercantil PATCH canonicalizes structural metadata and preserves operational status", () => {
+  const metadata = resolveCltIntegrationPatchMetadata(
+    {
+      bankId: "mercantil",
+      provider: "newcorban",
+      baseUrl: "https://viva.newcorban.com.br",
+      authType: "login-sms",
+      status: "SMS_PENDING"
+    },
+    {
+      provider: "manual",
+      baseUrl: "https://incompatible.example",
+      authType: "none",
+      status: "MANUAL"
+    }
+  );
+
+  assert.deepEqual(metadata, {
+    provider: "newcorban",
+    baseUrl: "https://viva.newcorban.com.br",
+    authType: "login-sms",
+    status: "SMS_PENDING"
+  });
+});
+
+test("Mercantil PATCH keeps canonical payload canonical without changing status", () => {
+  const metadata = resolveCltIntegrationPatchMetadata(
+    {
+      bankId: "mercantil",
+      provider: "newcorban",
+      baseUrl: "https://viva.newcorban.com.br",
+      authType: "login-sms",
+      status: "INACTIVE"
+    },
+    {
+      provider: "newcorban",
+      baseUrl: "https://viva.newcorban.com.br",
+      authType: "login-sms",
+      status: "ASSISTED"
+    }
+  );
+
+  assert.deepEqual(metadata, {
+    provider: "newcorban",
+    baseUrl: "https://viva.newcorban.com.br",
+    authType: "login-sms",
+    status: "INACTIVE"
+  });
+});
+
+test("non-Mercantil PATCH preserves existing metadata behavior", () => {
+  const metadata = resolveCltIntegrationPatchMetadata(
+    {
+      bankId: "custom-bank",
+      provider: "manual",
+      baseUrl: null,
+      authType: "none",
+      status: "INACTIVE"
+    },
+    {
+      provider: "bank-api",
+      baseUrl: " https://bank.example/api ",
+      authType: "api-key",
+      status: "CONNECTED"
+    }
+  );
+
+  assert.deepEqual(metadata, {
+    provider: "bank-api",
+    baseUrl: "https://bank.example/api",
+    authType: "api-key",
+    status: "CONNECTED"
+  });
+});
+
+test("PATCH lookup is tenant-scoped by companyId and bankId", async () => {
+  const calls: unknown[] = [];
+  const database = {
+    cltIntegration: {
+      findUnique: async (args: unknown) => {
+        calls.push(args);
+        return { id: "integration-company-a" };
+      }
+    }
+  } as unknown as Parameters<typeof findCltIntegrationForPatch>[2];
+
+  const result = await findCltIntegrationForPatch("company-a", "mercantil", database);
+
+  assert.deepEqual(calls, [
+    {
+      where: {
+        companyId_bankId: {
+          companyId: "company-a",
+          bankId: "mercantil"
+        }
+      }
+    }
+  ]);
+  assert.deepEqual(result, { id: "integration-company-a" });
+});
 
 test("CLT requests do not execute runtime DDL", () => {
   assert.doesNotMatch(cltSettingsSource, /ensureCltSchema/);

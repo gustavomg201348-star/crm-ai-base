@@ -13,6 +13,54 @@ import { prisma } from "@/lib/db";
 type CltIntegrationViewerRole = "ADMIN" | "SUPERVISOR" | "AGENT";
 type CltIntegrationDatabase = Pick<PrismaClient, "cltIntegration">;
 
+const MERCANTIL_BASE_URL = "https://viva.newcorban.com.br";
+
+export function resolveCltIntegrationPatchMetadata(
+  current: {
+    bankId: string;
+    provider: string;
+    baseUrl?: string | null;
+    authType: string;
+    status: string;
+  },
+  next: {
+    provider?: string;
+    baseUrl?: string;
+    authType?: string;
+    status?: string;
+  }
+) {
+  if (current.bankId === "mercantil") {
+    return {
+      provider: "newcorban",
+      baseUrl: MERCANTIL_BASE_URL,
+      authType: "login-sms",
+      status: current.status
+    };
+  }
+
+  return {
+    provider: next.provider || current.provider,
+    baseUrl:
+      next.baseUrl?.trim() ||
+      (next.provider === "newcorban" || current.provider === "newcorban"
+        ? MERCANTIL_BASE_URL
+        : null),
+    authType: next.authType || current.authType,
+    status: next.status || (next.provider === "newcorban" ? "ASSISTED" : current.status)
+  };
+}
+
+export async function findCltIntegrationForPatch(
+  companyId: string,
+  bankId: string,
+  database: CltIntegrationDatabase = prisma
+) {
+  return database.cltIntegration.findUnique({
+    where: { companyId_bankId: { companyId, bankId } }
+  });
+}
+
 export async function listCltIntegrations(
   companyId: string,
   database: CltIntegrationDatabase = prisma
