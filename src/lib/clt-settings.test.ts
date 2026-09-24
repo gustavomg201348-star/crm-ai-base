@@ -1,13 +1,108 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
 import {
+  ensureCltIntegrations,
   mapCltIntegration,
   resolveSensitivePasswordUpdate,
   resolveSensitiveTextUpdate
 } from "@/lib/clt-settings";
+import { prisma } from "@/lib/db";
 import { encryptSecret, type SecretEncryptionOptions } from "@/lib/secret-encryption";
 
 const keyV1 = Buffer.from("c".repeat(32)).toString("base64url");
+
+const cltSettingsSource = readFileSync(join(process.cwd(), "src/lib/clt-settings.ts"), "utf8");
+
+test("CLT requests do not execute runtime DDL", () => {
+  assert.doesNotMatch(cltSettingsSource, /ensureCltSchema/);
+  assert.doesNotMatch(cltSettingsSource, /\$executeRaw(?:Unsafe)?/);
+  assert.doesNotMatch(cltSettingsSource, /CREATE\s+(?:TABLE|INDEX)/i);
+  assert.doesNotMatch(cltSettingsSource, /ALTER\s+TABLE/i);
+});
+
+test("ensureCltIntegrations preserves functional provisioning without runtime DDL", () => {
+  assert.match(cltSettingsSource, /findMany\(\{\s*where: \{ companyId \}/);
+  assert.match(cltSettingsSource, /const missingBanks = cltBanks\.filter/);
+  assert.match(cltSettingsSource, /prisma\.cltIntegration\.upsert/);
+  assert.match(cltSettingsSource, /where: \{ companyId_bankId: \{ companyId, bankId: bank\.id \} \}/);
+  assert.match(cltSettingsSource, /bank\.provider === "newcorban"/);
+  assert.match(cltSettingsSource, /prisma\.cltIntegration\.updateMany/);
+  assert.match(cltSettingsSource, /provider: \{ not: "newcorban" \}/);
+  assert.match(cltSettingsSource, /orderBy: \{ bankName: "asc" \}/);
+});
+
+test("ensureCltIntegrations provisions missing banks, normalizes Mercantil and preserves custom integrations", async () => {
+  const delegate = prisma.cltIntegration as unknown as {
+    findMany: (args: unknown) => Promise<unknown[]>;
+    upsert: (args: unknown) => Promise<unknown>;
+    updateMany: (args: unknown) => Promise<unknown>;
+  };
+  const original = {
+    findMany: delegate.findMany,
+    upsert: delegate.upsert,
+    updateMany: delegate.updateMany
+  };
+  const upserts: unknown[] = [];
+  const updates: unknown[] = [];
+  const finalRows = [{ id: "custom-1", bankId: "custom-bank", bankName: "Custom Bank" }];
+  let reads = 0;
+
+  delegate.findMany = async (args) => {
+    reads += 1;
+    assert.deepEqual(args, reads === 1 ? { where: { companyId: "company-1" } } : {
+      where: { companyId: "company-1" },
+      orderBy: { bankName: "asc" }
+    });
+    return reads === 1
+      ? [
+          { id: "custom-1", bankId: "custom-bank", bankName: "Custom Bank" },
+          { id: "mercantil-legacy", bankId: "mercantil", bankName: "Mercantil", provider: "manual" }
+        ]
+      : finalRows;
+  };
+  delegate.upsert = async (args) => {
+    upserts.push(args);
+    return {};
+  };
+  delegate.updateMany = async (args) => {
+    updates.push(args);
+    return { count: 1 };
+  };
+
+  try {
+    const result = await ensureCltIntegrations("company-1");
+
+    assert.equal(reads, 2);
+    assert.deepEqual(result, finalRows);
+    assert.equal(upserts.length, 3);
+    assert.deepEqual(
+      upserts.map((entry) => (entry as { create: { bankId: string } }).create.bankId).sort(),
+      ["3rn", "bmg", "c6-ficsa"]
+    );
+    assert.equal(
+      upserts.some((entry) => (entry as { create: { bankId: string } }).create.bankId === "custom-bank"),
+      false
+    );
+    assert.deepEqual(updates, [
+      {
+        where: { companyId: "company-1", bankId: "mercantil", provider: { not: "newcorban" } },
+        data: {
+          provider: "newcorban",
+          baseUrl: "https://viva.newcorban.com.br",
+          authType: "login-sms",
+          status: "ASSISTED",
+          lastTestMessage: "Fluxo assistido: login no Newcorban com validacao por SMS."
+        }
+      }
+    ]);
+  } finally {
+    delegate.findMany = original.findMany;
+    delegate.upsert = original.upsert;
+    delegate.updateMany = original.updateMany;
+  }
+});
 
 function encryptionOptions(): SecretEncryptionOptions {
   return {
