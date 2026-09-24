@@ -1,4 +1,5 @@
 import { cltBanks } from "@/lib/clt-integration";
+import type { PrismaClient } from "@prisma/client";
 import {
   resolveCltApiKey,
   resolveCltCertifiedAgentCpf,
@@ -10,16 +11,23 @@ import {
 import { prisma } from "@/lib/db";
 
 type CltIntegrationViewerRole = "ADMIN" | "SUPERVISOR" | "AGENT";
+type CltIntegrationDatabase = Pick<PrismaClient, "cltIntegration">;
 
-export async function listCltIntegrations(companyId: string) {
-  return prisma.cltIntegration.findMany({
+export async function listCltIntegrations(
+  companyId: string,
+  database: CltIntegrationDatabase = prisma
+) {
+  return database.cltIntegration.findMany({
     where: { companyId },
     orderBy: { bankName: "asc" }
   });
 }
 
-export async function provisionCltIntegrations(companyId: string) {
-  const existing = await prisma.cltIntegration.findMany({
+export async function provisionCltIntegrations(
+  companyId: string,
+  database: CltIntegrationDatabase = prisma
+) {
+  const existing = await database.cltIntegration.findMany({
     where: { companyId }
   });
   const existingIds = new Set(existing.map((item) => item.bankId));
@@ -28,7 +36,7 @@ export async function provisionCltIntegrations(companyId: string) {
   if (missingBanks.length) {
     await Promise.all(
       missingBanks.map((bank) =>
-        prisma.cltIntegration.upsert({
+        database.cltIntegration.upsert({
           where: { companyId_bankId: { companyId, bankId: bank.id } },
           update: {},
           create: {
@@ -50,7 +58,7 @@ export async function provisionCltIntegrations(companyId: string) {
     cltBanks
       .filter((bank) => bank.provider === "newcorban")
       .map((bank) =>
-        prisma.cltIntegration.updateMany({
+        database.cltIntegration.updateMany({
           where: { companyId, bankId: bank.id, provider: { not: "newcorban" } },
           data: {
             provider: "newcorban",
@@ -63,7 +71,7 @@ export async function provisionCltIntegrations(companyId: string) {
       )
   );
 
-  return listCltIntegrations(companyId);
+  return listCltIntegrations(companyId, database);
 }
 
 export function maskSecret(value?: string | null) {
