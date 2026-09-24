@@ -66,3 +66,15 @@ test("integrations PATCH prepara os seis secrets CLT antes do Prisma update sem 
   assert.match(code, /\.\.\.preparedSecrets/);
   assert.equal(code.includes("encryptSecret("), false);
 });
+
+test("integrations PATCH remains tenant-scoped and delegates metadata canonicalization", () => {
+  const code = source("src/app/api/clt/integrations/route.ts");
+
+  assert.match(
+    code,
+    /findCltIntegrationForPatch\(session\.companyId, body\.bankId\)/
+  );
+  assert.match(code, /const metadata = resolveCltIntegrationPatchMetadata\(current, body\)/);
+  assert.match(code, /where: \{ id: current\.id \}/);
+  assert.match(code, /\.\.\.metadata/);
+});
