@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { session, response } = await getSessionOrUnauthorized(request);
@@ -21,7 +21,7 @@ export async function PATCH(
     if (blocked) return blocked;
 
     const campaign = await prisma.campaign.findFirst({
-      where: { id: params.id, companyId: session.companyId },
+      where: { id: (await params).id, companyId: session.companyId },
       select: { id: true }
     });
 
@@ -46,7 +46,7 @@ export async function PATCH(
       route: "/api/campaigns/[id]/start",
       publicErrorCode: "CAMPAIGN_START_FAILED",
       status: 500,
-      campaignId: params.id
+      campaignId: (await params).id
     });
 
     return publicErrorResponse({

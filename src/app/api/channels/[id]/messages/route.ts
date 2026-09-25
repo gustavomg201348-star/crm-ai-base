@@ -25,7 +25,7 @@ import { safeLogError } from "@/lib/safe-logger";
 import { enforceRateLimits, rateLimitPolicies } from "@/lib/rate-limit";
 
 type RouteContext = {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 };
 
 type ConversationWithContact = Conversation & { contact: Contact };
@@ -52,7 +52,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     ]);
     if (limited) return limited;
 
-    const { id } = context.params;
+    const { id } = await context.params;
     const body = (await request.json().catch(() => null)) as
       | { conversationId?: string; to?: string; body?: string }
       | null;
@@ -276,7 +276,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       route: "/api/channels/[id]/messages",
       publicErrorCode: "MESSAGE_SEND_FAILED",
       status: 500,
-      channelId: context.params.id,
+      channelId: (await context.params).id,
       conversationId: failedConversationId ?? null,
       metaAcceptedMessage
     });

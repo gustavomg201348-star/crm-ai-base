@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db";
 import { canAccessConversation } from "@/lib/permissions";
 
 type RouteContext = {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 };
 
 export async function POST(request: NextRequest, context: RouteContext) {
@@ -18,7 +18,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     const conversation = await prisma.conversation.findFirst({
       where: {
-        id: context.params.id,
+        id: (await context.params).id,
         contact: { companyId: session.companyId }
       },
       select: { id: true, agentId: true }

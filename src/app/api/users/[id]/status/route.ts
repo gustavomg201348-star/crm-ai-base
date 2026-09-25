@@ -9,7 +9,7 @@ import { prisma } from "@/lib/db";
 import { safeLogError } from "@/lib/safe-logger";
 
 type RouteContext = {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 };
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
@@ -21,7 +21,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     if (blocked) return blocked;
 
     const user = await prisma.user.findFirst({
-      where: { id: context.params.id, companyId: session.companyId },
+      where: { id: (await context.params).id, companyId: session.companyId },
       select: { id: true }
     });
 
@@ -47,7 +47,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       method: "PATCH",
       companyId: session?.companyId,
       currentUserId: session?.id,
-      targetUserId: context.params.id,
+      targetUserId: (await context.params).id,
       publicErrorCode: "USER_SETTINGS_UPDATE_FAILED",
       status: 500
     });

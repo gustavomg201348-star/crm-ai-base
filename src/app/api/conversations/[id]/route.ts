@@ -9,7 +9,7 @@ import { prisma } from "@/lib/db";
 import { canAccessConversation } from "@/lib/permissions";
 
 type RouteContext = {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 };
 
 async function findOwnedConversation(id: string, companyId: string) {
@@ -31,7 +31,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     }
 
     const conversation = await findOwnedConversation(
-      context.params.id,
+      (await context.params).id,
       session.companyId
     );
 
@@ -60,7 +60,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
 
-    const existing = await findOwnedConversation(context.params.id, session.companyId);
+    const existing = await findOwnedConversation((await context.params).id, session.companyId);
 
     if (!existing) {
       return NextResponse.json({ error: "Conversa nao encontrada." }, { status: 404 });
