@@ -3,6 +3,7 @@ import { getSessionFromRequest } from "@/lib/auth";
 import { cltBanks } from "@/lib/clt-integration";
 import {
   findCltIntegrationForPatch,
+  listCltIntegrations,
   provisionCltIntegrations,
   mapCltIntegration,
   resolveCltIntegrationPatchMetadata
@@ -68,7 +69,7 @@ export async function GET(request: NextRequest) {
       return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
 
-    const integrations = await provisionCltIntegrations(session.companyId);
+    const integrations = await listCltIntegrations(session.companyId);
 
     return NextResponse.json({
       integrations: integrations.map((integration) => mapCltIntegration(integration, session.role))
