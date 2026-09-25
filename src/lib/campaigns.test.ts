@@ -1,15 +1,171 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
 import {
+  buildCampaignChannelSnapshot,
+  buildCampaignChannelWhere,
   buildCampaignPreparationFailureMessage,
+  mapCampaign,
   markCampaignPreparationFailed,
-  resolveCampaignTemplateHeaderMedia
+  resolveCampaignTemplateHeaderMedia,
+  type CampaignWithRelations
 } from "./campaigns";
 import { MetaMediaUploadError, type MetaTemplate } from "./meta-whatsapp";
 import { TemplateMediaStorageError } from "./template-media-storage";
 
 type ResolveCampaignTemplateHeaderMediaInput =
   Parameters<typeof resolveCampaignTemplateHeaderMedia>[0];
+
+function createCampaignFixture({
+  channelNameSnapshot,
+  channelDisplayPhoneSnapshot,
+  channelName = "Canal atual",
+  channelDisplayPhone = "+55 11 99999-0000"
+}: {
+  channelNameSnapshot: string | null;
+  channelDisplayPhoneSnapshot: string | null;
+  channelName?: string;
+  channelDisplayPhone?: string | null;
+}) {
+  const now = new Date("2026-09-25T12:00:00.000Z");
+
+  return {
+    id: "campaign-1",
+    companyId: "company-1",
+    channelId: "channel-1",
+    channelNameSnapshot,
+    channelDisplayPhoneSnapshot,
+    createdById: "user-1",
+    name: "Disparo",
+    message: "Mensagem",
+    messageType: "TEXT",
+    templateName: null,
+    templateLanguage: null,
+    templateVariables: null,
+    templateVariableMapping: null,
+    imagePath: null,
+    imageName: null,
+    imageMime: null,
+    imageSize: null,
+    status: "COMPLETED",
+    total: 0,
+    sent: 0,
+    delivered: 0,
+    failed: 0,
+    createdAt: now,
+    updatedAt: now,
+    startedAt: now,
+    finishedAt: now,
+    channel: {
+      id: "channel-1",
+      companyId: "company-1",
+      name: channelName,
+      type: "whatsapp",
+      provider: "meta",
+      externalId: null,
+      phoneNumberId: "phone-number-1",
+      wabaId: "waba-1",
+      displayPhone: channelDisplayPhone,
+      accessToken: "encrypted-token",
+      verifyToken: null,
+      appSecret: null,
+      status: "ACTIVE",
+      lastWebhookSubscribedAt: null,
+      lastWebhookReceivedAt: null,
+      createdAt: now,
+      updatedAt: now
+    },
+    recipients: []
+  } as CampaignWithRelations;
+}
+
+test("buildCampaignChannelSnapshot captures the validated channel identity", () => {
+  assert.deepEqual(
+    buildCampaignChannelSnapshot({
+      name: "Viva Consultoria - WhatsApp 8199",
+      displayPhone: "+55 33 8468-8199"
+    }),
+    {
+      channelNameSnapshot: "Viva Consultoria - WhatsApp 8199",
+      channelDisplayPhoneSnapshot: "+55 33 8468-8199"
+    }
+  );
+});
+
+test("buildCampaignChannelWhere keeps channel lookup inside the session company", () => {
+  assert.deepEqual(
+    buildCampaignChannelWhere({ channelId: "channel-b", companyId: "company-a" }),
+    {
+      id: "channel-b",
+      companyId: "company-a",
+      type: "whatsapp",
+      provider: "meta",
+      status: { in: ["ACTIVE", "CONNECTED"] }
+    }
+  );
+});
+
+test("mapCampaign preserves snapshot after the related channel changes", () => {
+  const mapped = mapCampaign(
+    createCampaignFixture({
+      channelNameSnapshot: "Canal original",
+      channelDisplayPhoneSnapshot: "+55 33 8000-1000",
+      channelName: "Canal renomeado",
+      channelDisplayPhone: "+55 33 9000-2000"
+    })
+  );
+
+  assert.deepEqual(mapped.channel, {
+    id: "channel-1",
+    name: "Canal original",
+    provider: "meta",
+    displayPhone: "+55 33 8000-1000"
+  });
+});
+
+test("mapCampaign falls back to the current channel for legacy campaigns", () => {
+  const mapped = mapCampaign(
+    createCampaignFixture({
+      channelNameSnapshot: null,
+      channelDisplayPhoneSnapshot: null
+    })
+  );
+
+  assert.equal(mapped.channel.name, "Canal atual");
+  assert.equal(mapped.channel.displayPhone, "+55 11 99999-0000");
+});
+
+test("mapCampaign supports a nullable channel display phone", () => {
+  const mapped = mapCampaign(
+    createCampaignFixture({
+      channelNameSnapshot: "Canal sem numero",
+      channelDisplayPhoneSnapshot: null,
+      channelDisplayPhone: "+55 11 98888-7777"
+    })
+  );
+
+  assert.equal(mapped.channel.name, "Canal sem numero");
+  assert.equal(mapped.channel.displayPhone, null);
+});
+
+test("normal campaign creation persists the validated channel snapshot", async () => {
+  const source = await readFile(
+    path.join(process.cwd(), "src", "app", "api", "campaigns", "route.ts"),
+    "utf8"
+  );
+
+  assert.match(source, /\.\.\.buildCampaignChannelSnapshot\(channel\)/);
+});
+
+test("import campaign creation persists the validated channel snapshot", async () => {
+  const source = await readFile(
+    path.join(process.cwd(), "src", "app", "api", "campaigns", "from-import", "route.ts"),
+    "utf8"
+  );
+
+  assert.match(source, /\.\.\.buildCampaignChannelSnapshot\(channel\)/);
+});
 
 function createResolveInput(template: MetaTemplate): ResolveCampaignTemplateHeaderMediaInput {
   return {
