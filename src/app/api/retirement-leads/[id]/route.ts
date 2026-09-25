@@ -7,12 +7,12 @@ export const dynamic = "force-dynamic";
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const { session, response } = await getSessionOrUnauthorized(request);
   if (response) return response;
 
-  const lead = await getRetirementLead(session.companyId, params.id);
+  const lead = await getRetirementLead(session.companyId, (await params).id);
   if (!lead) {
     return NextResponse.json({ error: "Lead nao encontrado." }, { status: 404 });
   }
@@ -22,7 +22,7 @@ export async function GET(
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { session, response } = await getSessionOrUnauthorized(request);
@@ -39,7 +39,7 @@ export async function PATCH(
     const lead = await updateRetirementLead({
       companyId: session.companyId,
       userId: session.id,
-      id: params.id,
+      id: (await params).id,
       data: body
     });
 

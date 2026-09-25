@@ -23,12 +23,12 @@ function mapEvent(event: Awaited<ReturnType<typeof createRetirementLeadEvent>>) 
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const { session, response } = await getSessionOrUnauthorized(request);
   if (response) return response;
 
-  const events = await listRetirementLeadEvents(session.companyId, params.id);
+  const events = await listRetirementLeadEvents(session.companyId, (await params).id);
   if (!events) {
     return NextResponse.json({ error: "Lead nao encontrado." }, { status: 404 });
   }
@@ -48,7 +48,7 @@ export async function GET(
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { session, response } = await getSessionOrUnauthorized(request);
@@ -61,7 +61,7 @@ export async function POST(
     const event = await createRetirementLeadEvent({
       companyId: session.companyId,
       userId: session.id,
-      retirementLeadId: params.id,
+      retirementLeadId: (await params).id,
       eventType: body?.eventType ?? "NOTE",
       description: body?.description
     });

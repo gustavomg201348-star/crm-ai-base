@@ -8,7 +8,7 @@ import { canAccessConversation } from "@/lib/permissions";
 import { safeLogError } from "@/lib/safe-logger";
 
 type RouteContext = {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 };
 
 async function getMetaMediaUrl({
@@ -49,7 +49,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
     const message = await prisma.message.findFirst({
       where: {
-        id: context.params.id,
+        id: (await context.params).id,
         conversation: { contact: { companyId: session.companyId } }
       },
       include: {
@@ -154,7 +154,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
       route: "/api/messages/[id]/media",
       publicErrorCode: "MEDIA_FETCH_FAILED",
       status: 500,
-      messageId: context.params.id
+      messageId: (await context.params).id
     });
 
     return publicErrorResponse({

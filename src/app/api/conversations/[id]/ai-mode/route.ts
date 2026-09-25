@@ -5,7 +5,7 @@ import { resolveConversationAccess } from "@/lib/conversation-access-control";
 import { prisma } from "@/lib/db";
 
 type RouteContext = {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 };
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
@@ -23,7 +23,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     const access = await resolveConversationAccess({
       db: prisma,
       session,
-      conversationId: context.params.id
+      conversationId: (await context.params).id
     });
 
     if (access.status === "not_found") {
@@ -35,7 +35,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
 
     const conversation = await updateConversationAiMode({
-      conversationId: context.params.id,
+      conversationId: (await context.params).id,
       companyId: session.companyId,
       mode:
         body?.mode === null || body?.mode === ""

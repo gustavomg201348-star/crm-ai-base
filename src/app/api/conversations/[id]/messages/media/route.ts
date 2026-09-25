@@ -9,7 +9,7 @@ import { enforceRateLimits, rateLimitPolicies } from "@/lib/rate-limit";
 import { maxMediaSize, sendConversationMedia } from "@/lib/whatsapp-media.service";
 
 type RouteContext = {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 };
 
 export async function POST(request: NextRequest, context: RouteContext) {
@@ -24,7 +24,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const access = await resolveConversationAccess({
       db: prisma,
       session,
-      conversationId: context.params.id
+      conversationId: (await context.params).id
     });
 
     if (access.status === "not_found") {
@@ -91,7 +91,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       route: "/api/conversations/[id]/messages/media",
       publicErrorCode: "MESSAGE_SEND_FAILED",
       status: 500,
-      conversationId: context.params.id
+      conversationId: (await context.params).id
     });
 
     return publicErrorResponse({
