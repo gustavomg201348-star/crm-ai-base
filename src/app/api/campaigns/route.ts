@@ -6,6 +6,8 @@ import { resolveChannelAccessToken } from "@/lib/channel-secrets";
 import {
   CAMPAIGN_IMAGE_MAX_BYTES,
   CAMPAIGN_IMAGE_TYPES,
+  buildCampaignChannelSnapshot,
+  buildCampaignChannelWhere,
   campaignInclude,
   mapCampaign,
   processCampaign
@@ -155,13 +157,7 @@ export async function POST(request: NextRequest) {
     }
 
     const channel = await prisma.channel.findFirst({
-      where: {
-        id: channelId,
-        companyId: session.companyId,
-        type: "whatsapp",
-        provider: "meta",
-        status: { in: ["ACTIVE", "CONNECTED"] }
-      }
+      where: buildCampaignChannelWhere({ channelId, companyId: session.companyId })
     });
 
     if (!channel) {
@@ -332,6 +328,7 @@ export async function POST(request: NextRequest) {
       data: {
         companyId: session.companyId,
         channelId: channel.id,
+        ...buildCampaignChannelSnapshot(channel),
         createdById: session.id,
         name: `Disparo ${new Date().toLocaleString("pt-BR")}`,
         message: message || `[Template: ${templateName}]`,

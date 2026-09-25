@@ -54,7 +54,53 @@ export type CampaignWithRelations = Prisma.CampaignGetPayload<{
   include: typeof campaignInclude;
 }>;
 
+export function buildCampaignChannelWhere({
+  channelId,
+  companyId
+}: {
+  channelId: string;
+  companyId: string;
+}) {
+  return {
+    id: channelId,
+    companyId,
+    type: "whatsapp",
+    provider: "meta",
+    status: { in: ["ACTIVE", "CONNECTED"] }
+  };
+}
+
+export function buildCampaignChannelSnapshot(channel: {
+  name: string;
+  displayPhone: string | null;
+}) {
+  return {
+    channelNameSnapshot: channel.name,
+    channelDisplayPhoneSnapshot: channel.displayPhone
+  };
+}
+
+export function resolveCampaignChannelIdentity(campaign: {
+  channelNameSnapshot: string | null;
+  channelDisplayPhoneSnapshot: string | null;
+  channel: {
+    name: string;
+    displayPhone: string | null;
+  };
+}) {
+  const hasSnapshot = campaign.channelNameSnapshot !== null;
+
+  return {
+    name: campaign.channelNameSnapshot ?? campaign.channel.name,
+    displayPhone: hasSnapshot
+      ? campaign.channelDisplayPhoneSnapshot
+      : campaign.channel.displayPhone
+  };
+}
+
 export function mapCampaign(campaign: CampaignWithRelations) {
+  const channelIdentity = resolveCampaignChannelIdentity(campaign);
+
   return {
     id: campaign.id,
     name: campaign.name,
@@ -77,9 +123,9 @@ export function mapCampaign(campaign: CampaignWithRelations) {
     finishedAt: campaign.finishedAt,
     channel: {
       id: campaign.channel.id,
-      name: campaign.channel.name,
+      name: channelIdentity.name,
       provider: campaign.channel.provider,
-      displayPhone: campaign.channel.displayPhone
+      displayPhone: channelIdentity.displayPhone
     },
     recipients: campaign.recipients.map((recipient) => ({
       id: recipient.id,

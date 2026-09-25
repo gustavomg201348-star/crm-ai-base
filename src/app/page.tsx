@@ -16869,6 +16869,19 @@ function Disparos({
                     {campaignStatusLabel(campaign.status)}
                   </span>
                 </div>
+                <p
+                  className="mt-2 truncate text-xs text-slate-500"
+                  title={
+                    campaign.channel.displayPhone
+                      ? `${campaign.channel.name} · ${campaign.channel.displayPhone}`
+                      : campaign.channel.name
+                  }
+                >
+                  {campaign.channel.name}
+                  {campaign.channel.displayPhone
+                    ? ` · ${campaign.channel.displayPhone}`
+                    : ""}
+                </p>
                 <div className="mt-3 grid grid-cols-4 gap-2 text-center text-xs">
                   <span className="rounded bg-slate-50 p-2">Total {campaign.total}</span>
                   <span className="rounded bg-emerald-50 p-2">
