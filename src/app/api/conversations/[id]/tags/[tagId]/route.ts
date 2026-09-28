@@ -5,7 +5,7 @@ import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
 
 type RouteContext = {
-  params: { id: string; tagId: string };
+  params: Promise<{ id: string; tagId: string }>;
 };
 
 export async function DELETE(request: NextRequest, context: RouteContext) {
@@ -19,7 +19,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     const access = await resolveConversationAccess({
       db: prisma,
       session,
-      conversationId: context.params.id
+      conversationId: (await context.params).id
     });
 
     if (access.status === "not_found") {
@@ -33,7 +33,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     const { conversation } = access;
 
     const tag = await prisma.tag.findFirst({
-      where: { id: context.params.tagId, companyId: session.companyId },
+      where: { id: (await context.params).tagId, companyId: session.companyId },
       select: { id: true }
     });
 

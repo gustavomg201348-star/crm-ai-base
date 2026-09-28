@@ -6,7 +6,7 @@ import { getSessionOrUnauthorized, isAdmin } from "@/lib/permissions";
 import { safeLogError } from "@/lib/safe-logger";
 
 type RouteContext = {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 };
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
@@ -41,7 +41,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
     const conversation = await assignConversationToUser({
       companyId: session.companyId,
-      conversationId: context.params.id,
+      conversationId: (await context.params).id,
       assignedToUserId,
       assignedByUserId: session.id,
       mode: body?.userId && isAdmin(session) ? "ADMIN_MANUAL" : "CLAIM_FIRST",
@@ -55,7 +55,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       route: "/api/conversations/[id]/assign",
       publicErrorCode: "CONFLICT",
       status: 409,
-      conversationId: context.params.id
+      conversationId: (await context.params).id
     });
 
     return publicErrorResponse({

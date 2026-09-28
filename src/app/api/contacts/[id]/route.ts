@@ -22,7 +22,7 @@ import {
 import { safeLogError } from "@/lib/safe-logger";
 
 type RouteContext = {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 };
 
 async function findOwnedContact(id: string, companyId: string) {
@@ -57,7 +57,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
 
-    const contact = await findOwnedContact(context.params.id, session.companyId);
+    const contact = await findOwnedContact((await context.params).id, session.companyId);
 
     if (!contact) {
       return NextResponse.json({ error: "Contato nao encontrado." }, { status: 404 });
@@ -70,7 +70,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
       route: "/api/contacts/[id]",
       publicErrorCode: "INTERNAL_ERROR",
       status: 500,
-      contactId: context.params.id
+      contactId: (await context.params).id
     });
 
     return publicErrorResponse({
@@ -89,7 +89,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
 
-    const existing = await findOwnedContact(context.params.id, session.companyId);
+    const existing = await findOwnedContact((await context.params).id, session.companyId);
 
     if (!existing) {
       return NextResponse.json({ error: "Contato nao encontrado." }, { status: 404 });
@@ -332,7 +332,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       route: "/api/contacts/[id]",
       publicErrorCode: "CONTACT_UPDATE_FAILED",
       status: 500,
-      contactId: context.params.id
+      contactId: (await context.params).id
     });
 
     return publicErrorResponse({
@@ -351,7 +351,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
 
-    const existing = await findOwnedContact(context.params.id, session.companyId);
+    const existing = await findOwnedContact((await context.params).id, session.companyId);
 
     if (!existing) {
       return NextResponse.json({ error: "Contato nao encontrado." }, { status: 404 });
@@ -386,7 +386,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       route: "/api/contacts/[id]",
       publicErrorCode: "CONTACT_DELETE_FAILED",
       status: 500,
-      contactId: context.params.id
+      contactId: (await context.params).id
     });
 
     return publicErrorResponse({

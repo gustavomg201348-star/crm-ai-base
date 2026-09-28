@@ -15,7 +15,7 @@ import { safeLogError } from "@/lib/safe-logger";
 import { enforceRateLimits, rateLimitPolicies } from "@/lib/rate-limit";
 
 type RouteContext = {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 };
 
 export async function POST(request: NextRequest, context: RouteContext) {
@@ -41,7 +41,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     const conversation = await prisma.conversation.findFirst({
       where: {
-        id: context.params.id,
+        id: (await context.params).id,
         contact: { companyId: session.companyId }
       },
       include: { contact: true }
@@ -138,7 +138,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       route: "/api/conversations/[id]/messages",
       publicErrorCode: "MESSAGE_SEND_FAILED",
       status: 500,
-      conversationId: context.params.id
+      conversationId: (await context.params).id
     });
 
     return publicErrorResponse({

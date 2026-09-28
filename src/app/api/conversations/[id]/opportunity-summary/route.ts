@@ -6,7 +6,7 @@ import { canAccessConversation } from "@/lib/permissions";
 import { safeLogError } from "@/lib/safe-logger";
 
 type RouteContext = {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 };
 
 export async function GET(request: NextRequest, context: RouteContext) {
@@ -19,7 +19,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
     const conversation = await prisma.conversation.findFirst({
       where: {
-        id: context.params.id,
+        id: (await context.params).id,
         contact: { companyId: session.companyId, archivedAt: null }
       },
       select: { id: true, agentId: true }
@@ -50,7 +50,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     safeLogError("opportunity-summary-api", error, {
       route: "/api/conversations/[id]/opportunity-summary",
       operation: "opportunity-summary-get",
-      conversationId: context.params.id
+      conversationId: (await context.params).id
     });
 
     return NextResponse.json(

@@ -5,7 +5,7 @@ import { getSessionOrUnauthorized, requireAdmin } from "@/lib/permissions";
 import { safeLogError } from "@/lib/safe-logger";
 
 type RouteContext = {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 };
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
@@ -18,7 +18,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
     const conversation = await unassignConversation({
       companyId: session.companyId,
-      conversationId: context.params.id,
+      conversationId: (await context.params).id,
       assignedByUserId: session.id
     });
 
@@ -29,7 +29,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       route: "/api/conversations/[id]/unassign",
       publicErrorCode: "INTERNAL_ERROR",
       status: 500,
-      conversationId: context.params.id
+      conversationId: (await context.params).id
     });
 
     return publicErrorResponse({

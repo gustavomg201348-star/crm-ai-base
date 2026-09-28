@@ -9,7 +9,7 @@ import { enforceRateLimits, rateLimitPolicies } from "@/lib/rate-limit";
 import { sendConversationTemplate } from "@/lib/whatsapp-template.service";
 
 type RouteContext = {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 };
 
 export async function POST(request: NextRequest, context: RouteContext) {
@@ -37,7 +37,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
 
     const current = await prisma.conversation.findFirst({
-      where: { id: context.params.id, contact: { companyId: session.companyId } },
+      where: { id: (await context.params).id, contact: { companyId: session.companyId } },
       select: { agentId: true }
     });
 
@@ -58,10 +58,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
     ]);
     if (limited) return limited;
 
-    authorizedConversation = { id: context.params.id, companyId: session.companyId };
+    authorizedConversation = { id: (await context.params).id, companyId: session.companyId };
 
     const conversation = await sendConversationTemplate({
-      conversationId: context.params.id,
+      conversationId: (await context.params).id,
       companyId: session.companyId,
       userId: session.id,
       templateName: body.templateName,
@@ -88,7 +88,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       route: "/api/conversations/[id]/messages/template",
       publicErrorCode: "MESSAGE_SEND_FAILED",
       status: 500,
-      conversationId: context.params.id
+      conversationId: (await context.params).id
     });
 
     return publicErrorResponse({

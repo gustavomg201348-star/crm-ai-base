@@ -6,7 +6,7 @@ import { prisma } from "@/lib/db";
 import { enforceRateLimits, rateLimitPolicies } from "@/lib/rate-limit";
 
 type RouteContext = {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 };
 
 export async function POST(request: NextRequest, context: RouteContext) {
@@ -20,7 +20,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const access = await resolveConversationAccess({
       db: prisma,
       session,
-      conversationId: context.params.id
+      conversationId: (await context.params).id
     });
 
     if (access.status === "not_found") {
