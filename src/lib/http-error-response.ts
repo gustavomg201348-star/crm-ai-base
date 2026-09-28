@@ -20,6 +20,7 @@ export type PublicErrorCode =
   | "CONTACT_BULK_UPDATE_FAILED"
   | "CONTACT_IMPORT_FAILED"
   | "CONTACT_IMPORT_INVALID_FILE"
+  | "CONTACT_IMPORT_FILE_TOO_LARGE"
   | "CONTACT_EXPORT_FAILED"
   | "USER_NOT_FOUND"
   | "USER_CREATE_FAILED"
@@ -96,6 +97,7 @@ const DEFAULT_PUBLIC_MESSAGES: Record<PublicErrorCode, string> = {
   CONTACT_BULK_UPDATE_FAILED: "Nao foi possivel aplicar acao em massa.",
   CONTACT_IMPORT_FAILED: "Nao foi possivel importar contatos.",
   CONTACT_IMPORT_INVALID_FILE: "Arquivo de importacao invalido.",
+  CONTACT_IMPORT_FILE_TOO_LARGE: "O arquivo excede o tamanho máximo permitido.",
   CONTACT_EXPORT_FAILED: "Nao foi possivel exportar contatos.",
   USER_NOT_FOUND: "Usuario nao encontrado.",
   USER_CREATE_FAILED: "Nao foi possivel criar usuario.",
