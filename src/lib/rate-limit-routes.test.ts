@@ -54,6 +54,9 @@ test("uploads e campanhas sao bloqueados antes do trabalho caro", () => {
       "await processCampaign"
     );
   }
+  const contactImportPreview = source("src/lib/contact-import-preview-handler.ts");
+  assertBefore(contactImportPreview, "await dependencies.enforceLimits", "await request.formData");
+  assertBefore(contactImportPreview, "await dependencies.enforceLimits", "dependencies.buildPreview");
 });
 
 test("webhook Meta assinado permanece fora do limiter de usuario", () => {
@@ -110,6 +113,7 @@ test("rotas autenticadas constroem quota somente com company e user da sessao", 
     "src/app/api/conversations/[id]/messages/template/route.ts",
     "src/app/api/channels/[id]/messages/route.ts",
     "src/app/api/templates/[id]/header-media/route.ts",
+    "src/lib/contact-import-preview-handler.ts",
     "src/app/api/campaigns/[id]/start/route.ts",
     "src/app/api/campaigns/[id]/resume/route.ts"
   ];

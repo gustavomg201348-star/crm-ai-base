@@ -8,6 +8,7 @@ import {
 import { prisma } from "@/lib/db";
 import { classifyPhoneNormalization, type PhoneNormalizationReason } from "@/lib/phone-normalization.service";
 import { upsertRetirementLeadForContact } from "@/lib/retirement-leads";
+import { parseContactImportSpreadsheet } from "@/lib/contact-import-upload";
 import {
   buildSpreadsheetImportColumns,
   buildSpreadsheetRawValues,
@@ -117,72 +118,6 @@ function onlyDigits(value: string) {
 function findHeaderIndex(headers: string[], aliases: readonly string[]) {
   const normalizedAliases = aliases.map(normalizeHeader);
   return headers.findIndex((header) => normalizedAliases.includes(header));
-}
-
-function parseCsvLine(line: string) {
-  const values: string[] = [];
-  let current = "";
-  let inQuotes = false;
-
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
-    const next = line[index + 1];
-
-    if (char === "\"" && next === "\"") {
-      current += "\"";
-      index += 1;
-      continue;
-    }
-
-    if (char === "\"") {
-      inQuotes = !inQuotes;
-      continue;
-    }
-
-    if ((char === "," || char === ";") && !inQuotes) {
-      values.push(current.trim());
-      current = "";
-      continue;
-    }
-
-    current += char;
-  }
-
-  values.push(current.trim());
-  return values;
-}
-
-function parseCsv(text: string) {
-  const lines = text
-    .replace(/^\uFEFF/, "")
-    .split(/\r?\n/)
-    .filter((line) => line.trim().length > 0);
-
-  return lines.map(parseCsvLine);
-}
-
-async function parseSpreadsheet(file: File) {
-  const bytes = Buffer.from(await file.arrayBuffer());
-  const extension = file.name.split(".").pop()?.toLowerCase();
-
-  if (extension === "csv" || file.type.includes("csv")) {
-    return parseCsv(bytes.toString("utf8"));
-  }
-
-  if (extension === "xlsx" || file.type.includes("spreadsheetml")) {
-    const XLSX = await import("xlsx");
-    const workbook = XLSX.read(bytes, { type: "buffer" });
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-    if (!sheet) return [];
-    return XLSX.utils.sheet_to_json<string[]>(sheet, {
-      header: 1,
-      raw: false,
-      defval: ""
-    });
-  }
-
-  throw new Error("Arquivo deve ser CSV ou Excel .xlsx.");
 }
 
 function getPhoneImportError(reason: PhoneNormalizationReason) {
@@ -318,12 +253,14 @@ export function findFirstContactImportIdentityConflict(
 
 export async function buildContactImportPreview({
   companyId,
-  file
+  file,
+  db = prisma
 }: {
   companyId: string;
   file: File;
+  db?: DbClient;
 }): Promise<ContactImportPreview> {
-  const table = await parseSpreadsheet(file);
+  const table = await parseContactImportSpreadsheet(file);
   if (table.length < 2) {
     throw new Error("A planilha precisa ter cabecalho e pelo menos uma linha.");
   }
@@ -406,7 +343,7 @@ export async function buildContactImportPreview({
     );
   });
 
-  const existingIndexes = await findExistingContactIndexes(prisma, companyId, rows);
+  const existingIndexes = await findExistingContactIndexes(db, companyId, rows);
   rows.forEach((row) => {
     const identity = resolveContactImportIdentityForRow(row, existingIndexes);
     row.existingContactId = identity.existingContactId;
