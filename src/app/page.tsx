@@ -1008,6 +1008,12 @@ type SpreadsheetImportRow = {
   duplicateCpf: boolean;
   duplicatePhone: boolean;
   existingContactId?: string | null;
+  retirementLead?: {
+    grantDate?: string | null;
+    benefitType?: string | null;
+    city?: string | null;
+    state?: string | null;
+  };
 };
 
 type SpreadsheetImportPreview = {
@@ -15796,7 +15802,23 @@ function Disparos({
     const response = await fetch("/api/imports/contacts/confirm", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rows: importPreview.rows })
+      body: JSON.stringify({
+        rows: importPreview.rows.map((row) => ({
+          name: row.name,
+          cpf: row.cpf,
+          phone: row.phone,
+          ...(row.retirementLead
+            ? {
+                retirementLead: {
+                  grantDate: row.retirementLead.grantDate,
+                  benefitType: row.retirementLead.benefitType,
+                  city: row.retirementLead.city,
+                  state: row.retirementLead.state
+                }
+              }
+            : {})
+        }))
+      })
     });
     setImporting(false);
 
