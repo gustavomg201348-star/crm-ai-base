@@ -5,6 +5,7 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
+COPY vendor/xlsx-0.20.3.tgz ./vendor/xlsx-0.20.3.tgz
 COPY package.json package-lock.json ./
 RUN npm ci
 

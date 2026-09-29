@@ -187,6 +187,111 @@ test("aceita XLSX OOXML pequeno e compativel com dense sheet_to_json", async () 
   assert.deepEqual(table[1], ["12345678900", "Cliente Teste", "5533999999999"]);
 });
 
+test("preserva semantica de importacao no SheetJS CE 0.20.3 sem avaliar formulas", async () => {
+  assert.equal(XLSX.version, "0.20.3");
+
+  const workbook = XLSX.utils.book_new();
+  const headers = [
+    "Texto",
+    "Numero",
+    "Zero a esquerda",
+    "CPF",
+    "Telefone",
+    "Unicode",
+    "Especiais",
+    "Coluna vazia",
+    "Data formatada",
+    "Numero formatado",
+    "Formula com cache",
+    "Formula sem cache",
+    "Literal com igual",
+    "Hyperlink"
+  ];
+  const sheet = XLSX.utils.aoa_to_sheet([
+    headers,
+    [
+      "Texto simples",
+      123,
+      "001234",
+      "01234567890",
+      "05533999999999",
+      "ação çã 日本語 😀",
+      "Árvore — ação ✓ & < > \"",
+      null,
+      null,
+      null,
+      null,
+      null,
+      "=NAO_E_FORMULA",
+      "Link seguro"
+    ]
+  ]);
+  const excelDateSerial =
+    (Date.UTC(2026, 8, 30) - Date.UTC(1899, 11, 30)) / (24 * 60 * 60 * 1000);
+  sheet.I2 = { t: "n", v: excelDateSerial, z: "dd/mm/yyyy" };
+  sheet.J2 = { t: "n", v: 1234.5, z: "#,##0.00" };
+  sheet.K2 = { t: "n", v: 2, f: "1+1" };
+  sheet.L2 = { t: "n", f: "2+2" };
+  sheet.M2 = { t: "s", v: "=NAO_E_FORMULA" };
+  sheet.N2 = {
+    t: "s",
+    v: "Link seguro",
+    l: { Target: "https://example.invalid/contato" }
+  };
+  sheet["!ref"] = "A1:N2";
+
+  XLSX.utils.book_append_sheet(workbook, sheet, "Contatos");
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([]), "Vazia");
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.aoa_to_sheet([["Outra aba"], ["conteudo"]]),
+    "Auxiliar"
+  );
+
+  const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "buffer", compression: true });
+  const table = await parseContactImportSpreadsheet(
+    new File([bytes], "paridade-sheetjs-0203.xlsx", { type: XLSX_MIME })
+  );
+
+  assert.deepEqual(table[0], headers);
+  assert.deepEqual(table[1], [
+    "Texto simples",
+    "123",
+    "001234",
+    "01234567890",
+    "05533999999999",
+    "ação çã 日本語 😀",
+    "Árvore — ação ✓ & < > \"",
+    "",
+    "30/09/2026",
+    "1,234.50",
+    "2",
+    "",
+    "=NAO_E_FORMULA",
+    "Link seguro"
+  ]);
+
+  const parsedWorkbook = XLSX.read(bytes, {
+    type: "buffer",
+    cellFormula: false,
+    cellHTML: false,
+    bookVBA: false,
+    dense: true
+  });
+  assert.deepEqual(parsedWorkbook.SheetNames, ["Contatos", "Vazia", "Auxiliar"]);
+  assert.equal(parsedWorkbook.Sheets.Vazia["!ref"], undefined);
+  const denseRows = (
+    parsedWorkbook.Sheets.Contatos as unknown as {
+      "!data": Array<Array<{ t?: string; v?: unknown } | undefined> | undefined>;
+    }
+  )["!data"];
+  assert.equal(denseRows[1]?.[10]?.v, 2);
+  assert.equal(denseRows[1]?.[11]?.t, "e");
+  assert.equal(denseRows[1]?.[11]?.v, undefined);
+  assert.equal(denseRows[1]?.[12]?.v, "=NAO_E_FORMULA");
+  assert.equal(denseRows[1]?.[13]?.v, "Link seguro");
+});
+
 test("aceita CSV pequeno abaixo do limite real de arquivo", async () => {
   const file = new File(
     ["CPF,Nome,Telefone\n12345678900,Cliente Teste,5533999999999"],
