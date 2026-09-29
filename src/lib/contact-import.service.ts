@@ -8,10 +8,14 @@ import {
 import { prisma } from "@/lib/db";
 import { classifyPhoneNormalization, type PhoneNormalizationReason } from "@/lib/phone-normalization.service";
 import { upsertRetirementLeadForContact } from "@/lib/retirement-leads";
-import { parseContactImportSpreadsheet } from "@/lib/contact-import-upload";
+import {
+  CONTACT_IMPORT_MAX_DATA_ROWS,
+  parseContactImportSpreadsheet
+} from "@/lib/contact-import-upload";
 import {
   buildSpreadsheetImportColumns,
   buildSpreadsheetRawValues,
+  SPREADSHEET_IMPORT_MAX_CELL_LENGTH,
   SPREADSHEET_IMPORT_MAX_HEADER_LENGTH,
   sanitizeSpreadsheetCellText,
   type SpreadsheetImportColumn,
@@ -51,6 +55,23 @@ export type ImportPreviewRow = {
     city?: string | null;
     state?: string | null;
   };
+};
+
+export const CONTACT_IMPORT_MAX_ROWS = CONTACT_IMPORT_MAX_DATA_ROWS;
+export const CONTACT_IMPORT_MAX_FIELD_LENGTH = SPREADSHEET_IMPORT_MAX_CELL_LENGTH;
+
+export type ContactImportRetirementLeadInput = {
+  grantDate?: string | null;
+  benefitType?: string | null;
+  city?: string | null;
+  state?: string | null;
+};
+
+export type ContactImportConfirmRowInput = {
+  name: string;
+  cpf: string;
+  phone: string;
+  retirementLead?: ContactImportRetirementLeadInput;
 };
 
 export type ContactImportPreview = {
@@ -145,6 +166,50 @@ function parseImportDate(value: string) {
   const parsed = new Date(raw);
   if (Number.isNaN(parsed.getTime())) return raw;
   return parsed.toISOString().slice(0, 10);
+}
+
+export function validateAndCanonicalizeContactImportRow(
+  raw: ContactImportConfirmRowInput,
+  rowNumber: number,
+  rawValues?: SpreadsheetImportRawValues
+): ImportPreviewRow {
+  const name = raw.name.trim();
+  const cpf = onlyDigits(raw.cpf);
+  const phone = onlyDigits(raw.phone);
+  const phoneClassification = classifyPhoneNormalization(phone);
+  const whatsapp = phoneClassification.normalizedPhone ?? "";
+  const grantDate = parseImportDate(raw.retirementLead?.grantDate ?? "");
+  const benefitType = raw.retirementLead?.benefitType?.trim() ?? "";
+  const city = raw.retirementLead?.city?.trim() ?? "";
+  const state = raw.retirementLead?.state?.trim() ?? "";
+  const errors: string[] = [];
+
+  if (!name) errors.push("Nome obrigatorio.");
+  if (!/^\d{11}$/.test(cpf)) errors.push("CPF deve conter 11 digitos.");
+  if (!phoneClassification.valid) {
+    errors.push(getPhoneImportError(phoneClassification.reason));
+  }
+  if (grantDate && Number.isNaN(new Date(grantDate).getTime())) {
+    errors.push("Data Concessao invalida.");
+  }
+
+  return {
+    rowNumber,
+    name,
+    cpf,
+    phone,
+    whatsapp,
+    ...(rawValues ? { rawValues } : {}),
+    status: errors.length ? "INVALID" : "VALID",
+    errors,
+    duplicateCpf: false,
+    duplicatePhone: false,
+    existingContactId: null,
+    retirementLead:
+      grantDate || benefitType || city || state
+        ? { grantDate: grantDate || null, benefitType, city, state }
+        : undefined
+  };
 }
 
 export function renderCampaignMessage(
@@ -291,49 +356,31 @@ export async function buildContactImportPreview({
   const cpfCounts = new Map<string, number>();
   const phoneCounts = new Map<string, number>();
 
-  const rows: ImportPreviewRow[] = table.slice(1).map((line, index) => {
-    const name = String(line[indexes.name] ?? "").trim();
-    const cpf = onlyDigits(String(line[indexes.cpf] ?? ""));
-    const phone = onlyDigits(String(line[indexes.phone] ?? ""));
-    const phoneClassification = classifyPhoneNormalization(phone);
-    const whatsapp = phoneClassification.normalizedPhone ?? "";
-    const grantDate =
-      indexes.grantDate >= 0 ? parseImportDate(String(line[indexes.grantDate] ?? "")) : "";
-    const benefitType =
-      indexes.benefitType >= 0 ? String(line[indexes.benefitType] ?? "").trim() : "";
-    const city = indexes.city >= 0 ? String(line[indexes.city] ?? "").trim() : "";
-    const state = indexes.state >= 0 ? String(line[indexes.state] ?? "").trim() : "";
-    const errors: string[] = [];
+  const rows: ImportPreviewRow[] = table.slice(1).map((line, index) =>
+    validateAndCanonicalizeContactImportRow(
+      {
+        name: String(line[indexes.name] ?? ""),
+        cpf: String(line[indexes.cpf] ?? ""),
+        phone: String(line[indexes.phone] ?? ""),
+        retirementLead: {
+          grantDate:
+            indexes.grantDate >= 0 ? String(line[indexes.grantDate] ?? "") : "",
+          benefitType:
+            indexes.benefitType >= 0 ? String(line[indexes.benefitType] ?? "") : "",
+          city: indexes.city >= 0 ? String(line[indexes.city] ?? "") : "",
+          state: indexes.state >= 0 ? String(line[indexes.state] ?? "") : ""
+        }
+      },
+      index + 2,
+      buildSpreadsheetRawValues(line, columns)
+    )
+  );
 
-    if (!name) errors.push("Nome obrigatorio.");
-    if (!/^\d{11}$/.test(cpf)) errors.push("CPF deve conter 11 digitos.");
-    if (!phoneClassification.valid) {
-      errors.push(getPhoneImportError(phoneClassification.reason));
+  rows.forEach((row) => {
+    if (row.cpf) cpfCounts.set(row.cpf, (cpfCounts.get(row.cpf) ?? 0) + 1);
+    if (row.whatsapp) {
+      phoneCounts.set(row.whatsapp, (phoneCounts.get(row.whatsapp) ?? 0) + 1);
     }
-    if (grantDate && Number.isNaN(new Date(grantDate).getTime())) {
-      errors.push("Data Concessao invalida.");
-    }
-
-    if (cpf) cpfCounts.set(cpf, (cpfCounts.get(cpf) ?? 0) + 1);
-    if (whatsapp) phoneCounts.set(whatsapp, (phoneCounts.get(whatsapp) ?? 0) + 1);
-
-    return {
-      rowNumber: index + 2,
-      name,
-      cpf,
-      phone,
-      whatsapp,
-      rawValues: buildSpreadsheetRawValues(line, columns),
-      status: errors.length ? "INVALID" : "VALID",
-      errors,
-      duplicateCpf: false,
-      duplicatePhone: false,
-      existingContactId: null,
-      retirementLead:
-        grantDate || benefitType || city || state
-          ? { grantDate: grantDate || null, benefitType, city, state }
-          : undefined
-    };
   });
 
   rows.forEach((row) => {
@@ -412,21 +459,26 @@ async function findContactForImport(
 export async function confirmContactImport({
   companyId,
   userId,
-  rows
+  rows,
+  db = prisma
 }: {
   companyId: string;
   userId: string;
-  rows: ImportPreviewRow[];
+  rows: ContactImportConfirmRowInput[];
+  db?: PrismaClient;
 }): Promise<ContactImportConfirmResult> {
-  const validRows = rows.filter((row) => row.status === "VALID");
-  const errors = rows
+  const canonicalRows = rows.map((row, index) =>
+    validateAndCanonicalizeContactImportRow(row, index + 2)
+  );
+  const validRows = canonicalRows.filter((row) => row.status === "VALID");
+  const errors = canonicalRows
     .filter((row) => row.status !== "VALID")
     .map((row) => ({
       rowNumber: row.rowNumber,
       reason: row.errors.join(" ")
     }));
 
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await db.$transaction(async (tx) => {
     const contactIds: string[] = [];
     const confirmedRows: ContactImportConfirmResult["rows"] = [];
     let created = 0;
@@ -569,7 +621,7 @@ export async function confirmContactImport({
 
   return {
     summary: {
-      totalRows: rows.length,
+      totalRows: canonicalRows.length,
       imported: result.contactIds.length,
       created: result.created,
       updated: result.updated,
