@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { mapQuotedReply } from "@/lib/message-reply";
 
 export type ConversationStatus = "OPEN" | "PENDING" | "BOT" | "SOLD" | "RESOLVED";
 
@@ -17,6 +18,18 @@ export const conversationInclude = {
     orderBy: { createdAt: "asc" }
   },
   messages: {
+    include: {
+      replyTo: {
+        select: {
+          id: true,
+          conversationId: true,
+          providerMessageId: true,
+          type: true,
+          body: true,
+          fileName: true
+        }
+      }
+    },
     orderBy: { createdAt: "asc" }
   }
 } satisfies Prisma.ConversationInclude;
@@ -195,6 +208,7 @@ export function mapConversation(conversation: ConversationWithRelations) {
       templateVariables: message.templateVariables,
       status: message.status,
       providerMessageId: message.providerMessageId,
+      replyTo: mapQuotedReply(message),
       readAt: message.readAt,
       senderType: message.senderType
     }))

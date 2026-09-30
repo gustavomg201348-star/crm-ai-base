@@ -28,6 +28,7 @@ import {
   isPrismaUniqueViolationForTarget
 } from "@/lib/prisma-errors";
 import { safeLogError, safeLogWarn } from "@/lib/safe-logger";
+import { buildInboundReplyFields } from "@/lib/message-reply";
 
 type InboundContact = ConversationWithRelations["contact"];
 
@@ -323,6 +324,14 @@ export async function processInboundMessage({
     throw new Error("Nao foi possivel resolver conversa inbound.");
   }
 
+  const replyFields = buildInboundReplyFields({
+    contextProviderMessageId,
+    referencedMessage,
+    companyId,
+    conversationId: conversation.id,
+    channelId
+  });
+
   if (conversationCreated) {
     await maybeAutoAssignConversation({
       companyId,
@@ -341,7 +350,8 @@ export async function processInboundMessage({
         mediaId: mediaId ?? null,
         fileName: fileName ?? null,
         mimeType: mimeType ?? null,
-        providerMessageId: providerMessageId ?? null
+        providerMessageId: providerMessageId ?? null,
+        ...replyFields
       }
     });
   } catch (error) {
