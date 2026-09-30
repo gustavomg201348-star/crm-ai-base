@@ -576,6 +576,7 @@ model ConversationTag {
 model Message {
   id                String       @id @default(cuid())
   conversationId    String
+  replyToMessageId String?
   direction         String
   body              String
   type              String       @default("text")
@@ -588,12 +589,20 @@ model Message {
   templateVariables String?
   status            String       @default("sent")
   providerMessageId String?
+  replyToProviderMessageId String?
+  replyPreviewType String?
+  replyPreviewBody String?
+  replyPreviewFileName String?
   readAt            DateTime?
   senderType        String?
   createdAt         DateTime     @default(now())
   conversation      Conversation @relation(fields: [conversationId], references: [id])
+  replyTo           Message?     @relation("MessageReplies", fields: [replyToMessageId], references: [id], onDelete: SetNull)
+  replies           Message[]    @relation("MessageReplies")
 
   @@index([conversationId, createdAt])
+  @@index([replyToMessageId])
+  @@index([replyToProviderMessageId])
   @@index([status])
   @@index([direction])
   @@index([providerMessageId])
