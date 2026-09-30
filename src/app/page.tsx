@@ -26,6 +26,7 @@ import { NextBestActionPage } from "@/app/components/opportunities/NextBestActio
 import { TemplateLibraryPage } from "@/app/components/templates/TemplateLibraryPage";
 import { useNewMessageSound } from "@/app/hooks/use-new-message-sound";
 import { resolveConversationChannelId } from "@/lib/conversation-channel.service";
+import { serializeCsvCell } from "@/lib/csv-export";
 import type { OpportunitySummary } from "@/lib/opportunity-summary-types";
 import type {
   SpreadsheetImportColumn,
@@ -15853,7 +15854,12 @@ function Disparos({
           row.phone,
           row.errors.join(" | ")
         ]
-          .map((value) => `"${String(value).replace(/"/g, "\"\"")}"`)
+          .map((value) =>
+            serializeCsvCell(value, {
+              delimiter: ";",
+              kind: typeof value === "number" ? "trusted-number" : "untrusted-text"
+            })
+          )
           .join(";")
       )
     ].join("\n");
@@ -16011,7 +16017,7 @@ function Disparos({
     const csv = rows
       .map((row) =>
         row
-          .map((value) => `"${String(value).replace(/"/g, "\"\"")}"`)
+          .map((value) => serializeCsvCell(value, { delimiter: ";" }))
           .join(";")
       )
       .join("\n");

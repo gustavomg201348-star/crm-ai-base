@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { getSessionFromRequest } from "@/lib/auth";
 import { contactInclude, mapContact } from "@/lib/contacts";
+import { serializeCsvCell } from "@/lib/csv-export";
 import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireAdmin } from "@/lib/permissions";
@@ -38,11 +39,6 @@ function buildContactWhere(
         }
       : {})
   };
-}
-
-function csvCell(value: unknown) {
-  const text = value === null || value === undefined ? "" : String(value);
-  return `"${text.replace(/"/g, '""')}"`;
 }
 
 export async function GET(request: NextRequest) {
@@ -89,7 +85,7 @@ export async function GET(request: NextRequest) {
           contact.tags.map((tag) => tag.name).join("|"),
           contact.updatedAt
         ]
-          .map(csvCell)
+          .map((value) => serializeCsvCell(value, { delimiter: "," }))
           .join(",")
       )
     ].join("\n");
