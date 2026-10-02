@@ -93,6 +93,14 @@ export type ConversationRow = {
     templateVariables?: string | null;
     status?: string;
     providerMessageId?: string | null;
+    replyTo?: {
+      id: string | null;
+      providerMessageId: string | null;
+      direction?: string | null;
+      type: string | null;
+      body: string | null;
+      fileName: string | null;
+    } | null;
     readAt?: string | null;
     senderType?: string | null;
   }>;

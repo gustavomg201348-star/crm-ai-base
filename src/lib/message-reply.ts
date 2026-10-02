@@ -14,6 +14,15 @@ export type ReplySourceMessage = {
   };
 };
 
+export type QuotedReply = {
+  id: string | null;
+  providerMessageId: string | null;
+  direction?: string | null;
+  type: string | null;
+  body: string | null;
+  fileName: string | null;
+};
+
 export type PersistedReplyFields = {
   replyToMessageId: string | null;
   replyToProviderMessageId: string | null;
@@ -104,12 +113,13 @@ export function mapQuotedReply(message: {
   replyTo?: {
     id: string;
     conversationId: string;
+    direction?: string | null;
     providerMessageId?: string | null;
     type?: string | null;
     body?: string | null;
     fileName?: string | null;
   } | null;
-}) {
+}): QuotedReply | null {
   const localReply =
     message.replyTo && message.replyTo.conversationId === message.conversationId
       ? message.replyTo
@@ -132,6 +142,7 @@ export function mapQuotedReply(message: {
     return {
       id: localReply.id,
       providerMessageId: localReply.providerMessageId ?? providerMessageId,
+      ...(localReply.direction ? { direction: localReply.direction } : {}),
       type: relationSnapshot.replyPreviewType,
       body: relationSnapshot.replyPreviewBody,
       fileName: relationSnapshot.replyPreviewFileName

@@ -18,6 +18,10 @@ import { saveFailedOutboundMessage } from "@/lib/message-delivery";
 import { readMetaMessageId, sendMetaTextMessage } from "@/lib/meta-whatsapp";
 import { canAccessConversation } from "@/lib/permissions";
 import {
+  InvalidMessageReplyError,
+  resolveOutboundReplyContext
+} from "@/lib/outbound-message-reply";
+import {
   isPrismaUniqueViolation,
   isPrismaUniqueViolationForTarget
 } from "@/lib/prisma-errors";
@@ -54,7 +58,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     const { id } = await context.params;
     const body = (await request.json().catch(() => null)) as
-      | { conversationId?: string; to?: string; body?: string }
+      | {
+          conversationId?: string;
+          to?: string;
+          body?: string;
+          replyToMessageId?: string;
+        }
       | null;
     const message = body?.body?.trim();
 
@@ -117,13 +126,26 @@ export async function POST(request: NextRequest, context: RouteContext) {
       failedMessageBody = message;
     }
 
+    if (body.replyToMessageId && !conversation) {
+      throw new InvalidMessageReplyError();
+    }
+
+    const reply = conversation
+      ? await resolveOutboundReplyContext({
+          replyToMessageId: body.replyToMessageId,
+          companyId: session.companyId,
+          conversationId: conversation.id,
+          channelId: channel.id
+        })
+      : null;
     const sent = await sendMetaTextMessage({
       phoneNumberId: channel.phoneNumberId,
       accessToken,
       to: conversation
         ? normalizeContactPhone(conversation.contact.phone)
         : normalizedPhone,
-      body: message
+      body: message,
+      contextMessageId: reply?.contextMessageId
     });
     const providerMessageId = readMetaMessageId(sent);
     metaAcceptedMessage = true;
@@ -224,7 +246,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
           body: message,
           type: "text",
           status: "sent",
-          providerMessageId
+          providerMessageId,
+          ...(reply?.fields ?? {})
         }
       });
 
@@ -260,6 +283,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
       conversation: mapConversation(updated)
     });
   } catch (error) {
+    if (error instanceof InvalidMessageReplyError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+
     const errorMessage = "Falha ao enviar mensagem.";
 
     if (!metaAcceptedMessage && failedCompanyId && failedConversationId && failedMessageBody) {
