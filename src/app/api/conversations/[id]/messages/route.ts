@@ -9,6 +9,10 @@ import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { readMetaMessageId, sendMetaTextMessage } from "@/lib/meta-whatsapp";
+import {
+  InvalidMessageReplyError,
+  resolveOutboundReplyContext
+} from "@/lib/outbound-message-reply";
 import { canAccessConversation } from "@/lib/permissions";
 import { digitsOnlyPhone } from "@/lib/phone-normalization.service";
 import { safeLogError } from "@/lib/safe-logger";
@@ -30,6 +34,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       | {
           body?: string;
           direction?: "inbound" | "outbound";
+          replyToMessageId?: string;
         }
       | null;
 
@@ -72,17 +77,25 @@ export async function POST(request: NextRequest, context: RouteContext) {
           conversationId: conversation.id,
           companyId: session.companyId
         });
+      const reply = await resolveOutboundReplyContext({
+        replyToMessageId: body?.replyToMessageId,
+        companyId: session.companyId,
+        conversationId: conversation.id,
+        channelId: channel.id
+      });
       const sent = await sendMetaTextMessage({
         phoneNumberId: channel.phoneNumberId!,
         accessToken: channel.accessToken!,
         to: digitsOnlyPhone(integrationConversation.contact.phone),
-        body: messageBody
+        body: messageBody,
+        contextMessageId: reply?.contextMessageId
       });
       const updated = await saveOutboundMessage({
         conversationId: conversation.id,
         userId: session.id,
         body: messageBody,
-        providerMessageId: readMetaMessageId(sent)
+        providerMessageId: readMetaMessageId(sent),
+        reply: reply?.fields
       });
 
       return NextResponse.json({ conversation: updated });
@@ -133,6 +146,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     return NextResponse.json({ conversation: mapConversation(updated) });
   } catch (error) {
+    if (error instanceof InvalidMessageReplyError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+
     safeLogError("http-api", error, {
       operation: "conversation-message-send",
       route: "/api/conversations/[id]/messages",

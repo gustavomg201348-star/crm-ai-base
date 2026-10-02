@@ -23,6 +23,7 @@ export const conversationInclude = {
         select: {
           id: true,
           conversationId: true,
+          direction: true,
           providerMessageId: true,
           type: true,
           body: true,

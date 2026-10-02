@@ -268,12 +268,14 @@ export async function sendMetaTextMessage({
   phoneNumberId,
   accessToken,
   to,
-  body
+  body,
+  contextMessageId
 }: {
   phoneNumberId: string;
   accessToken: string;
   to: string;
   body: string;
+  contextMessageId?: string | null;
 }) {
   const apiVersion = process.env.META_GRAPH_VERSION || "v20.0";
   const response = await fetch(
@@ -284,12 +286,9 @@ export async function sendMetaTextMessage({
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({
-        messaging_product: "whatsapp",
-        to,
-        type: "text",
-        text: { body }
-      })
+      body: JSON.stringify(
+        buildMetaTextMessagePayload({ to, body, contextMessageId })
+      )
     }
   );
 
@@ -304,6 +303,28 @@ export async function sendMetaTextMessage({
   }
 
   return data;
+}
+
+export function buildMetaTextMessagePayload({
+  to,
+  body,
+  contextMessageId
+}: {
+  to: string;
+  body: string;
+  contextMessageId?: string | null;
+}) {
+  const normalizedContextMessageId = contextMessageId?.trim();
+
+  return {
+    messaging_product: "whatsapp",
+    to,
+    type: "text",
+    text: { body },
+    ...(normalizedContextMessageId
+      ? { context: { message_id: normalizedContextMessageId } }
+      : {})
+  };
 }
 
 export async function uploadMetaMedia({

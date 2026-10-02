@@ -84,6 +84,7 @@ export async function saveOutboundMessage({
   templateLanguage,
   templateVariables,
   providerMessageId,
+  reply,
   status = "sent",
   senderType = "agent"
 }: {
@@ -99,6 +100,13 @@ export async function saveOutboundMessage({
   templateLanguage?: string | null;
   templateVariables?: string | null;
   providerMessageId?: string | null;
+  reply?: {
+    replyToMessageId: string | null;
+    replyToProviderMessageId: string | null;
+    replyPreviewType: string | null;
+    replyPreviewBody: string | null;
+    replyPreviewFileName: string | null;
+  } | null;
   status?: string;
   senderType?: string;
 }) {
@@ -123,6 +131,7 @@ export async function saveOutboundMessage({
         templateLanguage,
         templateVariables,
         providerMessageId,
+        ...(reply ?? {}),
         status
       }
     });

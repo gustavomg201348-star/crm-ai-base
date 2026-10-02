@@ -78,6 +78,7 @@ import {
   Phone,
   Plus,
   RefreshCcw,
+  Reply,
   RotateCcw,
   Search,
   Send,
@@ -325,6 +326,14 @@ type ConversationRow = {
     mimeType?: string | null;
     templateName?: string | null;
     status?: string;
+    replyTo?: {
+      id: string | null;
+      providerMessageId: string | null;
+      direction?: string | null;
+      type: string | null;
+      body: string | null;
+      fileName: string | null;
+    } | null;
     readAt?: string | null;
     senderType?: string | null;
   } | null;
@@ -343,6 +352,14 @@ type ConversationRow = {
     templateVariables?: string | null;
     status?: string;
     providerMessageId?: string | null;
+    replyTo?: {
+      id: string | null;
+      providerMessageId: string | null;
+      direction?: string | null;
+      type: string | null;
+      body: string | null;
+      fileName: string | null;
+    } | null;
     readAt?: string | null;
     senderType?: string | null;
   }>;
@@ -3439,7 +3456,11 @@ export default function Home() {
     void loadConversations(conversationFilters);
   }
 
-  async function handleSendMessage(conversationId: string, body: string) {
+  async function handleSendMessage(
+    conversationId: string,
+    body: string,
+    replyToMessageId?: string
+  ) {
     const messageBody = body.trim();
     const now = new Date().toISOString();
     const conversation =
@@ -3448,6 +3469,19 @@ export default function Home() {
         : conversationList.find((item) => item.id === conversationId);
 
     if (!conversation || !messageBody) return false;
+    const replySource = replyToMessageId
+      ? conversation.messages.find((item) => item.id === replyToMessageId)
+      : null;
+    const optimisticReply = replySource
+      ? {
+          id: replySource.id,
+          providerMessageId: replySource.providerMessageId ?? null,
+          direction: replySource.direction,
+          type: replySource.type ?? "text",
+          body: replySource.body,
+          fileName: replySource.fileName ?? null
+        }
+      : null;
 
     const optimisticConversation: ConversationRow = {
       ...conversation,
@@ -3465,7 +3499,8 @@ export default function Home() {
         direction: "outbound",
         body: messageBody,
         createdAt: now,
-        status: "sending"
+        status: "sending",
+        replyTo: optimisticReply
       },
       messages: [
         ...conversation.messages,
@@ -3474,7 +3509,8 @@ export default function Home() {
           direction: "outbound",
           body: messageBody,
           createdAt: now,
-          status: "sending"
+          status: "sending",
+          replyTo: optimisticReply
         }
       ]
     };
@@ -3491,13 +3527,18 @@ export default function Home() {
               body: JSON.stringify({
                 conversationId,
                 to: conversation.contact.phone,
-                body: messageBody
+                body: messageBody,
+                ...(replyToMessageId ? { replyToMessageId } : {})
               })
             })
           : await fetch(`/api/conversations/${conversationId}/messages`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ body: messageBody, direction: "outbound" })
+              body: JSON.stringify({
+                body: messageBody,
+                direction: "outbound",
+                ...(replyToMessageId ? { replyToMessageId } : {})
+              })
             });
 
       if (!response.ok) {
@@ -6925,7 +6966,11 @@ function Atendimento({
   onAssignConversation: (conversationId: string, userId?: string) => Promise<void>;
   onUnassignConversation: (conversationId: string) => Promise<void>;
   onTransferConversation: (conversationId: string, userId: string) => Promise<void>;
-  onSendMessage: (conversationId: string, body: string) => Promise<boolean>;
+  onSendMessage: (
+    conversationId: string,
+    body: string,
+    replyToMessageId?: string
+  ) => Promise<boolean>;
   onSendMedia: (conversationId: string, file: File, caption?: string) => Promise<void>;
   onLoadTemplates: (conversationId: string) => Promise<WhatsAppTemplateRow[]>;
   onSendTemplate: (
@@ -6955,6 +7000,7 @@ function Atendimento({
   const [message, setMessage] = useState("");
   const [composerError, setComposerError] = useState("");
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<ConversationMessageRow | null>(null);
   const [sendingAttachment, setSendingAttachment] = useState(false);
   const [retryingMessageId, setRetryingMessageId] = useState<string | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -7014,6 +7060,9 @@ function Atendimento({
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<number | null>(null);
   const draftsByConversationRef = useRef<Record<string, string>>({});
+  const repliesByConversationRef = useRef<
+    Record<string, ConversationMessageRow>
+  >({});
   const selectedConversationIdRef = useRef<string | null>(selectedConversation?.id ?? null);
   const opportunityRequestIdRef = useRef(0);
   const copyToastTimeoutRef = useRef<number | null>(null);
@@ -7084,6 +7133,9 @@ function Atendimento({
     const conversationId = selectedConversation?.id ?? null;
     selectedConversationIdRef.current = conversationId;
     setMessage(conversationId ? draftsByConversationRef.current[conversationId] ?? "" : "");
+    setReplyingTo(
+      conversationId ? repliesByConversationRef.current[conversationId] ?? null : null
+    );
     setSelectedTemplate(null);
     setTemplateValues([]);
     setTemplateVariableDialogOpen(false);
@@ -7203,10 +7255,15 @@ function Atendimento({
 
     const conversationId = selectedConversation.id;
     const messageToSend = message;
+    const replyToSend = replyingTo;
 
     setSendingMessage(true);
     try {
-      const sent = await onSendMessage(conversationId, messageToSend);
+      const sent = await onSendMessage(
+        conversationId,
+        messageToSend,
+        replyToSend?.id
+      );
       if (sent) {
         setMessage((current) =>
           selectedConversationIdRef.current === conversationId
@@ -7224,10 +7281,46 @@ function Atendimento({
             delete draftsByConversationRef.current[conversationId];
           }
         }
+        if (
+          replyToSend &&
+          repliesByConversationRef.current[conversationId]?.id === replyToSend.id
+        ) {
+          delete repliesByConversationRef.current[conversationId];
+          if (selectedConversationIdRef.current === conversationId) {
+            setReplyingTo((current) =>
+              current?.id === replyToSend.id ? null : current
+            );
+          }
+        }
       }
     } finally {
       setSendingMessage(false);
     }
+  }
+
+  function selectReplyMessage(messageToReply: ConversationMessageRow) {
+    const conversationId = selectedConversationIdRef.current;
+    if (
+      !conversationId ||
+      !messageToReply.id ||
+      messageToReply.id.startsWith("optimistic-") ||
+      !messageToReply.providerMessageId
+    ) {
+      return;
+    }
+
+    repliesByConversationRef.current[conversationId] = messageToReply;
+    setReplyingTo(messageToReply);
+    window.requestAnimationFrame(focusComposerInput);
+  }
+
+  function cancelReply() {
+    const conversationId = selectedConversationIdRef.current;
+    if (conversationId) {
+      delete repliesByConversationRef.current[conversationId];
+    }
+    setReplyingTo(null);
+    window.requestAnimationFrame(focusComposerInput);
   }
 
   function updateComposerMessage(value: string | ((current: string) => string)) {
@@ -8403,6 +8496,19 @@ function Atendimento({
                   readAt={item.readAt}
                   timestamp={formatRelativeDate(item.createdAt)}
                   isAiMessage={item.direction === "outbound" && item.senderType === "ai"}
+                  replyTo={item.replyTo}
+                  replyAuthor={
+                    item.replyTo?.direction === "outbound"
+                      ? "Você"
+                      : item.replyTo?.direction === "inbound"
+                        ? formatContactNameForUi(selectedConversation.contact.name)
+                        : "Mensagem respondida"
+                  }
+                  onReply={
+                    item.providerMessageId && !item.id.startsWith("optimistic-")
+                      ? () => selectReplyMessage(item)
+                      : undefined
+                  }
                 >
                   {item.type === "audio" || item.mimeType?.startsWith("audio/") ? (
                     <AudioMessage
@@ -8470,6 +8576,18 @@ function Atendimento({
             <div role="alert" className="mb-3 rounded-2xl border border-rose-100 bg-rose-50 px-3 py-2 text-sm text-rose-700">
               {composerError}
             </div>
+          )}
+
+          {replyingTo && selectedConversation && (
+            <ComposerReplyPreview
+              message={replyingTo}
+              author={
+                replyingTo.direction === "outbound"
+                  ? "você"
+                  : formatContactNameForUi(selectedConversation.contact.name)
+              }
+              onCancel={cancelReply}
+            />
           )}
 
           {recording && (
@@ -9368,12 +9486,97 @@ function TimelineEventMarker({
   );
 }
 
+type ReplyPreviewSource = {
+  direction?: string | null;
+  type?: string | null;
+  body?: string | null;
+  fileName?: string | null;
+};
+
+function getReplyPreviewText(reply: ReplyPreviewSource) {
+  const type = reply.type?.trim().toLowerCase() || "text";
+  const body = reply.body?.trim();
+  const safeBody =
+    body && !/^https?:\/\/\S+$/i.test(body) ? body : null;
+  const fileName = reply.fileName?.trim();
+
+  if (type === "image") return safeBody ? `Imagem · ${safeBody}` : "Imagem";
+  if (type === "document") {
+    return fileName ? `Documento · ${fileName}` : "Documento";
+  }
+  if (type === "audio") return "Áudio";
+  if (type === "video") return safeBody ? `Vídeo · ${safeBody}` : "Vídeo";
+  if (type === "template") return safeBody || "Template";
+  return safeBody || "Mensagem respondida";
+}
+
+function ReplyQuote({
+  reply,
+  author,
+  side
+}: {
+  reply: ReplyPreviewSource;
+  author: string;
+  side: "left" | "right";
+}) {
+  return (
+    <div
+      className={clsx(
+        "mb-2 min-w-0 rounded-xl border-l-2 px-3 py-2 text-xs",
+        side === "right"
+          ? "border-white/70 bg-white/15 text-blue-50"
+          : "border-brand/70 bg-slate-50 text-slate-600"
+      )}
+    >
+      <p className={clsx("font-bold", side === "right" ? "text-white" : "text-slate-800")}>
+        {author}
+      </p>
+      <p className="mt-0.5 line-clamp-2 break-words opacity-90">
+        {getReplyPreviewText(reply)}
+      </p>
+    </div>
+  );
+}
+
+function ComposerReplyPreview({
+  message,
+  author,
+  onCancel
+}: {
+  message: ConversationMessageRow;
+  author: string;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="mb-3 flex min-w-0 items-start gap-3 rounded-2xl border border-blue-100 bg-blue-50/70 px-3 py-2.5">
+      <Reply aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-bold text-slate-800">Respondendo a {author}</p>
+        <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-slate-600">
+          {getReplyPreviewText(message)}
+        </p>
+      </div>
+      <button
+        type="button"
+        aria-label="Cancelar resposta à mensagem"
+        className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-slate-500 transition hover:bg-white hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+        onClick={onCancel}
+      >
+        <X aria-hidden="true" className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
 function ChatBubble({
   side,
   status,
   readAt,
   timestamp,
   isAiMessage,
+  replyTo,
+  replyAuthor,
+  onReply,
   children
 }: {
   side: "left" | "right";
@@ -9381,6 +9584,9 @@ function ChatBubble({
   readAt?: string | null;
   timestamp?: string;
   isAiMessage?: boolean;
+  replyTo?: ReplyPreviewSource | null;
+  replyAuthor?: string;
+  onReply?: () => void;
   children: React.ReactNode;
 }) {
   const rawStatus = status?.trim().toLowerCase();
@@ -9428,6 +9634,13 @@ function ChatBubble({
               : "rounded-bl-md border border-line/70 bg-white text-slate-800"
           )}
         >
+          {replyTo && (
+            <ReplyQuote
+              reply={replyTo}
+              author={replyAuthor || "Mensagem respondida"}
+              side={side}
+            />
+          )}
           {children}
         </div>
         {(timestamp || showDeliveryStatus) && (
@@ -9447,6 +9660,17 @@ function ChatBubble({
                 <Sparkles className="h-3 w-3" />
                 IA
               </span>
+            )}
+            {onReply && (
+              <button
+                type="button"
+                aria-label="Responder a esta mensagem"
+                className="ml-1 grid h-8 w-8 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                title="Responder"
+                onClick={onReply}
+              >
+                <Reply aria-hidden="true" className="h-3.5 w-3.5" />
+              </button>
             )}
             {showDeliveryStatus && (
               <span
