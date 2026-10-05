@@ -141,7 +141,7 @@ test("rotas validam acesso antes de writes e chamada OpenAI", () => {
     "src/app/api/conversations/[id]/tags/[tagId]/route.ts",
     "utf8"
   );
-  const aiRoute = readFileSync("src/app/api/conversations/[id]/ai/route.ts", "utf8");
+  const aiRoute = readFileSync("src/lib/ai-reply-route-handler.ts", "utf8");
   const aiModeRoute = readFileSync(
     "src/app/api/conversations/[id]/ai-mode/route.ts",
     "utf8"
@@ -160,8 +160,8 @@ test("rotas validam acesso antes de writes e chamada OpenAI", () => {
       tagsDelete.indexOf("conversationTag.deleteMany")
   );
   assert.ok(
-    aiRoute.indexOf("await resolveConversationAccess") <
-      aiRoute.indexOf("await generateAiSuggestion")
+    aiRoute.indexOf("await dependencies.resolveAccess") <
+      aiRoute.indexOf("await dependencies.generateSuggestion")
   );
   assert.ok(
     aiModeRoute.indexOf("await resolveConversationAccess") <

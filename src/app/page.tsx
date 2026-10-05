@@ -6,6 +6,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState
 } from "react";
@@ -28,6 +29,13 @@ import { useNewMessageSound } from "@/app/hooks/use-new-message-sound";
 import { resolveConversationChannelId } from "@/lib/conversation-channel.service";
 import { serializeCsvCell } from "@/lib/csv-export";
 import type { OpportunitySummary } from "@/lib/opportunity-summary-types";
+import {
+  aiReplyErrorMessage,
+  createAiReplySynchronousStartGuard,
+  createAiReplyRequestState,
+  reduceAiReplyRequestState,
+  startAiReplyRequestSynchronously
+} from "@/lib/ai-reply-request-state";
 import type {
   SpreadsheetImportColumn,
   SpreadsheetImportRawValues
@@ -660,7 +668,7 @@ type AiAnalysis = {
   confidence: number;
   tags?: string[];
   shouldTransferToHuman?: boolean;
-  source?: "openai" | "fallback";
+  source?: "openai" | "fallback" | "guardrail";
 };
 
 type ProposalStatus =
@@ -1777,8 +1785,30 @@ export default function Home() {
     currentUserId: session?.user.id ?? "",
     canManageOperation: userCanManageOperation(session)
   });
-  const [aiAnalysis, setAiAnalysis] = useState<AiAnalysis | null>(null);
-  const [aiLoading, setAiLoading] = useState(false);
+  const [aiReplyState, dispatchAiReplyState] = useReducer(
+    reduceAiReplyRequestState<AiAnalysis>,
+    undefined,
+    createAiReplyRequestState<AiAnalysis>
+  );
+  const aiRequestSequenceRef = useRef<Record<string, number>>({});
+  const aiRequestControllersRef = useRef<Record<string, AbortController | undefined>>({});
+  const aiSynchronousStartGuardRef = useRef(createAiReplySynchronousStartGuard());
+  const selectedAiAnalysis = selectedConversation
+    ? aiReplyState.analysisByConversation[selectedConversation.id] ?? null
+    : null;
+  const selectedAiLoading = selectedConversation
+    ? Boolean(aiReplyState.loadingByConversation[selectedConversation.id])
+    : false;
+  const selectedAiError = selectedConversation
+    ? aiReplyState.errorByConversation[selectedConversation.id] ?? ""
+    : "";
+
+  useEffect(() => {
+    const controllers = aiRequestControllersRef.current;
+    return () => {
+      Object.values(controllers).forEach((controller) => controller?.abort());
+    };
+  }, []);
   const [contactFilters, setContactFilters] = useState({
     search: "",
     status: "active",
@@ -3652,28 +3682,69 @@ export default function Home() {
     mergeConversation(data.conversation, "remove-tag");
   }
 
-  async function handleAnalyzeConversation(conversationId: string) {
-    setAiLoading(true);
-    setAppError("");
-
-    const response = await fetch(`/api/conversations/${conversationId}/ai`, {
-      method: "POST"
+  async function handleAnalyzeConversation(
+    conversationId: string,
+    replyToMessageId?: string
+  ) {
+    let requestId = 0;
+    const started = startAiReplyRequestSynchronously({
+      guard: aiSynchronousStartGuardRef.current,
+      conversationId,
+      start: () => {
+        requestId = (aiRequestSequenceRef.current[conversationId] ?? 0) + 1;
+        aiRequestSequenceRef.current[conversationId] = requestId;
+      }
     });
+    if (!started) return;
 
-    if (!response.ok) {
-      setAppError("Nao foi possivel gerar analise IA.");
-      setAiLoading(false);
-      return;
+    aiRequestControllersRef.current[conversationId]?.abort();
+    const controller = new AbortController();
+    aiRequestControllersRef.current[conversationId] = controller;
+    dispatchAiReplyState({ type: "begin", conversationId, requestId });
+    try {
+      const response = await fetch(`/api/conversations/${conversationId}/ai`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(replyToMessageId ? { replyToMessageId } : {}),
+        signal: controller.signal
+      });
+
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        dispatchAiReplyState({
+          type: "error",
+          conversationId,
+          requestId,
+          error: data?.error ?? "Nao foi possivel gerar analise IA."
+        });
+        return;
+      }
+
+      const data = (await response.json()) as { analysis: AiAnalysis };
+      dispatchAiReplyState({
+        type: "success",
+        conversationId,
+        requestId,
+        analysis: data.analysis
+      });
+    } catch (error) {
+      const safeError = aiReplyErrorMessage(error);
+      if (safeError) {
+        dispatchAiReplyState({
+          type: "error",
+          conversationId,
+          requestId,
+          error: safeError
+        });
+      }
+    } finally {
+      if (aiRequestControllersRef.current[conversationId] === controller) {
+        delete aiRequestControllersRef.current[conversationId];
+      }
+      dispatchAiReplyState({ type: "finish", conversationId, requestId });
     }
-
-    const data = (await response.json()) as {
-      analysis: AiAnalysis;
-      conversation: ConversationRow;
-    };
-
-    setAiAnalysis(data.analysis);
-    mergeConversation(data.conversation, "ai-analysis");
-    setAiLoading(false);
   }
 
   async function handleConversationAiMode(
@@ -4870,8 +4941,9 @@ export default function Home() {
                 onLoadTemplates={handleLoadTemplates}
                 onSendTemplate={handleSendTemplate}
                 onUpdateStatus={handleConversationStatus}
-                aiAnalysis={aiAnalysis}
-                aiLoading={aiLoading}
+                aiAnalysis={selectedAiAnalysis}
+                aiLoading={selectedAiLoading}
+                aiError={selectedAiError}
                 aiSettings={aiSettings}
                 onAnalyzeConversation={handleAnalyzeConversation}
                 onUpdateConversationAiMode={handleConversationAiMode}
@@ -6940,6 +7012,7 @@ function Atendimento({
   onUpdateStatus,
   aiAnalysis,
   aiLoading,
+  aiError,
   aiSettings,
   onAnalyzeConversation,
   onUpdateConversationAiMode,
@@ -6983,8 +7056,12 @@ function Atendimento({
   ) => Promise<void>;
   aiAnalysis: AiAnalysis | null;
   aiLoading: boolean;
+  aiError: string;
   aiSettings: AiSettings;
-  onAnalyzeConversation: (conversationId: string) => Promise<void>;
+  onAnalyzeConversation: (
+    conversationId: string,
+    replyToMessageId?: string
+  ) => Promise<void>;
   onUpdateConversationAiMode: (
     conversationId: string,
     payload: { mode?: AiMode | null; paused?: boolean }
@@ -7898,13 +7975,14 @@ function Atendimento({
         <AiPanel
           compact
           analysis={aiAnalysis}
+          error={aiError}
           companyMode={aiSettings.mode}
           conversation={selectedConversation}
           loading={aiLoading}
           disabled={!selectedConversation}
           onAnalyze={() =>
             selectedConversation
-              ? void onAnalyzeConversation(selectedConversation.id)
+              ? void onAnalyzeConversation(selectedConversation.id, replyingTo?.id)
               : undefined
           }
           onModeChange={(mode) =>
@@ -9218,7 +9296,7 @@ function Atendimento({
             onExpand={() => setAiSidebarCollapsed(false)}
             onAnalyze={() =>
               selectedConversation
-                ? void onAnalyzeConversation(selectedConversation.id)
+                ? void onAnalyzeConversation(selectedConversation.id, replyingTo?.id)
                 : undefined
             }
             disabled={!selectedConversation || aiLoading}
@@ -19425,6 +19503,7 @@ function Configuracoes({
 function AiPanel({
   compact = false,
   analysis,
+  error,
   companyMode = "COPILOT",
   conversation,
   loading = false,
@@ -19436,6 +19515,7 @@ function AiPanel({
 }: {
   compact?: boolean;
   analysis?: AiAnalysis | null;
+  error?: string;
   companyMode?: AiMode;
   conversation?: ConversationRow | null;
   loading?: boolean;
@@ -19514,6 +19594,11 @@ function AiPanel({
         >
           {loading ? "Gerando..." : "Gerar resposta IA"}
         </button>
+      )}
+      {error && (
+        <p className="mt-3 rounded border border-rose-200 bg-rose-50 p-2 text-sm text-rose-700">
+          {error}
+        </p>
       )}
       {analysis && (
         <div className="mt-4 space-y-3 rounded border border-amber-200 bg-amber-50 p-3">
