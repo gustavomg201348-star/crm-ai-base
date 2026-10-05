@@ -24,8 +24,12 @@ test("login limita IP e identidade antes do lookup e preserva erro de credenciai
 });
 
 test("IA e bloqueada antes da chamada OpenAI", () => {
-  const text = source("src/app/api/conversations/[id]/ai/route.ts");
-  assertBefore(text, "await enforceRateLimits", "await generateAiSuggestion");
+  const text = source("src/lib/ai-reply-route-handler.ts");
+  assertBefore(
+    text,
+    "await dependencies.enforceLimits",
+    "await dependencies.generateSuggestion"
+  );
 });
 
 test("envios humanos sao bloqueados antes dos providers", () => {
@@ -110,7 +114,7 @@ test("migration e schemas Prisma permanecem alinhados", () => {
 
 test("rotas autenticadas constroem quota somente com company e user da sessao", () => {
   const paths = [
-    "src/app/api/conversations/[id]/ai/route.ts",
+    "src/lib/ai-reply-route-handler.ts",
     "src/app/api/conversations/[id]/messages/route.ts",
     "src/app/api/conversations/[id]/messages/media/route.ts",
     "src/app/api/conversations/[id]/messages/template/route.ts",
