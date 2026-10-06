@@ -5,10 +5,12 @@ import {
 } from "@/lib/ai-response-context";
 import { enforceFinancialReplyGuardrails } from "@/lib/ai-response-guardrails";
 import {
+  AI_REPLY_JSON_SCHEMA,
   AI_REPLY_PROMPT_VERSION,
   InvalidAiReplyResponseError,
   parseAiReplyResponse
 } from "@/lib/ai-response-schema";
+import { safeLogWarn } from "@/lib/safe-logger";
 import {
   getConversationIntegration,
   saveOutboundMessage
@@ -32,6 +34,8 @@ export type AiSuggestion = {
 };
 
 export const AI_REPLY_PROVIDER_TIMEOUT_MS = 15_000;
+// The complete schema permits over 3,000 characters, plus JSON syntax and escapes.
+export const AI_REPLY_MAX_OUTPUT_TOKENS = 4_096;
 
 export class AiReplyProviderUnavailableError extends Error {
   constructor() {
@@ -170,19 +174,57 @@ export function buildAiReplyPrompt(context: AiResponseContext) {
   return prompt;
 }
 
-function readOpenAiOutput(data: unknown) {
-  if (!data || typeof data !== "object") return null;
-  const response = data as {
-    output_text?: unknown;
-    output?: Array<{ content?: Array<{ text?: unknown }> }>;
-  };
-  if (typeof response.output_text === "string") return response.output_text;
-  for (const item of response.output ?? []) {
-    for (const content of item.content ?? []) {
-      if (typeof content.text === "string") return content.text;
+function record(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+type AiReplyFailure =
+  | "prompt" | "provider_http" | "provider_connection" | "timeout"
+  | "response_status" | "incomplete" | "refusal" | "empty_output"
+  | "invalid_output" | "json_parse" | "schema_validation";
+
+function readOpenAiOutput(data: unknown, fail: (reason: AiReplyFailure) => never) {
+  const response = record(data);
+  if (response?.status === "incomplete") return fail("incomplete");
+  if (!response || response.status !== "completed") return fail("response_status");
+  if (!Array.isArray(response.output)) return fail("invalid_output");
+
+  const texts: string[] = [];
+  for (const value of response.output) {
+    const item = record(value);
+    if (!item) return fail("invalid_output");
+    if (item.type !== "message") continue;
+    if (item.status !== "completed" || !Array.isArray(item.content)) {
+      return fail("invalid_output");
+    }
+    for (const value of item.content) {
+      const content = record(value);
+      if (!content) return fail("invalid_output");
+      if (content.type === "refusal") return fail("refusal");
+      if (content.type !== "output_text") continue;
+      if (typeof content.text !== "string") return fail("invalid_output");
+      texts.push(content.text);
     }
   }
-  return null;
+  const output = texts.join("");
+  return output.trim() ? output : fail("empty_output");
+}
+
+const providerErrorTypes = new Set([
+  "invalid_request_error", "authentication_error", "permission_error",
+  "not_found_error", "rate_limit_error", "server_error", "api_error",
+  "insufficient_quota"
+]);
+const providerErrorCodes = new Set([
+  "invalid_api_key", "insufficient_quota", "rate_limit_exceeded", "model_not_found",
+  "permission_denied", "unsupported_parameter", "invalid_value",
+  "context_length_exceeded", "invalid_json_schema", "server_error"
+]);
+
+function allowedMetadata(value: unknown, allowed: Set<string>) {
+  return typeof value === "string" && allowed.has(value) ? value : null;
 }
 
 type ManualAiDependencies = {
@@ -209,12 +251,24 @@ export async function generateManualAiReplySuggestion(
   if (!apiKey) throw new AiReplyProviderUnavailableError();
 
   const controller = new AbortController();
+  const model = dependencies.model || "gpt-4o-mini";
+  let failure: AiReplyFailure = "prompt";
+  let status: number | null = null;
+  let requestId: string | null = null;
+  let errorType: string | null = null;
+  let errorCode: string | null = null;
+  const fail = (reason: AiReplyFailure): never => {
+    failure = reason;
+    throw new InvalidAiReplyResponseError();
+  };
   const timeout = setTimeout(
     () => controller.abort(),
     dependencies.timeoutMs ?? AI_REPLY_PROVIDER_TIMEOUT_MS
   );
 
   try {
+    const prompt = buildAiReplyPrompt(context);
+    failure = "provider_connection";
     const response = await dependencies.fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
@@ -222,25 +276,45 @@ export async function generateManualAiReplySuggestion(
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: dependencies.model || "gpt-4o-mini",
-        input: buildAiReplyPrompt(context),
-        temperature: 0.35
+        model,
+        input: prompt,
+        temperature: 0.35,
+        max_output_tokens: AI_REPLY_MAX_OUTPUT_TOKENS,
+        store: false,
+        text: {
+          format: {
+            type: "json_schema",
+            name: "qevora_ai_reply",
+            strict: true,
+            schema: AI_REPLY_JSON_SCHEMA
+          }
+        }
       }),
       signal: controller.signal
     });
+    status = response.status;
+    const providerRequestId = response.headers.get("x-request-id");
+    requestId = providerRequestId && /^req_[a-zA-Z0-9]{8,64}$/.test(providerRequestId)
+      ? providerRequestId : null;
     const data = await response.json().catch(() => null);
-    if (!response.ok) throw new AiReplyProviderError();
+    if (!response.ok) {
+      failure = "provider_http";
+      const providerError = record(record(data)?.error);
+      errorType = allowedMetadata(providerError?.type, providerErrorTypes);
+      errorCode = allowedMetadata(providerError?.code, providerErrorCodes);
+      throw new AiReplyProviderError();
+    }
 
-    const output = readOpenAiOutput(data);
-    if (!output) throw new InvalidAiReplyResponseError();
+    const output = readOpenAiOutput(data, fail);
 
     let parsed: unknown;
     try {
-      parsed = JSON.parse(extractJson(output));
+      parsed = JSON.parse(output);
     } catch {
-      throw new InvalidAiReplyResponseError();
+      fail("json_parse");
     }
 
+    failure = "schema_validation";
     const validated = parseAiReplyResponse(parsed);
     const guardedReply = enforceFinancialReplyGuardrails({
       suggestedReply: validated.suggestedReply,
@@ -254,10 +328,22 @@ export async function generateManualAiReplySuggestion(
       source: guardrailApplied ? "guardrail" : "openai"
     };
   } catch (error) {
-    if (
+    const timedOut =
       controller.signal.aborted ||
-      (error instanceof Error && error.name === "AbortError")
-    ) {
+      (error instanceof Error && error.name === "AbortError");
+    safeLogWarn("ai-reply", "generation-failed", {
+      provider: "openai",
+      operation: "ai_reply",
+      failure: timedOut ? "timeout" : failure,
+      status,
+      errorType,
+      errorCode,
+      requestId,
+      model: /^(?:gpt-[a-z0-9.-]{1,60}|o[1-9](?:-[a-z0-9.-]{1,60})?)$/.test(model)
+        ? model : null,
+      promptVersion: AI_REPLY_PROMPT_VERSION
+    });
+    if (timedOut) {
       throw new AiReplyProviderTimeoutError();
     }
     if (

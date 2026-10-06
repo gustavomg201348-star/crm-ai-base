@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
+import { Prisma } from "@prisma/client";
 import { NextRequest } from "next/server";
 import { createAiReplyPostHandler } from "./ai-reply-route-handler";
 import {
   AiReplyProviderError,
   AiReplyProviderTimeoutError,
   AiReplyProviderUnavailableError,
+  AI_REPLY_MAX_OUTPUT_TOKENS,
+  AI_REPLY_PROVIDER_TIMEOUT_MS,
   buildAiReplyPrompt,
   generateManualAiReplySuggestion
 } from "./ai-attendant.service";
@@ -16,12 +19,14 @@ import {
   FINANCIAL_VERIFICATION_REPLY
 } from "./ai-response-guardrails";
 import {
+  AI_REPLY_JSON_SCHEMA,
   AI_REPLY_PROMPT_VERSION,
   InvalidAiReplyRequestError,
   InvalidAiReplyResponseError,
   parseAiReplyRequestBody,
   parseAiReplyResponse
 } from "./ai-response-schema";
+import { prisma } from "./db";
 import {
   aiReplyErrorMessage,
   createAiReplySynchronousStartGuard,
@@ -98,6 +103,7 @@ function validProviderOutput(overrides: Record<string, unknown> = {}) {
     confidence: 82,
     tags: ["CLT"],
     shouldTransferToHuman: false,
+    reason: null,
     ...overrides
   };
 }
@@ -106,14 +112,41 @@ function responseWithOutput(output: unknown, ok = true) {
   return new Response(
     JSON.stringify(
       ok
-        ? { output: [{ content: [{ type: "output_text", text: JSON.stringify(output) }] }] }
+        ? {
+            status: "completed",
+            output: [{
+              type: "message", status: "completed", role: "assistant",
+              content: [{ type: "output_text", text: JSON.stringify(output), annotations: [] }]
+            }]
+          }
         : { error: { message: "erro sensivel do provider" } }
     ),
     { status: ok ? 200 : 500, headers: { "Content-Type": "application/json" } }
   );
 }
 
-test("gera sugestao manual em memoria sem tools e com schema validado", async () => {
+function forbidFunctionalWrites(t: TestContext) {
+  let writes = 0;
+  const client = prisma as unknown as Record<string, Record<string, unknown>>;
+  for (const model of Prisma.dmmf.datamodel.models) {
+    if (model.name === "RateLimitBucket") continue;
+    const delegate = client[model.name[0].toLowerCase() + model.name.slice(1)];
+    for (const method of ["create", "createMany", "createManyAndReturn", "update",
+      "updateMany", "upsert", "delete", "deleteMany"]) {
+      if (typeof delegate[method] !== "function") continue;
+      const original = delegate[method];
+      delegate[method] = () => { writes += 1; throw new Error("functional-write"); };
+      t.after(() => { delegate[method] = original; });
+    }
+  }
+  return () => writes;
+}
+
+test("gera sugestao manual em memoria sem tools e com schema validado", async (t) => {
+  const writes = forbidFunctionalWrites(t);
+  const network = t.mock.method(globalThis, "fetch", () => {
+    throw new Error("unexpected-network-or-Meta");
+  });
   let requestBody: Record<string, unknown> | null = null;
   let providerCalls = 0;
   const suggestion = await generateManualAiReplySuggestion(
@@ -135,6 +168,236 @@ test("gera sugestao manual em memoria sem tools e com schema validado", async ()
   assert.equal(suggestion.suggestedReply, validProviderOutput().suggestedReply);
   assert.equal(Object.prototype.hasOwnProperty.call(requestBody, "tools"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(requestBody, "tool_choice"), false);
+  assert.equal(writes(), 0);
+  assert.equal(network.mock.callCount(), 0);
+});
+
+test("body real do fetch usa o contrato Responses strict e minimiza retencao", async () => {
+  let captured: Record<string, unknown> = {};
+  await generateManualAiReplySuggestion({ context: context() }, {
+    apiKey: "test-key",
+    fetch: (async (url, init) => {
+      assert.equal(url, "https://api.openai.com/v1/responses");
+      assert.equal(init?.method, "POST");
+      captured = JSON.parse(String(init?.body));
+      return responseWithOutput(validProviderOutput());
+    }) as typeof fetch
+  });
+  assert.equal(captured.model, "gpt-4o-mini");
+  assert.equal(captured.input, buildAiReplyPrompt(context()));
+  assert.equal(captured.temperature, 0.35);
+  assert.equal(captured.store, false);
+  assert.equal(captured.max_output_tokens, AI_REPLY_MAX_OUTPUT_TOKENS);
+  assert.ok(AI_REPLY_MAX_OUTPUT_TOKENS >= 16);
+  assert.deepEqual(captured.text, {
+    format: {
+      type: "json_schema", name: "qevora_ai_reply", strict: true,
+      schema: AI_REPLY_JSON_SCHEMA
+    }
+  });
+  assert.deepEqual(Object.keys(captured).sort(), [
+    "input", "max_output_tokens", "model", "store", "temperature", "text"
+  ]);
+  assert.equal(AI_REPLY_JSON_SCHEMA.type, "object");
+  assert.equal(AI_REPLY_JSON_SCHEMA.additionalProperties, false);
+  assert.deepEqual([...AI_REPLY_JSON_SCHEMA.required].sort(),
+    Object.keys(AI_REPLY_JSON_SCHEMA.properties).sort());
+  assert.deepEqual(AI_REPLY_JSON_SCHEMA.properties.temperature.enum, ["HOT", "WARM", "COLD"]);
+  assert.deepEqual(AI_REPLY_JSON_SCHEMA.properties.summary, { type: "string" });
+  assert.deepEqual(AI_REPLY_JSON_SCHEMA.properties.nextAction, { type: "string" });
+  assert.deepEqual(AI_REPLY_JSON_SCHEMA.properties.suggestedReply, { type: "string" });
+  assert.equal(AI_REPLY_JSON_SCHEMA.properties.confidence.minimum, 0);
+  assert.equal(AI_REPLY_JSON_SCHEMA.properties.confidence.maximum, 100);
+  assert.equal(AI_REPLY_JSON_SCHEMA.properties.tags.maxItems, 4);
+  assert.deepEqual(AI_REPLY_JSON_SCHEMA.properties.tags.items, { type: "string" });
+  assert.deepEqual(AI_REPLY_JSON_SCHEMA.properties.reason.type, ["string", "null"]);
+});
+
+test("schema remoto usa somente keywords do subset conservador suportado", () => {
+  const allowed = new Set([
+    "type", "properties", "required", "additionalProperties", "enum",
+    "minimum", "maximum", "maxItems", "items"
+  ]);
+  function inspect(schema: Record<string, unknown>) {
+    for (const keyword of Object.keys(schema)) assert.ok(allowed.has(keyword), keyword);
+    if (schema.properties) {
+      for (const property of Object.values(schema.properties)) {
+        inspect(property as Record<string, unknown>);
+      }
+    }
+    if (schema.items) inspect(schema.items as Record<string, unknown>);
+  }
+  inspect(AI_REPLY_JSON_SCHEMA);
+});
+
+test("validator aceita contrato completo com tags vazias e reason null", () => {
+  const result = parseAiReplyResponse(validProviderOutput({ tags: [], reason: null }));
+  assert.deepEqual(result.tags, []);
+  assert.equal(Object.prototype.hasOwnProperty.call(result, "reason"), false);
+  assert.equal(parseAiReplyResponse(validProviderOutput({ reason: "Revisao humana." })).reason,
+    "Revisao humana.");
+});
+
+const invalidStructuredOutputs: Array<[string, Record<string, unknown>]> = [
+  ["temperature MORNO", { temperature: "MORNO" }],
+  ["enum fora de caixa", { temperature: "warm" }],
+  ["confidence string", { confidence: "80" }],
+  ["confidence acima de 100", { confidence: 120 }],
+  ["confidence abaixo de zero", { confidence: -1 }],
+  ["reply vazio", { suggestedReply: "" }],
+  ["reply somente whitespace", { suggestedReply: "   " }],
+  ["summary acima de 600", { summary: "x".repeat(601) }],
+  ["nextAction acima de 400", { nextAction: "x".repeat(401) }],
+  ["summary somente whitespace", { summary: "   " }],
+  ["nextAction somente whitespace", { nextAction: "   " }],
+  ["tags acima de quatro", { tags: ["a", "b", "c", "d", "e"] }],
+  ["tag acima de 80", { tags: ["x".repeat(81)] }],
+  ["tag vazia", { tags: [""] }],
+  ["tag somente whitespace", { tags: ["   "] }],
+  ["reason acima de 600", { reason: "x".repeat(601) }],
+  ["reason undefined", { reason: undefined }],
+  ["campo extra", { unexpected: "nao propagar" }]
+];
+for (const [name, overrides] of invalidStructuredOutputs) {
+  test(`validator strict rejeita ${name}`, () => {
+    assert.throws(() => parseAiReplyResponse(validProviderOutput(overrides)),
+      InvalidAiReplyResponseError);
+  });
+}
+for (const field of AI_REPLY_JSON_SCHEMA.required) {
+  test(`validator rejeita campo obrigatorio ausente: ${field}`, () => {
+    const output = validProviderOutput();
+    delete output[field];
+    assert.throws(() => parseAiReplyResponse(output), InvalidAiReplyResponseError);
+  });
+}
+
+test("parser concatena blocos output_text na ordem e ignora outros tipos", async () => {
+  const json = JSON.stringify(validProviderOutput());
+  const response = {
+    status: "completed", output_text: "nao confiar no atalho",
+    output: [
+      { type: "reasoning", summary: [] },
+      { type: "message", status: "completed", content: [
+        { type: "other", text: "nao interpretar" },
+        { type: "output_text", text: json.slice(0, 40) }
+      ] },
+      { type: "message", status: "completed", content: [
+        { type: "output_text", text: json.slice(40) }
+      ] }
+    ]
+  };
+  const result = await generateManualAiReplySuggestion({ context: context() }, {
+    apiKey: "test-key",
+    fetch: (async () => Response.json(response)) as typeof fetch
+  });
+  assert.equal(result.suggestedReply, validProviderOutput().suggestedReply);
+});
+
+const invalidResponses: Array<[string, unknown, string]> = [
+  ["incomplete com JSON completo", {
+    status: "incomplete", incomplete_details: { reason: "max_output_tokens" },
+    output: [{ type: "message", status: "completed", content: [
+      { type: "output_text", text: JSON.stringify(validProviderOutput()) }
+    ] }]
+  }, "incomplete"],
+  ["incomplete com JSON parcial", {
+    status: "incomplete", output: [{ type: "message", status: "incomplete",
+      content: [{ type: "output_text", text: "{" }] }]
+  }, "incomplete"],
+  ["failed", { status: "failed", output: [] }, "response_status"],
+  ["status ausente", { output: [] }, "response_status"],
+  ["refusal mesmo com JSON valido", {
+    status: "completed", output: [{ type: "message", status: "completed", content: [
+      { type: "output_text", text: JSON.stringify(validProviderOutput()) },
+      { type: "refusal", refusal: "conteudo privado que nao deve aparecer" }
+    ] }]
+  }, "refusal"],
+  ["output vazio", { status: "completed", output: [] }, "empty_output"],
+  ["texto de outro tipo", { status: "completed", output: [{
+    type: "message", status: "completed", content: [{
+      type: "other", text: JSON.stringify(validProviderOutput())
+    }]
+  }] }, "empty_output"],
+  ["output malformado", { status: "completed", output: {} }, "invalid_output"],
+  ["JSON invalido", { status: "completed", output: [{
+    type: "message", status: "completed", content: [{ type: "output_text", text: "{" }]
+  }] }, "json_parse"],
+  ["JSON com fences", { status: "completed", output: [{
+    type: "message", status: "completed", content: [{ type: "output_text",
+      text: "```json\n" + JSON.stringify(validProviderOutput()) + "\n```" }]
+  }] }, "json_parse"]
+];
+for (const [name, response, failure] of invalidResponses) {
+  test(`parser rejeita ${name} com diagnostico seguro`, async (t) => {
+    const logs: unknown[][] = [];
+    t.mock.method(console, "warn", (...args: unknown[]) => logs.push(args));
+    await assert.rejects(generateManualAiReplySuggestion({ context: context() }, {
+      apiKey: "test-key", fetch: (async () => Response.json(response)) as typeof fetch
+    }), InvalidAiReplyResponseError);
+    assert.equal(logs.length, 1);
+    assert.equal((logs[0][2] as Record<string, unknown>).failure, failure);
+    assert.doesNotMatch(JSON.stringify(logs), /conteudo privado|test-key|suggestedReply/);
+  });
+}
+
+for (const providerStatus of [400, 401, 429, 500]) {
+  test(`OpenAI ${providerStatus}: metadados permitidos, HTTP publico 502 e zero writes`, async (t) => {
+    const logs: unknown[][] = [];
+    t.mock.method(console, "warn", (...args: unknown[]) => logs.push(args));
+    const writes = forbidFunctionalWrites(t);
+    const network = t.mock.method(globalThis, "fetch", () => {
+      throw new Error("unexpected-network-or-Meta");
+    });
+    const type = providerStatus === 429 ? "insufficient_quota" : "invalid_request_error";
+    const code = providerStatus === 429 ? "insufficient_quota" : "invalid_value";
+    const handler = createAiReplyPostHandler({
+      getSession: async () => ({ id: "test-admin", companyId: "test-company",
+        name: "Test", email: "test@example.com", role: "ADMIN" }),
+      enforceLimits: async () => null,
+      resolveAccess: async () => ({ status: "allowed",
+        conversation: { id: "test-conversation", agentId: null } }),
+      buildContext: async () => context(),
+      generateSuggestion: (input) => generateManualAiReplySuggestion(input, {
+        apiKey: "test-key", fetch: (async () => Response.json({
+          error: { type, code, message: "PRIVATE_RAW_PROVIDER_BODY", prompt: "PRIVATE_PROMPT" }
+        }, { status: providerStatus, headers: { "x-request-id": "req_abcdefgh12345678" } })) as typeof fetch
+      })
+    });
+    const response = await handler(new NextRequest(
+      "http://localhost/api/conversations/test-conversation/ai", { method: "POST", body: "{}" }
+    ), { params: Promise.resolve({ id: "test-conversation" }) });
+    assert.equal(response.status, 502);
+    assert.deepEqual(await response.json(), { error: "Resposta da IA indisponivel." });
+    assert.equal(writes(), 0);
+    assert.equal(network.mock.callCount(), 0);
+    assert.equal(logs.length, 1);
+    assert.deepEqual(logs[0][2], {
+      provider: "openai", operation: "ai_reply", failure: "provider_http",
+      status: providerStatus, errorType: type, errorCode: code,
+      requestId: "req_abcdefgh12345678", model: "gpt-4o-mini",
+      promptVersion: AI_REPLY_PROMPT_VERSION
+    });
+    assert.doesNotMatch(JSON.stringify(logs), /PRIVATE_|test-key|customer|Authorization/);
+  });
+}
+
+test("metadados provider arbitrarios nunca entram no logger", async (t) => {
+  const logs: unknown[][] = [];
+  t.mock.method(console, "warn", (...args: unknown[]) => logs.push(args));
+  await assert.rejects(generateManualAiReplySuggestion({ context: context() }, {
+    apiKey: "test-key", model: "PRIVATE_MODEL",
+    fetch: (async () => Response.json({ error: {
+      type: "PRIVATE_TYPE", code: "PRIVATE_CODE", message: "PRIVATE_MESSAGE"
+    } }, { status: 400, headers: { "x-request-id": "PRIVATE_REQUEST_ID" } })) as typeof fetch
+  }), AiReplyProviderError);
+  const metadata = logs[0][2] as Record<string, unknown>;
+  assert.equal(metadata.errorType, null);
+  assert.equal(metadata.errorCode, null);
+  assert.equal(metadata.requestId, null);
+  assert.equal(metadata.model, null);
+  assert.doesNotMatch(JSON.stringify(logs), /PRIVATE_|test-key/);
+  assert.equal(AI_REPLY_PROVIDER_TIMEOUT_MS, 15_000);
 });
 
 test("prompt e versionado, separa regras de dados nao confiaveis e respeita budget", () => {
@@ -333,7 +596,8 @@ test("marca resposta filtrada pelo guardrail sem mascarar como OpenAI normal", a
 
 test("rejeita JSON e schema invalidos em vez de produzir fallback silencioso", async () => {
   const malformedJsonResponse = new Response(
-    JSON.stringify({ output_text: "isto nao e JSON" }),
+    JSON.stringify({ status: "completed", output: [{ type: "message", status: "completed",
+      content: [{ type: "output_text", text: "isto nao e JSON" }] }] }),
     { status: 200, headers: { "Content-Type": "application/json" } }
   );
   await assert.rejects(
@@ -366,7 +630,11 @@ test("erro HTTP e provider indisponivel retornam erros distintos e seguros", asy
   );
 });
 
-test("timeout aborta a chamada sem criar resposta", async () => {
+test("timeout aborta a chamada sem criar resposta", async (t) => {
+  const writes = forbidFunctionalWrites(t);
+  const network = t.mock.method(globalThis, "fetch", () => {
+    throw new Error("unexpected-network-or-Meta");
+  });
   const neverCompletes = ((_url: unknown, init?: RequestInit) =>
     new Promise<Response>((_resolve, reject) => {
       init?.signal?.addEventListener("abort", () => {
@@ -383,6 +651,8 @@ test("timeout aborta a chamada sem criar resposta", async () => {
     ),
     AiReplyProviderTimeoutError
   );
+  assert.equal(writes(), 0);
+  assert.equal(network.mock.callCount(), 0);
 });
 
 test("schema aplica limites e tipos estritos", () => {
@@ -643,7 +913,7 @@ test("handler HTTP rejeita JSON malformado antes de contexto e OpenAI", async ()
     },
     generateSuggestion: async () => {
       openAiCalls += 1;
-      return { ...validProviderOutput(), temperature: "WARM", source: "openai" };
+      return { ...parseAiReplyResponse(validProviderOutput()), source: "openai" };
     }
   });
   const response = await handler(
@@ -683,8 +953,7 @@ test("handler HTTP aceita body vazio sem reply selecionado", async () => {
       return context();
     },
     generateSuggestion: async () => ({
-      ...validProviderOutput(),
-      temperature: "WARM",
+      ...parseAiReplyResponse(validProviderOutput()),
       source: "openai"
     })
   });
