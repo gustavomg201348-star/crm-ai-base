@@ -9,6 +9,29 @@ export const AI_REPLY_LIMITS = {
   tag: 80
 } as const;
 
+export const AI_REPLY_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    summary: { type: "string" },
+    temperature: { type: "string", enum: ["HOT", "WARM", "COLD"] },
+    nextAction: { type: "string" },
+    suggestedReply: { type: "string" },
+    confidence: { type: "number", minimum: 0, maximum: 100 },
+    shouldTransferToHuman: { type: "boolean" },
+    tags: {
+      type: "array",
+      maxItems: AI_REPLY_LIMITS.tags,
+      items: { type: "string" }
+    },
+    reason: { type: ["string", "null"] }
+  },
+  required: [
+    "summary", "temperature", "nextAction", "suggestedReply", "confidence",
+    "shouldTransferToHuman", "tags", "reason"
+  ]
+} as const;
+
 export type AiReplyTemperature = "HOT" | "WARM" | "COLD";
 
 export type ValidatedAiReply = {
@@ -70,21 +93,23 @@ export function parseAiReplyRequestBody(rawBody: string) {
 function requiredString(value: unknown, maxLength: number) {
   if (typeof value !== "string") throw new InvalidAiReplyResponseError();
   const normalized = value.trim();
-  if (!normalized || normalized.length > maxLength) {
+  if (!normalized || Array.from(value).length > maxLength) {
     throw new InvalidAiReplyResponseError();
   }
   return normalized;
 }
 
 function optionalString(value: unknown, maxLength: number) {
-  if (value === undefined || value === null || value === "") return undefined;
-  return requiredString(value, maxLength);
+  if (value === null) return undefined;
+  if (typeof value !== "string" || Array.from(value).length > maxLength) {
+    throw new InvalidAiReplyResponseError();
+  }
+  return value.trim() || undefined;
 }
 
 function temperature(value: unknown): AiReplyTemperature {
-  const normalized = typeof value === "string" ? value.trim().toUpperCase() : "";
-  if (normalized === "HOT" || normalized === "WARM" || normalized === "COLD") {
-    return normalized;
+  if (value === "HOT" || value === "WARM" || value === "COLD") {
+    return value;
   }
   throw new InvalidAiReplyResponseError();
 }
@@ -98,7 +123,6 @@ function confidence(value: unknown) {
 }
 
 function tags(value: unknown) {
-  if (value === undefined) return [];
   if (!Array.isArray(value) || value.length > AI_REPLY_LIMITS.tags) {
     throw new InvalidAiReplyResponseError();
   }
@@ -111,6 +135,16 @@ export function parseAiReplyResponse(value: unknown): ValidatedAiReply {
   }
 
   const candidate = value as Record<string, unknown>;
+  if (
+    AI_REPLY_JSON_SCHEMA.required.some((field) =>
+      !Object.prototype.hasOwnProperty.call(candidate, field)
+    ) ||
+    Object.keys(candidate).some((field) =>
+      !Object.prototype.hasOwnProperty.call(AI_REPLY_JSON_SCHEMA.properties, field)
+    )
+  ) {
+    throw new InvalidAiReplyResponseError();
+  }
   if (typeof candidate.shouldTransferToHuman !== "boolean") {
     throw new InvalidAiReplyResponseError();
   }
