@@ -59,8 +59,14 @@ export class InvalidAiReplyRequestError extends Error {
   }
 }
 
-export function parseAiReplyRequestBody(rawBody: string) {
-  if (!rawBody.trim()) return {} as { replyToMessageId?: string | null };
+export type AiReplyRequest = {
+  replyToMessageId?: string | null;
+  trigger?: "manual" | "auto_draft";
+  triggerMessageId?: string;
+};
+
+export function parseAiReplyRequestBody(rawBody: string): AiReplyRequest {
+  if (!rawBody.trim()) return {};
 
   let value: unknown;
   try {
@@ -73,7 +79,7 @@ export function parseAiReplyRequestBody(rawBody: string) {
   }
 
   const body = value as Record<string, unknown>;
-  if (Object.keys(body).some((field) => field !== "replyToMessageId")) {
+  if (Object.keys(body).some((field) => !["replyToMessageId", "trigger", "triggerMessageId"].includes(field))) {
     throw new InvalidAiReplyRequestError();
   }
   if (
@@ -83,7 +89,18 @@ export function parseAiReplyRequestBody(rawBody: string) {
   ) {
     throw new InvalidAiReplyRequestError();
   }
+  if (body.trigger !== undefined && body.trigger !== "manual" && body.trigger !== "auto_draft") {
+    throw new InvalidAiReplyRequestError();
+  }
+  if (body.trigger === "auto_draft") {
+    if (typeof body.triggerMessageId !== "string" || !body.triggerMessageId.trim() ||
+        body.triggerMessageId.length > 200 || body.triggerMessageId !== body.triggerMessageId.trim()) {
+      throw new InvalidAiReplyRequestError();
+    }
+  } else if (body.triggerMessageId !== undefined) throw new InvalidAiReplyRequestError();
   return {
+    ...(body.trigger ? { trigger: body.trigger as "manual" | "auto_draft" } : {}),
+    ...(body.trigger === "auto_draft" ? { triggerMessageId: body.triggerMessageId as string } : {}),
     ...(typeof body.replyToMessageId === "string"
       ? { replyToMessageId: body.replyToMessageId }
       : {})

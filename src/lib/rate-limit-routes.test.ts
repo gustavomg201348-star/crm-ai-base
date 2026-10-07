@@ -32,6 +32,19 @@ test("IA e bloqueada antes da chamada OpenAI", () => {
   );
 });
 
+test("auto-draft preserva limiter normal e adiciona claim compartilhado antes do provider", () => {
+  const handler = source("src/lib/ai-reply-route-handler.ts");
+  const route = source("src/app/api/conversations/[id]/ai/route.ts");
+  const policy = source("src/lib/ai-auto-draft-policy.ts");
+  assertBefore(handler, "await dependencies.enforceLimits", "dependencies.claimAutoDraft?.(autoInput)");
+  assertBefore(handler, "dependencies.claimAutoDraft?.(autoInput)", "await dependencies.generateSuggestion");
+  assert.match(route, /\["auto-draft-v1", companyId, conversationId, triggerMessageId\]/);
+  assert.match(route, /claimAutoDraft\(prismaRateLimitStore, key\)/);
+  assert.match(policy, /await store.increment/);
+  assert.doesNotMatch(policy, /\$executeRaw|\.create\(|\.upsert\(|\.delete\(/);
+  assert.doesNotMatch(route, /localStorage|BroadcastChannel|new Map/);
+});
+
 test("envios humanos sao bloqueados antes dos providers", () => {
   const routes = [
     ["src/app/api/conversations/[id]/messages/route.ts", "await sendMetaTextMessage"],

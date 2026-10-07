@@ -16,6 +16,7 @@ import {
   InvalidAiReplyResponseError,
   parseAiReplyRequestBody
 } from "@/lib/ai-response-schema";
+import type { AiReplyRequest } from "@/lib/ai-response-schema";
 import type { SessionUser } from "@/lib/auth";
 import type { ConversationAccessResult } from "@/lib/conversation-access-control";
 import { rateLimitPolicies } from "@/lib/rate-limit";
@@ -44,6 +45,8 @@ type AiReplyRouteDependencies = {
     replyToMessageId?: string | null;
   }): Promise<AiResponseContext>;
   generateSuggestion(input: { context: AiResponseContext }): Promise<AiSuggestion>;
+  autoDraftEligible?(input: { companyId: string; conversationId: string; triggerMessageId: string }): Promise<boolean>;
+  claimAutoDraft?(input: { companyId: string; conversationId: string; triggerMessageId: string }): Promise<"allowed" | "claimed" | "unavailable">;
 };
 
 export function createAiReplyPostHandler(dependencies: AiReplyRouteDependencies) {
@@ -64,7 +67,7 @@ export function createAiReplyPostHandler(dependencies: AiReplyRouteDependencies)
       if (limited) return limited;
 
       const rawBody = await request.text();
-      let body: { replyToMessageId?: string | null };
+      let body: AiReplyRequest;
       try {
         body = parseAiReplyRequestBody(rawBody);
       } catch (error) {
@@ -84,13 +87,37 @@ export function createAiReplyPostHandler(dependencies: AiReplyRouteDependencies)
         );
       }
 
+      const autoInput = body.trigger === "auto_draft" ? {
+        companyId: session.companyId,
+        conversationId: access.conversation.id,
+        triggerMessageId: body.triggerMessageId!
+      } : null;
+      const autoEligible = async () => !autoInput ||
+        Boolean(await dependencies.autoDraftEligible?.(autoInput));
+      if (!await autoEligible()) {
+        return NextResponse.json({ code: "AUTO_DRAFT_NOT_ELIGIBLE", error: "Auto-draft nao elegivel." }, { status: 409 });
+      }
+      if (autoInput) {
+        const claim = await dependencies.claimAutoDraft?.(autoInput) ?? "unavailable";
+        if (claim !== "allowed") {
+          return NextResponse.json({ code: claim === "claimed" ? "AUTO_DRAFT_ALREADY_CLAIMED" : "AUTO_DRAFT_GATE_UNAVAILABLE", error: claim === "claimed"
+            ? "Auto-draft ja solicitado." : "Auto-draft temporariamente indisponivel." },
+          { status: claim === "claimed" ? 409 : 503 });
+        }
+      }
       const aiContext = await dependencies.buildContext({
         conversationId: access.conversation.id,
         companyId: session.companyId,
         replyToMessageId:
           typeof body.replyToMessageId === "string" ? body.replyToMessageId : null
       });
+      if (!await autoEligible()) {
+        return NextResponse.json({ code: "AUTO_DRAFT_STALE", error: "Auto-draft desatualizado." }, { status: 409 });
+      }
       const suggestion = await dependencies.generateSuggestion({ context: aiContext });
+      if (!await autoEligible()) {
+        return NextResponse.json({ code: "AUTO_DRAFT_STALE", error: "Auto-draft desatualizado." }, { status: 409 });
+      }
 
       return NextResponse.json({
         analysis: suggestion,

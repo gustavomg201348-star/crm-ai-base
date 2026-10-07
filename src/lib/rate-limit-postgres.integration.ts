@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { prisma } from "./db";
 import { consumeRateLimits, prismaRateLimitStore } from "./rate-limit";
+import { claimAutoDraft, AUTO_DRAFT_CLAIM_WINDOW_MS } from "./ai-auto-draft-policy";
+import { createHmac } from "node:crypto";
 
 process.env.AUTH_SECRET = "rate-limit-postgres-integration-test";
 
@@ -155,6 +157,31 @@ test("migration e rate limiter funcionam materialmente em PostgreSQL descartavel
       await prisma.rateLimitBucket.count({ where: { key: "active-integration-bucket" } }),
       1
     );
+    // Same isolated database guard as the migration/limiter test above. No provider.
+    const keyFor = (messageId: string) => createHmac("sha256", process.env.AUTH_SECRET!)
+      .update(JSON.stringify(["auto-draft-v1", "company-ci", "conversation-ci", messageId]))
+      .digest("hex");
+    const key = keyFor("message-a");
+    const claims = await Promise.all(Array.from({ length: 20 }, () =>
+      claimAutoDraft(prismaRateLimitStore, key, start)));
+    assert.equal(claims.filter((claim) => claim === "allowed").length, 1);
+    assert.equal(claims.filter((claim) => claim === "claimed").length, 19);
+    const first = await prisma.rateLimitBucket.findUniqueOrThrow({ where: { key } });
+    assert.equal(first.count, 20);
+    assert.equal(first.expiresAt.getTime(), start.getTime() + AUTO_DRAFT_CLAIM_WINDOW_MS);
+    assert.equal(await claimAutoDraft(prismaRateLimitStore, key,
+      new Date(first.expiresAt.getTime() - 1)), "claimed");
+    const loser = await prisma.rateLimitBucket.findUniqueOrThrow({ where: { key } });
+    assert.equal(loser.count, 21);
+    assert.equal(loser.expiresAt.getTime(), first.expiresAt.getTime());
+    assert.equal(loser.windowStart.getTime(), first.windowStart.getTime());
+    const resetAt = first.expiresAt;
+    assert.equal(await claimAutoDraft(prismaRateLimitStore, key, resetAt), "allowed");
+    const reset = await prisma.rateLimitBucket.findUniqueOrThrow({ where: { key } });
+    assert.equal(reset.count, 1);
+    assert.equal(reset.expiresAt.getTime(), resetAt.getTime() + AUTO_DRAFT_CLAIM_WINDOW_MS);
+    assert.deepEqual(await Promise.all(["message-b", "message-c"].map((id) =>
+      claimAutoDraft(prismaRateLimitStore, keyFor(id), resetAt))), ["allowed", "allowed"]);
   } finally {
     await prisma.$disconnect();
   }

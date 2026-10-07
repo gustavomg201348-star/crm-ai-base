@@ -878,7 +878,7 @@ test("frontend usa estado de erro por conversa e preserva draft e reply", () => 
   assert.match(page, /repliesByConversationRef/);
   assert.match(page, /analysisByConversation\[selectedConversation\.id\]/);
   assert.match(page, /errorByConversation\[selectedConversation\.id\]/);
-  assert.match(page, /aiRequestControllersRef\.current\[conversationId\]\?\.abort\(\)/);
+  assert.match(page, /if \(aiRequestControllersRef\.current\[conversationId\] \|\|/);
   assert.doesNotMatch(
     page.slice(
       page.indexOf("async function handleAnalyzeConversation"),
@@ -977,17 +977,19 @@ test("rota manual nao possui mutation Prisma, Meta ou fallback automatico", () =
   assert.match(route, /buildAiResponseContext/);
   assert.doesNotMatch(route, /generateAiSuggestion/);
   assert.doesNotMatch(route, /sendMetaTextMessage|graph\.facebook\.com/);
-  assert.doesNotMatch(route, /\.(?:create|update|updateMany|delete|deleteMany|upsert)\s*\(/);
+  assert.doesNotMatch(route, /prisma\.[\w.]+\.(?:create|update|updateMany|delete|deleteMany|upsert)\s*\(/);
+  assert.match(route, /claimAutoDraft\(prismaRateLimitStore, key\)/);
   assert.doesNotMatch(route, /\$transaction/);
 });
 
-test("frontend envia somente replyToMessageId, preserva replyingTo e nao envia automaticamente", () => {
+test("frontend separa trigger de replyToMessageId, preserva replyingTo e nao envia automaticamente", () => {
   const page = readFileSync("src/app/page.tsx", "utf8");
   const analyzeStart = page.indexOf("async function handleAnalyzeConversation");
   const analyzeEnd = page.indexOf("async function handleConversationAiMode", analyzeStart);
   const analyzeFlow = page.slice(analyzeStart, analyzeEnd);
 
-  assert.match(analyzeFlow, /body: JSON\.stringify\(replyToMessageId \? \{ replyToMessageId \} : \{\}\)/);
+  assert.match(analyzeFlow, /replyToMessageId \? \{ replyToMessageId \} : \{\}/);
+  assert.match(analyzeFlow, /trigger: "auto_draft", triggerMessageId: autoDraft\.triggerMessageId/);
   assert.doesNotMatch(analyzeFlow, /providerMessageId|replyPreview|fileName|direction/);
   assert.doesNotMatch(analyzeFlow, /handleSendMessage|onSendMessage/);
   assert.match(page, /onAnalyzeConversation\(selectedConversation\.id, replyingTo\?\.id\)/);
@@ -996,6 +998,150 @@ test("frontend envia somente replyToMessageId, preserva replyingTo e nao envia a
     page.slice(page.indexOf("Usar sugestao") - 300, page.indexOf("Usar sugestao") + 100),
     /setReplyingTo\(null\)/
   );
+});
+
+test("contrato auto-draft exige trigger separado e preserva manual", () => {
+  assert.deepEqual(parseAiReplyRequestBody('{"trigger":"manual"}'), { trigger: "manual" });
+  assert.deepEqual(parseAiReplyRequestBody('{"trigger":"auto_draft","triggerMessageId":"m1","replyToMessageId":"quoted"}'), {
+    trigger: "auto_draft", triggerMessageId: "m1", replyToMessageId: "quoted"
+  });
+  for (const body of [{ trigger: "auto_draft" }, { trigger: "auto_draft", triggerMessageId: " " },
+    { triggerMessageId: "m1" }, { trigger: "other" }, { trigger: "manual", triggerMessageId: "m1" }]) {
+    assert.throws(() => parseAiReplyRequestBody(JSON.stringify(body)), InvalidAiReplyRequestError);
+  }
+});
+
+test("auto-draft gate indisponivel/duplicado/policy invalida: zero OpenAI; manual bypassa somente gate", async () => {
+  let generated = 0; let claims = 0; let contextReads = 0;
+  let eligible = true; let decision: "allowed" | "claimed" | "unavailable" = "unavailable";
+  const handler = createAiReplyPostHandler({
+    getSession: async () => ({ id: "operator-a", companyId: "tenant-a", name: "Test", email: "test@example.invalid", role: "ADMIN" }),
+    enforceLimits: async () => null,
+    resolveAccess: async () => ({ status: "allowed", conversation: { id: "conversation-a", agentId: null } }),
+    autoDraftEligible: async (input) => {
+      assert.deepEqual(input, { companyId: "tenant-a", conversationId: "conversation-a", triggerMessageId: "m1" });
+      return eligible;
+    },
+    claimAutoDraft: async () => { claims++; return decision; },
+    buildContext: async () => { contextReads++; return context(); },
+    generateSuggestion: async () => { generated++; return { ...parseAiReplyResponse(validProviderOutput()), source: "openai" }; }
+  });
+  const call = (body: object) => handler(new NextRequest("http://localhost/api/conversations/conversation-a/ai", {
+    method: "POST", body: JSON.stringify(body)
+  }), { params: Promise.resolve({ id: "conversation-a" }) });
+  const auto = { trigger: "auto_draft", triggerMessageId: "m1" };
+  const unavailable = await call(auto);
+  assert.equal(unavailable.status, 503);
+  assert.equal((await unavailable.json()).code, "AUTO_DRAFT_GATE_UNAVAILABLE");
+  decision = "claimed";
+  const claimed = await call(auto);
+  assert.equal(claimed.status, 409);
+  assert.equal((await claimed.json()).code, "AUTO_DRAFT_ALREADY_CLAIMED");
+  eligible = false;
+  const ineligible = await call(auto);
+  assert.equal(ineligible.status, 409);
+  assert.equal((await ineligible.json()).code, "AUTO_DRAFT_NOT_ELIGIBLE");
+  assert.equal(claims, 2); assert.equal(contextReads, 0); assert.equal(generated, 0);
+  assert.equal((await call({})).status, 200);
+  assert.equal(claims, 2); assert.equal(generated, 1);
+});
+
+test("auto-draft reutiliza gerador oficial: zero writes funcionais, zero Meta, contexto reply separado", async (t) => {
+  const writes = forbidFunctionalWrites(t);
+  const network = t.mock.method(globalThis, "fetch", () => { throw new Error("unexpected-Meta-or-network"); });
+  let providerCalls = 0; let eligibilityCalls = 0;
+  const handler = createAiReplyPostHandler({
+    getSession: async () => ({ id: "operator-a", companyId: "tenant-a", name: "Test", email: "test@example.invalid", role: "ADMIN" }),
+    enforceLimits: async () => null,
+    resolveAccess: async () => ({ status: "allowed", conversation: { id: "conversation-a", agentId: null } }),
+    autoDraftEligible: async () => { eligibilityCalls++; return true; },
+    claimAutoDraft: async () => "allowed",
+    buildContext: async (input) => { assert.equal(input.replyToMessageId, "quoted"); return context(); },
+    generateSuggestion: (input) => generateManualAiReplySuggestion(input, {
+      apiKey: "mock-only", fetch: (async () => { providerCalls++; return responseWithOutput(validProviderOutput()); }) as typeof fetch
+    })
+  });
+  const response = await handler(new NextRequest("http://localhost/api/conversations/conversation-a/ai", {
+    method: "POST", body: JSON.stringify({ trigger: "auto_draft", triggerMessageId: "m1", replyToMessageId: "quoted" })
+  }), { params: Promise.resolve({ id: "conversation-a" }) });
+  assert.equal(response.status, 200); assert.equal(eligibilityCalls, 3);
+  assert.equal(providerCalls, 1); assert.equal(writes(), 0); assert.equal(network.mock.callCount(), 0);
+});
+
+test("auto-draft revalida antes e depois do provider; resultado stale nao retorna sugestao", async () => {
+  for (const rejectAt of [2, 3]) {
+    let checks = 0; let generated = 0;
+    const handler = createAiReplyPostHandler({
+      getSession: async () => ({ id: "operator-a", companyId: "tenant-a", name: "Test", email: "test@example.invalid", role: "ADMIN" }),
+      enforceLimits: async () => null,
+      resolveAccess: async () => ({ status: "allowed", conversation: { id: "conversation-a", agentId: null } }),
+      autoDraftEligible: async () => ++checks < rejectAt,
+      claimAutoDraft: async () => "allowed",
+      buildContext: async () => context(),
+      generateSuggestion: async () => { generated++; return { ...parseAiReplyResponse(validProviderOutput()), source: "openai" }; }
+    });
+    const response = await handler(new NextRequest("http://localhost/api/conversations/conversation-a/ai", {
+      method: "POST", body: JSON.stringify({ trigger: "auto_draft", triggerMessageId: "m1" })
+    }), { params: Promise.resolve({ id: "conversation-a" }) });
+    assert.equal(response.status, 409); assert.equal(generated, rejectAt === 2 ? 0 : 1);
+    const body = await response.json();
+    assert.equal(body.suggestion, undefined);
+    assert.equal(body.code, "AUTO_DRAFT_STALE");
+  }
+});
+
+test("quatro requests de abas/operadores compartilham um gate e geram uma vez", async () => {
+  let count = 0; let generated = 0;
+  const create = (userId: string) => createAiReplyPostHandler({
+    getSession: async () => ({ id: userId, companyId: "tenant-a", name: "Test", email: "test@example.invalid", role: "ADMIN" }),
+    enforceLimits: async (limits) => { assert.deepEqual(limits[0].identifiers, ["tenant-a", userId]); return null; },
+    resolveAccess: async () => ({ status: "allowed", conversation: { id: "conversation-a", agentId: null } }),
+    autoDraftEligible: async () => true,
+    claimAutoDraft: async (input) => {
+      assert.deepEqual(input, { companyId: "tenant-a", conversationId: "conversation-a", triggerMessageId: "m1" });
+      return ++count === 1 ? "allowed" : "claimed";
+    },
+    buildContext: async () => context(),
+    generateSuggestion: async () => { generated++; return { ...parseAiReplyResponse(validProviderOutput()), source: "openai" }; }
+  });
+  const responses = await Promise.all(["operator-a", "operator-a", "operator-b", "operator-b"].map((userId) =>
+    create(userId)(new NextRequest("http://localhost/api/conversations/conversation-a/ai", {
+      method: "POST", body: JSON.stringify({ trigger: "auto_draft", triggerMessageId: "m1" })
+    }), { params: Promise.resolve({ id: "conversation-a" }) })));
+  assert.deepEqual(responses.map((response) => response.status).sort(), [200, 409, 409, 409]);
+  assert.equal(generated, 1);
+});
+
+test("auto-draft: denied tenant/agent e rate limit bloqueiam antes de gate e OpenAI", async () => {
+  for (const rejection of ["tenant", "agent", "rate"] as const) {
+    let calls = 0;
+    const handler = createAiReplyPostHandler({
+      getSession: async () => ({ id: "operator-a", companyId: "tenant-a", name: "Test", email: "test@example.invalid", role: "AGENT" }),
+      enforceLimits: async () => rejection === "rate" ? new Response(null, { status: 429 }) as never : null,
+      resolveAccess: async () => rejection === "tenant" ? { status: "not_found" } : {
+        status: "forbidden", conversation: { id: "conversation-a", agentId: "operator-b" }
+      },
+      autoDraftEligible: async () => { calls++; return true; },
+      claimAutoDraft: async () => { calls++; return "allowed"; },
+      buildContext: async () => { calls++; return context(); },
+      generateSuggestion: async () => { calls++; return { ...parseAiReplyResponse(validProviderOutput()), source: "openai" }; }
+    });
+    const response = await handler(new NextRequest("http://localhost/api/conversations/conversation-a/ai", {
+      method: "POST", body: JSON.stringify({ trigger: "auto_draft", triggerMessageId: "m1" })
+    }), { params: Promise.resolve({ id: "conversation-a" }) });
+    assert.equal(response.status, rejection === "rate" ? 429 : rejection === "tenant" ? 404 : 403);
+    assert.equal(calls, 0);
+  }
+});
+
+test("frontend conserva envio humano e exige confirmacao antes de substituir composer", () => {
+  const page = readFileSync("src/app/page.tsx", "utf8");
+  assert.match(page, /if \(message\.trim\(\) && !window\.confirm/);
+  const click = page.slice(page.lastIndexOf("onClick={() =>", page.indexOf("Usar sugestao")), page.indexOf("Usar sugestao"));
+  assert.match(click, /updateComposerMessage/);
+  assert.doesNotMatch(click, /setReplyingTo|handleSendMessage|onSendMessage/);
+  const automatic = page.slice(page.indexOf("autoDraftRunRef.current ="), page.indexOf("async function handleConversationAiMode"));
+  assert.doesNotMatch(automatic, /handleSendMessage|onSendMessage|updateComposerMessage/);
 });
 
 test("fluxo automatico legado permanece separado do endpoint manual", () => {
