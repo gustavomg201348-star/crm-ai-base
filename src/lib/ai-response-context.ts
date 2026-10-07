@@ -7,6 +7,9 @@ import {
 import { getOpportunitySummaryForConversation } from "@/lib/opportunity-summary-service";
 import type { OpportunitySummary } from "@/lib/opportunity-summary-types";
 import type { AuthorizedFinancialFacts } from "@/lib/ai-response-guardrails";
+import { COPILOT_PROPOSAL_SCAN_LIMIT, hasUsableCpf, resolveProductIntent, selectProposalFacts,
+  type CustomerFacts, type ProposalFacts, type ProposalRecord, type HistoricalProposal, type ProductIntent } from "@/lib/ai-response-facts";
+import { buildResponseGoal, type ResponseGoal } from "@/lib/ai-response-goal";
 
 export const AI_RESPONSE_CONTEXT_LIMITS = {
   sourceMessages: 40,
@@ -44,6 +47,10 @@ type ContextConversationRecord = {
   id: string;
   channelId: string | null;
   contact: {
+    id: string;
+    cpf: string | null;
+    phone: string;
+    email: string | null;
     name: string;
     stage: { name: string } | null;
     origin: { name: string } | null;
@@ -92,6 +99,13 @@ export type AiResponseContext = {
     tags: string[];
   };
   messages: AiResponseContextMessage[];
+  currentCustomerMessage: AiResponseContextMessage | null;
+  customerFacts: CustomerFacts;
+  proposalSelection: "SELECTED" | "NONE" | "UNKNOWN";
+  proposalFacts: ProposalFacts | null;
+  proposalHistory: HistoricalProposal[];
+  productFacts: { requestedProduct: string | null; state: ProductIntent["state"]; source: "CURRENT_MESSAGE" | "HISTORY" | "UNKNOWN" };
+  responseGoal: ResponseGoal;
   selectedReply: QuotedReply | null;
   opportunity: {
     probableProduct: string | null;
@@ -139,6 +153,10 @@ type AiResponseContextDependencies = {
     companyId: string;
     conversationId: string;
   }): Promise<OpportunitySummary | null>;
+  loadProposals(input: { companyId: string; contactId: string }): Promise<ProposalRecord[]>;
+  loadCurrentMessage(input: { companyId: string; conversationId: string; channelId: string | null;
+    messageId?: string | null }): Promise<SelectedReplyRecord | null>;
+  now?(): Date;
 };
 
 const defaultDependencies: AiResponseContextDependencies = {
@@ -150,6 +168,10 @@ const defaultDependencies: AiResponseContextDependencies = {
         channelId: true,
         contact: {
           select: {
+            id: true,
+            cpf: true,
+            phone: true,
+            email: true,
             name: true,
             stage: { select: { name: true } },
             origin: { select: { name: true } },
@@ -218,7 +240,22 @@ const defaultDependencies: AiResponseContextDependencies = {
         }
       }
     }),
-  loadOpportunity: getOpportunitySummaryForConversation
+  loadOpportunity: getOpportunitySummaryForConversation,
+  loadProposals: ({ companyId, contactId }) => prisma.proposal.findMany({
+    where: { companyId, contactId },
+    orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
+    take: COPILOT_PROPOSAL_SCAN_LIMIT + 1,
+    select: { companyId: true, contactId: true, product: true, bank: true, status: true,
+      amount: true, financedAmount: true, releasedAmount: true, installmentAmount: true,
+      term: true, createdAt: true, updatedAt: true }
+  }),
+  loadCurrentMessage: ({ companyId, conversationId, channelId, messageId }) => prisma.message.findFirst({
+    where: { ...(messageId ? { id: messageId } : {}), conversationId, direction: "inbound",
+      conversation: { id: conversationId, channelId, contact: { companyId } } },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { id: true, conversationId: true, direction: true, type: true, body: true, fileName: true,
+      conversation: { select: { channelId: true, contact: { select: { companyId: true } } } } }
+  })
 };
 
 function truncate(value: string, maxLength: number) {
@@ -230,6 +267,7 @@ function truncate(value: string, maxLength: number) {
 export function redactAiSensitiveText(value?: string | null, maxLength = 1_200) {
   if (!value) return null;
   const redacted = value
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[EMAIL OMITIDO]")
     .replace(/\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g, "[CPF OMITIDO]")
     .replace(/(?:\+?55\s*)?(?:\(?\d{2}\)?\s*)?9?\d{4}[-\s]?\d{4}/g, "[TELEFONE OMITIDO]")
     .replace(
@@ -299,16 +337,6 @@ function limitMessages(messages: ContextMessageRecord[]) {
 }
 
 function opportunityContext(summary: OpportunitySummary | null) {
-  const activeProposal = summary?.activeProposal
-    ? {
-        product:
-          redactAiSensitiveText(summary.activeProposal.product, 120) || "Produto nao informado",
-        status:
-          redactAiSensitiveText(summary.activeProposal.status, 80) || "Status nao informado",
-        amount: redactAiSensitiveText(summary.activeProposal.amount, 80)
-      }
-    : null;
-
   return {
     opportunity: {
       probableProduct: redactAiSensitiveText(summary?.probableProduct.label, 120),
@@ -323,12 +351,14 @@ function opportunityContext(summary: OpportunitySummary | null) {
         summary?.pendingReturn?.title,
         AI_RESPONSE_CONTEXT_LIMITS.factCharacters
       ),
-      activeProposal
+      // Financial authority comes exclusively from the Copilot projection, not Observer.
+      activeProposal: null
     },
     financialFacts: {
-      proposalAmounts: activeProposal?.amount ? [activeProposal.amount] : [],
-      proposalStatuses: activeProposal?.status ? [activeProposal.status] : [],
-      proposalProducts: activeProposal?.product ? [activeProposal.product] : [],
+      proposal: null,
+      proposalAmounts: [],
+      proposalStatuses: [],
+      proposalProducts: [],
       proposalBanks: [],
       installmentAmounts: [],
       installmentCounts: [],
@@ -346,11 +376,13 @@ export async function buildAiResponseContext(
   {
     companyId,
     conversationId,
-    replyToMessageId
+    replyToMessageId,
+    triggerMessageId
   }: {
     companyId: string;
     conversationId: string;
     replyToMessageId?: string | null;
+    triggerMessageId?: string | null;
   },
   dependencies: AiResponseContextDependencies = defaultDependencies
 ): Promise<AiResponseContext> {
@@ -358,7 +390,7 @@ export async function buildAiResponseContext(
   if (!conversation) throw new AiResponseContextNotFoundError();
 
   const selectedMessageId = replyToMessageId?.trim() || null;
-  const [company, opportunity, selectedReplyRecord] = await Promise.all([
+  const [company, opportunity, selectedReplyRecord, proposals, currentRecord] = await Promise.all([
     dependencies.loadCompany(companyId),
     dependencies.loadOpportunity({ companyId, conversationId }),
     selectedMessageId
@@ -368,7 +400,10 @@ export async function buildAiResponseContext(
           channelId: conversation.channelId,
           messageId: selectedMessageId
         })
-      : Promise.resolve(null)
+      : Promise.resolve(null),
+    dependencies.loadProposals({ companyId, contactId: conversation.contact.id }),
+    dependencies.loadCurrentMessage({ companyId, conversationId, channelId: conversation.channelId,
+      messageId: triggerMessageId })
   ]);
 
   if (!company) throw new AiResponseContextNotFoundError();
@@ -383,6 +418,38 @@ export async function buildAiResponseContext(
   if (!selectedReplyIsValid) {
     throw new InvalidAiResponseReplyError();
   }
+  if ((triggerMessageId && !currentRecord) || (currentRecord && (
+    currentRecord.direction !== "inbound" || currentRecord.conversationId !== conversationId ||
+    currentRecord.conversation.contact.companyId !== companyId ||
+    currentRecord.conversation.channelId !== conversation.channelId ||
+    (triggerMessageId && currentRecord.id !== triggerMessageId)))) throw new InvalidAiResponseReplyError();
+  const currentCustomerMessage = currentRecord ? {
+    direction: "customer" as const,
+    type: redactAiSensitiveText(currentRecord.type, 40) || "text",
+    body: currentRecord.type === "audio" ? null : redactAiSensitiveText(currentRecord.body),
+    fileName: redactAiSensitiveText(currentRecord.fileName, 160),
+    quotedReply: null
+  } : null;
+  const customerFacts: CustomerFacts = {
+    hasCpf: Boolean(conversation.contact.cpf?.trim()),
+    hasLocallyValidCpf: hasUsableCpf(conversation.contact.cpf),
+    hasPhone: Boolean(conversation.contact.phone?.trim()),
+    hasEmail: Boolean(conversation.contact.email?.trim()),
+    hasResponsibleAgent: Boolean(conversation.contact.owner || conversation.agent)
+  };
+  const messages = limitMessages(conversation.messages.filter((message) => message.id !== currentRecord?.id));
+  const productIntent = resolveProductIntent(currentCustomerMessage?.body ?? "",
+    messages.filter((message) => message.direction === "customer").map((message) => message.body ?? ""));
+  const requestedProduct = productIntent.product;
+  const projection = selectProposalFacts({ records: proposals, companyId, contactId: conversation.contact.id,
+    requestedProduct,
+    now: dependencies.now?.() ?? new Date(), sanitize: redactAiSensitiveText });
+  if (productIntent.state === "AMBIGUOUS" || productIntent.state === "NEGATED") {
+    projection.selection = "UNKNOWN";
+    projection.proposal = null;
+  }
+  const responseGoal = buildResponseGoal({ question: currentCustomerMessage?.body ?? null,
+    customer: customerFacts, proposal: projection.proposal, proposalSelection: projection.selection, requestedProduct });
 
   const selectedReplySnapshot = selectedReplyRecord
     ? buildReplySnapshot(selectedReplyRecord)
@@ -421,8 +488,16 @@ export async function buildAiResponseContext(
         .filter((tag): tag is string => Boolean(tag))
         .slice(0, 12)
     },
-    messages: limitMessages(conversation.messages),
+    messages,
+    productFacts: { requestedProduct, state: productIntent.state, source: productIntent.source },
+    currentCustomerMessage,
+    customerFacts,
+    proposalSelection: projection.selection,
+    proposalFacts: projection.proposal,
+    proposalHistory: projection.history,
+    responseGoal,
     selectedReply,
-    ...opportunityFacts
+    ...opportunityFacts,
+    financialFacts: { ...opportunityFacts.financialFacts, proposal: projection.proposal }
   };
 }

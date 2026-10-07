@@ -43,6 +43,7 @@ type AiReplyRouteDependencies = {
     companyId: string;
     conversationId: string;
     replyToMessageId?: string | null;
+    triggerMessageId?: string | null;
   }): Promise<AiResponseContext>;
   generateSuggestion(input: { context: AiResponseContext }): Promise<AiSuggestion>;
   autoDraftEligible?(input: { companyId: string; conversationId: string; triggerMessageId: string }): Promise<boolean>;
@@ -109,7 +110,8 @@ export function createAiReplyPostHandler(dependencies: AiReplyRouteDependencies)
         conversationId: access.conversation.id,
         companyId: session.companyId,
         replyToMessageId:
-          typeof body.replyToMessageId === "string" ? body.replyToMessageId : null
+          typeof body.replyToMessageId === "string" ? body.replyToMessageId : null,
+        ...(autoInput ? { triggerMessageId: autoInput.triggerMessageId } : {})
       });
       if (!await autoEligible()) {
         return NextResponse.json({ code: "AUTO_DRAFT_STALE", error: "Auto-draft desatualizado." }, { status: 409 });
