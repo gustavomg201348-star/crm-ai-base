@@ -29,8 +29,11 @@ import { useNewMessageSound } from "@/app/hooks/use-new-message-sound";
 import { resolveConversationChannelId } from "@/lib/conversation-channel.service";
 import { serializeCsvCell } from "@/lib/csv-export";
 import type { OpportunitySummary } from "@/lib/opportunity-summary-types";
+import { createAutoDraftController, type AutoDraftTrigger } from "@/lib/ai-auto-draft-state";
 import {
   aiReplyErrorMessage,
+  createDetailedSnapshotAcceptance,
+  isExpectedAutoDraftSkip,
   createAiReplySynchronousStartGuard,
   createAiReplyRequestState,
   reduceAiReplyRequestState,
@@ -1793,6 +1796,25 @@ export default function Home() {
   const aiRequestSequenceRef = useRef<Record<string, number>>({});
   const aiRequestControllersRef = useRef<Record<string, AbortController | undefined>>({});
   const aiSynchronousStartGuardRef = useRef(createAiReplySynchronousStartGuard());
+  const autoDraftRunRef = useRef<(trigger: AutoDraftTrigger, isCurrent: () => boolean) => Promise<void>>(async () => {});
+  const autoDraftPresentedRef = useRef<Record<string, string | undefined>>({});
+  const autoDraftControllerRef = useRef<ReturnType<typeof createAutoDraftController> | null>(null);
+  if (!autoDraftControllerRef.current) {
+    autoDraftControllerRef.current = createAutoDraftController({
+      run: (trigger, isCurrent) => autoDraftRunRef.current(trigger, isCurrent),
+      isBusy: (trigger) => Boolean(aiRequestControllersRef.current[trigger.conversationId]),
+      invalidate: (conversationId) => {
+        if (!autoDraftPresentedRef.current[conversationId]) return;
+        delete autoDraftPresentedRef.current[conversationId];
+        dispatchAiReplyState({ type: "invalidate", conversationId });
+      }
+    });
+  }
+  const detailedSnapshotAcceptanceRef = useRef(createDetailedSnapshotAcceptance());
+  const selectedDetailEpochRef = useRef(0);
+  const [autoDraftDetail, setAutoDraftDetail] = useState<{
+    conversation: ConversationRow; epoch: number;
+  } | null>(null);
   const selectedAiAnalysis = selectedConversation
     ? aiReplyState.analysisByConversation[selectedConversation.id] ?? null
     : null;
@@ -1806,6 +1828,7 @@ export default function Home() {
   useEffect(() => {
     const controllers = aiRequestControllersRef.current;
     return () => {
+      autoDraftControllerRef.current?.dispose();
       Object.values(controllers).forEach((controller) => controller?.abort());
     };
   }, []);
@@ -1912,8 +1935,28 @@ export default function Home() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   useEffect(() => {
+    selectedDetailEpochRef.current++;
     selectedConversationRef.current = selectedConversation?.id ?? null;
-  }, [selectedConversation?.id]);
+    autoDraftControllerRef.current?.select(active === "atendimento" ? selectedConversation?.id ?? null : null);
+  }, [selectedConversation?.id, active]);
+
+  useEffect(() => {
+    const suspend = () => autoDraftControllerRef.current?.suspend();
+    document.addEventListener("visibilitychange", suspend);
+    return () => document.removeEventListener("visibilitychange", suspend);
+  }, []);
+
+  useEffect(() => {
+    if (!autoDraftDetail || autoDraftDetail.epoch !== selectedDetailEpochRef.current ||
+        autoDraftDetail.conversation.id !== selectedConversation?.id) return;
+    autoDraftControllerRef.current?.observe({
+      ...autoDraftDetail.conversation,
+      aiMode: selectedConversation.aiMode,
+      aiPaused: Boolean(selectedConversation.aiPaused),
+      status: selectedConversation.status
+    }, aiSettings.mode, active === "atendimento" && !document.hidden);
+  }, [autoDraftDetail, selectedConversation?.id, selectedConversation?.aiMode,
+    selectedConversation?.aiPaused, selectedConversation?.status, aiSettings.mode, active]);
 
   useEffect(() => {
     conversationListRef.current = conversationList;
@@ -2452,12 +2495,16 @@ export default function Home() {
     async (conversationId?: string | null) => {
       const id = conversationId ?? selectedConversationRef.current;
       if (!id) return null;
+      const ticket = detailedSnapshotAcceptanceRef.current.begin(id, selectedDetailEpochRef.current);
 
       const response = await fetch(`/api/conversations/${id}`);
       if (!response.ok) return null;
 
       const data = (await response.json()) as { conversation: ConversationRow };
+      if (!detailedSnapshotAcceptanceRef.current.accept(ticket,
+        selectedConversationRef.current, selectedDetailEpochRef.current)) return null;
       mergeConversation(data.conversation, "refresh");
+      setAutoDraftDetail({ conversation: data.conversation, epoch: ticket.epoch });
       return data.conversation;
     },
     [mergeConversation]
@@ -3684,8 +3731,11 @@ export default function Home() {
 
   async function handleAnalyzeConversation(
     conversationId: string,
-    replyToMessageId?: string
+    replyToMessageId?: string,
+    autoDraft?: { triggerMessageId: string; isCurrent: () => boolean }
   ) {
+    if (aiRequestControllersRef.current[conversationId] ||
+        (autoDraft && !autoDraft.isCurrent())) return;
     let requestId = 0;
     const started = startAiReplyRequestSynchronously({
       guard: aiSynchronousStartGuardRef.current,
@@ -3697,7 +3747,6 @@ export default function Home() {
     });
     if (!started) return;
 
-    aiRequestControllersRef.current[conversationId]?.abort();
     const controller = new AbortController();
     aiRequestControllersRef.current[conversationId] = controller;
     dispatchAiReplyState({ type: "begin", conversationId, requestId });
@@ -3705,14 +3754,19 @@ export default function Home() {
       const response = await fetch(`/api/conversations/${conversationId}/ai`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(replyToMessageId ? { replyToMessageId } : {}),
+        body: JSON.stringify({
+          ...(replyToMessageId ? { replyToMessageId } : {}),
+          ...(autoDraft ? { trigger: "auto_draft", triggerMessageId: autoDraft.triggerMessageId } : {})
+        }),
         signal: controller.signal
       });
 
       if (!response.ok) {
         const data = (await response.json().catch(() => null)) as
-          | { error?: string }
+          | { error?: string; code?: string }
           | null;
+        if (autoDraft && !autoDraft.isCurrent()) return;
+        if (autoDraft && isExpectedAutoDraftSkip(response.status, data?.code)) return;
         dispatchAiReplyState({
           type: "error",
           conversationId,
@@ -3723,6 +3777,8 @@ export default function Home() {
       }
 
       const data = (await response.json()) as { analysis: AiAnalysis };
+      if (autoDraft && !autoDraft.isCurrent()) return;
+      autoDraftPresentedRef.current[conversationId] = autoDraft?.triggerMessageId;
       dispatchAiReplyState({
         type: "success",
         conversationId,
@@ -3731,7 +3787,7 @@ export default function Home() {
       });
     } catch (error) {
       const safeError = aiReplyErrorMessage(error);
-      if (safeError) {
+      if (safeError && (!autoDraft || autoDraft.isCurrent())) {
         dispatchAiReplyState({
           type: "error",
           conversationId,
@@ -3744,8 +3800,15 @@ export default function Home() {
         delete aiRequestControllersRef.current[conversationId];
       }
       dispatchAiReplyState({ type: "finish", conversationId, requestId });
+      autoDraftControllerRef.current?.notifyIdle();
     }
   }
+
+  useEffect(() => {
+    autoDraftRunRef.current = (trigger, isCurrent) => handleAnalyzeConversation(
+      trigger.conversationId, undefined, { triggerMessageId: trigger.triggerMessageId, isCurrent }
+    );
+  });
 
   async function handleConversationAiMode(
     conversationId: string,
@@ -8001,7 +8064,10 @@ function Atendimento({
           <button
             className="flex h-10 w-full items-center justify-center gap-2 rounded bg-brand px-3 text-sm font-semibold text-white"
             disabled={!selectedConversation}
-            onClick={() => updateComposerMessage(aiAnalysis.suggestedReply)}
+            onClick={() => {
+              if (message.trim() && !window.confirm("Substituir seu texto pela sugestao da IA?")) return;
+              updateComposerMessage(aiAnalysis.suggestedReply);
+            }}
           >
             <Send className="h-4 w-4" />
             Usar sugestao
@@ -19592,7 +19658,7 @@ function AiPanel({
           disabled={disabled || loading}
           onClick={onAnalyze}
         >
-          {loading ? "Gerando..." : "Gerar resposta IA"}
+          {loading ? "IA preparando resposta..." : "Gerar resposta IA"}
         </button>
       )}
       {error && (

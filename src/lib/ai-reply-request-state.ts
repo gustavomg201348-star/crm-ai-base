@@ -5,7 +5,31 @@ export type AiReplyRequestState<T> = {
   latestRequestIdByConversation: Record<string, number | undefined>;
 };
 
+export function createDetailedSnapshotAcceptance() {
+  let issued = 0;
+  let accepted = 0;
+  return {
+    begin(conversationId: string, epoch: number) {
+      return { conversationId, epoch, sequence: ++issued };
+    },
+    accept(ticket: { conversationId: string; epoch: number; sequence: number },
+      conversationId: string | null, epoch: number) {
+      if (ticket.conversationId !== conversationId || ticket.epoch !== epoch ||
+          ticket.sequence <= accepted) return false;
+      accepted = ticket.sequence;
+      return true;
+    }
+  };
+}
+
+export function isExpectedAutoDraftSkip(status: number, code: unknown) {
+  return status === 409 && typeof code === "string" && [
+    "AUTO_DRAFT_NOT_ELIGIBLE", "AUTO_DRAFT_ALREADY_CLAIMED", "AUTO_DRAFT_STALE"
+  ].includes(code);
+}
+
 export type AiReplyRequestAction<T> =
+  | { type: "invalidate"; conversationId: string }
   | { type: "begin"; conversationId: string; requestId: number }
   | { type: "success"; conversationId: string; requestId: number; analysis: T }
   | { type: "error"; conversationId: string; requestId: number; error: string }
@@ -24,6 +48,11 @@ export function reduceAiReplyRequestState<T>(
   state: AiReplyRequestState<T>,
   action: AiReplyRequestAction<T>
 ): AiReplyRequestState<T> {
+  if (action.type === "invalidate") {
+    return { ...state, analysisByConversation: {
+      ...state.analysisByConversation, [action.conversationId]: undefined
+    } };
+  }
   if (action.type === "begin") {
     return {
       ...state,
