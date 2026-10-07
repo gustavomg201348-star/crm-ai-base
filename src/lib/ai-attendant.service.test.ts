@@ -35,6 +35,8 @@ import {
   startAiReplyRequestSynchronously
 } from "./ai-reply-request-state";
 import type { AuthorizedFinancialFacts } from "./ai-response-guardrails";
+import { buildResponseGoal } from "./ai-response-goal";
+import { selectProposalFacts } from "./ai-response-facts";
 
 function financialFacts(
   overrides: Partial<AuthorizedFinancialFacts> = {}
@@ -58,6 +60,14 @@ function financialFacts(
 
 function context(overrides: Partial<AiResponseContext> = {}): AiResponseContext {
   return {
+    customerFacts: { hasCpf: false, hasLocallyValidCpf: false, hasPhone: false, hasEmail: false, hasResponsibleAgent: true },
+    currentCustomerMessage: null,
+    proposalSelection: "NONE",
+    proposalFacts: null,
+    proposalHistory: [],
+    productFacts: { requestedProduct: null, state: "NO_MENTION", source: "UNKNOWN" },
+    responseGoal: buildResponseGoal({ question: null, customer: { hasCpf: false, hasLocallyValidCpf: false, hasPhone: false, hasEmail: false, hasResponsibleAgent: true },
+      proposal: null, proposalSelection: "NONE" }),
     company: {
       name: "QEVORA",
       segment: "Credito",
@@ -98,8 +108,8 @@ function validProviderOutput(overrides: Record<string, unknown> = {}) {
   return {
     summary: "Cliente quer entender as opcoes.",
     temperature: "WARM",
-    nextAction: "Entender a necessidade.",
-    suggestedReply: "Claro. Qual opcao voce deseja avaliar primeiro?",
+    nextAction: "Esclarecer o pedido atual do cliente.",
+    suggestedReply: "Qual informacao voce gostaria de esclarecer neste atendimento?",
     confidence: 82,
     tags: ["CLT"],
     shouldTransferToHuman: false,
@@ -1056,7 +1066,7 @@ test("auto-draft reutiliza gerador oficial: zero writes funcionais, zero Meta, c
     resolveAccess: async () => ({ status: "allowed", conversation: { id: "conversation-a", agentId: null } }),
     autoDraftEligible: async () => { eligibilityCalls++; return true; },
     claimAutoDraft: async () => "allowed",
-    buildContext: async (input) => { assert.equal(input.replyToMessageId, "quoted"); return context(); },
+    buildContext: async (input) => { assert.equal(input.replyToMessageId, "quoted"); assert.equal(input.triggerMessageId, "m1"); return context(); },
     generateSuggestion: (input) => generateManualAiReplySuggestion(input, {
       apiKey: "mock-only", fetch: (async () => { providerCalls++; return responseWithOutput(validProviderOutput()); }) as typeof fetch
     })
@@ -1152,4 +1162,110 @@ test("fluxo automatico legado permanece separado do endpoint manual", () => {
   assert.match(service, /const \{ suggestion \} = await generateAiSuggestion/);
   assert.match(service, /sendMetaTextMessage/);
   assert.doesNotMatch(route, /maybeSendAutomaticAiReply|generateAiSuggestion/);
+});
+
+test("pergunta atual tem budget reservado e historico antigo e podado primeiro", () => {
+  const prompt = buildAiReplyPrompt(context({
+    company: { name: "QEVORA", segment: "Credito", instructions: "Regra geral. ".repeat(120) },
+    currentCustomerMessage: { direction: "customer", type: "text", body: "CURRENT_QUESTION Quanto libera no CLT?", fileName: null, quotedReply: null },
+    messages: Array.from({ length: 40 }, (_, index) => ({ direction: "attendant", type: "text", body: `OLD_${index} ${"x".repeat(1200)}`, fileName: null, quotedReply: null }))
+  }));
+  assert.match(prompt, /CURRENT_QUESTION Quanto libera no CLT/);
+  assert.doesNotMatch(prompt, /OLD_0 /);
+  assert.ok(prompt.length <= 16000);
+  assert.match(prompt, /CURRENT CUSTOMER MESSAGE \(UNTRUSTED/);
+});
+
+function operationalContext(question: string, withProposal: boolean) {
+  const now = new Date("2026-10-07T12:00:00Z");
+  const projection = selectProposalFacts({ companyId: "tenant-a", contactId: "contact-a", requestedProduct: "CLT", now,
+    sanitize: (text) => text, records: withProposal ? [{ companyId: "tenant-a", contactId: "contact-a", product: "CLT", bank: "Banco de teste",
+      status: "DRAFT", amount: "15000.00", installmentAmount: "400.00", term: 48, financedAmount: null, releasedAmount: null,
+      createdAt: now, updatedAt: now }] : [] });
+  const customerFacts = { hasCpf: true, hasLocallyValidCpf: true, hasPhone: true, hasEmail: false, hasResponsibleAgent: true };
+  const responseGoal = buildResponseGoal({ question, customer: customerFacts, proposal: projection.proposal, proposalSelection: projection.selection });
+  return context({ customerFacts, proposalFacts: projection.proposal, proposalSelection: projection.selection,
+    responseGoal, financialFacts: financialFacts({ proposal: projection.proposal }),
+    currentCustomerMessage: { direction: "customer", type: "text", body: question, fileName: null, quotedReply: null } });
+}
+
+for (const [question, proposal, rawReply] of [
+  ["Quanto libera no CLT?", true, "Voce tem R$ 15000 liberado hoje."],
+  ["Quanto libera no CLT?", false, "Envie seu CPF para simular."],
+  ["Algum retorno?", false, "Vou verificar e em breve retorno."],
+  ["Qual parcela?", true, "A parcela e R$ 999."],
+  ["Quando cai?", true, "Cai hoje na sua conta."]
+] as const) {
+  test(`pipeline oficial reconcilia ${question} / ${rawReply}`, async (t) => {
+    const writes = forbidFunctionalWrites(t);
+    const network = t.mock.method(globalThis, "fetch", () => { throw new Error("unexpected-real-network"); });
+    const aiContext = operationalContext(question, proposal);
+    const suggestion = await generateManualAiReplySuggestion({ context: aiContext }, {
+      apiKey: "mock-only", fetch: (async () => responseWithOutput(validProviderOutput({ suggestedReply: rawReply }))) as typeof fetch
+    });
+    assert.equal(suggestion.suggestedReply, aiContext.responseGoal.safeReply);
+    assert.equal(suggestion.nextAction, aiContext.responseGoal.nextAction);
+    assert.equal(suggestion.shouldTransferToHuman, aiContext.responseGoal.shouldTransferToHuman);
+    assert.equal(suggestion.source, "guardrail");
+    assert.equal(writes(), 0); assert.equal(network.mock.callCount(), 0);
+  });
+}
+
+test("pipeline aceita contrato coerente de fato registrado sem mudar source", async () => {
+  const aiContext = operationalContext("Qual parcela?", true);
+  const suggestion = await generateManualAiReplySuggestion({ context: aiContext }, {
+    apiKey: "mock-only", fetch: (async () => responseWithOutput(validProviderOutput({
+      suggestedReply: aiContext.responseGoal.safeReply, nextAction: aiContext.responseGoal.nextAction,
+      shouldTransferToHuman: aiContext.responseGoal.shouldTransferToHuman
+    }))) as typeof fetch
+  });
+  assert.equal(suggestion.source, "openai");
+});
+
+test("fallback deterministico tambem passa pelo gate financeiro", async () => {
+  const aiContext = operationalContext("Qual banco?", true);
+  aiContext.proposalFacts!.bank = "Banco liberou R$ 99999";
+  aiContext.responseGoal = buildResponseGoal({ question: "Qual banco?", customer: aiContext.customerFacts,
+    proposal: aiContext.proposalFacts, proposalSelection: "SELECTED" });
+  const suggestion = await generateManualAiReplySuggestion({ context: aiContext }, {
+    apiKey: "mock-only", fetch: (async () => responseWithOutput(validProviderOutput())) as typeof fetch
+  });
+  assert.equal(suggestion.shouldTransferToHuman, true);
+  assert.doesNotMatch(suggestion.suggestedReply, /99999/);
+  assert.equal(suggestion.source, "guardrail");
+});
+
+test("provider nao controla campos operacionais de CLARIFY_REQUEST", async () => {
+  const aiContext = context();
+  const suggestion = await generateManualAiReplySuggestion({ context: aiContext }, {
+    apiKey: "mock-only", fetch: (async () => responseWithOutput(validProviderOutput({
+      summary: "Banco aprovou.", reason: "Pagamento confirmado.", nextAction: "Esclarecer pagamento confirmado.",
+      suggestedReply: "Como posso ajudar?", shouldTransferToHuman: true
+    }))) as typeof fetch
+  });
+  assert.equal(suggestion.suggestedReply, aiContext.responseGoal.safeReply);
+  assert.equal(suggestion.nextAction, aiContext.responseGoal.nextAction);
+  assert.equal(suggestion.shouldTransferToHuman, false);
+  assert.doesNotMatch(`${suggestion.summary} ${suggestion.reason}`, /aprovou|pagamento confirmado/i);
+  assert.equal(suggestion.confidence, 82); assert.equal(suggestion.temperature, "WARM");
+  assert.deepEqual(suggestion.tags, ["CLT"]);
+});
+
+test("contexto real envia current exatamente uma vez ao modelo", async () => {
+  const { buildAiResponseContext } = await import("./ai-response-context");
+  const current = { id: "current", conversationId: "conversation-a", direction: "inbound", type: "text",
+    body: "UNIQUE_CURRENT_92", fileName: null, replyToProviderMessageId: null,
+    replyPreviewType: null, replyPreviewBody: null, replyPreviewFileName: null, replyTo: null };
+  const aiContext = await buildAiResponseContext({ companyId: "tenant-a", conversationId: "conversation-a" }, {
+    loadConversation: async () => ({ id: "conversation-a", channelId: "channel-a",
+      contact: { id: "contact-a", cpf: null, phone: "", email: null, name: "Teste", stage: null, origin: null, owner: null, tags: [] },
+      agent: null, messages: [current] }),
+    loadCompany: async () => ({ name: "Teste", segment: null, aiInstructions: null }),
+    loadOpportunity: async () => null, loadSelectedReply: async () => null, loadProposals: async () => [],
+    loadCurrentMessage: async () => ({ ...current, conversation: { channelId: "channel-a", contact: { companyId: "tenant-a" } } })
+  });
+  const prompt = buildAiReplyPrompt(aiContext);
+  assert.equal(prompt.split("UNIQUE_CURRENT_92").length - 1, 1);
+  assert.match(prompt, /DRAFT significa somente proposta registrada em rascunho/);
+  assert.doesNotMatch(prompt, /rascunho\/simulacao-like/);
 });

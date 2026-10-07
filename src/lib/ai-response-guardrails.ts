@@ -1,7 +1,11 @@
+import type { ProposalFacts } from "@/lib/ai-response-facts";
+
 export const FINANCIAL_VERIFICATION_REPLY =
-  "Vou verificar essa informacao para voce e retorno com os dados corretos.";
+  "Nao ha informacao suficiente no registro para confirmar essa condicao. E necessaria a validacao de um atendente.";
 
 export type AuthorizedFinancialFacts = {
+  // When present (including null), this linked projection is the ONLY authority.
+  proposal?: ProposalFacts | null;
   proposalAmounts: string[];
   proposalStatuses: string[];
   proposalProducts: string[];
@@ -66,7 +70,7 @@ function allCurrencyClaimsAreAuthorized(
 ) {
   const claims = reply.match(currencyPattern) ?? [];
   if (claims.length === 0) return true;
-  const allowed = facts.proposalAmounts
+  const allowed = [...facts.proposalAmounts, ...facts.installmentAmounts]
     .map(numericValue)
     .filter((value): value is number => value !== null);
   return claims.every((claim) => {
@@ -133,14 +137,12 @@ function containsUnsupportedConcreteClaim(
     return true;
   }
   if (mentionsUnsupportedCategory && !asksForVerification) {
-    const hasAuthorizedCategory =
-      facts.installmentAmounts.length > 0 ||
-      facts.installmentCounts.length > 0 ||
-      facts.rates.length > 0 ||
-      facts.cets.length > 0 ||
-      facts.margins.length > 0 ||
-      facts.limits.length > 0;
-    if (!hasAuthorizedCategory) return true;
+    const categories: Array<[RegExp, boolean]> = [
+      [/\btaxa\b/, facts.rates.length > 0], [/\bcet\b/, facts.cets.length > 0],
+      [/\bmargem\b/, facts.margins.length > 0], [/\blimite\b/, facts.limits.length > 0],
+      [/\bparcela\b/, facts.installmentAmounts.length > 0], [/\bprazo\b/, facts.installmentCounts.length > 0]
+    ];
+    if (categories.some(([pattern, available]) => pattern.test(normalizedReply) && !available)) return true;
   }
   if (availabilityClaim && !asksForVerification) {
     return (
@@ -158,6 +160,20 @@ export function enforceFinancialReplyGuardrails({
   suggestedReply: string;
   facts: AuthorizedFinancialFacts;
 }) {
+  if (Object.prototype.hasOwnProperty.call(facts, "proposal")) {
+    const proposal = facts.proposal;
+    facts = { proposalAmounts: proposal?.amount ? [proposal.amount.value] : [],
+      proposalStatuses: proposal ? [proposal.normalizedStatus] : [],
+      proposalProducts: proposal ? [proposal.product] : [], proposalBanks: proposal?.bank ? [proposal.bank] : [],
+      installmentAmounts: proposal?.installmentAmount ? [proposal.installmentAmount] : [],
+      installmentCounts: proposal?.term ? [proposal.term] : [],
+      rates: [], cets: [], margins: [], limits: [], paymentDates: [], discountDates: [] };
+    // A recorded status/value never proves availability, release or payment today.
+    const normalized = normalize(suggestedReply);
+    if (/\b(?:tem|esta|foi|ja|valor|credito)\b[^.!?\n]{0,45}\b(?:liberad[oa]|disponivel)\b|\b(?:cai|caira|depositado)\b/.test(normalized)) {
+      return FINANCIAL_VERIFICATION_REPLY;
+    }
+  }
   const unsupported =
     !allCurrencyClaimsAreAuthorized(suggestedReply, facts) ||
     !supportedPercentages(suggestedReply, facts) ||

@@ -80,6 +80,7 @@ function dependencies(
         id: "conversation-1",
         channelId: "channel-1",
         contact: {
+          id: "contact-1", cpf: null, phone: "", email: null,
           name: "Maria da Silva",
           stage: { name: "Qualificacao" },
           origin: { name: "WhatsApp" },
@@ -103,6 +104,8 @@ function dependencies(
     async loadOpportunity() {
       return null;
     },
+    async loadProposals() { return []; },
+    async loadCurrentMessage() { return selectedReply({ id: "message-1", body: "Quero entender as opcoes." }); },
     ...overrides
   };
 }
@@ -216,11 +219,13 @@ test("mantem quoted reply historico limitado e nao trata audio como transcricao"
   const context = await buildAiResponseContext(
     { companyId: "company-1", conversationId: "conversation-1" },
     dependencies({
+      async loadCurrentMessage() { return selectedReply({ id: "current-outside-history" }); },
       async loadConversation() {
         return {
           id: "conversation-1",
           channelId: "channel-1",
           contact: {
+            id: "contact-1", cpf: null, phone: "", email: null,
             name: "Maria",
             stage: null,
             origin: null,
@@ -270,6 +275,7 @@ test("remove telefone, CPF e credenciais de todos os textos enviados ao prompt",
           id: "conversation-1",
           channelId: "channel-1",
           contact: {
+            id: "contact-1", cpf: null, phone: "", email: null,
             name: "Maria 529.982.247-25",
             stage: { name: "Telefone 11999998888" },
             origin: null,
@@ -311,6 +317,7 @@ test("aplica limite simultaneo de quantidade e caracteres ao historico", async (
           id: "conversation-1",
           channelId: "channel-1",
           contact: {
+            id: "contact-1", cpf: null, phone: "", email: null,
             name: "Maria",
             stage: null,
             origin: null,
@@ -352,10 +359,128 @@ test("projeta Observer como sinal e mantem somente fatos financeiros explicitos"
   );
 
   assert.equal(context.opportunity.probableProductIsInference, true);
-  assert.deepEqual(context.financialFacts.proposalAmounts, ["15000.00"]);
-  assert.deepEqual(context.financialFacts.proposalStatuses, ["APPROVED"]);
-  assert.deepEqual(context.financialFacts.proposalProducts, ["Credito CLT"]);
+  assert.equal(context.financialFacts.proposal, null);
+  assert.deepEqual(context.financialFacts.proposalAmounts, []);
+  assert.deepEqual(context.financialFacts.proposalStatuses, []);
+  assert.deepEqual(context.financialFacts.proposalProducts, []);
   assert.deepEqual(context.financialFacts.proposalBanks, []);
   assert.deepEqual(context.financialFacts.rates, []);
   assert.deepEqual(context.financialFacts.margins, []);
+});
+
+test("disponibilidade cadastral nao expoe CPF, telefone ou email", async () => {
+  const deps = dependencies();
+  const conversation = (await deps.loadConversation({ companyId: "company-1", conversationId: "conversation-1" }))!;
+  conversation.contact.cpf = "529.982.247-25";
+  conversation.contact.phone = "11999998888";
+  conversation.contact.email = "smoke@example.invalid";
+  const context = await buildAiResponseContext({ companyId: "company-1", conversationId: "conversation-1" },
+    dependencies({ async loadConversation() { return conversation; } }));
+  assert.deepEqual(context.customerFacts, { hasCpf: true, hasLocallyValidCpf: true, hasPhone: true, hasEmail: true, hasResponsibleAgent: true });
+  assert.doesNotMatch(JSON.stringify(context), /529|11999998888|smoke@example/);
+});
+
+test("current inbound e independente da janela de historico e preserva trigger", async () => {
+  let receivedScope: unknown;
+  const context = await buildAiResponseContext({ companyId: "company-1", conversationId: "conversation-1", triggerMessageId: "trigger" },
+    dependencies({ async loadCurrentMessage(scope) {
+      receivedScope = scope;
+      return selectedReply({ id: "trigger", body: "Quanto libera? Meu CPF e 529.982.247-25, email smoke@example.invalid" });
+    } }));
+  assert.deepEqual(receivedScope, { companyId: "company-1", conversationId: "conversation-1", channelId: "channel-1", messageId: "trigger" });
+  assert.match(context.currentCustomerMessage!.body!, /Quanto libera/);
+  assert.doesNotMatch(context.currentCustomerMessage!.body!, /529|smoke@example/);
+  assert.doesNotMatch(JSON.stringify(context), /"trigger"/);
+});
+
+for (const [name, current] of [
+  ["tenant", selectedReply({ id: "trigger", companyId: "company-2" })],
+  ["conversa", selectedReply({ id: "trigger", conversationId: "conversation-2" })],
+  ["canal", selectedReply({ id: "trigger", channelId: "channel-2" })],
+  ["outbound", selectedReply({ id: "trigger", direction: "outbound" })],
+  ["id", selectedReply({ id: "outro" })], ["ausente", null]
+] as const) {
+  test(`current trigger ${name} invalido e rejeitado antes do provider`, async () => {
+    await assert.rejects(buildAiResponseContext({ companyId: "company-1", conversationId: "conversation-1", triggerMessageId: "trigger" },
+      dependencies({ async loadCurrentMessage() { return current; } })), InvalidAiResponseReplyError);
+  });
+}
+
+test("proposal reads recebem company/contact e projeção nao usa amount da Observadora", async () => {
+  let scope: unknown;
+  const context = await buildAiResponseContext({ companyId: "company-1", conversationId: "conversation-1" }, dependencies({
+    async loadProposals(input) { scope = input; return []; },
+    async loadOpportunity() { return { probableProduct: { label: "CLT" }, commercialState: { label: "Proposta" },
+      priority: { label: "Alta" }, recommendedAction: { label: "Revisar" },
+      activeProposal: { product: "CLT", status: "APPROVED", amount: "99999" } } as OpportunitySummary; }
+  }));
+  assert.deepEqual(scope, { companyId: "company-1", contactId: "contact-1" });
+  assert.equal(context.proposalFacts, null); assert.equal(context.financialFacts.proposal, null);
+  assert.doesNotMatch(JSON.stringify(context), /99999/);
+});
+
+test("produto informado no historico evita perguntar novamente sem autorizar valor", async () => {
+  const deps = dependencies();
+  const conversation = (await deps.loadConversation({ companyId: "company-1", conversationId: "conversation-1" }))!;
+  conversation.messages = [message({ id: "historical", body: "Quero consultar CLT." })];
+  const context = await buildAiResponseContext({ companyId: "company-1", conversationId: "conversation-1" }, dependencies({
+    async loadConversation() { return conversation; },
+    async loadCurrentMessage() { return selectedReply({ body: "Quanto libera?" }); }
+  }));
+  assert.equal(context.productFacts.requestedProduct, "CLT");
+  assert.equal(context.responseGoal.action, "HUMAN_VALIDATION");
+  assert.equal(context.responseGoal.nextRequiredInformation, null);
+  assert.equal(context.financialFacts.proposal, null);
+});
+
+test("sem CPF/telefone/email cadastrado todos os booleanos refletem ausencia", async () => {
+  const deps = dependencies();
+  const conversation = (await deps.loadConversation({ companyId: "company-1", conversationId: "conversation-1" }))!;
+  conversation.contact.owner = null; conversation.agent = null;
+  const context = await buildAiResponseContext({ companyId: "company-1", conversationId: "conversation-1" },
+    dependencies({ async loadConversation() { return conversation; } }));
+  assert.deepEqual(context.customerFacts, { hasCpf: false, hasLocallyValidCpf: false, hasPhone: false, hasEmail: false, hasResponsibleAgent: false });
+});
+
+for (const text of ["CLT ou FGTS", "Nao quero CLT", "sem CLT"]) {
+  test(`contexto nao usa historico para escolher produto: ${text}`, async () => {
+    const deps = dependencies();
+    const conversation = (await deps.loadConversation({ companyId: "company-1", conversationId: "conversation-1" }))!;
+    conversation.messages = [message({ id: "old", body: "Quero CLT" })];
+    const context = await buildAiResponseContext({ companyId: "company-1", conversationId: "conversation-1" }, dependencies({
+      async loadConversation() { return conversation; },
+      async loadCurrentMessage() { return selectedReply({ id: "current", body: text }); },
+      async loadProposals() { return [{ companyId: "company-1", contactId: "contact-1", product: "CLT", bank: "Teste",
+        status: "DRAFT", amount: "1000", financedAmount: null, releasedAmount: null, installmentAmount: null, term: null,
+        createdAt: new Date(), updatedAt: new Date() }]; }
+    }));
+    assert.equal(context.productFacts.requestedProduct, null);
+    assert.equal(context.proposalFacts, null); assert.equal(context.financialFacts.proposal, null);
+    assert.equal(context.responseGoal.shouldTransferToHuman, true);
+  });
+}
+test("dedupe current por id preserva outras mensagens com texto igual e ordem", async () => {
+  const deps = dependencies();
+  const conversation = (await deps.loadConversation({ companyId: "company-1", conversationId: "conversation-1" }))!;
+  conversation.messages = [message({ id: "outbound", direction: "outbound", body: "Resposta anterior" }),
+    message({ id: "current", body: "Texto igual" }), message({ id: "other", body: "Texto igual" })];
+  const context = await buildAiResponseContext({ companyId: "company-1", conversationId: "conversation-1" }, dependencies({
+    async loadConversation() { return conversation; },
+    async loadCurrentMessage() { return selectedReply({ id: "current", body: "Texto igual" }); }
+  }));
+  assert.deepEqual(context.messages.map((item) => item.body), ["Texto igual", "Resposta anterior"]);
+  assert.equal(context.currentCustomerMessage?.body, "Texto igual");
+});
+test("CPF cadastrado invalido indica presenca sem validade nem pedido de documento", async () => {
+  const deps = dependencies();
+  const conversation = (await deps.loadConversation({ companyId: "company-1", conversationId: "conversation-1" }))!;
+  conversation.contact.cpf = "invalido";
+  const context = await buildAiResponseContext({ companyId: "company-1", conversationId: "conversation-1" }, dependencies({
+    async loadConversation() { return conversation; },
+    async loadCurrentMessage() { return selectedReply({ body: "Meu CPF esta cadastrado?" }); }
+  }));
+  assert.equal(context.customerFacts.hasCpf, true); assert.equal(context.customerFacts.hasLocallyValidCpf, false);
+  assert.match(context.responseGoal.safeReply, /ja esta cadastrado/);
+  assert.doesNotMatch(context.responseGoal.safeReply, /envie|nao tem CPF|invalido/i);
+  assert.doesNotMatch(JSON.stringify(context.customerFacts), /invalido/);
 });

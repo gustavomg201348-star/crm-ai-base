@@ -1,4 +1,4 @@
-export const AI_REPLY_PROMPT_VERSION = "ai-reply-v1";
+export const AI_REPLY_PROMPT_VERSION = "ai-reply-v2";
 
 export const AI_REPLY_LIMITS = {
   suggestedReply: 1_200,
