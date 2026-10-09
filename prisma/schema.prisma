@@ -39,6 +39,61 @@ model Company {
   nextBestActionEvents NextBestActionEvent[]
   metaTemplates MetaTemplate[]
   mediaAssets   MediaAsset[]
+  openCreditIntegrations OpenCreditIntegration[]
+  openCreditLeads OpenCreditLead[]
+  openCreditEvents OpenCreditEvent[]
+}
+
+model OpenCreditIntegration {
+  id              String @id @default(cuid())
+  companyId       String
+  publicWebhookId String @unique
+  webhookSecret   String
+  enabled         Boolean @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  company         Company @relation(fields: [companyId], references: [id])
+  leads           OpenCreditLead[]
+  events          OpenCreditEvent[]
+
+  @@unique([companyId, id])
+}
+
+model OpenCreditLead {
+  id             String @id @default(cuid())
+  companyId      String
+  integrationId  String
+  externalLeadId String
+  contactId      String?
+  createdAt      DateTime @default(now())
+  company        Company @relation(fields: [companyId], references: [id])
+  integration    OpenCreditIntegration @relation(fields: [companyId, integrationId], references: [companyId, id])
+  contact        Contact? @relation(fields: [companyId, contactId], references: [companyId, id], onDelete: Restrict)
+  events         OpenCreditEvent[]
+
+  @@unique([companyId, integrationId, externalLeadId])
+  @@index([companyId, contactId])
+}
+
+model OpenCreditEvent {
+  id               String @id @default(cuid())
+  companyId        String
+  integrationId    String
+  eventId          String
+  eventType        String
+  externalLeadId   String
+  contractVersion  Int
+  assignedAt       DateTime
+  receivedAt       DateTime @default(now())
+  processedAt      DateTime?
+  processingStatus String
+  errorCode        String?
+  company          Company @relation(fields: [companyId], references: [id])
+  integration      OpenCreditIntegration @relation(fields: [companyId, integrationId], references: [companyId, id])
+  lead             OpenCreditLead @relation(fields: [companyId, integrationId, externalLeadId], references: [companyId, integrationId, externalLeadId])
+
+  @@unique([integrationId, eventId])
+  @@index([companyId, receivedAt])
 }
 
 model RateLimitBucket {
@@ -282,6 +337,8 @@ model Contact {
   multicredClients    MulticredClient[]
   nextBestActionEvents NextBestActionEvent[]
 
+  openCreditLeads OpenCreditLead[]
+  @@unique([companyId, id])
   @@index([companyId])
   @@index([companyId, phone])
   @@index([companyId, normalizedPhone])
