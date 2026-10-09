@@ -106,6 +106,7 @@ export function mapCampaign(campaign: CampaignWithRelations) {
     name: campaign.name,
     message: campaign.message,
     messageType: campaign.messageType,
+    aiProfile: campaign.aiProfile,
     templateName: campaign.templateName,
     templateLanguage: campaign.templateLanguage,
     templateVariables: campaign.templateVariables,

@@ -30,6 +30,7 @@ import { resolveConversationChannelId } from "@/lib/conversation-channel.service
 import { serializeCsvCell } from "@/lib/csv-export";
 import type { OpportunitySummary } from "@/lib/opportunity-summary-types";
 import { createAutoDraftController, type AutoDraftTrigger } from "@/lib/ai-auto-draft-state";
+import type { AiAgentProfile } from "@/lib/ai-agent-profile";
 import {
   aiReplyErrorMessage,
   createDetailedSnapshotAcceptance,
@@ -292,6 +293,7 @@ type ConversationRow = {
   channel: string;
   summary?: string | null;
   aiMode?: AiMode | null;
+  aiProfile?: AiAgentProfile | null;
   aiPaused?: boolean;
   aiLastSuggestion?: string | null;
   unreadCount: number;
@@ -908,6 +910,7 @@ type CampaignRow = {
   name: string;
   message: string;
   messageType?: string;
+  aiProfile?: AiAgentProfile | null;
   templateName?: string | null;
   templateLanguage?: string | null;
   templateVariables?: string | null;
@@ -2988,6 +2991,7 @@ export default function Home() {
     message: string;
     image?: File | null;
     messageType?: string;
+    aiProfile?: AiAgentProfile | null;
     templateName?: string;
     templateLanguage?: string;
     templateVariables?: string[];
@@ -3003,6 +3007,10 @@ export default function Home() {
     formData.set("message", payload.message);
     formData.set("contactIds", JSON.stringify(payload.contactIds));
     formData.set("messageType", payload.messageType ?? "TEXT");
+
+    if (payload.aiProfile) {
+      formData.set("aiProfile", payload.aiProfile);
+    }
     if (payload.templateName) formData.set("templateName", payload.templateName);
     if (payload.templateLanguage) {
       formData.set("templateLanguage", payload.templateLanguage);
@@ -15755,6 +15763,7 @@ function Disparos({
     message: string;
     image?: File | null;
     messageType?: string;
+    aiProfile?: AiAgentProfile | null;
     templateName?: string;
     templateLanguage?: string;
     templateVariables?: string[];
@@ -15767,6 +15776,9 @@ function Disparos({
   }) => Promise<CampaignRow | null>;
   onRefreshCampaigns: () => Promise<void>;
 }) {
+  const [aiProfile, setAiProfile] =
+    useState<AiAgentProfile | "">("");
+
   const metaChannels = channels.filter(
     (channel) =>
       channel.provider === "meta" &&
@@ -16467,6 +16479,7 @@ function Disparos({
       message: messageMode === "TEMPLATE" ? renderMessagePreview() : message,
       image: messageMode === "TEMPLATE" ? null : image,
       messageType: messageMode,
+      aiProfile: aiProfile || null,
       templateName: selectedCampaignTemplate?.name,
       templateLanguage: selectedCampaignTemplate?.language,
       templateVariables: campaignTemplateValues,
@@ -16481,6 +16494,7 @@ function Disparos({
       setSelectedIds([]);
       setMessage("");
       setImage(null);
+      setAiProfile("");
       setSelectedCampaignTemplate(null);
       setCampaignTemplateValues([]);
       setImportFile(null);
@@ -16512,6 +16526,33 @@ function Disparos({
             <Send className="h-4 w-4" />
             {sending ? "Enviando..." : "Enviar disparo"}
           </button>
+        </div>
+
+        <div className="mt-4 max-w-sm">
+          <label className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">
+            Agente IA
+          </label>
+
+          <select
+            className="mt-2 h-10 w-full rounded border border-line bg-white px-3 text-sm text-slate-700 outline-none"
+            value={aiProfile}
+            onChange={(event) =>
+              setAiProfile(
+                event.target.value as AiAgentProfile | ""
+              )
+            }
+          >
+            <option value="">
+              Nenhum agente especializado
+            </option>
+            <option value="CLT">
+              Credito CLT
+            </option>
+          </select>
+
+          <p className="mt-1 text-xs text-slate-500">
+            Define apenas o perfil da campanha. Nao ativa atendimento automatico.
+          </p>
         </div>
 
         <div className="mt-4 rounded-2xl border border-dashed border-blue-200 bg-blue-50/60 p-4">

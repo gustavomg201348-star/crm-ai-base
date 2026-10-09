@@ -24,6 +24,10 @@ import {
   digitsOnlyPhone,
   normalizeBrazilianPhoneForIdentity
 } from "@/lib/phone-normalization.service";
+import {
+  InvalidAiAgentProfileError,
+  parseAiAgentProfile
+} from "@/lib/ai-agent-profile";
 import { safeLogError } from "@/lib/safe-logger";
 import {
   deserializeTemplateVariableMappingV1,
@@ -127,6 +131,22 @@ export async function POST(request: NextRequest) {
     const contactIds = parseContactIds(formData.get("contactIds"));
     const image = formData.get("image");
     const messageType = String(formData.get("messageType") ?? "TEXT").trim();
+
+    let aiProfile: ReturnType<typeof parseAiAgentProfile>;
+
+    try {
+      aiProfile = parseAiAgentProfile(formData.get("aiProfile"));
+    } catch (error) {
+      if (error instanceof InvalidAiAgentProfileError) {
+        return NextResponse.json(
+          { error: error.message },
+          { status: 400 }
+        );
+      }
+
+      throw error;
+    }
+
     const templateName = String(formData.get("templateName") ?? "").trim();
     const templateLanguage = String(formData.get("templateLanguage") ?? "").trim();
     const templateVariables = String(formData.get("templateVariables") ?? "").trim();
@@ -333,6 +353,7 @@ export async function POST(request: NextRequest) {
         name: `Disparo ${new Date().toLocaleString("pt-BR")}`,
         message: message || `[Template: ${templateName}]`,
         messageType: messageType === "TEMPLATE" ? "TEMPLATE" : "TEXT",
+        aiProfile,
         templateName: messageType === "TEMPLATE" ? templateName : null,
         templateLanguage: messageType === "TEMPLATE" ? templateLanguage : null,
         templateVariables: messageType === "TEMPLATE" ? templateVariables || "[]" : null,

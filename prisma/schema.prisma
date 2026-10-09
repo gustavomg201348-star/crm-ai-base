@@ -527,6 +527,7 @@ model Conversation {
   channel       String         @default("whatsapp")
   summary       String?
   aiMode        String?
+  aiProfile     String?
   aiPaused      Boolean        @default(false)
   aiLastSuggestion String?
   unreadCount   Int            @default(0)
@@ -643,6 +644,7 @@ model Campaign {
   name        String
   message     String
   messageType String              @default("TEXT")
+  aiProfile   String?
   templateName String?
   templateLanguage String?
   templateVariables String?
