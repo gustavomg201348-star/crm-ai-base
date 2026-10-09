@@ -40,6 +40,7 @@ function createCampaignFixture({
     name: "Disparo",
     message: "Mensagem",
     messageType: "TEXT",
+    aiProfile: null,
     templateName: null,
     templateLanguage: null,
     templateVariables: null,
