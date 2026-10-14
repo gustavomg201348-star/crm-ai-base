@@ -134,7 +134,9 @@ async function rejectsDeleteRestrict(operation: () => Promise<unknown>, constrai
   catch (error) {
     if (error instanceof Prisma.PrismaClientUnknownRequestError &&
         constraints.some(constraint => new RegExp("\\b" + constraint + "\\b").test(error.message)) &&
-        (/code:\s*"23503"/.test(error.message) || error.message.includes("violates foreign key constraint"))) return;
+        (/code:\s*"(?:23001|23503)"/.test(error.message) ||
+          error.message.includes("violates RESTRICT setting of foreign key constraint") ||
+          error.message.includes("violates foreign key constraint"))) return;
     assert.fail(JSON.stringify({ context, outcome: "UNEXPECTED_DELETE_ERROR",
       expectedConstraints: constraints, ...safePrismaDiagnostic(error) }));
   }
