@@ -80,6 +80,19 @@ PostgreSQL, review data-retention/erasure and onboarding, then validate normal d
 Local Docker was unavailable during implementation; mock tests do not constitute
 material PostgreSQL concurrency evidence.
 
+The existing CI PostgreSQL 18 job now runs `opencredit-postgres.integration.ts`
+after the real migration chain. It checks table/index/FK definitions, migration
+completion, uniqueness, cross-company rejection, two concurrent signed handlers,
+event/lead retries, rollback, RESTRICT, foreign DDIs and calendar validation.
+Execution requires GitHub Actions, CI, explicit OPENCREDIT_POSTGRES_TEST=1 and the
+exact loopback qevora_ci test database/role/schema with fictitious CI credentials.
+The suite cleans only its own random Company IDs in reverse FK order and never
+prints credentials, encryption keys, signatures or payloads. Rollback deliberately
+injects an out-of-range integer at the service boundary after real Contact/Lead
+inserts; this is not a valid supplier request. Query text is observed only in
+memory, without parameters or logs. This gate has not been executed locally:
+successful material validation must be confirmed from CI before merge.
+
 Rollback: disable the integration and revert application changes; retain additive
 tables and audit records. Do not drop tables containing operational data automatically.
 There is no conversational bridge, controller change or modification of aiProfile.
