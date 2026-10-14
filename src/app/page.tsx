@@ -25,6 +25,7 @@ import { TemplateVariableDialog } from "@/app/components/conversations/TemplateV
 import { MotorCommercialPage } from "@/app/components/opportunities/MotorCommercialPage";
 import { NextBestActionPage } from "@/app/components/opportunities/NextBestActionPage";
 import { TemplateLibraryPage } from "@/app/components/templates/TemplateLibraryPage";
+import { OpenCreditSettingsCard } from "@/app/components/integrations/OpenCreditSettingsCard";
 import { useNewMessageSound } from "@/app/hooks/use-new-message-sound";
 import { resolveConversationChannelId } from "@/lib/conversation-channel.service";
 import { serializeCsvCell } from "@/lib/csv-export";
@@ -5154,6 +5155,7 @@ export default function Home() {
             />
           )}
           {active === "config" && userIsAdmin(session) && (
+            <>
             <Configuracoes
               reference={reference}
               attendants={attendants}
@@ -5175,6 +5177,8 @@ export default function Home() {
               onUpdateTag={handleUpdateTag}
               onUpdateUser={handleUpdateUser}
             />
+            <OpenCreditSettingsCard />
+            </>
           )}
         </div>
       </section>

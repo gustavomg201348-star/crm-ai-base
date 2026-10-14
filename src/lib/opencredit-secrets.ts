@@ -26,3 +26,7 @@ export function resolveOpenCreditWebhookSecret(
 export function createOpenCreditPublicWebhookId() {
   return randomBytes(24).toString("hex");
 }
+
+export function createOpenCreditWebhookSecret() {
+  return randomBytes(32).toString("hex");
+}
