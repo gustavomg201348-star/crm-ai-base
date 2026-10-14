@@ -101,3 +101,14 @@ GitHub CI run #280: OpenCredit material integration 9/9 PASS.
 Rollback: disable the integration and revert application changes; retain additive
 tables and audit records. Do not drop tables containing operational data automatically.
 There is no conversational bridge, controller change or modification of aiProfile.
+
+
+## Modos de recebimento
+
+A integração local possui três estados:
+
+- `ACTIVE`: o webhook aceita os eventos e os novos leads são gravados sem retenção.
+- `PAUSED`: o webhook continua autenticando, persistindo e respondendo sucesso para a Prospecta; os novos leads são marcados com `held=true`.
+- `DISABLED`: bloqueio total; o webhook é recusado e nenhum evento é ingerido.
+
+Ao mudar de `PAUSED` para `ACTIVE`, os leads retidos daquela empresa e integração são liberados de forma tenant-scoped. A pausa não altera URL, HMAC Secret, WhatsApp, IA ou operações de crédito. A rotação do segredo continua desativando a integração.
