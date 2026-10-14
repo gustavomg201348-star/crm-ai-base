@@ -342,7 +342,7 @@ test("actual RESTRICT rejects deletion of linked Contact, Integration and Compan
     ["OpenCreditLead_companyId_integrationId_fkey", "OpenCreditEvent_companyId_integrationId_fkey"], "delete linked Integration");
   await assertLinkedRecordsPreserved();
   await rejectsDeleteRestrict(() => db.company.delete({ where: { id: f.companyA } }),
-    ["OpenCreditIntegration_companyId_fkey", "OpenCreditLead_companyId_fkey", "OpenCreditEvent_companyId_fkey"], "delete linked Company");
+    ["OpenCreditIntegration_companyId_fkey", "OpenCreditLead_companyId_fkey", "OpenCreditEvent_companyId_fkey", "Contact_companyId_fkey"], "delete linked Company");
   await assertLinkedRecordsPreserved();
   assert.deepEqual(await f.counts(), { contacts: 1, leads: 1, events: 1 });
 }));
