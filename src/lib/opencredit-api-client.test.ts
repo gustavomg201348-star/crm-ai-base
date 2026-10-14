@@ -1,7 +1,30 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { before, test } from "node:test";
 import { readFileSync } from "node:fs";
-import { createOpenCreditApiClient, OpenCreditApiError } from "./opencredit-api-client";
+import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
+
+let createOpenCreditApiClient: typeof import("./opencredit-api-client").createOpenCreditApiClient;
+let OpenCreditApiError: typeof import("./opencredit-api-client").OpenCreditApiError;
+
+// Standalone Node has no Next server-layer aliases. Mock only the marker while
+// importing the module, as Next's server compiler does; restore it immediately.
+before(async () => {
+  const require = createRequire(import.meta.url);
+  const marker = require.resolve("next/dist/compiled/server-only");
+  const empty = require.resolve("next/dist/compiled/server-only/empty");
+  require(empty);
+  const previous = require.cache[marker];
+  require.cache[marker] = require.cache[empty];
+  try {
+    const client = await import("./opencredit-api-client");
+    createOpenCreditApiClient = client.createOpenCreditApiClient;
+    OpenCreditApiError = client.OpenCreditApiError;
+  } finally {
+    if (previous) require.cache[marker] = previous;
+    else delete require.cache[marker];
+  }
+});
 
 const creds = { email: "partner@example.invalid", password: "fictitious-test-password" };
 const pair = (suffix = "1", expiresIn = 28800) => Response.json({ data: {
@@ -161,4 +184,46 @@ test("authentication timeout sanitizes abort errors without a password retry", a
 test("client has no DB, logging, webhook linkage or persisted browser token storage", () => {
   const source = readFileSync(new URL("./opencredit-api-client.ts", import.meta.url), "utf8");
   assert.doesNotMatch(source, /console\.|safeLog|prisma|localStorage|sessionStorage|opencredit-webhook|opencredit-management/);
+});
+
+test("server-only marker is present and bundled Next aliases enforce both boundaries", () => {
+  const source = readFileSync(new URL("./opencredit-api-client.ts", import.meta.url), "utf8");
+  assert.match(source, /^import "next\/dist\/compiled\/server-only";/m);
+  const require = createRequire(import.meta.url);
+  const { createServerOnlyClientOnlyAliases } = require("next/dist/build/create-compiler-aliases") as {
+    createServerOnlyClientOnlyAliases(isServer: boolean): Record<string, string>;
+  };
+  assert.equal(createServerOnlyClientOnlyAliases(true)["next/dist/compiled/server-only$"], "next/dist/compiled/server-only/empty");
+  assert.equal(createServerOnlyClientOnlyAliases(false)["next/dist/compiled/server-only"], "next/dist/compiled/server-only/index");
+  const config = readFileSync(require.resolve("next/dist/build/webpack-config"), "utf8");
+  assert.ok(config.includes("next-invalid-import-error-loader"));
+  assert.ok(config.includes("'server-only' cannot be imported from a Client Component module."));
+});
+
+test("bundled marker rejects ordinary Node import; Next server alias target is empty", () => {
+  const require = createRequire(import.meta.url);
+  const marker = require.resolve("next/dist/compiled/server-only");
+  const code = `require(${JSON.stringify(marker)})`;
+  const env = { ...process.env, NODE_OPTIONS: "" };
+  const rejected = spawnSync(process.execPath, ["-e", code], { env, encoding: "utf8", timeout: 10000 });
+  assert.equal(rejected.status, 1);
+  assert.match(rejected.stderr, /cannot be imported from a Client Component module/);
+  const serverCode = `require(${JSON.stringify(require.resolve("next/dist/compiled/server-only/empty"))})`;
+  const allowed = spawnSync(process.execPath, ["-e", serverCode], { env, encoding: "utf8", timeout: 10000 });
+  assert.equal(allowed.status, 0);
+});
+
+test("existing runtime browser guard remains effective after the server-marker test bootstrap", async () => {
+  const f = fixture(() => { throw new Error("transport must not run"); });
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "window");
+  Object.defineProperty(globalThis, "window", { value: {}, configurable: true });
+  try {
+    assert.throws(() => createOpenCreditApiClient(), { code: "CONFIGURATION" });
+    await assert.rejects(f.client.request("/api/banks"), { code: "CONFIGURATION" });
+    assert.equal(f.calls.length, 0);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "window", previous);
+    else Reflect.deleteProperty(globalThis, "window");
+    f.client.dispose();
+  }
 });

@@ -12,6 +12,24 @@ Supply OPENCREDIT_API_EMAIL and OPENCREDIT_API_PASSWORD through the deployment's
 secret manager; never put actual values in Git, logs, browser state or URLs.
 Importing the client makes no requests. No route or existing caller uses it yet.
 
+The module imports `next/dist/compiled/server-only`, bundled by the pinned Next
+15.5.27. Next's layer-aware aliases and invalid-import loader reject importing it
+from a Client Component at build time; the existing runtime check remains intact.
+No extra package or compiler configuration is introduced. This bundled path is a
+Next internal integration point: revalidate its aliases/loader on framework upgrades.
+Standalone Node tests have no Next server-layer aliases. The test bootstrap mocks
+only the marker to the bundled empty server target during the client import and
+immediately restores the require cache. Authentication/refresh/retry code and the
+runtime check are not mocked. Run normally:
+
+```powershell
+npx.cmd --yes tsx@4.20.6 src/lib/opencredit-api-client.test.ts
+```
+
+The tests verify the marker, installed Next boundary aliases/loader, rejection in
+ordinary Node and acceptance of the empty server target. They do not create a
+temporary Client Component fixture or alter the application to provoke a failed build.
+
 The environment account is a **partner account**, not a company-specific binding.
 Future callers must authorize the CRM company and explicitly validate its partner /
 provider tenant association before using it. Never expose this as a generic proxy
