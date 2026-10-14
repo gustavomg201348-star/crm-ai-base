@@ -94,7 +94,7 @@ export async function ingestOpenCreditLead(db: Db, binding: OpenCreditBinding, p
         deadline.assertRemaining();
         const integration = await tx.openCreditIntegration.findFirst({
           where: { id: binding.id, companyId: binding.companyId, enabled: true },
-          select: { id: true }
+          select: { id: true, paused: true }
         });
         if (!integration) throw new OpenCreditInputError("INTEGRATION_UNAVAILABLE", 403);
         const where = { integrationId_eventId: { integrationId: binding.id, eventId: payload.eventId } };
@@ -120,10 +120,15 @@ export async function ingestOpenCreditLead(db: Db, binding: OpenCreditBinding, p
         if (!lead) {
           lead = await tx.openCreditLead.create({ data: {
             companyId: binding.companyId, integrationId: binding.id,
-            externalLeadId: payload.externalLeadId, contactId
+            externalLeadId: payload.externalLeadId, contactId, held: integration.paused
           } });
-        } else if (!lead.contactId && contactId) {
-          await tx.openCreditLead.update({ where: { id: lead.id }, data: { contactId } });
+        } else {
+          const update: { contactId?: string; held?: boolean } = {};
+          if (!lead.contactId && contactId) update.contactId = contactId;
+          if (lead.held && !integration.paused) update.held = false;
+          if (Object.keys(update).length) {
+            await tx.openCreditLead.update({ where: { id: lead.id }, data: update });
+          }
         }
         deadline.assertRemaining();
         await tx.openCreditEvent.create({ data: {

@@ -114,6 +114,7 @@ function databaseFixture(initial: FakeContact[] = []) {
   let transient = 0;
   let transientCode = "P2034";
   let integrationEnabled = true;
+  let integrationPaused = false;
   let transientMeta: Record<string, unknown> | undefined;
   const same = (row: Record<string, unknown>, where: Record<string, unknown>) =>
     Object.entries(where).every(([key, value]) => row[key] === value);
@@ -121,7 +122,7 @@ function databaseFixture(initial: FakeContact[] = []) {
     openCreditIntegration: { findFirst: async ({ where }: { where: Record<string, unknown> }) => {
       assert.equal(where.enabled, true);
       assert.ok(where.companyId);
-      return integrationEnabled ? { id: where.id } : null;
+      return integrationEnabled ? { id: where.id, paused: integrationPaused } : null;
     } },
     contact: {
       findMany: async ({ where }: { where: Record<string, unknown> }) => state.contacts.filter(c => same(c, where)).slice(0, 2),
@@ -179,7 +180,7 @@ function databaseFixture(initial: FakeContact[] = []) {
     uniqueConflict: (meta: Record<string, unknown> = {
       modelName: "OpenCreditEvent", target: ["integrationId", "eventId"]
     }) => { transient = 1; transientCode = "P2002"; transientMeta = meta; },
-    disable: () => { integrationEnabled = false; } };
+    disable: () => { integrationEnabled = false; }, pause: () => { integrationPaused = true; } };
 }
 test("retry deduplicates event and Contact; another event reuses external lead", async () => {
   const f = databaseFixture();
@@ -192,6 +193,14 @@ test("retry deduplicates event and Contact; another event reuses external lead",
   assert.equal(f.state.events.length, 2);
   assert.equal(f.state.leads[0].externalLeadId, "external-lead");
   assert.equal(f.state.events[0].companyId, binding.companyId);
+});
+test("paused integration acknowledges persistence path and marks new lead held", async () => {
+  const f = databaseFixture(); f.pause();
+  const result = await ingestOpenCreditLead(f.db, binding, parseOpenCreditAssignedLead(validPayload()));
+  assert.equal(result.duplicate, false);
+  assert.equal(f.state.leads.length, 1);
+  assert.equal(f.state.leads[0].held, true);
+  assert.equal(f.state.events.length, 1);
 });
 test("eventId cannot be rebound to another external lead", async () => {
   const f = databaseFixture();

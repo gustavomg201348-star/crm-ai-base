@@ -50,6 +50,7 @@ model OpenCreditIntegration {
   publicWebhookId String @unique
   webhookSecret   String
   enabled         Boolean @default(false)
+  paused          Boolean @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   company         Company @relation(fields: [companyId], references: [id])
@@ -65,6 +66,7 @@ model OpenCreditLead {
   integrationId  String
   externalLeadId String
   contactId      String?
+  held           Boolean @default(false)
   createdAt      DateTime @default(now())
   company        Company @relation(fields: [companyId], references: [id])
   integration    OpenCreditIntegration @relation(fields: [companyId, integrationId], references: [companyId, id])
@@ -73,6 +75,7 @@ model OpenCreditLead {
 
   @@unique([companyId, integrationId, externalLeadId])
   @@index([companyId, contactId])
+  @@index([companyId, integrationId, held])
 }
 
 model OpenCreditEvent {

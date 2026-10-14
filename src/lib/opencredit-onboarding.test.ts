@@ -14,6 +14,7 @@ const encryption = { activeKeyId: "v1", keys: { v1: Buffer.alloc(32, 7) } };
 const admin: SessionUser = { id: "synthetic-admin", companyId: "synthetic-company-a", name: "Synthetic", email: "admin@example.test", role: "ADMIN" };
 function fixture(options: typeof encryption | null = encryption, session: SessionUser | null = admin) {
   const rows: OpenCreditIntegration[] = [];
+  const leads: Array<{ companyId: string; integrationId: string; held: boolean }> = [];
   const calls: Array<{ method: string; args: unknown }> = [];
   let counter = 0;
   let conflict = false;
@@ -23,7 +24,7 @@ function fixture(options: typeof encryption | null = encryption, session: Sessio
     const actual = row[key as keyof OpenCreditIntegration];
     return actual instanceof Date && value instanceof Date ? actual.getTime() === value.getTime() : actual === value;
   });
-  const db = { openCreditIntegration: {
+  const openCreditIntegration = {
     async findMany(args: Args) { calls.push({ method: "findMany", args }); return rows.filter(row => matches(row, args.where)).map(row => ({ ...row })); },
     async findFirst(args: Args) { calls.push({ method: "findFirst", args }); const row = rows.find(row => matches(row, args.where)); return row ? { ...row } : null; },
     async create(args: Args) {
@@ -39,10 +40,26 @@ function fixture(options: typeof encryption | null = encryption, session: Sessio
       Object.assign(row, args.data, { updatedAt: new Date(++counter) });
       return { ...row };
     }
-  } } as unknown as Pick<PrismaClient, "openCreditIntegration">;
+  };
+  const openCreditLead = {
+    async updateMany({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) {
+      calls.push({ method: "lead.updateMany", args: { where, data } });
+      let count = 0;
+      for (const lead of leads) {
+        if (Object.entries(where).every(([key, value]) => lead[key as keyof typeof lead] === value)) {
+          Object.assign(lead, data); count++;
+        }
+      }
+      return { count };
+    }
+  };
+  const db = {
+    openCreditIntegration, openCreditLead,
+    $transaction: async (run: (tx: unknown) => Promise<unknown>) => run({ openCreditIntegration, openCreditLead })
+  } as unknown as Pick<PrismaClient, "$transaction" | "openCreditIntegration" | "openCreditLead">;
   const service = createOpenCreditIntegrationService(db, options);
   const handlers = createOpenCreditManagementHandlers({ getSession: async () => session, service });
-  return { rows, calls, db, service, handlers, conflict: () => { conflict = true; }, failCreate: (marker: string) => { createError = marker; } };
+  return { rows, leads, calls, db, service, handlers, conflict: () => { conflict = true; }, failCreate: (marker: string) => { createError = marker; } };
 }
 function request(method: string, body?: unknown) {
   return new NextRequest("http://localhost/api/integrations/opencredit", {
@@ -62,7 +79,8 @@ test("create encrypts at rest, returns secret once, uses session tenant and star
   assert.equal(response.status, 201); assertNoStore(response);
   const data = await response.json();
   assert.equal(f.rows.length, 1); assert.equal(f.rows[0].companyId, admin.companyId);
-  assert.equal(f.rows[0].enabled, false); assert.equal(data.integration.enabled, false);
+  assert.equal(f.rows[0].enabled, false); assert.equal(f.rows[0].paused, false);
+  assert.equal(data.integration.enabled, false); assert.equal(data.integration.status, "DISABLED");
   assert.ok(f.rows[0].webhookSecret.startsWith("enc:v1:"));
   assert.ok(f.rows[0].webhookSecret !== data.setupSecret);
   assert.ok(resolveOpenCreditWebhookSecret(f.rows[0].webhookSecret, encryption) === data.setupSecret);
@@ -80,7 +98,7 @@ test("GET is tenant scoped/read only and never returns plaintext or ciphertext",
 test("mapper uses an exact whitelist, including legacy dates and secret-presence boolean", async () => {
   const f = fixture(); await f.service.create(admin.companyId);
   assert.deepEqual(Object.keys(mapOpenCreditIntegration(f.rows[0])).sort(),
-    ["id", "publicWebhookId", "enabled", "createdAt", "updatedAt", "hasWebhookSecret", "webhookPath"].sort());
+    ["id", "publicWebhookId", "enabled", "status", "createdAt", "updatedAt", "hasWebhookSecret", "webhookPath"].sort());
   const mapped = mapOpenCreditIntegration({ ...f.rows[0], webhookSecret: "" });
   assert.equal(mapped.hasWebhookSecret, false);
   assert.equal(mapped.webhookPath, `/api/integrations/opencredit/webhooks/${mapped.publicWebhookId}`);
@@ -123,8 +141,9 @@ test("tenant A cannot rotate tenant B secret", async () => {
   assert.equal(response.status, 404); assert.deepEqual(f.rows[0], before);
   assert.deepEqual(f.calls.map(call => call.method), ["findFirst"]);
 });
-for (const body of [{}, { enabled: "true" }, { enabled: true, companyId: "other" }, { enabled: true, webhookSecret: "synthetic-secret" },
-  { enabled: true, publicWebhookId: "other" }, { enabled: true, createdAt: "other" }, [], null]) {
+for (const body of [{}, { enabled: "true" }, { status: "UNKNOWN" }, { paused: true }, { enabled: true, companyId: "other" },
+  { enabled: true, webhookSecret: "synthetic-secret" }, { enabled: true, publicWebhookId: "other" },
+  { enabled: true, createdAt: "other" }, { status: "PAUSED", enabled: true }, [], null]) {
   test(`PATCH rejects non-whitelisted body ${JSON.stringify(Object.keys(body ?? {}))}`, async () => {
     const f = fixture(); const response = await f.handlers.PATCH(request("PATCH", body), context("integration-a"));
     assert.equal(response.status, 400); assert.equal(f.calls.length, 0);
@@ -147,8 +166,31 @@ test("PATCH only changes enabled and never returns setupSecret", async () => {
     assert.ok(!text.includes("setupSecret") && !text.includes("webhookSecret") && !text.includes("enc:v1:") && !text.includes(created.setupSecret));
     assert.equal(f.rows[0].enabled, enabled);
     const write = f.calls.filter(call => call.method === "update").at(-1)!.args as { where: { companyId: string }; data: unknown };
-    assert.equal(write.where.companyId, admin.companyId); assert.deepEqual(write.data, { enabled });
+    assert.equal(write.where.companyId, admin.companyId); assert.deepEqual(write.data, { enabled, paused: false });
   }
+});
+test("ACTIVE, PAUSED and DISABLED retain and release only local leads", async () => {
+  const f = fixture(); const created = await f.service.create(admin.companyId);
+  let response = await f.handlers.PATCH(request("PATCH", { status: "PAUSED" }), context(created.integration.id));
+  assert.equal(response.status, 200);
+  let data = await response.json();
+  assert.equal(data.integration.status, "PAUSED");
+  assert.equal(f.rows[0].enabled, true); assert.equal(f.rows[0].paused, true);
+  f.leads.push(
+    { companyId: admin.companyId, integrationId: created.integration.id, held: true },
+    { companyId: "synthetic-company-b", integrationId: created.integration.id, held: true }
+  );
+  response = await f.handlers.PATCH(request("PATCH", { status: "ACTIVE" }), context(created.integration.id));
+  assert.equal(response.status, 200);
+  data = await response.json();
+  assert.equal(data.integration.status, "ACTIVE");
+  assert.equal(f.leads[0].held, false);
+  assert.equal(f.leads[1].held, true);
+  response = await f.handlers.PATCH(request("PATCH", { status: "DISABLED" }), context(created.integration.id));
+  assert.equal(response.status, 200);
+  data = await response.json();
+  assert.equal(data.integration.status, "DISABLED");
+  assert.equal(f.rows[0].enabled, false); assert.equal(f.rows[0].paused, false);
 });
 test("rotation changes encrypted secret and disables atomically; old signature fails and public ID is stable", async () => {
   const f = fixture(); const created = await f.service.create(admin.companyId);
@@ -168,12 +210,13 @@ test("rotation changes encrypted secret and disables atomically; old signature f
   assert.equal(verifyOpenCreditSignature(raw, signature(data.setupSecret), resolved), true);
   const write = f.calls.filter(call => call.method === "update").at(-1)!.args as { where: { companyId: string }; data: Record<string, unknown> };
   assert.equal(write.where.companyId, admin.companyId);
-  assert.deepEqual(Object.keys(write.data).sort(), ["enabled", "webhookSecret"]); assert.equal(write.data.enabled, false);
+  assert.deepEqual(Object.keys(write.data).sort(), ["enabled", "paused", "webhookSecret"]);
+  assert.equal(write.data.enabled, false); assert.equal(write.data.paused, false);
 });
 test("missing encryption fails create and rotation closed without writes", async () => {
   const f = fixture(null);
   await assert.rejects(() => f.service.create(admin.companyId)); assert.equal(f.calls.length, 0);
-  f.rows.push({ id: "existing", companyId: admin.companyId, publicWebhookId: "a".repeat(48), enabled: true,
+  f.rows.push({ id: "existing", companyId: admin.companyId, publicWebhookId: "a".repeat(48), enabled: true, paused: false,
     webhookSecret: prepareOpenCreditWebhookSecret("synthetic", encryption), createdAt: new Date(), updatedAt: new Date() });
   await assert.rejects(() => f.service.rotate(admin.companyId, "existing"));
   assert.equal(f.rows[0].enabled, true); assert.equal(f.calls.filter(call => call.method === "update").length, 0);

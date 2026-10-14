@@ -1,10 +1,21 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { SafeOpenCreditIntegration } from "@/lib/opencredit-integration.service";
+import type { OpenCreditStatus, SafeOpenCreditIntegration } from "@/lib/opencredit-integration.service";
 
 const button = "rounded-xl border border-line px-3 py-2 text-sm font-semibold disabled:opacity-50";
 type Setup = { integration: SafeOpenCreditIntegration; setupSecret: string };
+
+const statusLabel: Record<OpenCreditStatus, string> = {
+  ACTIVE: "Recebendo leads",
+  PAUSED: "Recebimento pausado",
+  DISABLED: "Integração desativada"
+};
+const statusHelp: Record<OpenCreditStatus, string> = {
+  ACTIVE: "Novos leads recebidos ficam disponíveis normalmente.",
+  PAUSED: "A Prospecta continua entregando normalmente, mas os novos leads ficam retidos no QEVORA até você retomar.",
+  DISABLED: "Bloqueio total: o webhook é recusado."
+};
 
 export function OpenCreditSettingsCard() {
   const [integrations, setIntegrations] = useState<SafeOpenCreditIntegration[]>([]);
@@ -39,14 +50,25 @@ export function OpenCreditSettingsCard() {
       const data = await response.json() as { integration: SafeOpenCreditIntegration; setupSecret?: string };
       setIntegrations(current => [data.integration, ...current.filter(row => row.id !== data.integration.id)]);
       if (typeof data.setupSecret === "string") setSetup({ integration: data.integration, setupSecret: data.setupSecret });
+      else setNotice("Status atualizado.");
     } catch {
-      // Never serialize the response, exception or one-time secret in logs.
       setError("Não foi possível concluir a configuração. Recarregue a lista antes de tentar novamente.");
     } finally { setBusy(false); }
   }
+
   async function copy(value: string) {
     try { await navigator.clipboard.writeText(value); setNotice("Copiado."); }
     catch { setError("Não foi possível copiar. Copie manualmente o campo exibido."); }
+  }
+
+  function changeStatus(row: SafeOpenCreditIntegration, status: OpenCreditStatus) {
+    if (status === "ACTIVE" && row.status === "DISABLED" &&
+        !window.confirm("Ative somente depois que a URL e o segredo estiverem configurados no fornecedor. Deseja ativar?")) return;
+    if (status === "PAUSED" &&
+        !window.confirm("Durante a pausa, os novos leads continuarão sendo recebidos, mas ficarão retidos até você retomar. Deseja pausar?")) return;
+    if (status === "DISABLED" &&
+        !window.confirm("Isso fará o QEVORA recusar o webhook. Use apenas quando quiser bloquear totalmente a integração. Deseja desativar?")) return;
+    void mutate(`/api/integrations/opencredit/${encodeURIComponent(row.id)}`, "PATCH", { status });
   }
 
   return (
@@ -54,27 +76,43 @@ export function OpenCreditSettingsCard() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 id="opencredit-title" className="text-lg font-bold">OpenCredit / Prospecta</h2>
-          <p className="text-sm text-slate-500">Configuração segura do webhook de leads. Não ativa IA, WhatsApp ou operações de crédito.</p>
+          <p className="text-sm text-slate-500">Controle do recebimento de leads. O modo pausado retém novos leads sem provocar falha no webhook.</p>
         </div>
         <button type="button" className={button} disabled={busy || Boolean(setup)}
           onClick={() => void mutate("/api/integrations/opencredit", "POST")}>Criar integração</button>
       </div>
+
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
       {notice && <p role="status" className="text-sm text-teal-700">{notice}</p>}
       {!integrations.length && <p className="text-sm text-slate-500">Nenhuma integração carregada.</p>}
+
       {integrations.map(row => (
         <div key={row.id} className="space-y-3 rounded-2xl border border-line p-4">
           <div className="flex flex-wrap justify-between gap-2 text-sm">
-            <strong>{row.enabled ? "Ativa" : "Desativada"}</strong>
+            <strong>{statusLabel[row.status]}</strong>
             <span>Criada em {new Date(row.createdAt).toLocaleString("pt-BR")}</span>
           </div>
+          <p className="text-sm text-slate-500">{statusHelp[row.status]}</p>
           <p className="break-all text-sm">{origin + row.webhookPath}</p>
+
           <div className="flex flex-wrap gap-2">
             <button type="button" className={button} onClick={() => void copy(origin + row.webhookPath)}>Copiar URL</button>
-            <button type="button" className={button} disabled={busy || Boolean(setup)} onClick={() => {
-              if (!row.enabled && !window.confirm("Ative somente depois que a URL e o segredo estiverem configurados no fornecedor.")) return;
-              void mutate(`/api/integrations/opencredit/${encodeURIComponent(row.id)}`, "PATCH", { enabled: !row.enabled });
-            }}>{row.enabled ? "Desativar" : "Ativar"}</button>
+            {row.status === "ACTIVE" && (
+              <button type="button" className={button} disabled={busy || Boolean(setup)}
+                onClick={() => changeStatus(row, "PAUSED")}>Pausar recebimento</button>
+            )}
+            {row.status === "PAUSED" && (
+              <button type="button" className={button} disabled={busy || Boolean(setup)}
+                onClick={() => changeStatus(row, "ACTIVE")}>Retomar recebimento</button>
+            )}
+            {row.status === "DISABLED" && (
+              <button type="button" className={button} disabled={busy || Boolean(setup)}
+                onClick={() => changeStatus(row, "ACTIVE")}>Ativar</button>
+            )}
+            {row.status !== "DISABLED" && (
+              <button type="button" className={button} disabled={busy || Boolean(setup)}
+                onClick={() => changeStatus(row, "DISABLED")}>Desativar</button>
+            )}
             <button type="button" className={button} disabled={busy || Boolean(setup)} onClick={() => {
               if (!window.confirm("O segredo atual deixará de funcionar e a integração será automaticamente desativada. Atualize o segredo no fornecedor antes de reativar. Deseja continuar?")) return;
               void mutate(`/api/integrations/opencredit/${encodeURIComponent(row.id)}/rotate-secret`, "POST");
@@ -82,6 +120,7 @@ export function OpenCreditSettingsCard() {
           </div>
         </div>
       ))}
+
       {setup && (
         <div role="dialog" aria-modal="true" aria-label="Segredo de configuração OpenCredit"
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
