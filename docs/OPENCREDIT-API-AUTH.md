@@ -10,7 +10,8 @@ No changes to lead.assigned, receive modes, schema, migrations or UI are needed.
 `src/lib/opencredit-api-client.ts` exports a lazy reusable client and injectable factory.
 Supply OPENCREDIT_API_EMAIL and OPENCREDIT_API_PASSWORD through the deployment's
 secret manager; never put actual values in Git, logs, browser state or URLs.
-Importing the client makes no requests. No route or existing caller uses it yet.
+Importing the client makes no requests. Only the platform-admin connection test
+described below uses it; no commercial workflow is connected.
 
 The module uses the public `import "server-only"` marker, as documented in
 [Next.js environment poisoning protection](https://nextjs.org/docs/app/getting-started/server-and-client-components#preventing-environment-poisoning).
@@ -78,4 +79,53 @@ though the provider documentation describes it as optional. Partner login tokens
 are not webhook HMAC secrets and never replace signature validation.
 
 No registration, credentials configuration or real API request was performed.
-Rollback: remove this unused client/tests/document; no database rollback needed.
+Rollback: remove the connection endpoint and then the client/tests/document when
+no caller remains; no database rollback is needed.
+
+## Explicit platform-admin connection test
+
+POST `/api/admin/integrations/opencredit/test-connection` requires a current QEVORA
+session and the existing `requirePlatformAdmin` policy. It does not authorize all
+Company admins to use the partner account. Body must contain zero bytes (even `{}`
+is rejected); an empty transport stream is accepted, and a stalled request body
+is cancelled/rejected after one second. Queries and inbound Authorization headers
+are rejected. Origin must
+match the request protocol plus Host (or URL host when absent). Next's listener
+URL can use an internal host behind a proxy; X-Forwarded-Host is not trusted for
+this comparison. Sec-Fetch-Site, if present, must be same-origin.
+No UI or automatic invocation is added. All responses use Cache-Control: no-store.
+
+After authorization/request validation, the existing shared limiter enforces
+three attempts per minute with both companyId and userId in the rule identity.
+The only permitted database writes are existing RateLimitBucket infrastructure;
+session freshness performs its usual User read. No functional records are changed.
+
+All four settings must exist before external requests: OPENCREDIT_API_EMAIL,
+OPENCREDIT_API_PASSWORD, OPENCREDIT_TENANT_ID and OPENCREDIT_PARTNER_ID. IDs accept
+1–128 ASCII letters/digits/underscore/hyphen, starting with a letter/digit. Values
+are runtime-only, never hardcoded, accepted from requests or stored in the database.
+Confirm the actual account/tenant/partner relationship through provider onboarding.
+This endpoint is not a Company-to-partner commercial authorization registry.
+
+The service constructs exactly GET `/api/tenants/{tenantId}/banks` with product=clt
+and the configured partnerId. It never selects another path or initiates commercial
+POST/PATCH/DELETE. Required login/refresh POSTs remain solely in the existing client.
+Provider 401 recovery and the single GET retry are unchanged; no service retry exists.
+
+A 20-second total deadline includes client authentication/request and body reading.
+The JSON body is bounded to 64 KiB of actual bytes and data.items is validated
+(at most 1000 items with valid bankId and nonblank bankName). Only `{ok:true,
+bankCount:number}` is returned; extra fields, bearer, headers and raw error bodies
+are never forwarded or logged. Empty items is valid, not a synthetic fallback.
+
+HTTP errors: QEVORA authentication 401, platform/origin rejection 403, unexpected
+request 400, limiter 429 (or unavailable 503), configuration 503, provider rejection /
+invalid response 502, provider 429/5xx or network/deadline 503. No failure returns 200.
+On timeout, the service aborts the request and cancels a body reader when available.
+Already in-flight shared auth can still complete: this is not a promise of provider
+cancellation. Late responses are cancelled/discarded, not returned as success.
+
+Validation uses injected transport, fictitious configuration and an isolated limiter
+store. No real login, provider request, Railway configuration or webhook activation
+is performed. Rollback this slice by removing the unused administrative endpoint
+and its service/tests; no database/schema rollback is required.
