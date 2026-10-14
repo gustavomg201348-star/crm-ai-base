@@ -3,7 +3,6 @@ import test, { after } from "node:test";
 import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { ingestOpenCreditLead } from "./opencredit-lead.service";
-import { parseOpenCreditAssignedLead } from "./opencredit-webhook-contract";
 import { createOpenCreditWebhookHandler } from "./opencredit-webhook-handler";
 import { createOpenCreditPublicWebhookId, prepareOpenCreditWebhookSecret, resolveOpenCreditWebhookSecret } from "./opencredit-secrets";
 
@@ -129,6 +128,17 @@ async function rejectsPrismaCode(operation: () => Promise<unknown>, code: string
     assert.fail(JSON.stringify({ context, expectedCode: code, outcome: "UNEXPECTED_ERROR", ...safePrismaDiagnostic(error) }));
   }
   assert.fail(JSON.stringify({ context, expectedCode: code, outcome: "OPERATION_DID_NOT_REJECT" }));
+}
+async function rejectsDeleteRestrict(operation: () => Promise<unknown>, constraints: string[], context: string) {
+  try { await operation(); }
+  catch (error) {
+    if (error instanceof Prisma.PrismaClientUnknownRequestError &&
+        constraints.some(constraint => new RegExp("\\b" + constraint + "\\b").test(error.message)) &&
+        (/code:\s*"23503"/.test(error.message) || error.message.includes("violates foreign key constraint"))) return;
+    assert.fail(JSON.stringify({ context, outcome: "UNEXPECTED_DELETE_ERROR",
+      expectedConstraints: constraints, ...safePrismaDiagnostic(error) }));
+  }
+  assert.fail(JSON.stringify({ context, outcome: "DELETE_DID_NOT_REJECT", expectedConstraints: constraints }));
 }
 
 test("OpenCredit migration and actual table/index/FK definitions", async () => {
@@ -275,31 +285,31 @@ test("same event with another lead conflicts; new event reuses existing external
   assert.deepEqual(await f.counts(), { contacts: 1, leads: 1, events: 2 });
 }));
 
-test("real transaction rolls back successful Contact/Lead inserts when final event data fails", async () => withFixture(async f => {
-  const input = parseOpenCreditAssignedLead(f.payload());
-  // Deliberate fault injection at the service boundary, NOT a valid webhook.
-  // Int overflow fails the final event operation after earlier real inserts.
-  input.contractVersion = 2_147_483_648;
+test("real transaction rolls back Contact/Lead inserts when final Event violates PostgreSQL FK", async () => withFixture(async f => {
   const queries: string[] = [];
   recordQueries = queries;
   try {
-    await assert.rejects(
-      () => ingestOpenCreditLead(db, { id: f.integration.id, companyId: f.companyA }, input),
-      error => {
-        // Prisma 5.22 binds Prisma Int as INT8; PostgreSQL rejects storing it
-        // in INTEGER with SQLSTATE 22003. The native connector wraps that
-        // unmapped PostgresError in UnknownRequestError, not P2020/P2010.
-        // Sources: prisma-engines/5.22.0/.../model_extensions/scalar_field.rs
-        // and quaint/src/connector/postgres/error.rs. Check only the machine
-        // code carried in the diagnostic, never generic/full error wording.
-        return error instanceof Prisma.PrismaClientUnknownRequestError &&
-          /PostgresError\s*\{\s*code:\s*"22003"\s*,/.test(error.message);
-      }
-    );
+    await rejectsPrismaCode(() => db.$transaction(async tx => {
+      const contact = await tx.contact.create({ data: {
+        companyId: f.companyA, name: "Synthetic rollback Contact", phone: "11987654321"
+      } });
+      await tx.openCreditLead.create({ data: {
+        companyId: f.companyA, integrationId: f.integration.id,
+        externalLeadId: "rollback-existing-lead", contactId: contact.id
+      } });
+      // Valid Prisma input; only the final composite FK fails in PostgreSQL.
+      await tx.openCreditEvent.create({ data: {
+        companyId: f.companyA, integrationId: f.integration.id,
+        externalLeadId: "rollback-missing-lead", eventId: "rollback-event",
+        eventType: "lead.assigned", contractVersion: 2,
+        assignedAt: new Date("2026-10-09T17:00:00Z"), processingStatus: "PROCESSED"
+      } });
+    }), "P2003", "rollback final Event externalLeadId FK");
   }
   finally { recordQueries = null; }
   assert.ok(queries.some(q => q.includes('INSERT INTO "public"."Contact"')), "Contact insert must actually have run");
   assert.ok(queries.some(q => q.includes('INSERT INTO "public"."OpenCreditLead"')), "Lead insert must actually have run");
+  assert.ok(queries.some(q => q.includes('INSERT INTO "public"."OpenCreditEvent"')), "Final Event INSERT must reach PostgreSQL");
   assert.ok(queries.some(q => q.trim().toUpperCase() === "ROLLBACK"), "Database rollback must be observed");
   assert.deepEqual(await f.counts(), { contacts: 0, leads: 0, events: 0 });
 }));
@@ -310,9 +320,28 @@ test("actual RESTRICT rejects deletion of linked Contact, Integration and Compan
     companyId_integrationId_externalLeadId: { companyId: f.companyA, integrationId: f.integration.id, externalLeadId: "synthetic-lead" }
   } });
   assert.ok(lead.contactId);
-  await rejectsPrismaCode(() => db.contact.delete({ where: { id: lead.contactId! } }), "P2003", "delete linked Contact");
-  await rejectsPrismaCode(() => db.openCreditIntegration.delete({ where: { id: f.integration.id } }), "P2003", "delete linked Integration");
-  await rejectsPrismaCode(() => db.company.delete({ where: { id: f.companyA } }), "P2003", "delete linked Company");
+  const assertLinkedRecordsPreserved = async () => {
+    assert.equal(await db.company.count({ where: { id: f.companyA } }), 1);
+    assert.equal(await db.openCreditIntegration.count({ where: { id: f.integration.id, companyId: f.companyA } }), 1);
+    assert.equal(await db.contact.count({ where: { id: lead.contactId!, companyId: f.companyA } }), 1);
+    assert.equal(await db.openCreditLead.count({ where: {
+      id: lead.id, companyId: f.companyA, integrationId: f.integration.id, contactId: lead.contactId!
+    } }), 1);
+    assert.equal(await db.openCreditEvent.count({ where: {
+      companyId: f.companyA, integrationId: f.integration.id,
+      externalLeadId: lead.externalLeadId, eventId: "synthetic-event"
+    } }), 1);
+    assert.deepEqual(await f.counts(), { contacts: 1, leads: 1, events: 1 });
+  };
+  await rejectsDeleteRestrict(() => db.contact.delete({ where: { id: lead.contactId! } }),
+    ["OpenCreditLead_companyId_contactId_fkey"], "delete linked Contact");
+  await assertLinkedRecordsPreserved();
+  await rejectsDeleteRestrict(() => db.openCreditIntegration.delete({ where: { id: f.integration.id } }),
+    ["OpenCreditLead_companyId_integrationId_fkey", "OpenCreditEvent_companyId_integrationId_fkey"], "delete linked Integration");
+  await assertLinkedRecordsPreserved();
+  await rejectsDeleteRestrict(() => db.company.delete({ where: { id: f.companyA } }),
+    ["OpenCreditIntegration_companyId_fkey", "OpenCreditLead_companyId_fkey", "OpenCreditEvent_companyId_fkey"], "delete linked Company");
+  await assertLinkedRecordsPreserved();
   assert.deepEqual(await f.counts(), { contacts: 1, leads: 1, events: 1 });
 }));
 
