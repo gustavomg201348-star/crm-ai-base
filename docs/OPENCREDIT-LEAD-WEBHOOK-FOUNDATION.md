@@ -87,11 +87,16 @@ event/lead retries, rollback, RESTRICT, foreign DDIs and calendar validation.
 Execution requires GitHub Actions, CI, explicit OPENCREDIT_POSTGRES_TEST=1 and the
 exact loopback qevora_ci test database/role/schema with fictitious CI credentials.
 The suite cleans only its own random Company IDs in reverse FK order and never
-prints credentials, encryption keys, signatures or payloads. Rollback deliberately
-injects an out-of-range integer at the service boundary after real Contact/Lead
-inserts; this is not a valid supplier request. Query text is observed only in
-memory, without parameters or logs. This gate has not been executed locally:
-successful material validation must be confirmed from CI before merge.
+prints credentials, encryption keys, signatures or payloads. The rollback test
+creates a valid Contact and OpenCreditLead inside one real PostgreSQL transaction,
+then deliberately attempts to create an OpenCreditEvent referencing a missing
+external lead. PostgreSQL rejects the final insert through the composite
+OpenCreditEvent → OpenCreditLead foreign key
+(`OpenCreditEvent_companyId_integrationId_externalLeadId_fkey`), and the test
+verifies that Contact, Lead and Event inserts are all rolled back (final counts: 0).
+Query text is observed only in memory, without parameters or logs. This gate was
+not executed locally; material validation was confirmed on PostgreSQL 18 in
+GitHub CI run #280: OpenCredit material integration 9/9 PASS.
 
 Rollback: disable the integration and revert application changes; retain additive
 tables and audit records. Do not drop tables containing operational data automatically.
