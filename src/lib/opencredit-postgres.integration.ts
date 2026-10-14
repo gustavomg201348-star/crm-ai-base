@@ -84,8 +84,51 @@ async function withFixture(run: (fixture: Fixture) => Promise<void>) {
     await db.company.deleteMany({ where: { id: { in: companyIds } } });
   }
 }
-async function rejectsPrismaCode(operation: () => Promise<unknown>, code: string) {
-  await assert.rejects(operation, error => error instanceof Prisma.PrismaClientKnownRequestError && error.code === code);
+function safePrismaDiagnostic(error: unknown) {
+  const value = error !== null && typeof error === "object"
+    ? error as { name?: unknown; constructor?: { name?: unknown }; code?: unknown; meta?: unknown }
+    : null;
+  const names = ["Error", "TypeError", "RangeError", "AssertionError", "PrismaClientKnownRequestError",
+    "PrismaClientUnknownRequestError", "PrismaClientValidationError", "PrismaClientInitializationError",
+    "PrismaClientRustPanicError"];
+  const safeName = (name: unknown) => typeof name === "string" && names.includes(name) ? name : "UNRECOGNIZED";
+  // Exact allowlist: never emit IDs, data values, free-form messages or SQL.
+  const identifiers = ["Company", "Contact", "OpenCreditIntegration", "OpenCreditLead", "OpenCreditEvent",
+    "id", "companyId", "integrationId", "contactId", "externalLeadId", "eventId", "publicWebhookId",
+    "ContactToOpenCreditLead", "OpenCreditLeadToContact", "CompanyToOpenCreditIntegration",
+    "CompanyToOpenCreditLead", "CompanyToOpenCreditEvent", "OpenCreditIntegrationToOpenCreditLead",
+    "OpenCreditEventToOpenCreditIntegration", "OpenCreditEventToOpenCreditLead",
+    "foreign key", "(not available)", "22003", "23503", "23505",
+    "OpenCreditIntegration_publicWebhookId_key", "OpenCreditLead_companyId_integrationId_externalLeadId_key",
+    "OpenCreditEvent_integrationId_eventId_key", "OpenCreditIntegration_companyId_fkey",
+    "OpenCreditLead_companyId_fkey", "OpenCreditLead_companyId_integrationId_fkey",
+    "OpenCreditLead_companyId_contactId_fkey", "OpenCreditEvent_companyId_fkey",
+    "OpenCreditEvent_companyId_integrationId_fkey", "OpenCreditEvent_companyId_integrationId_externalLeadId_fkey"];
+  const safeIdentifier = (item: unknown) => typeof item === "string" &&
+    (identifiers.includes(item) || identifiers.some(id => item === id + " (index)")) ? item : "REDACTED";
+  const meta: Record<string, string | string[]> = {};
+  if (value?.meta !== null && typeof value?.meta === "object") {
+    const source = value.meta as Record<string, unknown>;
+    for (const key of ["modelName", "target", "field_name", "constraint", "relation_name", "model_a_name", "model_b_name", "code"]) {
+      if (Object.prototype.hasOwnProperty.call(source, key)) {
+        meta[key] = Array.isArray(source[key]) ? source[key].slice(0, 8).map(safeIdentifier) : safeIdentifier(source[key]);
+      }
+    }
+  }
+  return {
+    constructor: safeName(value?.constructor?.name), name: safeName(value?.name),
+    code: typeof value?.code === "string" && /^P\d{4}$/.test(value.code) ? value.code : "MISSING_OR_UNRECOGNIZED",
+    knownRequestErrorInstance: error instanceof Prisma.PrismaClientKnownRequestError, meta
+  };
+}
+async function rejectsPrismaCode(operation: () => Promise<unknown>, code: string, context: string) {
+  try { await operation(); }
+  catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === code) return;
+    // Do not attach the original error as actual/cause: node:test could print it.
+    assert.fail(JSON.stringify({ context, expectedCode: code, outcome: "UNEXPECTED_ERROR", ...safePrismaDiagnostic(error) }));
+  }
+  assert.fail(JSON.stringify({ context, expectedCode: code, outcome: "OPERATION_DID_NOT_REJECT" }));
 }
 
 test("OpenCredit migration and actual table/index/FK definitions", async () => {
@@ -154,10 +197,10 @@ test("composite tenant FKs reject cross-company Contact, Integration and Event l
   await rejectsPrismaCode(() => db.openCreditIntegration.create({ data: {
     companyId: "missing-ci-" + randomUUID(), publicWebhookId: createOpenCreditPublicWebhookId(),
     webhookSecret: f.integration.webhookSecret
-  } }), "P2003");
+  } }), "P2003", "integration with missing Company FK");
   await rejectsPrismaCode(() => db.openCreditLead.create({ data: {
     companyId: f.companyB, integrationId: f.integrationB.id, externalLeadId: "cross-contact", contactId: contact.id
-  } }), "P2003");
+  } }), "P2003", "cross-company Contact FK");
   const rejectedLeadScope = {
     companyId: f.companyB, integrationId: f.integrationB.id, externalLeadId: "cross-contact"
   };
@@ -179,32 +222,32 @@ test("composite tenant FKs reject cross-company Contact, Integration and Event l
   assert.equal(await db.contact.count({ where: { id: contact.id, companyId: f.companyB } }), 0);
   await rejectsPrismaCode(() => db.openCreditLead.create({ data: {
     companyId: f.companyA, integrationId: f.integrationB.id, externalLeadId: "cross-integration"
-  } }), "P2003");
+  } }), "P2003", "cross-company Integration FK");
   await rejectsPrismaCode(() => db.openCreditEvent.create({ data: {
     companyId: f.companyA, integrationId: f.integrationB.id, externalLeadId: "missing-lead",
     eventId: "cross-event", eventType: "lead.assigned", contractVersion: 2,
     assignedAt: new Date(), processingStatus: "PROCESSED"
-  } }), "P2003");
+  } }), "P2003", "cross-company Event Integration FK");
   await rejectsPrismaCode(() => db.openCreditEvent.create({ data: {
     companyId: f.companyA, integrationId: f.integration.id, externalLeadId: "missing-lead",
     eventId: "missing-reference", eventType: "lead.assigned", contractVersion: 2,
     assignedAt: new Date(), processingStatus: "PROCESSED"
-  } }), "P2003");
+  } }), "P2003", "missing lead Event FK");
   assert.deepEqual(await f.counts(), { contacts: 1, leads: 0, events: 0 });
 }));
 
 test("actual public ID, external lead and event uniques reject duplicates and permit different integrations", async () => withFixture(async f => {
   await rejectsPrismaCode(() => db.openCreditIntegration.create({ data: {
     companyId: f.companyB, publicWebhookId: f.integration.publicWebhookId, webhookSecret: f.integration.webhookSecret
-  } }), "P2002");
+  } }), "P2002", "duplicate publicWebhookId");
   const lead = { companyId: f.companyA, integrationId: f.integration.id, externalLeadId: "unique-lead" };
   await db.openCreditLead.create({ data: lead });
-  await rejectsPrismaCode(() => db.openCreditLead.create({ data: lead }), "P2002");
+  await rejectsPrismaCode(() => db.openCreditLead.create({ data: lead }), "P2002", "duplicate externalLeadId");
   await db.openCreditLead.create({ data: { ...lead, companyId: f.companyB, integrationId: f.integrationB.id } });
   const event = { ...lead, eventId: "unique-event", eventType: "lead.assigned", contractVersion: 2,
     assignedAt: new Date(), processingStatus: "PROCESSED" };
   await db.openCreditEvent.create({ data: event });
-  await rejectsPrismaCode(() => db.openCreditEvent.create({ data: event }), "P2002");
+  await rejectsPrismaCode(() => db.openCreditEvent.create({ data: event }), "P2002", "duplicate eventId");
   await db.openCreditEvent.create({ data: { ...event, companyId: f.companyB, integrationId: f.integrationB.id } });
   assert.equal(await db.openCreditEvent.count({ where: { companyId: { in: [f.companyA, f.companyB] } } }), 2);
 }));
@@ -267,9 +310,9 @@ test("actual RESTRICT rejects deletion of linked Contact, Integration and Compan
     companyId_integrationId_externalLeadId: { companyId: f.companyA, integrationId: f.integration.id, externalLeadId: "synthetic-lead" }
   } });
   assert.ok(lead.contactId);
-  await rejectsPrismaCode(() => db.contact.delete({ where: { id: lead.contactId! } }), "P2003");
-  await rejectsPrismaCode(() => db.openCreditIntegration.delete({ where: { id: f.integration.id } }), "P2003");
-  await rejectsPrismaCode(() => db.company.delete({ where: { id: f.companyA } }), "P2003");
+  await rejectsPrismaCode(() => db.contact.delete({ where: { id: lead.contactId! } }), "P2003", "delete linked Contact");
+  await rejectsPrismaCode(() => db.openCreditIntegration.delete({ where: { id: f.integration.id } }), "P2003", "delete linked Integration");
+  await rejectsPrismaCode(() => db.company.delete({ where: { id: f.companyA } }), "P2003", "delete linked Company");
   assert.deepEqual(await f.counts(), { contacts: 1, leads: 1, events: 1 });
 }));
 
