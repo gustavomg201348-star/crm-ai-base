@@ -11,15 +11,15 @@ type Result = { ok: true; bankCount: number };
 type Failure = "CONFIGURATION" | "AUTHENTICATION" | "INVALID_RESPONSE" | "PROVIDER_UNAVAILABLE" | "PROVIDER_FAILED" | "TIMEOUT" | "NETWORK";
 
 export class OpenCreditConnectionError extends Error {
-  constructor(readonly code: Failure, readonly status: 502 | 503) {
+  constructor(readonly code: Failure, readonly status: 502 | 503, readonly providerStatus?: number) {
     super(`OPENCREDIT_CONNECTION_${code}`);
   }
 }
 
 function providerFailure(status: number) {
-  if (status === 401 || status === 403) return new OpenCreditConnectionError("AUTHENTICATION", 502);
-  if (status === 429 || status >= 500) return new OpenCreditConnectionError("PROVIDER_UNAVAILABLE", 503);
-  return new OpenCreditConnectionError("PROVIDER_FAILED", 502);
+  if (status === 401 || status === 403) return new OpenCreditConnectionError("AUTHENTICATION", 502, status);
+  if (status === 429 || status >= 500) return new OpenCreditConnectionError("PROVIDER_UNAVAILABLE", 503, status);
+  return new OpenCreditConnectionError("PROVIDER_FAILED", 502, status);
 }
 
 /** Fixed banks probe, never a generic provider proxy or commercial operation. */
@@ -99,7 +99,10 @@ export function createOpenCreditConnectionService(options: {
       if (error instanceof OpenCreditConnectionError) throw error;
       if (error instanceof OpenCreditApiError) {
         if (error.code === "CONFIGURATION") throw new OpenCreditConnectionError("CONFIGURATION", 503);
-        if (error.code === "AUTH_FAILED") throw providerFailure(error.status ?? 401);
+        if (error.code === "AUTH_FAILED") {
+          if (error.status === undefined) throw new OpenCreditConnectionError("AUTHENTICATION", 502);
+          throw providerFailure(error.status);
+        }
         if (error.code === "TIMEOUT" || error.code === "NETWORK") throw new OpenCreditConnectionError(error.code, 503);
         throw new OpenCreditConnectionError("INVALID_RESPONSE", 502);
       }
@@ -186,7 +189,14 @@ export function createOpenCreditConnectionHandler(deps: {
       const result = await deps.testConnection();
       return reply({ ok: true, bankCount: result.bankCount });
     } catch (error) {
-      if (error instanceof OpenCreditConnectionError) return reply({ error: `OPENCREDIT_CONNECTION_${error.code}` }, error.status);
+      if (error instanceof OpenCreditConnectionError) {
+        const body: { error: string; providerStatus?: number } = { error: `OPENCREDIT_CONNECTION_${error.code}` };
+        const status = error.providerStatus;
+        if (typeof status === "number" && Number.isInteger(status) && status >= 100 && status <= 599) {
+          body.providerStatus = status;
+        }
+        return reply(body, error.status);
+      }
       // No raw exception/provider/request data is logged or returned.
       return reply({ error: "CONNECTION_TEST_UNAVAILABLE" }, 503);
     }

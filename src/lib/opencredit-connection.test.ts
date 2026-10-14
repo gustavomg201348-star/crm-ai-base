@@ -11,6 +11,7 @@ let createService: typeof import("./opencredit-connection.service").createOpenCr
 let createHandler: typeof import("./opencredit-connection.service").createOpenCreditConnectionHandler;
 let createClient: typeof import("./opencredit-api-client").createOpenCreditApiClient;
 let ApiError: typeof import("./opencredit-api-client").OpenCreditApiError;
+let ConnectionError: typeof import("./opencredit-connection.service").OpenCreditConnectionError;
 before(async () => {
   const loader = Module as typeof Module & { _load(specifier: string, ...args: unknown[]): unknown };
   const original = loader._load;
@@ -19,6 +20,7 @@ before(async () => {
     const service = await import("./opencredit-connection.service");
     createService = service.createOpenCreditConnectionService;
     createHandler = service.createOpenCreditConnectionHandler;
+    ConnectionError = service.OpenCreditConnectionError;
     const client = await import("./opencredit-api-client");
     createClient = client.createOpenCreditApiClient;
     ApiError = client.OpenCreditApiError;
@@ -71,12 +73,14 @@ function fixture(options: { env?: typeof config; session?: SessionUser | null;
   return { handler, service, calls, rules };
 }
 
-async function checkError(response: Response, status: number) {
+async function checkError(response: Response, status: number, providerStatus?: number) {
   assert.equal(response.status, status);
   assert.equal(response.headers.get("cache-control"), "no-store");
   const text = await response.text();
   assert.doesNotMatch(text, /fictitious|do-not-return|example\.invalid|Bearer|stack|https?:\/\//);
-  assert.deepEqual(Object.keys(JSON.parse(text)), ["error"]);
+  const body = JSON.parse(text);
+  assert.deepEqual(Object.keys(body), providerStatus === undefined ? ["error"] : ["error", "providerStatus"]);
+  if (providerStatus !== undefined) assert.equal(body.providerStatus, providerStatus);
 }
 
 test("platform admin success returns only ok and bankCount from a fixed GET", async () => {
@@ -209,7 +213,10 @@ for (const status of [400, 401, 403, 429, 500, 503]) test(`provider HTTP ${statu
     status, headers: { "x-provider-sensitive": "do-not-return" }
   }) });
   const response = await f.handler(request());
-  await checkError(response, status === 429 || status >= 500 ? 503 : 502);
+  const code = status === 401 || status === 403 ? "AUTHENTICATION"
+    : status === 429 || status >= 500 ? "PROVIDER_UNAVAILABLE" : "PROVIDER_FAILED";
+  assert.deepEqual(await response.clone().json(), { error: `OPENCREDIT_CONNECTION_${code}`, providerStatus: status });
+  await checkError(response, status === 429 || status >= 500 ? 503 : 502, status);
   assert.equal(response.headers.has("x-provider-sensitive"), false); assert.equal(f.calls.length, 1);
 });
 
@@ -258,13 +265,28 @@ test("total timeout covers stalled client and sanitizes late completion", async 
 for (const code of ["CONFIGURATION", "AUTH_FAILED", "INVALID_RESPONSE", "TIMEOUT", "NETWORK"] as const) {
   test(`auth client error ${code} is mapped without raw details`, async () => {
     const f = fixture({ provider: () => { throw new ApiError(code, 401); } });
-    await checkError(await f.handler(request()), code === "AUTH_FAILED" || code === "INVALID_RESPONSE" ? 502 : 503);
+    await checkError(await f.handler(request()), code === "AUTH_FAILED" || code === "INVALID_RESPONSE" ? 502 : 503,
+      code === "AUTH_FAILED" ? 401 : undefined);
   });
 }
 
 test("raw network errors never reach the response", async () => {
   const f = fixture({ provider: () => { throw new Error("fictitious-password https://internal.example.invalid stack do-not-return"); } });
   await checkError(await f.handler(request()), 503);
+});
+
+test("auth failure without a known HTTP status never invents providerStatus", async () => {
+  const f = fixture({ provider: () => { throw new ApiError("AUTH_FAILED"); } });
+  const response = await f.handler(request());
+  assert.deepEqual(await response.clone().json(), { error: "OPENCREDIT_CONNECTION_AUTHENTICATION" });
+  await checkError(response, 502);
+});
+
+test("invalid provider status metadata is never serialized", async () => {
+  for (const status of [0, 99, 600, 999, 400.5, NaN, Infinity, "400"]) {
+    const f = fixture({ provider: () => { throw new ConnectionError("PROVIDER_FAILED", 502, status as number); } });
+    await checkError(await f.handler(request()), 502);
+  }
 });
 
 test("actual auth client owns one refresh/retry; probe sends only banks GET and auth POSTs", async () => {
