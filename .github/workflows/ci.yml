@@ -89,3 +89,8 @@ jobs:
 
       - name: Validate RateLimitBucket and PostgreSQL limiter
         run: npx --yes tsx@4.20.6 src/lib/rate-limit-postgres.integration.ts
+
+      - name: Validate OpenCredit constraints and concurrent ingestion
+        run: npx --yes tsx@4.20.6 src/lib/opencredit-postgres.integration.ts
+        env:
+          OPENCREDIT_POSTGRES_TEST: "1"
