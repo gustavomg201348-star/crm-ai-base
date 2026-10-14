@@ -1,28 +1,26 @@
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
 import { readFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
-import { createRequire } from "node:module";
+import Module from "node:module";
 
 let createOpenCreditApiClient: typeof import("./opencredit-api-client").createOpenCreditApiClient;
 let OpenCreditApiError: typeof import("./opencredit-api-client").OpenCreditApiError;
 
-// Standalone Node has no Next server-layer aliases. Mock only the marker while
-// importing the module, as Next's server compiler does; restore it immediately.
+// Standalone Node does not handle Next's public marker. Stub only that no-op
+// import for unit tests, and restore the loader immediately after loading.
 before(async () => {
-  const require = createRequire(import.meta.url);
-  const marker = require.resolve("next/dist/compiled/server-only");
-  const empty = require.resolve("next/dist/compiled/server-only/empty");
-  require(empty);
-  const previous = require.cache[marker];
-  require.cache[marker] = require.cache[empty];
+  const loader = Module as typeof Module & {
+    _load(specifier: string, ...args: unknown[]): unknown;
+  };
+  const original = loader._load;
+  loader._load = (specifier, ...args) => specifier === "server-only"
+    ? {} : original.call(loader, specifier, ...args);
   try {
     const client = await import("./opencredit-api-client");
     createOpenCreditApiClient = client.createOpenCreditApiClient;
     OpenCreditApiError = client.OpenCreditApiError;
   } finally {
-    if (previous) require.cache[marker] = previous;
-    else delete require.cache[marker];
+    loader._load = original;
   }
 });
 
@@ -186,31 +184,9 @@ test("client has no DB, logging, webhook linkage or persisted browser token stor
   assert.doesNotMatch(source, /console\.|safeLog|prisma|localStorage|sessionStorage|opencredit-webhook|opencredit-management/);
 });
 
-test("server-only marker is present and bundled Next aliases enforce both boundaries", () => {
+test("client declares the public server-only marker", () => {
   const source = readFileSync(new URL("./opencredit-api-client.ts", import.meta.url), "utf8");
-  assert.match(source, /^import "next\/dist\/compiled\/server-only";/m);
-  const require = createRequire(import.meta.url);
-  const { createServerOnlyClientOnlyAliases } = require("next/dist/build/create-compiler-aliases") as {
-    createServerOnlyClientOnlyAliases(isServer: boolean): Record<string, string>;
-  };
-  assert.equal(createServerOnlyClientOnlyAliases(true)["next/dist/compiled/server-only$"], "next/dist/compiled/server-only/empty");
-  assert.equal(createServerOnlyClientOnlyAliases(false)["next/dist/compiled/server-only"], "next/dist/compiled/server-only/index");
-  const config = readFileSync(require.resolve("next/dist/build/webpack-config"), "utf8");
-  assert.ok(config.includes("next-invalid-import-error-loader"));
-  assert.ok(config.includes("'server-only' cannot be imported from a Client Component module."));
-});
-
-test("bundled marker rejects ordinary Node import; Next server alias target is empty", () => {
-  const require = createRequire(import.meta.url);
-  const marker = require.resolve("next/dist/compiled/server-only");
-  const code = `require(${JSON.stringify(marker)})`;
-  const env = { ...process.env, NODE_OPTIONS: "" };
-  const rejected = spawnSync(process.execPath, ["-e", code], { env, encoding: "utf8", timeout: 10000 });
-  assert.equal(rejected.status, 1);
-  assert.match(rejected.stderr, /cannot be imported from a Client Component module/);
-  const serverCode = `require(${JSON.stringify(require.resolve("next/dist/compiled/server-only/empty"))})`;
-  const allowed = spawnSync(process.execPath, ["-e", serverCode], { env, encoding: "utf8", timeout: 10000 });
-  assert.equal(allowed.status, 0);
+  assert.match(source, /^import "server-only";/m);
 });
 
 test("existing runtime browser guard remains effective after the server-marker test bootstrap", async () => {

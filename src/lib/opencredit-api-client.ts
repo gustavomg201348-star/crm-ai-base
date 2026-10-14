@@ -1,5 +1,5 @@
-// Next 15 bundles and enforces this marker at the Client Component boundary.
-import "next/dist/compiled/server-only";
+// Public Next.js marker: reject accidental imports from Client Components.
+import "server-only";
 import { createHash } from "node:crypto";
 
 const ORIGIN = "https://core.api.opencredit.tech";
