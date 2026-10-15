@@ -480,3 +480,36 @@ Zero functional writes; only existing RateLimitBucket infrastructure is permitte
 No client auth, refresh/retry/cache, old endpoint, schema, migration or webhook changes.
 Tests exclusively use mock transports. Rollback: revert this route/service/test/docs;
 no database rollback is needed.
+
+## Status interpretation
+
+`opencredit-status-interpreter.ts` is a pure shared-safe module, without imports,
+HTTP, environment access, persistence, credentials or provider client. It is NOT yet
+connected to proposal-status-catalog or any other runtime flow.
+
+Production observations supplied for the eight current banks (Paypro, Prospecta
+Fintech, V8 Digital, C6 Bank, Facta, Happy, Novosaque and VCTEX) had the same six
+categories, while individual status labels vary by bank. QEVORA never uses those
+labels or bank IDs for generic interpretation. These are observations, NOT a formal
+exhaustive OpenAPI enum.
+
+category alone maps meaning: EM_ANDAMENTO -> IN_PROGRESS, PENDENTE -> ACTION_REQUIRED,
+APROVADA -> SUCCESS, REPROVADA -> REJECTED, CANCELADA -> CANCELED, ERRO ->
+TECHNICAL_ATTENTION. Future/unknown categories map UNKNOWN, without throwing or
+assuming a technical error. No trimming, case conversion or text inference occurs.
+The validated terminal boolean is preserved independently; shouldPoll = !terminal.
+APROVADA with terminal=false therefore remains SUCCESS with shouldPoll=true;
+EM_ANDAMENTO with terminal=true remains IN_PROGRESS with shouldPoll=false.
+requiresSignature = (hasSignUrl === true); missing/false never infer a signature,
+including for PENDENTE. These flags describe potential future handling only:
+the function does not poll, open links or execute an action.
+
+Input is strictly typed with required category:string and terminal:boolean, and
+optional hasSignUrl:boolean. It does not revalidate the provider contract. The existing
+catalogue parser permits terminal to be absent; future callers must explicitly handle
+that absence BEFORE invoking this interpreter, without silently inferring a boolean
+from category. No adapter, fallback or endpoint change is introduced in this slice.
+
+SUCCESS is not authorization to grant credit. REJECTED is not a QEVORA decision.
+All meanings interpret supplier metadata only: QEVORA calculates no approval,
+eligibility, margin, risk or financial decision here. No CPF or personal data is used.
