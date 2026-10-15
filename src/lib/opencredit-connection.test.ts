@@ -252,6 +252,15 @@ test("empty bank list is a valid result without synthetic banks", async () => {
   assert.deepEqual(await (await f.handler(request())).json(), { ok: true, bankCount: 0 });
 });
 
+test("shared banks reader preserves connection count semantics for repeated provider IDs", async () => {
+  const f = fixture({ provider: () => Response.json({ data: { items: [
+    { bankId: "same", bankName: "First" }, { bankId: "same", bankName: "Second", token: "do-not-return" }
+  ] } }) });
+  const response = await f.handler(request());
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true, bankCount: 2 });
+});
+
 test("real byte limit rejects streamed oversized body independently of Content-Length", async () => {
   const f = fixture({ provider: () => new Response("x".repeat(65537), { headers: { "content-length": "1" } }) });
   await checkError(await f.handler(request()), 502);

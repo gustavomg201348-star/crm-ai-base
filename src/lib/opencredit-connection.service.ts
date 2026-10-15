@@ -2,6 +2,7 @@ import "server-only";
 import { NextResponse, type NextRequest } from "next/server";
 import { OpenCreditApiError, openCreditApiClient } from "./opencredit-api-client";
 import { emptyBody, sameOrigin } from "./opencredit-admin-request";
+import { parseOpenCreditBanks, type OpenCreditBank } from "./opencredit-banks";
 import type { SessionUser } from "./auth";
 import type { RateLimitRule } from "./rate-limit";
 
@@ -24,7 +25,7 @@ function providerFailure(status: number) {
 }
 
 /** Fixed banks probe, never a generic provider proxy or commercial operation. */
-export function createOpenCreditConnectionService(options: {
+export function createOpenCreditBanksReader(options: {
   client?: Pick<typeof openCreditApiClient, "request">;
   env?: () => Config;
   timeoutMs?: number;
@@ -33,7 +34,7 @@ export function createOpenCreditConnectionService(options: {
   const env = options.env ?? (() => process.env);
   const timeoutMs = options.timeoutMs ?? 20_000;
 
-  return async (): Promise<Result> => {
+  return async (): Promise<OpenCreditBank[]> => {
     const config = env();
     const tenant = config.OPENCREDIT_TENANT_ID;
     if (!tenant || !ID.test(tenant)
@@ -53,7 +54,7 @@ export function createOpenCreditConnectionService(options: {
       }, timeoutMs);
     });
 
-    const operation = async (): Promise<Result> => {
+    const operation = async (): Promise<OpenCreditBank[]> => {
       // Existing client alone owns login/refresh and the single GET retry.
       const response = await client.request(path, { method: "GET", signal: abort.signal });
       if (abort.signal.aborted || !response.ok) {
@@ -84,14 +85,9 @@ export function createOpenCreditConnectionService(options: {
       let payload: unknown;
       try { payload = JSON.parse(Buffer.concat(chunks).toString("utf8")); }
       catch { throw new OpenCreditConnectionError("INVALID_RESPONSE", 502); }
-      const data = (payload as { data?: { items?: unknown } } | null)?.data;
-      if (!data || !Array.isArray(data.items) || data.items.length > 1000
-        || !data.items.every(item => item && typeof item === "object" && !Array.isArray(item)
-          && typeof item.bankId === "string" && ID.test(item.bankId)
-          && typeof item.bankName === "string" && item.bankName.trim() && item.bankName.length <= 200)) {
-        throw new OpenCreditConnectionError("INVALID_RESPONSE", 502);
-      }
-      return { ok: true, bankCount: data.items.length };
+      const banks = parseOpenCreditBanks(payload);
+      if (!banks) throw new OpenCreditConnectionError("INVALID_RESPONSE", 502);
+      return banks;
     };
 
     try { return await Promise.race([operation(), deadline]); }
@@ -115,6 +111,11 @@ export function createOpenCreditConnectionService(options: {
       try { reader?.releaseLock(); } catch { /* A cancelled read may still settle. */ }
     }
   };
+}
+
+export function createOpenCreditConnectionService(options: Parameters<typeof createOpenCreditBanksReader>[0] = {}) {
+  const readBanks = createOpenCreditBanksReader(options);
+  return async (): Promise<Result> => ({ ok: true, bankCount: (await readBanks()).length });
 }
 
 function reply(body: object, status = 200) {
