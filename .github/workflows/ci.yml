@@ -50,6 +50,9 @@ jobs:
       - name: Validate OpenCredit Foundation B onboarding tests
         run: npx --yes tsx@4.20.6 src/lib/opencredit-onboarding.test.ts
 
+      - name: Validate chatbot definition and fail-closed scope
+        run: npx --yes tsx@4.20.6 --test src/lib/chatbot-definition.test.ts src/lib/chatbot-foundation-scope.test.ts
+
       - name: Build
         run: npm run build
 
@@ -100,3 +103,17 @@ jobs:
         run: npx --yes tsx@4.20.6 src/lib/opencredit-postgres.integration.ts
         env:
           OPENCREDIT_POSTGRES_TEST: "1"
+
+      - name: Create dedicated disposable chatbot database
+        run: echo 'CREATE DATABASE qevora_chatbot_test;' | npx prisma db execute --stdin --schema prisma/schema.postgres.prisma
+
+      - name: Apply migrations to chatbot test database
+        run: npm run prisma:migrate:prod
+        env:
+          DATABASE_URL: postgresql://qevora_ci:qevora_ci_password@127.0.0.1:5432/qevora_chatbot_test?schema=public
+
+      - name: Validate chatbot persistence, constraints and concurrency
+        run: npx --yes tsx@4.20.6 --test src/lib/chatbot-foundation.test.ts
+        env:
+          CHATBOT_FOUNDATION_TEST_DATABASE_URL: postgresql://qevora_ci:qevora_ci_password@127.0.0.1:5432/qevora_chatbot_test?schema=public
+          CHATBOT_FOUNDATION_POSTGRES_TEST: "1"
