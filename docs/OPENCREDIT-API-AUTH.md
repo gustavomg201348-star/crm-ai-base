@@ -261,3 +261,57 @@ this provider behavior remains unverified. Automated tests use fakes only and do
 contact production, Railway or OpenCredit. No webhook or ACTIVE/PAUSED/DISABLED change.
 Rollback removes the dedicated diagnostic route/service/summary/client method; no
 database rollback is required.
+
+## Administrative available CLT banks
+
+The operator reported a production test-connection result of `{ok:true,bankCount:8}`.
+Eight is an observation, never a hardcoded count or guarantee of future availability.
+No live request was repeated while implementing this slice.
+
+`POST /api/admin/integrations/opencredit/list-banks` is an administrative read-only
+listing, not a commercial endpoint. It uses exactly
+`GET /api/tenants/{configuredTenant}/banks?product=clt` via the existing server-only
+client, without partnerId. Required server configuration is only OPENCREDIT_API_EMAIL,
+OPENCREDIT_API_PASSWORD and OPENCREDIT_TENANT_ID. Partner configuration remains intact
+for diagnose-access and any future routes that require it.
+
+The route uses current session freshness, requirePlatformAdmin, the existing
+same-origin and zero-byte body checks, rejects query parameters and inbound
+Authorization, and returns Cache-Control: no-store for all POST responses.
+The existing shared limiter uses category opencredit-list-banks with three runs
+per minute per companyId + userId. There is no UI or automatic invocation.
+Only existing RateLimitBucket infrastructure writes are permitted; no functional
+records are created or changed.
+
+The fixed banks reader is shared with test-connection: same twenty-second total
+deadline, 64 KiB declared/actual response size cap, JSON parsing and complete
+data.items validation. At most 1000 objects are allowed, with bankId matching
+1–128 ASCII letters/digits/underscore/hyphen (first character a letter/digit) and
+a nonblank bankName up to 200 characters. Any invalid item rejects the whole list.
+The server reconstructs every item as exactly `{bankId,bankName}`, retaining provider
+order and original case/text. No metadata, configuration, credentials, pricing,
+permissions, arbitrary headers or raw provider bodies are forwarded or logged.
+
+Success is exactly `{ok:true,count:banks.length,banks:[{bankId,bankName},...]}`.
+An empty array returns `{ok:true,count:0,banks:[]}`; no fallback catalogue is invented.
+The new listing rejects every exact duplicate bankId as INVALID_RESPONSE, even
+when the names match. Different names for one ID are never silently accepted.
+IDs are case-sensitive and no sorting/deduplication/normalization is performed.
+This additional duplicate rule applies only to list-banks: test-connection retains
+its existing count-only behavior and exact response `{ok:true,bankCount:number}`.
+
+Sanitized provider failures retain the existing status mapping under
+OPENCREDIT_LIST_BANKS_*: authentication 502, invalid payload 502, other rejection
+502, provider 429/5xx or network/timeout/configuration 503. A real known HTTP error
+may include only a validated numeric providerStatus. No raw error or stack is exposed.
+The client login, private token cache, refresh, single GET/HEAD retry and
+non-idempotent no-replay rules are unchanged.
+
+Bank names and IDs remain untrusted provider text: display as text, never HTML.
+The list is NOT authorization for any financial operation or CRM Company to use the
+shared partner account. Later steps must independently authorize company scope and
+validate the rules for their exact provider routes. This slice does not create a
+client, lead, simulation, proposal, reservation, submission or contract; it does not
+query CPF, change webhook/receive modes, or add any schema/migration/Railway changes.
+All automated tests use fake providers. Rollback removes the list route/service and
+restores the prior count implementation/helper layout; no database rollback is needed.
