@@ -100,17 +100,35 @@ three attempts per minute with both companyId and userId in the rule identity.
 The only permitted database writes are existing RateLimitBucket infrastructure;
 session freshness performs its usual User read. No functional records are changed.
 
-All four settings must exist before external requests: OPENCREDIT_API_EMAIL,
-OPENCREDIT_API_PASSWORD, OPENCREDIT_TENANT_ID and OPENCREDIT_PARTNER_ID. IDs accept
+For test-connection, three settings must exist before external requests:
+OPENCREDIT_API_EMAIL, OPENCREDIT_API_PASSWORD and OPENCREDIT_TENANT_ID. The tenant ID accepts
 1–128 ASCII letters/digits/underscore/hyphen, starting with a letter/digit. Values
 are runtime-only, never hardcoded, accepted from requests or stored in the database.
-Confirm the actual account/tenant/partner relationship through provider onboarding.
+OPENCREDIT_PARTNER_ID is neither read nor required by this connection test; it is
+not removed globally and remains required by diagnose-access. Confirm account,
+tenant and any route-specific partner relationship through provider onboarding.
 This endpoint is not a Company-to-partner commercial authorization registry.
 
-The service constructs exactly GET `/api/tenants/{tenantId}/banks` with product=clt
-and the configured partnerId. It never selects another path or initiates commercial
+The service constructs exactly GET `/api/tenants/{tenantId}/banks?product=clt`,
+without partnerId. It never selects another path or initiates commercial
 POST/PATCH/DELETE. Required login/refresh POSTs remain solely in the existing client.
 Provider 401 recovery and the single GET retry are unchanged; no service retry exists.
+
+The original provider documentation indicated partnerId for the banks query. In a
+production diagnostic reported by the operator with role API_CLIENT, authentication
+succeeded and the configured tenant matched the decoded/unverified token tenant.
+The observed responses were:
+
+- `/banks?product=clt&partnerId=...`: HTTP 404;
+- `/banks?product=clt`: HTTP 200;
+- `/banks?partnerId=...`: HTTP 404.
+
+The connection test therefore omits partnerId as compatibility observed for this
+banks route and this API_CLIENT credential. This is not a claim that partnerId is
+globally invalid or unnecessary for other accounts/routes. No global partner
+support or configuration is removed. The three diagnose-access probes remain
+unchanged, including the variants that send partnerId. No production request was
+repeated as part of this change.
 
 A 20-second total deadline includes client authentication/request and body reading.
 The JSON body is bounded to 64 KiB of actual bytes and data.items is validated

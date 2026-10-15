@@ -7,7 +7,7 @@ import type { RateLimitRule } from "./rate-limit";
 
 const MAX_BYTES = 64 * 1024;
 const ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
-type Config = Partial<Record<"OPENCREDIT_TENANT_ID" | "OPENCREDIT_PARTNER_ID" | "OPENCREDIT_API_EMAIL" | "OPENCREDIT_API_PASSWORD", string>>;
+type Config = Partial<Record<"OPENCREDIT_TENANT_ID" | "OPENCREDIT_API_EMAIL" | "OPENCREDIT_API_PASSWORD", string>>;
 type Result = { ok: true; bankCount: number };
 type Failure = "CONFIGURATION" | "AUTHENTICATION" | "INVALID_RESPONSE" | "PROVIDER_UNAVAILABLE" | "PROVIDER_FAILED" | "TIMEOUT" | "NETWORK";
 
@@ -36,12 +36,11 @@ export function createOpenCreditConnectionService(options: {
   return async (): Promise<Result> => {
     const config = env();
     const tenant = config.OPENCREDIT_TENANT_ID;
-    const partner = config.OPENCREDIT_PARTNER_ID;
-    if (!tenant || !partner || !ID.test(tenant) || !ID.test(partner)
+    if (!tenant || !ID.test(tenant)
       || !config.OPENCREDIT_API_EMAIL?.trim() || !config.OPENCREDIT_API_PASSWORD?.trim()) {
       throw new OpenCreditConnectionError("CONFIGURATION", 503);
     }
-    const path = `/api/tenants/${encodeURIComponent(tenant)}/banks?${new URLSearchParams({ product: "clt", partnerId: partner })}`;
+    const path = `/api/tenants/${encodeURIComponent(tenant)}/banks?${new URLSearchParams({ product: "clt" })}`;
     const abort = new AbortController();
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;

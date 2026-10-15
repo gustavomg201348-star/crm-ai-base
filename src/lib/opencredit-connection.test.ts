@@ -28,11 +28,11 @@ before(async () => {
 });
 
 const config = {
-  OPENCREDIT_TENANT_ID: "tenant-fixture", OPENCREDIT_PARTNER_ID: "partner-fixture",
+  OPENCREDIT_TENANT_ID: "tenant-fixture",
   OPENCREDIT_API_EMAIL: "fixture@example.invalid", OPENCREDIT_API_PASSWORD: "fictitious-password"
 };
 const admin: SessionUser = { id: "admin-fixture", companyId: "platform-fixture", name: "Fixture", email: "fixture@example.invalid", role: "ADMIN" };
-const path = "/api/tenants/tenant-fixture/banks?product=clt&partnerId=partner-fixture";
+const path = "/api/tenants/tenant-fixture/banks?product=clt";
 const success = () => Response.json({ data: { items: [
   { bankId: "bank-fixture", bankName: "Fixture bank", accessToken: "fictitious-provider-token" }
 ] }, extraSensitiveField: "do-not-return" });
@@ -57,7 +57,7 @@ function request(options: { origin?: string | null; site?: string; body?: string
   });
 }
 
-function fixture(options: { env?: typeof config; session?: SessionUser | null;
+function fixture(options: { env?: typeof config & { OPENCREDIT_PARTNER_ID?: string }; session?: SessionUser | null;
   provider?: () => Response | Promise<Response>; timeoutMs?: number; limitResponse?: Response } = {}) {
   const calls: { path: string; init?: RequestInit }[] = [];
   const rules: RateLimitRule[][] = [];
@@ -91,24 +91,42 @@ test("platform admin success returns only ok and bankCount from a fixed GET", as
   assert.deepEqual(await response.json(), { ok: true, bankCount: 1 });
   assert.equal(f.calls.length, 1);
   assert.equal(f.calls[0].path, path);
+  assert.equal(new URL(f.calls[0].path, "https://example.invalid").searchParams.has("partnerId"), false);
   assert.equal(f.calls[0].init?.method, "GET");
   assert.equal(f.calls[0].init?.body, undefined);
   assert.deepEqual(f.rules[0], [{ category: "opencredit-test-connection", identifiers: [admin.companyId, admin.id], limit: 3, windowMs: 60000 }]);
 });
 
+for (const partner of [undefined, "", "partner-fixture", "../invalid-partner"]) {
+  test("absent, empty, present or invalid partner configuration is irrelevant to the banks test", async () => {
+    const f = fixture({ env: partner === undefined ? config : { ...config, OPENCREDIT_PARTNER_ID: partner } });
+    const response = await f.handler(request());
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.deepEqual(await response.json(), { ok: true, bankCount: 1 });
+    assert.equal(f.calls.length, 1); assert.equal(f.calls[0].path, path);
+  });
+}
+
+test("banks test never reads the partner configuration", async () => {
+  const f = fixture({ env: { ...config, get OPENCREDIT_PARTNER_ID(): string { throw new Error("must not read partner"); } } });
+  assert.deepEqual(await (await f.handler(request())).json(), { ok: true, bankCount: 1 });
+  assert.equal(f.calls[0].path, path);
+});
+
 for (const key of Object.keys(config) as (keyof typeof config)[]) test(`missing ${key} blocks all external requests`, async () => {
   const f = fixture({ env: { ...config, [key]: "" } });
-  await checkError(await f.handler(request()), 503);
+  const response = await f.handler(request());
+  assert.deepEqual(await response.clone().json(), { error: "OPENCREDIT_CONNECTION_CONFIGURATION" });
+  await checkError(response, 503);
   assert.equal(f.calls.length, 0);
 });
 
 for (const value of ["../another", "tenant?x=1", "https://example.invalid", "partner&product=inss", " x", "x".repeat(129)]) {
   test(`invalid server identifier is rejected: ${value.length}`, async () => {
-    for (const key of ["OPENCREDIT_TENANT_ID", "OPENCREDIT_PARTNER_ID"] as const) {
-      const f = fixture({ env: { ...config, [key]: value } });
-      await checkError(await f.handler(request()), 503);
-      assert.equal(f.calls.length, 0);
-    }
+    const f = fixture({ env: { ...config, OPENCREDIT_TENANT_ID: value } });
+    await checkError(await f.handler(request()), 503);
+    assert.equal(f.calls.length, 0);
   });
 }
 
@@ -120,7 +138,7 @@ for (const session of [null, { ...admin, role: "AGENT" as const }, { ...admin, r
   });
 }
 
-for (const field of ["tenantId", "partnerId", "email", "password", "url", "path", "token", "accessToken"]) {
+for (const field of ["tenantId", "partnerId", "product", "query", "email", "password", "url", "path", "token", "accessToken"]) {
   test(`browser body cannot supply ${field}`, async () => {
     const f = fixture();
     await checkError(await f.handler(request({ body: JSON.stringify({ [field]: "fictitious-input" }) })), 400);
@@ -129,7 +147,9 @@ for (const field of ["tenantId", "partnerId", "email", "password", "url", "path"
 }
 
 test("JSON empty object, query configuration and inbound bearer are rejected", async () => {
-  for (const r of [request({ body: "{}" }), request({ query: "?tenantId=another" }), request({ bearer: "Bearer fictitious-token" })]) {
+  for (const r of [request({ body: "{}" }), request({ bearer: "Bearer fictitious-token" }),
+    ...["tenantId=another", "partnerId=another", "product=inss", "path=other", "url=https://example.invalid", "query=external"]
+      .map(query => request({ query: `?${query}` }))]) {
     const f = fixture(); await checkError(await f.handler(r), 400); assert.equal(f.calls.length, 0);
   }
 });
@@ -208,7 +228,7 @@ test("limiter unavailable fails closed before provider", async () => {
   await checkError(await f.handler(request()), 503); assert.equal(f.calls.length, 0);
 });
 
-for (const status of [400, 401, 403, 429, 500, 503]) test(`provider HTTP ${status} has sanitized non-success response and no service retry`, async () => {
+for (const status of [400, 401, 403, 404, 429, 500, 503]) test(`provider HTTP ${status} has sanitized non-success response and no service retry`, async () => {
   const f = fixture({ provider: () => new Response("Bearer fictitious-token; fixture@example.invalid; do-not-return", {
     status, headers: { "x-provider-sensitive": "do-not-return" }
   }) });
