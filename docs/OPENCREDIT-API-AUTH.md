@@ -398,3 +398,85 @@ is introduced. No functional records, schema, migration or Railway settings chan
 Tests use fake transports only, never live credentials or operational endpoints.
 Rollback removes the capabilities route/service and restores the previous parser
 layout; no database rollback is needed.
+
+## Administrative proposal status catalogue
+
+`POST /api/admin/integrations/opencredit/proposal-status-catalog` accepts exactly
+`{"bankId":"v8"}` as application/json (optional UTF-8 charset). No query,
+inbound Authorization, additional or duplicate JSON properties are accepted.
+Escaped identifiers are intentionally not accepted. The caller must be a current
+platform administrator, same-origin; shared rate limiting is three executions/minute
+per companyId + userId, category opencredit-proposal-status-catalog, fail-closed.
+All application responses use Cache-Control: no-store.
+
+Only the existing server-only client executes the new functional request:
+`GET /api/tenants/{serverTenant}/integration/proposal-status?bankId={encodedBankId}`.
+Technical login/refresh and GET retry remain owned by that unchanged client.
+No partnerId is sent; OPENCREDIT_PARTNER_ID remains available to diagnose-access.
+No CPF, individual proposal, client registration, simulation, selection, reset,
+bank account, feedback, contact, or credit operation is introduced.
+
+### Published contract versus local policy
+
+Rechecked the official partner-openapi.json on 2026-10-15:
+IntegrationApiController_listProposalStatus declares JWT, required path tenantId,
+required query bankId, and HTTP 200/400/401. Description permits omitting bankId,
+but this implementation ALWAYS sends it. Response 200 has only schema.example:
+data.categories[] has code/terminal/description; data.items[] has bankId/bankName/
+statuses[], with status/category/terminal/hasSignUrl. There are no formal response
+properties, required, nullable or enums. Description calls the six categories fixed;
+the six observed codes EM_ANDAMENTO/PENDENTE/APROVADA/REPROVADA/CANCELADA/ERRO
+are NOT implemented as an exhaustive enum.
+
+The following is a **local conservative contract**, not an assertion of provider
+required/nullability rules. data.categories and data.items must be arrays. Category
+code and each status's status/category are required locally so the result is useful.
+Codes accept uppercase ASCII letters, digits and underscores, starting with a letter,
+up to 64 characters, including future codes. Status labels are nonblank text up to
+160 characters, no controls or HTTP/WWW URLs; display them as text, NEVER HTML.
+Category must reference a returned category. Duplicate codes/labels, mismatching
+bank IDs, and contradictory terminal values reject the entire result.
+terminal and hasSignUrl are optional locally: absent stays absent, true/false are
+preserved; present null/string/number/array/object/undefined are INVALID_RESPONSE.
+No missing flag is inferred false or permission. Unknown fields, descriptions,
+bankName, requestId, raw provider payload, metadata, headers, tokens and URLs are
+discarded. This strict local policy may need revision if the provider contract evolves.
+
+The bankId should come from list-banks, but that browser claim is not trusted:
+server validates ASCII ID format (1..128, letters/digits/underscore/hyphen, first
+alphanumeric), uses only the configured server tenant, and delegates wallet
+authorization to the provider. There is deliberately no permanent hardcoded bank
+allowlist and no second /banks call or new cache. Unknown/out-of-wallet bank is
+documented to return items:[]; public statuses:[] does not authorize operating it.
+At most one bank item is accepted and its bankId must exactly match the request.
+This endpoint is platform-only; no arbitrary Company can use the shared account.
+
+### Public response, limits and errors
+
+Example: `{ "ok": true, "bankId": "v8", "categories": [{ "code": "APROVADA",
+"terminal": true }], "statuses": [{ "status": "Paga", "category": "APROVADA",
+"terminal": true, "hasSignUrl": false }] }`.
+No match returns the requested bankId, validated categories, and statuses:[].
+Missing booleans are omitted. No synthetic default statuses or bank names.
+
+Body: 256 actual bytes, one-second deadline (streaming included). Provider: 32 KiB
+declared/actual byte cap, twenty-second total deadline including authentication and
+body, max 32 categories, one bank item and 100 statuses. The 32 KiB budget covers
+the bounded small catalogue without inheriting the 64 KiB multi-bank reader cap;
+oversize fails closed, not truncated. It is a local operational bound, not a published
+provider guarantee. Timeouts cancel streams without waiting indefinitely for cancel.
+
+Errors use OPENCREDIT_PROPOSAL_STATUS_CATALOG_CONFIGURATION/AUTHENTICATION/
+INVALID_RESPONSE/PROVIDER_UNAVAILABLE/PROVIDER_FAILED/TIMEOUT/NETWORK. Known
+provider HTTP failures alone may include numeric providerStatus (100..599).
+401/403 map to internal 502 AUTHENTICATION, 429/5xx to 503 PROVIDER_UNAVAILABLE,
+other non-2xx to 502 PROVIDER_FAILED. Invalid response 502; local config/network/
+timeout 503, without invented providerStatus. No raw message, body, headers or stack.
+
+status category/terminal/hasSignUrl are metadata intended for future polling
+interpretation, not current polling, signature navigation or business authorization.
+Unknown labels must never be assumed terminal. No polling workflow is activated.
+Zero functional writes; only existing RateLimitBucket infrastructure is permitted.
+No client auth, refresh/retry/cache, old endpoint, schema, migration or webhook changes.
+Tests exclusively use mock transports. Rollback: revert this route/service/test/docs;
+no database rollback is needed.
