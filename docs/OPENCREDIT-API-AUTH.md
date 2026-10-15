@@ -129,3 +129,35 @@ Validation uses injected transport, fictitious configuration and an isolated lim
 store. No real login, provider request, Railway configuration or webhook activation
 is performed. Rollback this slice by removing the unused administrative endpoint
 and its service/tests; no database/schema rollback is required.
+
+## Isolated administrative credential test
+
+`POST /api/admin/integrations/opencredit/test-authentication` requires only
+OPENCREDIT_API_EMAIL and OPENCREDIT_API_PASSWORD. It does not read tenant/partner
+configuration or call banks or commercial endpoints. No UI/automatic call is added.
+It uses the existing session freshness, platform-admin permission, same-origin and
+truly empty-body checks. Query parameters and incoming Authorization are rejected.
+The shared limiter uses its own opencredit-test-authentication category, allowing
+three attempts per minute per companyId + userId. Only RateLimitBucket infrastructure
+writes are permitted; there are no functional writes.
+
+The client's server-only `verifyCredentials(): Promise<void>` always sends one fresh
+POST to the fixed official /api/auth/login using current server credentials, even
+with cached tokens. It never refreshes or retries. Existing bounded auth parsing,
+10-second timeout, redirect rejection, credentials omit and no-store are reused.
+The returned token pair is discarded, never published or persisted. The method does
+not replace the request() token cache or change request() login/refresh/retry policy.
+A provider login could affect existing provider-side sessions; this depends on the
+provider and has not been tested live. The test is administrative and rate-limited.
+
+Success is exactly `{ok:true}`. Errors contain only a sanitized code, plus an integer
+providerStatus (100–599) if an actual HTTP rejection was received. Login 400/401/403
+and other non-2xx rejections return FAILED/502; 429/5xx return PROVIDER_UNAVAILABLE/503.
+Local configuration/network/timeout errors return 503 and malformed successful auth
+payloads return INVALID_RESPONSE/502, without providerStatus. Every response is
+Cache-Control: no-store. No body, token, credential, URL or provider header is exposed
+or logged. A successful test validates only login, not tenant/partner authorization.
+
+Automated validation uses fake transports only. This slice does not activate any
+integration, webhook, bank call or business workflow. Rollback removes this endpoint
+and verifyCredentials; no schema/migration/data rollback is necessary.
