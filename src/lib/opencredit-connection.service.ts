@@ -2,7 +2,7 @@ import "server-only";
 import { NextResponse, type NextRequest } from "next/server";
 import { OpenCreditApiError, openCreditApiClient } from "./opencredit-api-client";
 import { emptyBody, sameOrigin } from "./opencredit-admin-request";
-import { parseOpenCreditBanks, type OpenCreditBank } from "./opencredit-banks";
+import { parseOpenCreditBanks, parseOpenCreditBankCapabilities, type OpenCreditBank, type OpenCreditBankCapabilities } from "./opencredit-banks";
 import type { SessionUser } from "./auth";
 import type { RateLimitRule } from "./rate-limit";
 
@@ -24,17 +24,21 @@ function providerFailure(status: number) {
   return new OpenCreditConnectionError("PROVIDER_FAILED", 502, status);
 }
 
-/** Fixed banks probe, never a generic provider proxy or commercial operation. */
-export function createOpenCreditBanksReader(options: {
+type BanksReaderOptions = {
   client?: Pick<typeof openCreditApiClient, "request">;
   env?: () => Config;
   timeoutMs?: number;
-} = {}) {
+};
+
+/** Same fixed transport; strict capability validation is opt-in, never a URL option. */
+export function createOpenCreditBanksReader(options?: BanksReaderOptions): () => Promise<OpenCreditBank[]>;
+export function createOpenCreditBanksReader(options: BanksReaderOptions, includeCapabilities: true): () => Promise<OpenCreditBankCapabilities[]>;
+export function createOpenCreditBanksReader(options: BanksReaderOptions = {}, includeCapabilities = false) {
   const client = options.client ?? openCreditApiClient;
   const env = options.env ?? (() => process.env);
   const timeoutMs = options.timeoutMs ?? 20_000;
 
-  return async (): Promise<OpenCreditBank[]> => {
+  return async (): Promise<OpenCreditBank[] | OpenCreditBankCapabilities[]> => {
     const config = env();
     const tenant = config.OPENCREDIT_TENANT_ID;
     if (!tenant || !ID.test(tenant)
@@ -54,7 +58,7 @@ export function createOpenCreditBanksReader(options: {
       }, timeoutMs);
     });
 
-    const operation = async (): Promise<OpenCreditBank[]> => {
+    const operation = async (): Promise<OpenCreditBank[] | OpenCreditBankCapabilities[]> => {
       // Existing client alone owns login/refresh and the single GET retry.
       const response = await client.request(path, { method: "GET", signal: abort.signal });
       if (abort.signal.aborted || !response.ok) {
@@ -85,7 +89,7 @@ export function createOpenCreditBanksReader(options: {
       let payload: unknown;
       try { payload = JSON.parse(Buffer.concat(chunks).toString("utf8")); }
       catch { throw new OpenCreditConnectionError("INVALID_RESPONSE", 502); }
-      const banks = parseOpenCreditBanks(payload);
+      const banks = includeCapabilities ? parseOpenCreditBankCapabilities(payload) : parseOpenCreditBanks(payload);
       if (!banks) throw new OpenCreditConnectionError("INVALID_RESPONSE", 502);
       return banks;
     };
