@@ -82,6 +82,12 @@ test("multiple banks preserve provider order and discard every extra field", asy
 test("empty array is valid and not replaced with synthetic banks", async () => {
   const f = fixture({ provider: () => payload([]) }); await check(await f.handler(request()), 200, { ok: true, count: 0, banks: [] });
 });
+
+test("basic listing ignores malformed capability extras and retains its exact public contract", async () => {
+  const f = fixture({ provider: () => payload([{ ...bank, simulacaoAtiva: "true", digitacaoAtiva: null,
+    somentePix: [], capacidades: {}, documentosExigidos: [{ token: "private-provider-token" }] }]) });
+  await check(await f.handler(request()), 200, { ok: true, count: 1, banks: [bank] });
+});
 test("one thousand unique small banks are accepted", async () => {
   const banks = Array.from({ length: 1000 }, (_, i) => ({ bankId: String(i), bankName: "B" }));
   const f = fixture({ provider: () => payload(banks) }); await check(await f.handler(request()), 200, { ok: true, count: 1000, banks });

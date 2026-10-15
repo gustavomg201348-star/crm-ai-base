@@ -315,3 +315,86 @@ client, lead, simulation, proposal, reservation, submission or contract; it does
 query CPF, change webhook/receive modes, or add any schema/migration/Railway changes.
 All automated tests use fake providers. Rollback removes the list route/service and
 restores the prior count implementation/helper layout; no database rollback is needed.
+
+## Administrative conservative bank capabilities
+
+`POST /api/admin/integrations/opencredit/bank-capabilities` is read-only for domain
+data and uses only the already approved banks request:
+`GET /api/tenants/{configuredTenant}/banks?product=clt`, without partnerId or CPF.
+Login/refresh remain exclusively in the unchanged existing client; no second client
+or token cache, new provider route, UI or automatic invocation is added.
+
+### Contract provenance: local QEVORA policy, not a formal provider schema
+
+The official OpenAPI 3.1.0 / contract 2.8.0 checked on 2026-10-15 publishes banks
+only at responses.200.content.application/json.schema.example.data.items.
+There are no formal properties/required/nullability declarations for these fields.
+The seven names below occur flat on each example bank item with boolean examples.
+Their optionality and strict validation here are an explicitly approved conservative
+LOCAL QEVORA contract, NOT inferred provider required/properties rules:
+
+- simulacaoAtiva
+- digitacaoAtiva
+- suportaParcela
+- suportaLiquido
+- aceitaChavePixReal
+- somentePix
+- exigeContatoEmpregador
+
+Only own present properties are considered. Absence means omit the public property;
+it is never false and never grants permission. A present value must be a real boolean:
+both true and false survive unchanged. Null, strings (including "true"/"false"),
+numbers, arrays, objects and explicit undefined are invalid. Any invalid known flag
+rejects the entire capabilities response; no partial list, coercion or default.
+An item with none of the seven flags returns capabilities: {}.
+The nested public capabilities object is reconstructed; provider fields are flat,
+so a provider-supplied nested capabilities object is not treated as an alternative.
+
+Success is exactly `{ok:true,count:N,banks:[{bankId,bankName,capabilities:{...}}]}`,
+where capabilities contains only those seven own, present, valid flags and count is
+computed from the full validated array. Order/case/text are preserved. Exact duplicate
+bankId is INVALID_RESPONSE, even with identical names. All unknown fields are dropped.
+
+### Deliberately excluded provider-example fields
+
+- documentosExigidos: only [] is exemplified; element schema/enum/limits are unknown.
+- margemMaximaPercentual, valorParcelaMinima, valorLiberadoMinimo,
+  valorLiberadoMaximo, valorPrincipalMinimo: financial/percentage semantics, monetary
+  units and formal types/nullability are not sufficiently specified; no interpretation.
+- product, enabled: outside the approved seven-field whitelist; no extra authorization
+  is inferred from them.
+- suportaValorSolicitado, suportaPagamentoPix: outside the whitelist; do not substitute
+  them for the explicitly chosen suportaLiquido / aceitaChavePixReal capabilities.
+
+Credentials, tokens, tenant/partner, arbitrary metadata/configuration, URLs, headers,
+requestPayload, bankRaw, commissions and every other unknown field remain excluded.
+Provider text must be displayed as text, not HTML.
+
+### Compatibility and controls
+
+The shared identity validator and bounded transport remain common to all banks
+readers (max 1000 banks, 64 KiB, ID/name validation, twenty-second total deadline).
+Strict capability validation is opt-in only for the new endpoint: list-banks keeps
+exactly `{ok:true,count:N,banks:[{bankId,bankName}]}` and test-connection keeps exactly
+`{ok:true,bankCount:N}`, including their previous behavior for ignored extra fields
+and duplicates. The basic callers do not start failing on malformed capability extras.
+No auth/cache/refresh/retry, test-authentication, diagnose-access or webhook change.
+
+Current session freshness, requirePlatformAdmin, sameOrigin, emptyBody, rejected
+queries/inbound Authorization and Cache-Control: no-store follow the approved pattern.
+Rate limit uses the existing shared infrastructure with category
+opencredit-bank-capabilities, three executions per minute per companyId + userId;
+unavailable limiter fails closed. Only OPENCREDIT_API_EMAIL, OPENCREDIT_API_PASSWORD
+and OPENCREDIT_TENANT_ID are required; partner configuration remains for diagnose-access.
+Errors use sanitized OPENCREDIT_BANK_CAPABILITIES_* codes and only a genuine known,
+validated numeric providerStatus may accompany provider HTTP failures.
+
+A bank appearing in the list is NOT permission to simulate or submit. Explicit
+simulacaoAtiva/digitacaoAtiva false must be respected; absent flags do not authorize.
+Even true is only provider metadata, not QEVORA company authorization or customer
+consent. No eligibility or financial decision is made here. No CPF/client/margin,
+simulation/selection/reset, bank account, proposal/status/feedback/contact operation
+is introduced. No functional records, schema, migration or Railway settings change.
+Tests use fake transports only, never live credentials or operational endpoints.
+Rollback removes the capabilities route/service and restores the previous parser
+layout; no database rollback is needed.
