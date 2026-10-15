@@ -189,6 +189,54 @@ test("client declares the public server-only marker", () => {
   assert.match(source, /^import "server-only";/m);
 });
 
+test("verifyCredentials always logs in with the current password, returns void and never refreshes", async () => {
+  const f = fixture(c => c.path === "/api/auth/login" ? pair() : new Response());
+  try {
+    await f.client.request("/api/banks");
+    assert.equal(await f.client.verifyCredentials(), undefined);
+    assert.equal(await f.client.verifyCredentials(), undefined);
+    assert.deepEqual(f.calls.map(c => c.path), ["/api/auth/login", "/api/banks", "/api/auth/login", "/api/auth/login"]);
+    f.change({ ...creds, password: "rotated-fictitious-password" });
+    await f.client.verifyCredentials();
+    assert.deepEqual(JSON.parse(String(f.calls.at(-1)?.init.body)), { ...creds, password: "rotated-fictitious-password" });
+    assert.equal(f.calls.at(-1)?.init.method, "POST");
+    assert.equal(new Headers(f.calls.at(-1)?.init.headers).has("authorization"), false);
+  } finally { f.client.dispose(); }
+});
+
+test("verifyCredentials does not publish its tokens or change request refresh policy", async () => {
+  const f = fixture(c => c.path.includes("/auth/") ? pair() : new Response());
+  try {
+    await f.client.verifyCredentials();
+    await f.client.request("/api/banks");
+    assert.deepEqual(f.calls.map(c => c.path), ["/api/auth/login", "/api/auth/login", "/api/banks"]);
+    f.advance(28800000);
+    await f.client.request("/api/banks");
+    assert.deepEqual(f.calls.slice(-2).map(c => c.path), ["/api/auth/refresh", "/api/banks"]);
+  } finally { f.client.dispose(); }
+});
+
+test("verifyCredentials cannot publish success after disposal", async () => {
+  let finish!: (response: Response) => void;
+  const f = fixture(() => new Promise<Response>(resolve => { finish = resolve; }));
+  const verifying = f.client.verifyCredentials();
+  f.client.dispose(); finish(pair());
+  await assert.rejects(verifying, { code: "DISPOSED" });
+  await assert.rejects(f.client.verifyCredentials(), { code: "DISPOSED" });
+  assert.equal(f.calls.length, 1);
+});
+
+test("cached access cannot hide a rejected password probe or trigger refresh fallback", async () => {
+  let logins = 0;
+  const f = fixture(c => c.path === "/api/auth/login"
+    ? (++logins === 1 ? pair() : new Response("sensitive-provider-error", { status: 401 })) : new Response());
+  try {
+    await f.client.request("/api/banks");
+    await assert.rejects(f.client.verifyCredentials(), { code: "AUTH_FAILED", status: 401, message: "OPENCREDIT_API_AUTH_FAILED" });
+    assert.deepEqual(f.calls.map(c => c.path), ["/api/auth/login", "/api/banks", "/api/auth/login"]);
+  } finally { f.client.dispose(); }
+});
+
 test("existing runtime browser guard remains effective after the server-marker test bootstrap", async () => {
   const f = fixture(() => { throw new Error("transport must not run"); });
   const previous = Object.getOwnPropertyDescriptor(globalThis, "window");

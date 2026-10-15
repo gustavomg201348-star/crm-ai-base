@@ -153,6 +153,14 @@ export function createOpenCreditApiClient(options: Options = {}) {
   }
 
   return {
+    async verifyCredentials(): Promise<void> {
+      const creds = configuration();
+      const version = generation;
+      // Always test the current password, never cached access or refresh tokens.
+      // Reuse bounded parsing/timeout protections and discard the returned pair.
+      await exchange("/api/auth/login", creds);
+      if (generation !== version || disposed) throw new OpenCreditApiError("DISPOSED");
+    },
     async request(path: string, init: RequestInit = {}): Promise<Response> {
       // No external URL, auth-route bypass, cross-origin redirect or caller-controlled bearer.
       let url: URL;
