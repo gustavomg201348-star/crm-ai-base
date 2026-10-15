@@ -189,6 +189,36 @@ test("client declares the public server-only marker", () => {
   assert.match(source, /^import "server-only";/m);
 });
 
+test("diagnoseAccess uses one fresh pair without changing the normal cached pair or refresh", async () => {
+  let login = 0;
+  const f = fixture(c => c.path === "/api/auth/login" ? pair(String(++login)) : c.path === "/api/auth/refresh" ? pair("refreshed") : new Response());
+  try {
+    await f.client.request("/api/banks");
+    await f.client.diagnoseAccess("tenant-fixture", "partner-fixture");
+    await f.client.request("/api/banks");
+    const banks = f.calls.filter(c => !c.path.includes("/auth/"));
+    assert.deepEqual(banks.map(c => new Headers(c.init.headers).get("authorization")),
+      ["Bearer test-access-1", "Bearer test-access-2", "Bearer test-access-2", "Bearer test-access-2", "Bearer test-access-1"]);
+    assert.equal(f.calls.filter(c => c.path === "/api/auth/login").length, 2);
+    assert.equal(f.calls.filter(c => c.path === "/api/auth/refresh").length, 0);
+    f.advance(28800000); await f.client.request("/api/banks");
+    const refresh = f.calls.find(c => c.path === "/api/auth/refresh");
+    assert.deepEqual(JSON.parse(String(refresh?.init.body)), { refreshToken: "test-refresh-1" });
+  } finally { f.client.dispose(); }
+});
+
+test("diagnoseAccess does not reset the normal cache idle timer", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const f = fixture(c => c.path === "/api/auth/login" ? pair() : new Response());
+  try {
+    await f.client.request("/api/banks"); t.mock.timers.tick(300000);
+    await f.client.diagnoseAccess("tenant-fixture", "partner-fixture"); t.mock.timers.tick(300001);
+    await f.client.request("/api/banks");
+    assert.equal(f.calls.filter(c => c.path === "/api/auth/login").length, 3);
+    assert.equal(f.calls.filter(c => c.path === "/api/auth/refresh").length, 0);
+  } finally { f.client.dispose(); t.mock.timers.reset(); }
+});
+
 test("verifyCredentials always logs in with the current password, returns void and never refreshes", async () => {
   const f = fixture(c => c.path === "/api/auth/login" ? pair() : new Response());
   try {
