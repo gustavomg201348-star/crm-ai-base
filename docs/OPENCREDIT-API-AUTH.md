@@ -161,3 +161,85 @@ or logged. A successful test validates only login, not tenant/partner authorizat
 Automated validation uses fake transports only. This slice does not activate any
 integration, webhook, bank call or business workflow. Rollback removes this endpoint
 and verifyCredentials; no schema/migration/data rollback is necessary.
+
+## Administrative read-only access diagnostic
+
+`POST /api/admin/integrations/opencredit/diagnose-access` separates password acceptance
+from the banks route/tenant/partner response. It is not a commercial capability or
+a proxy. It requires session freshness and platform-admin authorization, same origin,
+a truly empty body (not `{}`), no query and no inbound Authorization. Responses are
+no-store. The shared limiter category opencredit-diagnose-access permits two runs per
+minute per companyId + userId. Only existing RateLimitBucket infrastructure writes
+are permitted; no domain writes, schema changes or migrations are introduced.
+
+Both configured IDs are validated before creating a private per-execution client.
+Email/password are read only on the server. The dedicated diagnoseAccess operation
+reuses the existing bounded login parser and transport, sends exactly one fresh
+login and never uses refresh or retries. It neither reads nor changes request()'s
+cache, pending auth, fingerprint or idle timer. The client is disposed in finally.
+The same fresh bearer stays inside the client for all three sequential GETs:
+
+1. configured: banks?product=clt&partnerId={configuredPartner}
+2. missingPartnerId: banks?product=clt
+3. missingProduct: banks?partnerId={configuredPartner}
+
+All three paths use only the configured tenant under the fixed official origin.
+Browser input and decoded claims never choose a URL, tenant, partner, method or query.
+No alternate tenant is tried. Each external call retains the ten-second timeout
+(up to roughly forty seconds of provider I/O per complete run). Bodies from probes,
+including 2xx bodies, are cancelled/discarded without reading or parsing. A probe's
+401 is reported directly, not refreshed or replayed. Network/timeout probes report
+only `{error:"NETWORK"}` or `{error:"TIMEOUT"}`, without an invented status, and the
+remaining fixed probes may proceed. No request is repeated.
+
+A completed diagnostic returns HTTP 200 even if banks rejects all three GETs.
+Its exact successful response shape is:
+
+```text
+{
+  ok: true,
+  authentication: { ok: true },
+  token: { format: "opaque" } OR {
+    format: "jwt", decodedOnly: true,
+    role: { present: boolean, value?: string[] },
+    tenant: { present: boolean, value?: string },
+    partner: { present: boolean, value?: string }
+  },
+  tenantMatchesConfigured: boolean | null,
+  partnerMatchesConfigured: boolean | null,
+  probes: {
+    configured: Probe,
+    missingPartnerId: Probe,
+    missingProduct: Probe
+  }
+}
+Probe = { status: number, requestId?: string, correlationId?: string,
+          traceId?: string, traceparent?: string }
+     OR { error: "NETWORK" | "TIMEOUT" }
+```
+
+Decoded/unverified claims are diagnostic ONLY, not signature verification or QEVORA
+authorization. Only role/roles, tenantId/tenant_id and partnerId/partner_id are read.
+Role uses a conservative printable ASCII subset, up to ten values/64 characters each.
+IDs are bounded to 128 ASCII letters/digits/underscore/hyphen; safe integer IDs become
+strings. Invalid or conflicting aliases expose only presence. Malformed JWT-shaped
+payloads are treated as opaque. No subject, email, name, CPF, jti, timestamps, complete
+payload/header/signature or arbitrary claims are returned. No configured ID is echoed
+as a substitute for an absent claim. Comparisons are exact/case-sensitive and null
+when a safe claim is unavailable; they never confer permissions.
+
+Only x-request-id, x-correlation-id, x-trace-id and traceparent may be copied into
+the named output fields, with a conservative ASCII whitelist and 256-character cap.
+Known credentials and token values are also suppressed in allowed claims/headers.
+Cookies, Location, Authorization, other headers, raw bodies and raw errors are never
+logged/returned. Claims/request IDs are still untrusted provider-controlled strings;
+display them as text, never HTML. A status such as 400/404 alone does not prove why
+access was rejected.
+
+Login failures reuse the test-authentication sanitized error codes/status mappings;
+no probes run after failed login. Invalid/missing configuration returns sanitized
+CONFIGURATION/503 before probes. A live login might affect provider-side sessions;
+this provider behavior remains unverified. Automated tests use fakes only and do not
+contact production, Railway or OpenCredit. No webhook or ACTIVE/PAUSED/DISABLED change.
+Rollback removes the dedicated diagnostic route/service/summary/client method; no
+database rollback is required.

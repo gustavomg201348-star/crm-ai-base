@@ -1,6 +1,7 @@
 // Public Next.js marker: reject accidental imports from Client Components.
 import "server-only";
 import { createHash } from "node:crypto";
+import { configuredOpenCreditId, openCreditCorrelationIds, summarizeOpenCreditAccessToken } from "./opencredit-access-summary";
 
 const ORIGIN = "https://core.api.opencredit.tech";
 const IDLE_MS = 10 * 60 * 1000;
@@ -153,6 +154,39 @@ export function createOpenCreditApiClient(options: Options = {}) {
   }
 
   return {
+    async diagnoseAccess(tenant: string, partner: string) {
+      assertServer();
+      if (disposed) throw new OpenCreditApiError("DISPOSED");
+      // Do not touch the normal cache, fingerprint, pending auth or idle timer.
+      const creds = credentials();
+      if (!configuredOpenCreditId(tenant) || !configuredOpenCreditId(partner)
+        || !creds.email.trim() || !creds.password.trim()) throw new OpenCreditApiError("CONFIGURATION");
+      const pair = await exchange("/api/auth/login", creds);
+      const base = `/api/tenants/${encodeURIComponent(tenant)}/banks?`;
+      const probe = async (query: URLSearchParams) => {
+        if (disposed) throw new OpenCreditApiError("DISPOSED");
+        try {
+          const response = await call(base + query, {
+            method: "GET", headers: { Authorization: `Bearer ${pair.access}` }
+          }) as Response;
+          // Never read or parse any probe body, even on success. Cancellation
+          // must not delay the diagnostic if a provider stream stalls.
+          void response.body?.cancel().catch(() => {});
+          return { status: response.status,
+            ...openCreditCorrelationIds(response.headers, [pair.access, pair.refresh, creds.email, creds.password]) };
+        } catch (error) {
+          return { error: error instanceof OpenCreditApiError && error.code === "TIMEOUT" ? "TIMEOUT" as const : "NETWORK" as const };
+        }
+      };
+      const configured = await probe(new URLSearchParams({ product: "clt", partnerId: partner }));
+      const missingPartnerId = await probe(new URLSearchParams({ product: "clt" }));
+      const missingProduct = await probe(new URLSearchParams({ partnerId: partner }));
+      if (disposed) throw new OpenCreditApiError("DISPOSED");
+      return { ok: true as const, authentication: { ok: true as const },
+        ...summarizeOpenCreditAccessToken(pair.access, tenant, partner, [pair.access, pair.refresh, creds.email, creds.password]),
+        probes: { configured, missingPartnerId, missingProduct }
+      };
+    },
     async verifyCredentials(): Promise<void> {
       const creds = configuration();
       const version = generation;

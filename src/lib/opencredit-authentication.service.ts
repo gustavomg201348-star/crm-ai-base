@@ -13,6 +13,22 @@ export class OpenCreditAuthenticationError extends Error {
   }
 }
 
+export function openCreditAuthenticationFailure(error: unknown): OpenCreditAuthenticationError {
+  if (error instanceof OpenCreditApiError) {
+    if (error.code === "AUTH_FAILED") {
+      const status = error.status;
+      const unavailable = status === 429 || (status !== undefined && status >= 500);
+      return new OpenCreditAuthenticationError(unavailable ? "PROVIDER_UNAVAILABLE" : "FAILED", unavailable ? 503 : 502, status);
+    }
+    if (error.code === "CONFIGURATION" || error.code === "TIMEOUT" || error.code === "NETWORK") {
+      return new OpenCreditAuthenticationError(error.code, 503);
+    }
+    return new OpenCreditAuthenticationError("INVALID_RESPONSE", 502);
+  }
+  // Unknown internal exceptions never expose raw details.
+  return new OpenCreditAuthenticationError("PROVIDER_UNAVAILABLE", 503);
+}
+
 /** Password-only check: no tenant, partner, bank request or commercial operation. */
 export function createOpenCreditAuthenticationService(options: {
   client?: Pick<typeof openCreditApiClient, "verifyCredentials">;
@@ -21,19 +37,7 @@ export function createOpenCreditAuthenticationService(options: {
   return async (): Promise<void> => {
     try { await client.verifyCredentials(); }
     catch (error) {
-      if (error instanceof OpenCreditApiError) {
-        if (error.code === "AUTH_FAILED") {
-          const status = error.status;
-          const unavailable = status === 429 || (status !== undefined && status >= 500);
-          throw new OpenCreditAuthenticationError(unavailable ? "PROVIDER_UNAVAILABLE" : "FAILED", unavailable ? 503 : 502, status);
-        }
-        if (error.code === "CONFIGURATION" || error.code === "TIMEOUT" || error.code === "NETWORK") {
-          throw new OpenCreditAuthenticationError(error.code, 503);
-        }
-        throw new OpenCreditAuthenticationError("INVALID_RESPONSE", 502);
-      }
-      // Unknown internal exceptions never expose raw details.
-      throw new OpenCreditAuthenticationError("PROVIDER_UNAVAILABLE", 503);
+      throw openCreditAuthenticationFailure(error);
     }
   };
 }
