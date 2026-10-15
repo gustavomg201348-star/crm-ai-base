@@ -7,6 +7,131 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model ChatbotFlow {
+  id                 String @id @default(cuid())
+  companyId          String
+  name               String
+  description        String?
+  isActive           Boolean @default(true)
+  publishedVersionId String?
+  versionCounter     Int @default(1)
+  revision           Int @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  company            Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  versions           ChatbotFlowVersion[] @relation("ChatbotFlowVersions")
+  publishedVersion   ChatbotFlowVersion? @relation("PublishedChatbotVersion", fields: [companyId, id, publishedVersionId], references: [companyId, flowId, id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([companyId, id])
+  @@index([companyId, isActive])
+}
+
+model ChatbotFlowVersion {
+  id           String @id @default(cuid())
+  companyId    String
+  flowId       String
+  number       Int
+  status       String @default("DRAFT")
+  definition   String
+  publishedAt  DateTime?
+  createdAt    DateTime @default(now())
+  flow         ChatbotFlow @relation("ChatbotFlowVersions", fields: [companyId, flowId], references: [companyId, id], onDelete: Restrict, onUpdate: NoAction)
+  publishedFor ChatbotFlow[] @relation("PublishedChatbotVersion")
+  sessions     ChatbotSession[]
+
+  @@unique([companyId, flowId, number])
+  @@unique([companyId, flowId, id])
+}
+
+model ChatbotSession {
+  id                   String @id @default(cuid())
+  companyId            String
+  channelId            String
+  conversationId       String
+  contactId            String
+  flowId               String
+  flowVersionId        String
+  campaignId           String?
+  campaignRecipientId  String?
+  activeConversationId String? @unique
+  currentStepId        String
+  status               String @default("ACTIVE")
+  authority            String @default("CHATBOT")
+  revision             Int @default(0)
+  expiresAt            DateTime
+  suspensionReason     String?
+  closureReason        String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  endedAt              DateTime?
+  channel              Channel @relation(fields: [companyId, channelId], references: [companyId, id], onDelete: Restrict, onUpdate: NoAction)
+  contact              Contact @relation(fields: [companyId, contactId], references: [companyId, id], onDelete: Restrict, onUpdate: NoAction)
+  conversation         Conversation @relation(fields: [conversationId, contactId, channelId], references: [id, contactId, channelId], onDelete: Restrict, onUpdate: NoAction)
+  version              ChatbotFlowVersion @relation(fields: [companyId, flowId, flowVersionId], references: [companyId, flowId, id], onDelete: Restrict, onUpdate: NoAction)
+  campaign             Campaign? @relation(fields: [companyId, channelId, campaignId], references: [companyId, channelId, id], onDelete: Restrict, onUpdate: NoAction)
+  recipient            CampaignRecipient? @relation(fields: [campaignId, campaignRecipientId, contactId, conversationId], references: [campaignId, id, contactId, conversationId], onDelete: Restrict, onUpdate: NoAction)
+  events               ChatbotEvent[]
+  outbox               ChatbotOutbox[]
+
+  @@unique([companyId, channelId, id])
+  @@index([companyId, conversationId, createdAt])
+  @@index([status, expiresAt])
+}
+
+model ChatbotEvent {
+  id                      String @id @default(cuid())
+  companyId               String
+  channelId               String
+  sessionId               String
+  idempotencyKey          String
+  fingerprint             String
+  sessionRevision         Int?
+  kind                    String
+  payload                 String
+  occurredAt              DateTime
+  status                  String @default("PENDING")
+  attempts                Int @default(0)
+  maxAttempts             Int @default(3)
+  availableAt             DateTime @default(now())
+  leaseUntil              DateTime?
+  leaseToken              String?
+  processedAt             DateTime?
+  errorCode               String?
+  createdAt               DateTime @default(now())
+  session                 ChatbotSession @relation(fields: [companyId, channelId, sessionId], references: [companyId, channelId, id], onDelete: Restrict, onUpdate: NoAction)
+  commands                ChatbotOutbox[]
+
+  @@unique([companyId, channelId, idempotencyKey])
+  @@unique([companyId, channelId, sessionId, id])
+  @@index([status, availableAt])
+}
+
+model ChatbotOutbox {
+  id              String @id @default(cuid())
+  companyId       String
+  channelId       String
+  sessionId       String
+  eventId         String
+  idempotencyKey  String
+  payload         String
+  status          String @default("PENDING")
+  attempts        Int @default(0)
+  maxAttempts     Int @default(3)
+  availableAt     DateTime @default(now())
+  leaseUntil      DateTime?
+  leaseToken      String?
+  providerMessageId String?
+  errorCode       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  session         ChatbotSession @relation(fields: [companyId, channelId, sessionId], references: [companyId, channelId, id], onDelete: Restrict, onUpdate: NoAction)
+  event           ChatbotEvent @relation(fields: [companyId, channelId, sessionId, eventId], references: [companyId, channelId, sessionId, id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([companyId, channelId, idempotencyKey])
+  @@index([status, availableAt])
+}
+
+
 model Company {
   id            String          @id @default(cuid())
   name          String
@@ -42,6 +167,7 @@ model Company {
   openCreditIntegrations OpenCreditIntegration[]
   openCreditLeads OpenCreditLead[]
   openCreditEvents OpenCreditEvent[]
+  chatbotFlows ChatbotFlow[]
 }
 
 model OpenCreditIntegration {
@@ -130,7 +256,9 @@ model Channel {
   company       Company    @relation(fields: [companyId], references: [id])
   campaigns     Campaign[]
   conversations Conversation[] @relation("ConversationChannel")
+  chatbotSessions ChatbotSession[]
 
+  @@unique([companyId, id])
   @@index([companyId])
 }
 
@@ -341,6 +469,7 @@ model Contact {
   nextBestActionEvents NextBestActionEvent[]
 
   openCreditLeads OpenCreditLead[]
+  chatbotSessions ChatbotSession[]
   @@unique([companyId, id])
   @@index([companyId])
   @@index([companyId, phone])
@@ -606,6 +735,8 @@ model Conversation {
   assignmentHistory LeadAssignmentHistory[]
   nextBestActionEvents NextBestActionEvent[]
 
+  chatbotSessions ChatbotSession[]
+  @@unique([id, contactId, channelId])
   @@index([contactId])
   @@index([channelId])
   @@index([contactId, channelId, status])
@@ -726,7 +857,9 @@ model Campaign {
   channel     Channel             @relation(fields: [channelId], references: [id])
   createdBy   User?               @relation(fields: [createdById], references: [id])
   recipients  CampaignRecipient[]
+  chatbotSessions ChatbotSession[]
 
+  @@unique([companyId, channelId, id])
   @@index([companyId])
   @@index([channelId])
   @@index([createdById])
@@ -751,6 +884,8 @@ model CampaignRecipient {
   campaign          Campaign  @relation(fields: [campaignId], references: [id])
   contact           Contact   @relation(fields: [contactId], references: [id])
 
+  chatbotSessions ChatbotSession[]
+  @@unique([campaignId, id, contactId, conversationId])
   @@unique([campaignId, contactId])
   @@index([contactId])
   @@index([campaignId, status])
