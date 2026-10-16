@@ -614,7 +614,7 @@ containing eleven digits fail. The module intentionally does not import contacts
 normalizeContactCpf alone removes all non-digits and is insufficient as a validator.
 **CANONICAL CPF IS AN IDENTITY KEY, NOT VALIDATION OF OWNERSHIP OR VALIDITY.**
 There is no checksum; fixtures are fictitious mathematically invalid repeated digits.
-This key exists only in memory. The separate client-profile DTO builder continues
+Within the pure policy this key exists only in memory. The separate client-profile DTO builder continues
 preserving the technical value without this normalization. The pure policy makes no
 storage decision; the initial storage choice is documented in the foundation below.
 
@@ -656,14 +656,18 @@ Input and snapshots are never mutated; each decision is a fresh deterministic ob
 
 CLAIM is only a candidate recommendation from facts, NOT an atomic reservation.
 REUSE is not remote authentication or permission to make a financial request.
-Concurrency, DB unique(scope,canonicalCpf), transactional claim/re-read, snapshot
-freshness, revocation/dispatch races and operation replay remain future service/storage
-responsibilities. No DB constraint is implemented or claimed to be implemented here.
+The pure policy itself performs no persistence or atomic reservation and implements
+no DB constraints. The persistence foundation below now supplies
+unique(providerScope,normalizedCpf) and the other uniqueness/FK constraints.
+Transactional claim/re-read service logic, snapshot freshness, revocation/dispatch
+races and operation replay/idempotency remain future responsibilities.
 
 CommercialAccess != consent; RemoteIdentity != consent; receiving a lead != universal
 consent. Applicable operation authorization/evidence remains a separate boundary.
-No actual operation, endpoint, provider call, polling, schema/migration or Railway
-change occurs. Future execution must resolve all these gates before using the DTO.
+No actual commercial operation, endpoint, provider call, polling, UI or Railway
+configuration is introduced by the policy. This slice does contain schema/migration
+changes, exclusively in the persistence foundation documented below. Future execution
+must resolve all remaining gates before using the DTO.
 
 ## Commercial identity persistence foundation
 
