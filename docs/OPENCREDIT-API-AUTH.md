@@ -672,8 +672,9 @@ must resolve all remaining gates before using the DTO.
 ## Commercial identity persistence foundation
 
 Versioned models OpenCreditCommercialAccess and OpenCreditRemoteIdentity now provide
-storage foundations only. No operation uses them yet: no endpoint, UI, runtime mapper,
-claim/dispatch service, activation flow, scope provisioning or OpenCredit call is added.
+storage foundations only. The transactional access service documented below now uses
+CommercialAccess; RemoteIdentity still has no functional caller. No endpoint, UI,
+runtime mapper, claim/dispatch service, scope provisioning or OpenCredit call is added.
 The pure identity policy and existing webhook remain functionally unchanged.
 
 Both SQLite/PostgreSQL schemas declare equivalent models, inverse relations, uniques
@@ -687,7 +688,7 @@ CommercialAccess has one row per (companyId,providerScope), defaults enabled=fal
 and records changedByUserId. RemoteIdentity defaults enabled=false and records
 companyId, contactId, providerScope, normalizedCpf and createdByUserId. providerScope
 is required with NO default; no real scope is created. Timestamps are recorded but
-changedBy/createdBy are not a complete historical grant/revocation audit trail.
+changedBy/createdBy alone are not a complete historical grant/revocation audit trail.
 
 Unconditional unique(providerScope,normalizedCpf) prevents two Companies claiming
 the same identity namespace, including disabled rows. Unique(companyId,providerScope,
@@ -746,17 +747,19 @@ tables once real bindings exist.
 OpenCreditCommercialAccessEvent provides durable history of administrative
 CommercialAccess transitions. It is not a webhook log, remote identity event or
 consent/evidence of authorization. It contains no CPF, provider payload, free-text
-message, credential or token. No endpoint, UI, server action, grant/revoke service
-or functional runtime writer is introduced. No OpenCredit call, real access grant
-or real scope is created.
+message, credential or token. The foundation itself introduced no functional writer;
+the separate transactional service below now provides the first legitimate event
+insert writer. No endpoint, UI, server action, OpenCredit call, real access grant
+or real scope is introduced.
 
-Future actions are GRANTED and REVOKED. action remains String; neither a native enum
-nor a manual CHECK enforces it. A future service must validate action/state coherence:
+Actions are GRANTED and REVOKED. action remains String; neither a native enum
+nor a manual CHECK enforces it. The service below validates action/state coherence:
 GRANTED null -> true represents an absent access before its first grant;
 GRANTED false -> true grants an existing access; REVOKED true -> false revokes it.
 previousEnabled is deliberately nullable; nextEnabled records the resulting state.
-No-op requests must not create transition events. Future state changes and event
-inserts must commit in the same transaction; this foundation does not implement them.
+No-op requests must not create transition events. State changes and event
+inserts must commit in the same transaction; the separate service below implements
+that local atomicity without exposing a caller.
 
 The parent unique(id,companyId,providerScope), OCCommercial_id_company_scope_key,
 is deliberately redundant with the existing id PK: it supports the strong composite
@@ -774,7 +777,7 @@ or ordering guarantee based only on timestamps is added.
 
 **APPLICATION APPEND-ONLY CONTRACT, NOT PostgreSQL ACL ENFORCEMENT.**
 Events have no updatedAt. Production must not update, delete or upsert history;
-future services may insert events. The static TypeScript test rejects those mutators,
+transactional services insert events. The static TypeScript test rejects those mutators,
 computed literal access and obvious delegate/method extraction aliases; direct
 create remains allowed. This is a conservative syntactic guard, not proof against
 arbitrary dynamic code, raw SQL or a privileged database user.
@@ -798,6 +801,67 @@ No local result should be described as a completed GitHub run.
 
 Rollback before operational use: revert this slice with a separately approved
 database plan for the empty event table and redundant parent key. Once real history
-exists, do not automatically drop/delete it. The next service must implement
-authorized state-plus-event atomicity; grant/revoke, claim/reuse, freshness,
-revocation/dispatch coordination and commercial operation evidence remain absent.
+exists, do not automatically drop/delete it. State-plus-event atomicity is implemented
+by the service below; claim/reuse, freshness, revocation/dispatch coordination and
+commercial operation evidence remain absent.
+
+## Commercial access transactional service
+
+grantOpenCreditCommercialAccess(db,input) and revokeOpenCreditCommercialAccess(db,input)
+are internal server-only functions with an explicitly supplied transaction-capable
+database client. No default DB, endpoint, UI, route, server action or runtime caller
+is added. The service uses the existing isPlatformAdmin rule, not Company ADMIN status.
+Company Admin cannot self-grant/revoke; Supervisor and Agent cannot mutate access.
+An authenticated SessionUser is required from the future trusted server caller.
+This service does not authenticate an arbitrary object supplied by a browser.
+
+Every transaction rereads the actor by id, selecting only id/companyId/name/email/role.
+The id, Company, role and normalized email must still agree with the session;
+isPlatformAdmin is evaluated again on current database facts. Missing/stale actors
+fail closed with NOT_AUTHORIZED. Company is reread inside the same transaction;
+missing targets produce COMPANY_NOT_FOUND before any Access mutation.
+
+providerScope is a branded input AND is revalidated with the existing strict parser.
+Syntax is not trust: the future caller must use a trusted server-side resolver,
+never browser scope or email/password/token-derived namespaces. That resolver is
+not implemented; the real provider namespace remains blocked pending Prospecta
+confirmation. No real access/scope is configured or granted by this development.
+
+Grant absent creates enabled=true plus GRANTED null -> true. Grant disabled updates
+enabled/changedByUserId plus GRANTED false -> true. Revoke enabled updates those
+fields plus REVOKED true -> false. The service, not the caller, derives the action,
+previous/next state and actor. Extra top-level input fields are rejected.
+Grant enabled and revoke disabled are no-ops: no state update, timestamp touch,
+changedBy change or event. Revoke absent returns changed=false, enabled=false and
+accessId=null without creating a disabled row. changedBy represents the last real
+transition, not the last idempotent request. Results contain only changed/enabled/accessId.
+
+Access mutation and Event INSERT share one short Serializable transaction; Event
+history is never updated/deleted/upserted. A failure rolls back both. Only P2034
+or P2002 matching Access(companyId,providerScope)/OCCommercial_company_scope_key
+retries the entire local transaction, at most three attempts total; actor/Company/access
+are reread each time. Unknown unique targets do not retry. Exhaustion maps to
+CONCURRENT_CONFLICT; unexpected storage failures map to STORAGE_ERROR without raw
+Prisma exceptions, identifiers, SQL, scope, actor details or cause. There is no sleep,
+HTTP, OpenCredit request or external retry. Transaction limits are maxWait=2000ms
+and timeout=5000ms per attempt. Concurrent grant/revoke outcomes follow a valid
+serialization, not wall-clock request ordering.
+
+The dedicated disposable PostgreSQL test requires CI=true, GITHUB_ACTIONS=true,
+OPENCREDIT_COMMERCIAL_ACCESS_SERVICE_POSTGRES_TEST=1 and the established strict
+loopback/database/user/schema/port gates. Tests use only synthetic Companies, actors
+and synthetic-* scopes; no Contact or remote identity is used. Real concurrent
+transactions test first grants, disabled grants, revokes and a grant/revoke race.
+A test-only TransactionClient proxy causes a real final Event FK failure after
+observing the Access transition, proving rollback for both creation and update.
+There is no production failpoint, cleanup bypass, event deletion or new env setting
+for production. Synthetic fixtures remain only until the disposable database is destroyed.
+
+CommercialAccess is NOT consent and does NOT authorize proposal/simulation/client POST.
+It is only local administrative permission to let a Company enter a future commercial
+flow. No remote identity, claim/reuse, operation record, dispatch or credit call exists
+in this slice. Serializable local state does not solve future HTTP revocation races.
+The application append-only limitation remains: owner/superuser can modify history
+with database privileges; no ACL, trigger or role separation was added.
+Rollback: revert the service/CI/documentation commit; this slice has no schema,
+migration, backfill or operational data to undo. Existing audit tables are preserved.
