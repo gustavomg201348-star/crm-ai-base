@@ -267,11 +267,30 @@ model OpenCreditRemoteIdentity {
   contact         Contact @relation(fields: [companyId, contactId], references: [companyId, id], onDelete: Restrict, onUpdate: NoAction)
   commercialAccess OpenCreditCommercialAccess @relation(fields: [companyId, providerScope], references: [companyId, providerScope], onDelete: Restrict, onUpdate: NoAction)
   createdBy       User @relation("OpenCreditRemoteIdentityCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  events          OpenCreditRemoteIdentityEvent[]
 
+  @@unique([id, companyId, providerScope], map: "OCRemoteIdentity_id_company_scope_key")
   @@unique([providerScope, normalizedCpf], map: "OCRemote_scope_cpf_key")
   @@unique([companyId, providerScope, contactId], map: "OCRemote_company_scope_contact_key")
   @@index([companyId, contactId], map: "OCRemote_company_contact_idx")
   @@index([createdByUserId], map: "OCRemote_actor_idx")
+}
+
+model OpenCreditRemoteIdentityEvent {
+  id               String   @id @default(cuid())
+  remoteIdentityId String
+  companyId        String
+  providerScope    String
+  actorUserId      String
+  action           String
+  previousEnabled  Boolean?
+  nextEnabled      Boolean
+  createdAt        DateTime @default(now())
+  remoteIdentity   OpenCreditRemoteIdentity @relation(fields: [remoteIdentityId, companyId, providerScope], references: [id, companyId, providerScope], onDelete: Restrict, onUpdate: NoAction)
+  actor            User @relation("OpenCreditRemoteIdentityEventActor", fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([remoteIdentityId, createdAt, id], map: "OCRemoteEvent_identity_created_id_idx")
+  @@index([actorUserId], map: "OCRemoteEvent_actor_idx")
 }
 
 model OpenCreditIntegration {
@@ -459,6 +478,7 @@ model User {
   openCreditCommercialAccessChanges OpenCreditCommercialAccess[] @relation("OpenCreditCommercialAccessChangedBy")
   openCreditCommercialAccessEvents OpenCreditCommercialAccessEvent[] @relation("OpenCreditCommercialAccessEventActor")
   openCreditRemoteIdentitiesCreated OpenCreditRemoteIdentity[] @relation("OpenCreditRemoteIdentityCreatedBy")
+  openCreditRemoteIdentityEvents OpenCreditRemoteIdentityEvent[] @relation("OpenCreditRemoteIdentityEventActor")
 
   @@index([companyId])
 }

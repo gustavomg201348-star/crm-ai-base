@@ -865,3 +865,79 @@ The application append-only limitation remains: owner/superuser can modify histo
 with database privileges; no ACL, trigger or role separation was added.
 Rollback: revert the service/CI/documentation commit; this slice has no schema,
 migration, backfill or operational data to undo. Existing audit tables are preserved.
+
+## Remote identity audit foundation
+
+OpenCreditRemoteIdentityEvent introduces persistent history before any functional
+identity writer. There is still no claim/reuse, enable/disable service, endpoint,
+route, server action, UI, provider call, operation record or consent mechanism for
+remote identity. No real identity, access grant or operational scope is created.
+
+Future transition shapes are CLAIMED null -> false, ENABLED false -> true and
+DISABLED true -> false. action remains String, with no native enum or manual CHECK.
+previousEnabled is deliberately nullable; nextEnabled is required. A future service
+must derive/validate action/state coherence and commit parent state plus event
+atomically. This foundation only stores facts: tests of those shapes prove storage,
+not authorization or semantic enforcement by the database.
+
+Event fields are exactly id, remoteIdentityId, companyId, providerScope, actorUserId,
+action, previousEnabled, nextEnabled and createdAt. No updatedAt, normalizedCpf,
+customer name/phone/email, provider payload, request/response, credential, token,
+free-text or arbitrary metadata is copied into history.
+
+The new unique(id,companyId,providerScope), OCRemoteIdentity_id_company_scope_key,
+is deliberately redundant with RemoteIdentity.id's PK to support the strong composite
+Event(remoteIdentityId,companyId,providerScope) -> RemoteIdentity(id,companyId,providerScope)
+FK. An event cannot combine another identity, Company or scope. No redundant direct
+Event -> Company relation is added. actorUserId references User.id only: a Platform
+Admin of another Company is structurally valid, not thereby authorized.
+Inverse relations are RemoteIdentity.events and User.openCreditRemoteIdentityEvents.
+Both new FKs use ON DELETE RESTRICT and ON UPDATE NO ACTION; names follow Prisma's
+generated PostgreSQL convention, including length truncation. Indexes cover
+(remoteIdentityId,createdAt,id) and actorUserId. Timestamp alone is not a global
+ordering guarantee.
+
+**APPLICATION APPEND-ONLY, NOT DATABASE IMMUTABILITY.** The conservative TypeScript
+guard rejects update/updateMany/delete/deleteMany/upsert and obvious delegate/method
+escapes, computed literal access and aliases. Its reusable syntactic rule allows
+future direct create/read calls; the separate current-slice scan also asserts that
+no functional event writer exists yet. Future writer PRs must deliberately update
+that zero-writer assertion, not weaken the append-only mutator rule.
+This is not complete flow/taint analysis and does not protect against arbitrary
+dynamic code or raw SQL. PostgreSQL owner/superuser can still directly alter/delete
+data with database privileges. RESTRICT preserves parent references, not
+cryptographic or administrative immutability. No ACL, trigger, role, GRANT/REVOKE
+or separate DATABASE_URL is introduced.
+
+Disabled RemoteIdentity continues reserving ownership. No automatic expiry, release
+on disable, reassignment or change to normalizedCpf/default enabled is introduced.
+Existing unique(providerScope,normalizedCpf) and
+unique(companyId,providerScope,contactId) remain unchanged, as do Contact,
+CommercialAccess, webhook and providerScope semantics.
+
+Migration 20261016220000_add_opencredit_remote_identity_audit is structural only:
+the redundant parent unique, Event table, indexes and two FKs. No DML, backfill,
+seed, real scope or real identity. Both schemas retain equivalent logical models.
+CI adds the unit/contract and material tests without replacing existing gates.
+The dedicated material guard must pass before PrismaClient construction:
+CI=true, GITHUB_ACTIONS=true, OPENCREDIT_REMOTE_IDENTITY_AUDIT_POSTGRES_TEST=1,
+postgresql loopback only, qevora_ci database/user, fictitious CI password,
+schema=public and ports 5432/55432. Only synthetic-* scopes/Companies/actors/Contacts
+are used; the required parent snapshot uses an invalid repeated-digit synthetic CPF,
+never logged or included in Event.
+
+Material tests inspect migration completion, exact columns/defaults/PKs/unique/indexes
+and both actual FK definitions; they exercise Company/scope mismatches, a platform
+actor, missing actor, three stored action/state shapes, RESTRICT, NO ACTION and
+rollback. The NO ACTION test supplies a valid access for the replacement scope so
+the rejection is specifically the Event FK, not the older access FK.
+Fixtures may remain only in the disposable database until container destruction;
+there is no event cleanup API, deletion bypass or global table truncation.
+Local validation is not a completed GitHub run.
+
+Rollback before operational use requires reverting this slice and a separately
+approved database plan for its empty Event table/redundant parent key. Once real
+history exists, do not automatically erase it. The namespace still requires
+Prospecta confirmation and trusted server-side resolution; future identity services,
+operation authorization/evidence, freshness and revocation/dispatch gates remain
+separate blockers before commercial execution.
