@@ -213,7 +213,46 @@ model Company {
   openCreditIntegrations OpenCreditIntegration[]
   openCreditLeads OpenCreditLead[]
   openCreditEvents OpenCreditEvent[]
+  openCreditCommercialAccesses OpenCreditCommercialAccess[]
+  openCreditRemoteIdentities OpenCreditRemoteIdentity[]
   chatbotFlows ChatbotFlow[]
+}
+
+model OpenCreditCommercialAccess {
+  id              String   @id @default(cuid())
+  companyId       String
+  providerScope   String
+  enabled         Boolean  @default(false)
+  changedByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  company         Company @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  changedBy       User @relation("OpenCreditCommercialAccessChangedBy", fields: [changedByUserId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  identities      OpenCreditRemoteIdentity[]
+
+  @@unique([companyId, providerScope], map: "OCCommercial_company_scope_key")
+  @@index([changedByUserId], map: "OCCommercial_actor_idx")
+}
+
+model OpenCreditRemoteIdentity {
+  id              String   @id @default(cuid())
+  companyId       String
+  contactId       String
+  providerScope   String
+  normalizedCpf   String
+  enabled         Boolean  @default(false)
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  company         Company @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  contact         Contact @relation(fields: [companyId, contactId], references: [companyId, id], onDelete: Restrict, onUpdate: NoAction)
+  commercialAccess OpenCreditCommercialAccess @relation(fields: [companyId, providerScope], references: [companyId, providerScope], onDelete: Restrict, onUpdate: NoAction)
+  createdBy       User @relation("OpenCreditRemoteIdentityCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([providerScope, normalizedCpf], map: "OCRemote_scope_cpf_key")
+  @@unique([companyId, providerScope, contactId], map: "OCRemote_company_scope_contact_key")
+  @@index([companyId, contactId], map: "OCRemote_company_contact_idx")
+  @@index([createdByUserId], map: "OCRemote_actor_idx")
 }
 
 model OpenCreditIntegration {
@@ -398,6 +437,8 @@ model User {
   createdMulticredClients MulticredClient[] @relation("CreatedMulticredClients")
   assignedProposals Proposal[] @relation("AssignedProposals")
   proposalHistoryEvents ProposalHistory[] @relation("ProposalHistoryUser")
+  openCreditCommercialAccessChanges OpenCreditCommercialAccess[] @relation("OpenCreditCommercialAccessChangedBy")
+  openCreditRemoteIdentitiesCreated OpenCreditRemoteIdentity[] @relation("OpenCreditRemoteIdentityCreatedBy")
 
   @@index([companyId])
 }
@@ -517,6 +558,7 @@ model Contact {
 
   openCreditLeads OpenCreditLead[]
   chatbotSessions ChatbotSession[]
+  openCreditRemoteIdentities OpenCreditRemoteIdentity[]
   replyCorrelations ChatbotReplyCorrelation[]
   @@unique([companyId, id])
   @@index([companyId])
