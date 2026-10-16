@@ -1026,3 +1026,102 @@ simulation, proposal or any financial operation. Every future operation still ne
 final freshness checks, operation idempotency and revocation/dispatch coordination.
 No OpenCredit request, real identity/scope, webhook change, polling, Railway or
 production configuration is introduced.
+
+## Contact -> client profile adapter
+
+buildOpenCreditClientProfileFromContact(input) is a pure synchronous server-only
+adapter over caller-resolved snapshots, not an operational authorization boundary.
+"mappable" != "authorized to dispatch". The input is closed at all three levels:
+root contact/identity, seven Contact fields (id, companyId, name, phone, email, cpf,
+archivedAt) and five identity fields (companyId, contactId, providerScope,
+normalizedCpf, enabled). Only plain/null-prototype own enumerable data properties
+are accepted. Unknown/symbol/nonenumerable keys, accessors and inherited snapshots
+fail closed; getters are not invoked. Hostile object exceptions are sanitized,
+although JavaScript cannot generally inspect a Proxy without triggering its traps.
+
+It checks strict IDs, matching Company/Contact, runtime scope syntax, enabled=true
+and non-archived Contact. Missing/malformed CPF fails; Contact CPF is canonicalized
+only with canonicalizeOpenCreditOwnershipCpf and compared with the identity's
+already-canonical exact eleven-digit snapshot. No repair, inference or ownership
+mutation. The DTO uses the reserved identity.normalizedCpf, not the original Contact
+string. Identity enablement here proves local coherence, NOT consent or permission
+to execute client POST, validation, simulation, proposal or any financial operation.
+
+Only identity.normalizedCpf -> cpf, Contact.name -> nome, Contact.phone -> celular
+and non-null Contact.email -> email are passed to buildOpenCreditClientProfilePayload.
+Null email is omitted; strings are preserved exactly. There is no trim, lowercasing,
+phone formatting, +55 insertion, DDD inference or independent email validator.
+The existing builder remains responsible for its technical DTO rules; rejection
+becomes PROFILE_INVALID without the original exception, data or cause. All adapter
+errors are fresh closed-code messages without identifiers or PII. Input is not
+mutated and each successful call returns a fresh OpenCreditClientProfilePayload
+without a wrapper.
+
+The other fifteen fields are deliberately absent: data_nascimento, nome_mae, rg,
+orgao_emissor, uf_emissor, data_expedicao, genero, estado_civil, endereco_cep,
+endereco_rua, endereco_numero, endereco_complemento, endereco_bairro, endereco_cidade
+and endereco_uf. No enrichment from MulticredClient, proposals, conversations,
+webhooks, another Contact or AI. The pure builder/identity policy semantics remain
+unchanged. No database, environment lookup, provider client, HTTP implementation,
+endpoint, UI, runtime caller, consent, schema, migration or dependency is introduced.
+CI adds only the focused adapter unit gate, preserving existing gates.
+
+Before any real client POST a future trusted operational boundary must reread,
+near dispatch: actor/session, Company, enabled CommercialAccess and RemoteIdentity,
+trusted server-resolved providerScope, unarchived Contact, current CPF equality,
+absence of ambiguity, applicable authorization/evidence and operation state,
+idempotency/reconciliation. This adapter substitutes none of those checks. The
+builder receives an object, not raw JSON; a future boundary accepting external JSON
+must reject duplicate JSON keys BEFORE conversion. Keys collapsed by JSON.parse
+cannot be recovered here. Rollback is a code revert, with no data migration.
+
+### Validate operation audit — 2026-10-16
+
+Sources: [official partner OpenAPI](https://core.api.opencredit.tech/api/partner-openapi.json)
+and [official documentation](https://core.api.opencredit.tech/api/partner-docs).
+The documentation HTML references the partner OpenAPI. The inspected document is
+OpenAPI 3.1.0, API version 2.8.0. Only public documentation was fetched; no business
+endpoint, login or client data request was executed.
+
+The route and method ARE proven: operationId IntegrationApiController_validateClient,
+GET /api/tenants/{tenantId}/integration/clients/validate, JWT security. It is NOT a
+published POST operation. No requestBody is declared; therefore there are no body
+properties, required array or body enums to implement. Published parameters:
+
+| Parameter | Location | Formal schema | Formal required |
+| --- | --- | --- | --- |
+| tenantId | path | string (documented operation default) | true |
+| cpf | query | string | true |
+| stage | query | string, no enum | true |
+| simulationId | query | string | true |
+| bankId | query | string | true |
+| product | query | string, no enum | true |
+
+No partnerId or idempotency header is declared. CPF is sent in the query; bankId is
+also declared there. No tenant default is hardcoded into the adapter.
+
+**Published inconsistency:** descriptions say stage=simulate needs no bank;
+stage=propose needs simulationId (preferred) OR bankId; omitting stage checks all
+stages and permits omitting bank context. Yet the formal parameter list marks stage,
+simulationId AND bankId required=true. Product is described as clt, but no formal
+enum exists; likewise simulate/propose are descriptions, not a formal stage enum.
+Do not silently resolve this contradiction or implement requests from an inferred
+conditional contract. Provider clarification is required before a validate boundary.
+
+Published responses are 200, 400 and 401. The 200 application/json schema contains
+only example, with no formal type/properties/required definitions. Its example shows
+data.found, data.valid, data.evaluatedFor (bankId/source), data.pending and requestId.
+Pending items show field/label/regex/scope and resolveWith(method/path/optional field);
+the illustration includes client bank-account and bank employer-contact pendencies.
+The description permits evaluatedFor.bankId=null without bank context. These are
+examples/descriptions, NOT guaranteed field types, nullability or enums. Error
+illustrations show VALIDATION_ERROR (400) and UNAUTHORIZED (401), not a formal error
+response schema. No local validate response parser is added.
+
+The operation is described as checking stage-specific missing data and is published
+as GET (read intent). No mutation or banking action is described, but that is not
+proof of provider implementation having zero side effects. No idempotency-key
+contract or operation-specific retry guidance is published. Do not infer replay
+safety for financial operations. No validate HTTP code, POST client code or provider
+request is implemented. The endpoint identity is proven; a complete unambiguous
+request/response runtime contract is NOT PROVEN.
