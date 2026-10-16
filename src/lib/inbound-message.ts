@@ -29,6 +29,9 @@ import {
 } from "@/lib/prisma-errors";
 import { safeLogError, safeLogWarn } from "@/lib/safe-logger";
 import { buildInboundReplyFields } from "@/lib/message-reply";
+import { persistInboundMessage, preserveReplyReplay } from "./meta-reply-ingestion";
+import type { MetaReplyMetadata } from "./meta-reply-metadata";
+import { replyContentDigest } from "./meta-reply-snapshot";
 
 type InboundContact = ConversationWithRelations["contact"];
 
@@ -50,7 +53,8 @@ export async function processInboundMessage({
   fileName,
   mimeType,
   providerMessageId,
-  contextProviderMessageId
+  contextProviderMessageId,
+  replyMetadata
 }: {
   companyId: string;
   channelId?: string | null;
@@ -63,6 +67,7 @@ export async function processInboundMessage({
   mimeType?: string | null;
   providerMessageId?: string | null;
   contextProviderMessageId?: string | null;
+  replyMetadata?: MetaReplyMetadata;
 }) {
   const normalizedPhone = normalizeContactPhone(phone);
   const contactNormalizedPhone = getContactNormalizedPhone(normalizedPhone);
@@ -84,6 +89,11 @@ export async function processInboundMessage({
     });
 
     if (existingMessage) {
+      if (replyMetadata && channelId) await preserveReplyReplay(prisma, existingMessage, {
+        companyId, channelId, conversationId: existingMessage.conversationId, contactId: existingMessage.conversation.contactId,
+        providerMessageId, contextProviderMessageId, senderPhone: phone, metadata: replyMetadata,
+        contentDigest: replyContentDigest({ body: messageBody, type, mediaId, fileName, mimeType })
+      });
       return mapConversation(existingMessage.conversation);
     }
   }
@@ -340,8 +350,7 @@ export async function processInboundMessage({
   }
 
   try {
-    await prisma.message.create({
-      data: {
+    await persistInboundMessage(prisma, {
         conversationId: conversation.id,
         direction: "inbound",
         senderType: "customer",
@@ -352,8 +361,7 @@ export async function processInboundMessage({
         mimeType: mimeType ?? null,
         providerMessageId: providerMessageId ?? null,
         ...replyFields
-      }
-    });
+    }, replyMetadata && channelId ? { companyId, channelId, contactId: contact.id, senderPhone: phone, contextProviderMessageId, metadata: replyMetadata } : undefined);
   } catch (error) {
     if (providerMessageId && isProviderMessageIdUniqueViolation(error)) {
       const existingMessage = await prisma.message.findFirst({
@@ -367,6 +375,11 @@ export async function processInboundMessage({
       });
 
       if (existingMessage) {
+        if (replyMetadata && channelId) await preserveReplyReplay(prisma, existingMessage, {
+          companyId, channelId, conversationId: existingMessage.conversationId, contactId: existingMessage.conversation.contactId,
+          providerMessageId, contextProviderMessageId, senderPhone: phone, metadata: replyMetadata,
+          contentDigest: replyContentDigest({ body: messageBody, type, mediaId, fileName, mimeType })
+        });
         return mapConversation(existingMessage.conversation);
       }
     }

@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { readMetaReplyMetadata, type MetaReplyMetadata } from "./meta-reply-metadata";
 import {
   extractMetaTemplateVariables,
   type MetaTemplate
@@ -39,6 +40,7 @@ export type MetaWebhookMessage = {
   mimeType?: string | null;
   messageId?: string | null;
   contextMessageId?: string | null;
+  replyMetadata: MetaReplyMetadata;
 };
 
 export type MetaWebhookStatus = {
@@ -209,7 +211,8 @@ export function parseMetaWebhookMessages(payload: unknown): MetaWebhookMessage[]
           fileName: content.fileName ?? null,
           mimeType: content.mimeType ?? null,
           messageId: message.id ?? null,
-          contextMessageId: message.context?.id ?? null
+          contextMessageId: message.context?.id ?? null,
+          replyMetadata: readMetaReplyMetadata(message)
         });
       }
     }
