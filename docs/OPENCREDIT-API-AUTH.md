@@ -582,3 +582,85 @@ commercial OpenCredit enablement separate from webhook modes, remote identity/CP
 ownership policy for the shared account, and applicable consent/operational authorization.
 The provider contract does not specify a complete consent model. None of these bindings
 or consent mechanisms is implemented here. No schema/migration/Railway change.
+
+## Commercial authorization and remote identity policy
+
+`opencredit-commercial-identity-policy.ts` is server-only and pure. Its only runtime
+import is the public server-only marker. No network, provider client, env, DB, logger,
+filesystem, persistence, mapping registry or caller integration is introduced.
+
+Webhook ACTIVE/PAUSED/DISABLED controls inbound receiving, NOT commercial outbound.
+CommercialAccess and RemoteIdentity are separate typed read-only snapshots, not
+implemented Prisma models. They carry no role, credential, token, partnerId, tenantId,
+raw Contact/User or consent flag. Session/RBAC authorization belongs to a future
+service; it is not decided by this policy.
+
+OpenCreditProviderScope is nominally typed and represents the logical namespace in
+which equal CPFs can reach the same remote profile. LOCAL syntax: 1..64 ASCII
+characters, lowercase letter first, lowercase letters/digits with single internal
+hyphens; no outer whitespace, dots, slash/backslash, URL or email. An eleven-digit
+run is also rejected so a CPF cannot be embedded as a scope identifier. No trimming
+or case conversion occurs. Syntax cannot prove that an arbitrary string is not a
+secret or that a namespace is authorized: the future service must supply only a
+trusted server-resolved logical scope, never a browser choice or credential-derived
+fingerprint. Rotating a key does not define a new namespace. The actual remote
+namespace still needs confirmation with Prospecta; no tenant/account equivalence
+or dynamic scope allowlist is invented here.
+
+Ownership CPF accepts EXACTLY eleven ASCII digits or the conventional
+NNN.NNN.NNN-NN mask. Only after format validation are the known dots/hyphen removed.
+Partial masks, whitespace, controls, prefixes/suffixes, +55, letters and garbage
+containing eleven digits fail. The module intentionally does not import contacts.ts:
+normalizeContactCpf alone removes all non-digits and is insufficient as a validator.
+**CANONICAL CPF IS AN IDENTITY KEY, NOT VALIDATION OF OWNERSHIP OR VALIDITY.**
+There is no checksum; fixtures are fictitious mathematically invalid repeated digits.
+This key exists only in memory. The separate client-profile DTO builder continues
+preserving the technical value without this normalization. CPF plaintext versus HMAC
+storage and key rotation are NOT decided or implemented in this slice.
+
+evaluateOpenCreditIdentityUse receives caller-resolved company/contact IDs, CPF,
+archival state, matchingContactCount, trusted scope, commercial access and explicit
+existing identity (snapshot or null). Caller IDs have a LOCAL safe ASCII 1..128 bound,
+first alphanumeric then letters/digits/underscore/hyphen. matchingContactCount must be
+a safe integer in 0..1,000,000 (LOCAL bound); only exactly 1 proceeds. A future lookup
+may supply a saturated count of 2 once ambiguity is known, but must actually check
+canonical-equivalent legacy contacts, not merely assume the chosen Contact is unique.
+
+Decision order is deterministic:
+
+1. Reject malformed root, invalid provider scope or invalid caller IDs.
+2. Require commercial access, a real enabled boolean, enabled=true, matching scope
+   AND matching Company. Another Company's enabled record never grants permission.
+3. Require a real archival boolean and a non-archived Contact.
+4. Require CPF, canonicalize using the strict identity formats, then validate count
+   and require exactly one matching Contact. Null/undefined/empty CPF is missing;
+   whitespace and other nonempty malformed values are invalid.
+5. Only explicit existingIdentity:null produces CLAIM. Omitted/undefined/unresolved
+   identity facts are INVALID_FACTS, never an invitation to claim.
+6. For an existing snapshot, require matching scope, Company, Contact and canonical
+   CPF, then a real enabled boolean with enabled=true; only then REUSE. Snapshot CPF
+   must already be canonical, not normalized or repaired by this function.
+
+Allowed output is only {allowed:true,action:CLAIM|REUSE,normalizedCpf,providerScope}.
+Denials contain only {allowed:false,reason}, never identifiers, CPF or the other
+Company. Fixed reasons distinguish missing/disabled access, commercial scope/Company
+mismatch, archived/missing-CPF/invalid-CPF/ambiguous Contact, identity scope/Company/
+Contact/CPF mismatch, disabled identity, invalid scope and malformed facts. Normal
+denials do not throw. Standalone scope/CPF helpers throw fixed local parsing errors
+without input/cause; unexpected caller errors become INVALID_FACTS.
+
+An exact disabled identity remains IDENTITY_DISABLED, not CLAIM. A changed CPF is
+IDENTITY_CPF_MISMATCH, never silent reassignment, freeing of the old key or creation
+of a replacement. Existing mismatches take precedence over the identity enabled flag.
+Input and snapshots are never mutated; each decision is a fresh deterministic object.
+
+CLAIM is only a candidate recommendation from facts, NOT an atomic reservation.
+REUSE is not remote authentication or permission to make a financial request.
+Concurrency, DB unique(scope,canonicalCpf), transactional claim/re-read, snapshot
+freshness, revocation/dispatch races and operation replay remain future service/storage
+responsibilities. No DB constraint is implemented or claimed to be implemented here.
+
+CommercialAccess != consent; RemoteIdentity != consent; receiving a lead != universal
+consent. Applicable operation authorization/evidence remains a separate boundary.
+No actual operation, endpoint, provider call, polling, schema/migration or Railway
+change occurs. Future execution must resolve all these gates before using the DTO.
