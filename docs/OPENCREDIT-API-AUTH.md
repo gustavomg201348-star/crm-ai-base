@@ -10,8 +10,9 @@ No changes to lead.assigned, receive modes, schema, migrations or UI are needed.
 `src/lib/opencredit-api-client.ts` exports a lazy reusable client and injectable factory.
 Supply OPENCREDIT_API_EMAIL and OPENCREDIT_API_PASSWORD through the deployment's
 secret manager; never put actual values in Git, logs, browser state or URLs.
-Importing the client makes no requests. Only the platform-admin connection test
-described below uses it; no commercial workflow is connected.
+Importing the client makes no requests. The administrative authentication, connection,
+access diagnostic and catalogue operations described below use it; no commercial
+workflow is connected.
 
 The module uses the public `import "server-only"` marker, as documented in
 [Next.js environment poisoning protection](https://nextjs.org/docs/app/getting-started/server-and-client-components#preventing-environment-poisoning).
@@ -513,3 +514,71 @@ from category. No adapter, fallback or endpoint change is introduced in this sli
 SUCCESS is not authorization to grant credit. REJECTED is not a QEVORA decision.
 All meanings interpret supplier metadata only: QEVORA calculates no approval,
 eligibility, margin, risk or financial decision here. No CPF or personal data is used.
+
+## Client profile local contract
+
+`opencredit-client-profile-contract.ts` uses the public server-only marker but is
+otherwise pure: no provider client, HTTP, environment, database, filesystem or
+persistence. There is no endpoint, adapter, automatic registration or runtime caller.
+This slice creates only a technical DTO builder and sanitized success parser.
+
+Official operation audited: POST /api/tenants/{tenantId}/integration/clients,
+IntegrationApiController_createClient, contract 2.8.0 / OpenAPI 3.1.0. The formal
+request object requires only cpf. Its nineteen string properties are:
+cpf, nome, data_nascimento, celular, nome_mae, email, rg, orgao_emissor, uf_emissor,
+data_expedicao, genero, estado_civil, endereco_cep, endereco_rua, endereco_numero,
+endereco_complemento, endereco_bairro, endereco_cidade and endereco_uf.
+
+The builder accepts unknown, reconstructs a fresh object, and never changes values.
+Optional absence is allowed and omitted. Own undefined, null, non-string, empty or
+whitespace-only strings, and C0/C1 controls are rejected: remote clearing/nullification
+semantics are unpublished. Whitespace surrounding an otherwise valid generic string
+is preserved, not trimmed. Extra keys fail closed, including tenant/partner/company,
+Authorization, URL/path/method/headers, __proto__ and constructor. Only plain or
+null-prototype objects with own enumerable data properties are accepted; getters,
+symbols, hidden properties and inherited input are not a JSON DTO boundary.
+Duplicate serialized JSON keys must be rejected by a FUTURE raw request boundary
+before JSON.parse loses them; this object-only builder cannot detect already-collapsed
+duplicates, and does not accept serialized JSON. No boundary is introduced here.
+
+**LOCAL QEVORA SAFETY LIMIT — NOT PROVIDER CONTRACT:** cpf maximum 32 UTF-16 code
+units; every other string maximum 1024. Existing webhook identity checks use a smaller
+CPF bound and normalize values; they are deliberately NOT reused here. These generous
+local caps prevent absurd per-field input without inventing commercial constraints.
+The module does not enforce total request bytes; that belongs to the future service
+boundary. The provider publishes no minLength/maxLength/pattern for these fields.
+
+CPF accepts a safe bounded string, masked or not, with no checksum, regex, correction
+or normalization. It does not prove CPF validity, ownership or permission. All test
+identity values are synthetic; repeated-zero CPF fixtures are deliberately invalid.
+data_nascimento uses the textual DD/MM/AAAA rule as a structural NN/NN/NNNN check only:
+no calendar/age/timezone validation or ISO conversion. Even a structurally matching
+impossible date is not classified here. data_expedicao has only a provider example,
+so ANY safe bounded string is accepted; no date format is invented for it.
+genero has the formal M/F enum, exact case. estado_civil accepts string 1/2/3/4:
+**LOCAL QEVORA ALLOWLIST BASED ON PROVIDER DESCRIPTION, NOT A FORMAL OPENAPI ENUM.**
+No numeric coercion. Phone/email/CEP/UF/address fields have no invented regex, DDI,
+RFC email rules or UF enum; masks/case/leading zeros remain unchanged and house number
+remains a string. This local contract intentionally does not predict provider acceptance.
+
+The provider describes creation for a new CPF and updating sent fields for an existing
+CPF. CPF-only is formally permitted. This does NOT establish idempotency, safe retry,
+automatic enrichment, absence of side effects or Company isolation. **NO AUTOMATIC
+REPLAY.** No request or retry is implemented by this module.
+
+HTTP 201 is documented with only schema.example, not formal response properties,
+required or nullability. The parser's LOCAL conservative policy requires own data
+object and real boolean data.success/data.created, preserving all four true/false
+combinations, including success=false/created=true. It infers nothing. Only a fresh
+{success,created} is returned. Unknown response fields are ignored without reading
+their values: no requestId, CPF, client, creditProfile, barriers, metadata, message,
+error, headers, token, URL or raw provider object escapes through this contract.
+Invalid input and invalid success payload raise separate fixed local contract errors;
+no submitted values, raw error/cause, HTTP status or provider error mapping is retained.
+
+This module does NOT authorize a Company or CPF. Before any real call, blockers remain:
+authorized Company, Contact belonging to that Company, CPF resolved from that Contact,
+commercial OpenCredit enablement separate from webhook modes, remote identity/CPF
+ownership policy for the shared account, and applicable consent/operational authorization.
+The provider contract does not specify a complete consent model. None of these bindings
+or consent mechanisms is implemented here. No schema/migration/Railway change.
