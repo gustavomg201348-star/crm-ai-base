@@ -7,6 +7,51 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model ChatbotReplyCorrelation {
+  id                       String @id @default(cuid())
+  companyId                String
+  channelId                String
+  conversationId           String
+  contactId                String
+  inboundMessageId         String @unique
+  providerMessageId        String
+  contextProviderMessageId String?
+  interactionType          String
+  optionId                 String?
+  optionTitle              String?
+  optionIdentity           String
+  sourceTimestamp          DateTime?
+  timestampRaw             String?
+  senderIdentityHash       String
+  fingerprint              String
+  limitations              String @default("[]")
+  status                   String @default("NOT_FOUND")
+  reason                   String
+  sourceMessageId          String?
+  templateName             String?
+  templateLanguage         String?
+  campaignId               String?
+  campaignRecipientId      String?
+  candidateFlowId          String?
+  candidateVersionId       String?
+  flowCandidateStatus      String @default("UNCONFIGURED")
+  confirmedAt              DateTime?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+  channel                  Channel @relation(fields: [companyId, channelId], references: [companyId, id], onDelete: Cascade, onUpdate: NoAction)
+  contact                  Contact @relation(fields: [companyId, contactId], references: [companyId, id], onDelete: Cascade, onUpdate: NoAction)
+  conversation             Conversation @relation(fields: [conversationId, contactId, channelId], references: [id, contactId, channelId], onDelete: Cascade, onUpdate: NoAction)
+  inboundMessage           Message @relation("ChatbotReplyInbound", fields: [inboundMessageId, conversationId], references: [id, conversationId], onDelete: Cascade, onUpdate: NoAction)
+  sourceMessage            Message? @relation("ChatbotReplySource", fields: [sourceMessageId, conversationId], references: [id, conversationId], onDelete: Cascade, onUpdate: NoAction)
+  campaign                 Campaign? @relation(fields: [companyId, channelId, campaignId], references: [companyId, channelId, id], onDelete: Cascade, onUpdate: NoAction)
+  recipient                CampaignRecipient? @relation(fields: [campaignId, campaignRecipientId, contactId, conversationId], references: [campaignId, id, contactId, conversationId], onDelete: Cascade, onUpdate: NoAction)
+  candidateVersion         ChatbotFlowVersion? @relation(fields: [companyId, candidateFlowId, candidateVersionId], references: [companyId, flowId, id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([companyId, channelId, providerMessageId])
+  @@index([companyId, channelId, status, createdAt])
+  @@index([companyId, campaignId])
+}
+
 model ChatbotFlow {
   id                 String @id @default(cuid())
   companyId          String
@@ -37,6 +82,7 @@ model ChatbotFlowVersion {
   createdAt    DateTime @default(now())
   flow         ChatbotFlow @relation("ChatbotFlowVersions", fields: [companyId, flowId], references: [companyId, id], onDelete: Restrict, onUpdate: NoAction)
   publishedFor ChatbotFlow[] @relation("PublishedChatbotVersion")
+  replyCorrelations ChatbotReplyCorrelation[]
   sessions     ChatbotSession[]
 
   @@unique([companyId, flowId, number])
@@ -257,6 +303,7 @@ model Channel {
   campaigns     Campaign[]
   conversations Conversation[] @relation("ConversationChannel")
   chatbotSessions ChatbotSession[]
+  replyCorrelations ChatbotReplyCorrelation[]
 
   @@unique([companyId, id])
   @@index([companyId])
@@ -470,6 +517,7 @@ model Contact {
 
   openCreditLeads OpenCreditLead[]
   chatbotSessions ChatbotSession[]
+  replyCorrelations ChatbotReplyCorrelation[]
   @@unique([companyId, id])
   @@index([companyId])
   @@index([companyId, phone])
@@ -736,6 +784,7 @@ model Conversation {
   nextBestActionEvents NextBestActionEvent[]
 
   chatbotSessions ChatbotSession[]
+  replyCorrelations ChatbotReplyCorrelation[]
   @@unique([id, contactId, channelId])
   @@index([contactId])
   @@index([channelId])
@@ -782,6 +831,8 @@ model Message {
   status            String       @default("sent")
   providerMessageId String?
   replyToProviderMessageId String?
+  metaReplySnapshot String?
+  metaReplyConflictSnapshot String?
   replyPreviewType String?
   replyPreviewBody String?
   replyPreviewFileName String?
@@ -791,6 +842,10 @@ model Message {
   conversation      Conversation @relation(fields: [conversationId], references: [id])
   replyTo           Message?     @relation("MessageReplies", fields: [replyToMessageId], references: [id], onDelete: SetNull)
   replies           Message[]    @relation("MessageReplies")
+  inboundReplyCorrelations ChatbotReplyCorrelation[] @relation("ChatbotReplyInbound")
+  sourceReplyCorrelations ChatbotReplyCorrelation[] @relation("ChatbotReplySource")
+
+  @@unique([id, conversationId])
 
   @@index([conversationId, createdAt])
   @@index([replyToMessageId])
@@ -858,6 +913,7 @@ model Campaign {
   createdBy   User?               @relation(fields: [createdById], references: [id])
   recipients  CampaignRecipient[]
   chatbotSessions ChatbotSession[]
+  replyCorrelations ChatbotReplyCorrelation[]
 
   @@unique([companyId, channelId, id])
   @@index([companyId])
@@ -885,6 +941,7 @@ model CampaignRecipient {
   contact           Contact   @relation(fields: [contactId], references: [id])
 
   chatbotSessions ChatbotSession[]
+  replyCorrelations ChatbotReplyCorrelation[]
   @@unique([campaignId, id, contactId, conversationId])
   @@unique([campaignId, contactId])
   @@index([contactId])

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { processInboundMessage } from "@/lib/inbound-message";
+import { ReplyEvidencePersistenceError } from "@/lib/meta-reply-ingestion";
 import {
   parseMetaWebhookMessages,
   parseMetaWebhookStatuses
@@ -112,6 +113,7 @@ export async function POST(request: NextRequest) {
     const metaMessages = parseMetaWebhookMessages(body);
     if (metaMessages.length) {
       const results = [];
+      let evidenceRetryRequired = false;
 
       for (const message of metaMessages) {
         logWebhookAudit("message-parsed", {
@@ -145,29 +147,37 @@ export async function POST(request: NextRequest) {
           data: { lastWebhookReceivedAt: new Date() }
         });
 
-        const conversation = await processInboundMessage({
-          companyId: channel.companyId,
-          channelId: channel.id,
-          name: message.name,
-          phone: message.from,
-          body: message.body,
-          type: message.type,
-          mediaId: message.mediaId,
-          fileName: message.fileName,
-          mimeType: message.mimeType,
-          providerMessageId: message.messageId,
-          contextProviderMessageId: message.contextMessageId
-        });
+        try {
+          const conversation = await processInboundMessage({
+            companyId: channel.companyId,
+            channelId: channel.id,
+            name: message.name,
+            phone: message.from,
+            body: message.body,
+            type: message.type,
+            mediaId: message.mediaId,
+            fileName: message.fileName,
+            mimeType: message.mimeType,
+            providerMessageId: message.messageId,
+            contextProviderMessageId: message.contextMessageId,
+            replyMetadata: message.replyMetadata
+          });
 
-        logWebhookAudit("message-processed", {
-          channelId: channel.id,
-          companyId: channel.companyId,
-          hasChannelExternalId: Boolean(message.phoneNumberId),
-          hasSender: Boolean(message.from)
-        });
-        results.push({ phoneNumberId: message.phoneNumberId, ok: true, conversation });
+          logWebhookAudit("message-processed", {
+            channelId: channel.id,
+            companyId: channel.companyId,
+            hasChannelExternalId: Boolean(message.phoneNumberId),
+            hasSender: Boolean(message.from)
+          });
+          results.push({ phoneNumberId: message.phoneNumberId, ok: true, conversation });
+        } catch (error) {
+          if (!(error instanceof ReplyEvidencePersistenceError)) throw error;
+          evidenceRetryRequired = true;
+          logWebhookAudit("reply-evidence-retry-required", { code: "REPLY_EVIDENCE_RETRY_REQUIRED" });
+        }
       }
 
+      if (evidenceRetryRequired) return publicErrorResponse({ code: "INTERNAL_ERROR", status: 503 });
       return NextResponse.json({ ok: true, mode: "meta", results });
     }
 

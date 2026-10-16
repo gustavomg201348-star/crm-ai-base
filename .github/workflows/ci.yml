@@ -53,6 +53,9 @@ jobs:
       - name: Validate chatbot definition and fail-closed scope
         run: npx --yes tsx@4.20.6 --test src/lib/chatbot-definition.test.ts src/lib/chatbot-foundation-scope.test.ts
 
+      - name: Validate passive Meta reply formats and scope
+        run: npx --yes tsx@4.20.6 --test src/lib/meta-reply-correlation.test.ts src/lib/message-reply.test.ts src/lib/inbound-message.test.ts src/lib/meta-webhook-security.test.ts src/lib/webhook-channel-secrets.test.ts
+
       - name: Build
         run: npm run build
 
@@ -117,3 +120,9 @@ jobs:
         env:
           CHATBOT_FOUNDATION_TEST_DATABASE_URL: postgresql://qevora_ci:qevora_ci_password@127.0.0.1:5432/qevora_chatbot_test?schema=public
           CHATBOT_FOUNDATION_POSTGRES_TEST: "1"
+
+      - name: Validate passive Meta correlation and concurrency
+        run: npx --yes tsx@4.20.6 --test src/lib/meta-reply-correlation.integration.test.ts
+        env:
+          CHATBOT_REPLY_TEST_DATABASE_URL: postgresql://qevora_ci:qevora_ci_password@127.0.0.1:5432/qevora_chatbot_test?schema=public
+          CHATBOT_REPLY_POSTGRES_TEST: "1"
