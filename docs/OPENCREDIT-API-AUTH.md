@@ -659,8 +659,9 @@ REUSE is not remote authentication or permission to make a financial request.
 The pure policy itself performs no persistence or atomic reservation and implements
 no DB constraints. The persistence foundation below now supplies
 unique(providerScope,normalizedCpf) and the other uniqueness/FK constraints.
-Transactional claim/re-read service logic, snapshot freshness, revocation/dispatch
-races and operation replay/idempotency remain future responsibilities.
+The internal transactional claim/re-read service is documented below. Freshness at
+future operation dispatch, revocation/dispatch races and operation replay/idempotency
+remain future responsibilities.
 
 CommercialAccess != consent; RemoteIdentity != consent; receiving a lead != universal
 consent. Applicable operation authorization/evidence remains a separate boundary.
@@ -673,8 +674,9 @@ must resolve all remaining gates before using the DTO.
 
 Versioned models OpenCreditCommercialAccess and OpenCreditRemoteIdentity now provide
 storage foundations only. The transactional access service documented below now uses
-CommercialAccess; RemoteIdentity still has no functional caller. No endpoint, UI,
-runtime mapper, claim/dispatch service, scope provisioning or OpenCredit call is added.
+CommercialAccess; the identity service below now uses RemoteIdentity. Neither has
+a runtime caller. No endpoint, UI, runtime mapper, dispatch service, scope provisioning
+or OpenCredit call is added.
 The pure identity policy and existing webhook remain functionally unchanged.
 
 Both SQLite/PostgreSQL schemas declare equivalent models, inverse relations, uniques
@@ -737,8 +739,9 @@ Unexpected failures are sanitized before reaching node:test.
 No real identity or operational integration was created by development/tests.
 The effective provider namespace still requires confirmation with Prospecta.
 Consent/evidence remains separate. Storage constraints do not authorize any operation,
-provide idempotency or solve revocation/dispatch races. The claim/dispatch service
-does not exist. Rollback before real data: revert this code and use an approved
+provide operation idempotency or solve revocation/dispatch races. The internal claim
+service below is reservation-only; no dispatch service exists. Rollback before real
+data: revert this code and use an approved
 database rollback plan for the two empty tables; never automatically drop ownership
 tables once real bindings exist.
 
@@ -869,15 +872,16 @@ migration, backfill or operational data to undo. Existing audit tables are prese
 ## Remote identity audit foundation
 
 OpenCreditRemoteIdentityEvent introduces persistent history before any functional
-identity writer. There is still no claim/reuse, enable/disable service, endpoint,
-route, server action, UI, provider call, operation record or consent mechanism for
-remote identity. No real identity, access grant or operational scope is created.
+identity writer. The internal transactional service documented below now implements
+claim/enable/disable. There is still no endpoint, route, server action, UI, runtime
+caller, provider call, operation record or consent mechanism for remote identity.
+No real identity, access grant or operational scope is created.
 
 Future transition shapes are CLAIMED null -> false, ENABLED false -> true and
 DISABLED true -> false. action remains String, with no native enum or manual CHECK.
-previousEnabled is deliberately nullable; nextEnabled is required. A future service
-must derive/validate action/state coherence and commit parent state plus event
-atomically. This foundation only stores facts: tests of those shapes prove storage,
+previousEnabled is deliberately nullable; nextEnabled is required. The service below
+derives action/state coherence and commits parent state plus event atomically.
+The database foundation only stores facts: tests of those shapes prove storage,
 not authorization or semantic enforcement by the database.
 
 Event fields are exactly id, remoteIdentityId, companyId, providerScope, actorUserId,
@@ -900,9 +904,10 @@ ordering guarantee.
 **APPLICATION APPEND-ONLY, NOT DATABASE IMMUTABILITY.** The conservative TypeScript
 guard rejects update/updateMany/delete/deleteMany/upsert and obvious delegate/method
 escapes, computed literal access and aliases. Its reusable syntactic rule allows
-future direct create/read calls; the separate current-slice scan also asserts that
-no functional event writer exists yet. Future writer PRs must deliberately update
-that zero-writer assertion, not weaken the append-only mutator rule.
+direct create/read calls; the production scan permits Event.create only in
+opencredit-remote-identity.service.ts and requires exactly that writer. Other
+services, endpoints, UI and scripts remain forbidden writers. Mutators and delegate
+escapes remain rejected globally, including in the authorized service.
 This is not complete flow/taint analysis and does not protect against arbitrary
 dynamic code or raw SQL. PostgreSQL owner/superuser can still directly alter/delete
 data with database privileges. RESTRICT preserves parent references, not
@@ -938,6 +943,86 @@ Local validation is not a completed GitHub run.
 Rollback before operational use requires reverting this slice and a separately
 approved database plan for its empty Event table/redundant parent key. Once real
 history exists, do not automatically erase it. The namespace still requires
-Prospecta confirmation and trusted server-side resolution; future identity services,
-operation authorization/evidence, freshness and revocation/dispatch gates remain
+Prospecta confirmation and trusted server-side resolution; operation
+authorization/evidence, final freshness and revocation/dispatch gates remain
 separate blockers before commercial execution.
+
+## Remote identity transactional service
+
+claimOpenCreditRemoteIdentity(db,input), enableOpenCreditRemoteIdentity(db,input)
+and disableOpenCreditRemoteIdentity(db,input) are internal server-only APIs with
+an explicitly supplied transaction-capable client. This slice adds no schema or
+migration. No endpoint, UI, server action, runtime caller or real scope/identity is
+introduced. Rollback of this slice is a code revert; do not erase existing history.
+
+All three operations are temporarily and conservatively Platform Admin-only via
+isPlatformAdmin. Company ADMIN, SUPERVISOR and AGENT cannot perform them. Each
+transaction rereads the actor and compares id, companyId, role and normalized email
+with the authenticated SessionUser, then rechecks the current Platform Admin rule.
+Missing/stale actors fail closed. A future caller must authenticate that session;
+an arbitrary browser-supplied object is not an authentication boundary.
+
+Input accepts only actor/companyId/contactId/providerScope. IDs use the existing
+strict syntax and the branded scope is reparsed at runtime. Syntax is not trust:
+the future caller must obtain scope exclusively from a trusted server-side resolver,
+not browser input, tenantId, partnerId, email, password or token. No real resolver
+is implemented here. Output contains only changed/enabled/identityId. Errors contain
+closed codes, never CPF, identifiers, conflicting owners, raw Prisma metadata or cause.
+
+CLAIM is a local ownership reservation, NOT consent or remote registration. New
+claims always start disabled with CLAIMED null -> false. A disabled identity keeps
+both ownership reservations indefinitely; disabling never releases, deletes,
+expires, reassigns or changes the CPF snapshot or binding. Repeated claims of the
+same exact binding preserve enabled state, creator and timestamps without a new
+event. The two lookups are providerScope+normalizedCpf and
+companyId+providerScope+contactId; both are reconciled. Different owners produce a
+sanitized OWNERSHIP_CONFLICT; a changed Contact snapshot produces
+IDENTITY_SNAPSHOT_MISMATCH; contradictory bindings produce IDENTITY_CONFLICT.
+
+CLAIM and ENABLE reread Company and the exact tenant-scoped Contact, reject archived
+Contacts and missing/invalid CPF, and reuse canonicalizeOpenCreditOwnershipCpf.
+Only already-canonical digits and their conventional formatted representation are
+queried with companyId, findMany and take:2. Archived duplicate Contacts count;
+exactly one match must be the target Contact. No permissive legacy normalization.
+Both operations require an existing enabled CommercialAccess. ENABLE additionally
+requires the same identity from both unique lookups and a fresh matching CPF
+snapshot; it records ENABLED false -> true. Already enabled is a true no-op.
+
+DISABLE validates the current actor and Company, then uses only the scoped identity
+binding. It remains possible with revoked CommercialAccess, an archived Contact,
+changed/missing/invalid CPF or later ambiguity. Enabled -> disabled records DISABLED
+true -> false. Missing or already-disabled identity is a no-op, with no event or
+timestamp update. Absence returns identityId:null. Ownership fields and creator
+are never updated by any transition.
+
+State and exactly one derived Event.create share a short Serializable transaction
+(maxWait=2000ms, timeout=5000ms). P2034 retries the entire transaction, at most three
+attempts total, rereading authorization and all applicable facts. Only CLAIM retries
+P2002 for OCRemote_scope_cpf_key or OCRemote_company_scope_contact_key (equivalent
+Prisma field metadata accepted). Other PK/model/unknown unique failures do not retry.
+Re-read ownership conflicts retain their semantic code; retry exhaustion produces
+CONCURRENT_CONFLICT and unexpected storage failures STORAGE_ERROR. No HTTP, fetch,
+sleep, crypto/provider request or network retry occurs inside these transactions.
+No-op transitions write neither state nor event. Application append-only is not
+database immutability: owner/superuser privileges can still alter history.
+
+Unit/contract tests check authorization, stale actors, closed inputs, strict syntax,
+reconciliation, retries, no-ops, sanitized errors and the no-caller boundary. The
+dedicated material guard requires CI=true, GITHUB_ACTIONS=true,
+OPENCREDIT_REMOTE_IDENTITY_SERVICE_POSTGRES_TEST=1 and only the established disposable
+loopback PostgreSQL qevora_ci configuration. It runs before client construction.
+Tests use synthetic fixtures and invalid repeated-digit synthetic CPFs, never logs
+or events containing CPF. PostgreSQL tests prove state/event coherence, same-owner
+and cross-company claim races, enable/disable races and valid serial histories.
+A test-only transaction proxy injects a missing Event actor to trigger a real FK
+failure after observing the state change, proving rollback for CLAIM, ENABLE and
+DISABLE. No production failpoint, audit deletion or cleanup bypass exists.
+CI preserves existing gates and adds the service unit and material tests.
+
+This is NOT a complete operational boundary. Future authorization/evidence is still
+a blocker before any runtime commercial claim. No consent=true or legal consent
+is invented. An enabled RemoteIdentity alone does NOT authorize client POST,
+simulation, proposal or any financial operation. Every future operation still needs
+final freshness checks, operation idempotency and revocation/dispatch coordination.
+No OpenCredit request, real identity/scope, webhook change, polling, Railway or
+production configuration is introduced.
