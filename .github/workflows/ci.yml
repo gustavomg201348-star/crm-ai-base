@@ -68,6 +68,9 @@ jobs:
       - name: Validate OpenCredit remote identity transactional service
         run: npx --yes tsx@4.20.6 src/lib/opencredit-remote-identity-service.test.ts
 
+      - name: Validate OpenCredit contact client profile adapter
+        run: npx --yes tsx@4.20.6 src/lib/opencredit-contact-client-profile-adapter.test.ts
+
       - name: Validate passive Meta reply formats and scope
         run: npx --yes tsx@4.20.6 --test src/lib/meta-reply-correlation.test.ts src/lib/message-reply.test.ts src/lib/inbound-message.test.ts src/lib/meta-webhook-security.test.ts src/lib/webhook-channel-secrets.test.ts
 
