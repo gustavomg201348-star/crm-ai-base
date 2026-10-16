@@ -740,3 +740,64 @@ provide idempotency or solve revocation/dispatch races. The claim/dispatch servi
 does not exist. Rollback before real data: revert this code and use an approved
 database rollback plan for the two empty tables; never automatically drop ownership
 tables once real bindings exist.
+
+## Commercial access audit foundation
+
+OpenCreditCommercialAccessEvent provides durable history of administrative
+CommercialAccess transitions. It is not a webhook log, remote identity event or
+consent/evidence of authorization. It contains no CPF, provider payload, free-text
+message, credential or token. No endpoint, UI, server action, grant/revoke service
+or functional runtime writer is introduced. No OpenCredit call, real access grant
+or real scope is created.
+
+Future actions are GRANTED and REVOKED. action remains String; neither a native enum
+nor a manual CHECK enforces it. A future service must validate action/state coherence:
+GRANTED null -> true represents an absent access before its first grant;
+GRANTED false -> true grants an existing access; REVOKED true -> false revokes it.
+previousEnabled is deliberately nullable; nextEnabled records the resulting state.
+No-op requests must not create transition events. Future state changes and event
+inserts must commit in the same transaction; this foundation does not implement them.
+
+The parent unique(id,companyId,providerScope), OCCommercial_id_company_scope_key,
+is deliberately redundant with the existing id PK: it supports the strong composite
+Event(commercialAccessId,companyId,providerScope) -> Access(id,companyId,providerScope)
+FK, preventing a history row from mixing another access, Company or scope.
+There is no redundant direct Event -> Company relation. actorUserId references only
+User.id, so a Platform Admin belonging to a different Company is structurally valid.
+That FK proves existence, NOT permission. The inverse relations are Access.events
+and User.openCreditCommercialAccessEvents. Both new FKs use ON DELETE RESTRICT and
+ON UPDATE NO ACTION; history prevents physical deletion of referenced access/actor.
+FK names follow Prisma's generated PostgreSQL names, including its length truncation,
+so SQLite/PostgreSQL can keep the same logical model without SQLite FK name maps.
+Indexes cover (commercialAccessId,createdAt,id) and actorUserId; no speculative index
+or ordering guarantee based only on timestamps is added.
+
+**APPLICATION APPEND-ONLY CONTRACT, NOT PostgreSQL ACL ENFORCEMENT.**
+Events have no updatedAt. Production must not update, delete or upsert history;
+future services may insert events. The static TypeScript test rejects those mutators,
+computed literal access and obvious delegate/method extraction aliases; direct
+create remains allowed. This is a conservative syntactic guard, not proof against
+arbitrary dynamic code, raw SQL or a privileged database user.
+RESTRICT preserves parent links, not event immutability. PostgreSQL owner/superuser
+can still alter/delete history with database privileges. This slice is not tamper-proof
+and introduces no role, role separation, GRANT/REVOKE, trigger or DATABASE_URL change.
+ACL auditing is deliberately deferred: the current CI role is superuser and cannot
+prove production runtime privilege enforcement. SQLite has equivalent logical
+structure but supplies no PostgreSQL privilege guarantee either.
+
+Migration 20261016200000_add_opencredit_commercial_access_audit only adds the parent
+unique, event table, indexes and FKs. No backfill, seed or existing-data DML.
+The material test requires CI=true, GITHUB_ACTIONS=true,
+OPENCREDIT_COMMERCIAL_ACCESS_AUDIT_POSTGRES_TEST=1 and the same strict disposable
+loopback database/user/schema/ports as the identity foundation tests. It inspects real
+columns/defaults/indexes/FKs and exercises cross-company/scope rejection, a platform
+actor, RESTRICT, NO ACTION and rollback using synthetic fixtures without CPF.
+Fixtures may remain only in that disposable database until it is destroyed;
+there is no event deletion API or cleanup bypass. CI invokes both new tests.
+No local result should be described as a completed GitHub run.
+
+Rollback before operational use: revert this slice with a separately approved
+database plan for the empty event table and redundant parent key. Once real history
+exists, do not automatically drop/delete it. The next service must implement
+authorized state-plus-event atomicity; grant/revoke, claim/reuse, freshness,
+revocation/dispatch coordination and commercial operation evidence remain absent.
