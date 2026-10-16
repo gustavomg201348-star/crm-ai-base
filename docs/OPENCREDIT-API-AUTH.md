@@ -590,8 +590,8 @@ import is the public server-only marker. No network, provider client, env, DB, l
 filesystem, persistence, mapping registry or caller integration is introduced.
 
 Webhook ACTIVE/PAUSED/DISABLED controls inbound receiving, NOT commercial outbound.
-CommercialAccess and RemoteIdentity are separate typed read-only snapshots, not
-implemented Prisma models. They carry no role, credential, token, partnerId, tenantId,
+The policy's CommercialAccess and RemoteIdentity are separate typed read-only
+snapshots, distinct from the persistence foundation described below. They carry no role, credential, token, partnerId, tenantId,
 raw Contact/User or consent flag. Session/RBAC authorization belongs to a future
 service; it is not decided by this policy.
 
@@ -615,8 +615,8 @@ normalizeContactCpf alone removes all non-digits and is insufficient as a valida
 **CANONICAL CPF IS AN IDENTITY KEY, NOT VALIDATION OF OWNERSHIP OR VALIDITY.**
 There is no checksum; fixtures are fictitious mathematically invalid repeated digits.
 This key exists only in memory. The separate client-profile DTO builder continues
-preserving the technical value without this normalization. CPF plaintext versus HMAC
-storage and key rotation are NOT decided or implemented in this slice.
+preserving the technical value without this normalization. The pure policy makes no
+storage decision; the initial storage choice is documented in the foundation below.
 
 evaluateOpenCreditIdentityUse receives caller-resolved company/contact IDs, CPF,
 archival state, matchingContactCount, trusted scope, commercial access and explicit
@@ -664,3 +664,75 @@ CommercialAccess != consent; RemoteIdentity != consent; receiving a lead != univ
 consent. Applicable operation authorization/evidence remains a separate boundary.
 No actual operation, endpoint, provider call, polling, schema/migration or Railway
 change occurs. Future execution must resolve all these gates before using the DTO.
+
+## Commercial identity persistence foundation
+
+Versioned models OpenCreditCommercialAccess and OpenCreditRemoteIdentity now provide
+storage foundations only. No operation uses them yet: no endpoint, UI, runtime mapper,
+claim/dispatch service, activation flow, scope provisioning or OpenCredit call is added.
+The pure identity policy and existing webhook remain functionally unchanged.
+
+Both SQLite/PostgreSQL schemas declare equivalent models, inverse relations, uniques
+and actions. SQLite cannot name foreign keys in Prisma, so both follow the existing
+unnamed @relation convention; PostgreSQL migration uses Prisma's fixed FK names.
+The existing SQLite-only User.email index map remains untouched. No native enum,
+manual CHECK, trigger, immutable-column mechanism or normalization is introduced:
+format and future identity immutability enforcement belong to the policy/service.
+
+CommercialAccess has one row per (companyId,providerScope), defaults enabled=false
+and records changedByUserId. RemoteIdentity defaults enabled=false and records
+companyId, contactId, providerScope, normalizedCpf and createdByUserId. providerScope
+is required with NO default; no real scope is created. Timestamps are recorded but
+changedBy/createdBy are not a complete historical grant/revocation audit trail.
+
+Unconditional unique(providerScope,normalizedCpf) prevents two Companies claiming
+the same identity namespace, including disabled rows. Unique(companyId,providerScope,
+contactId) prevents rebinding one Contact with a different CPF in that scope.
+Both differ from Contact's existing nonunique CPF index; no Contact data is changed.
+The composite Contact FK uses (companyId,contactId). The composite CommercialAccess
+FK uses (companyId,providerScope): another Company's access row cannot satisfy it.
+User actor FKs intentionally reference only User.id; a platform actor from another
+Company is valid structurally, NOT evidence of authorization. Future administrative
+services still require platform authorization. Every new FK uses ON DELETE RESTRICT
+and ON UPDATE NO ACTION; no cascade erases ownership when a parent is deleted.
+
+normalizedCpf is a plaintext local eleven-digit snapshot AND personal data.
+Plaintext is NOT cryptographic protection. This deliberate initial choice supports
+deterministic equality/unique constraints while preserving identity when Contact.cpf
+changes. Existing secret encryption uses AES-GCM with random IVs; it is NOT reused
+as a CPF fingerprint. No HMAC, hash derivation, new key/env or encryption mechanism
+is introduced. Additional protection can still be evaluated BEFORE real bindings
+are created. Never log the value, put it in errors/public URLs/idempotency keys or
+dynamic constraint names, or copy it to unrelated tables.
+
+Migration 20261016190000_add_opencredit_commercial_identity creates only the two
+tables and their indexes/uniques/FKs. No INSERT, UPDATE, seed, backfill, default scope
+or modification of existing Contact/webhook/lead/event records. New tables start
+empty. This versioned migration is NOT permission to run it manually in production.
+
+The dedicated material PostgreSQL test is invoked by the existing PostgreSQL CI job.
+Before client construction its gate requires CI=true, GITHUB_ACTIONS=true and
+OPENCREDIT_COMMERCIAL_IDENTITY_POSTGRES_TEST=1, PostgreSQL loopback only, database
+qevora_ci, fictitious qevora_ci/qevora_ci_password credentials and only schema=public.
+Ports allowed are 5432 (CI) or 55432 (dedicated local disposable container).
+Local reproduction explicitly sets these gates; this is not a claim of a GitHub run.
+Tests never touch production. Each invocation creates random Company IDs and cleans
+only its own rows in reverse FK order; no global TRUNCATE/delete or raw Prisma logs.
+Only mathematically invalid synthetic repeated-digit CPFs are used.
+
+Material tests inspect pg_catalog/information_schema definitions, types/defaults/PKs,
+uniques and six FKs; they exercise cross-company CPF collisions, independent scopes,
+Contact/access composite references, platform actors, RESTRICT, rollback and snapshot
+preservation. The concurrency test starts two real transactions behind a barrier:
+one insert commits, one loses specifically on the scope+CPF unique. P2002/P2003 must
+match expected model/target/constraint; Prisma 5's native RESTRICT UnknownRequestError
+is accepted only for the expected static FK and a PostgreSQL constraint violation.
+Unexpected failures are sanitized before reaching node:test.
+
+No real identity or operational integration was created by development/tests.
+The effective provider namespace still requires confirmation with Prospecta.
+Consent/evidence remains separate. Storage constraints do not authorize any operation,
+provide idempotency or solve revocation/dispatch races. The claim/dispatch service
+does not exist. Rollback before real data: revert this code and use an approved
+database rollback plan for the two empty tables; never automatically drop ownership
+tables once real bindings exist.
