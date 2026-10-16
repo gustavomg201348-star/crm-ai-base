@@ -229,9 +229,28 @@ model OpenCreditCommercialAccess {
   company         Company @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   changedBy       User @relation("OpenCreditCommercialAccessChangedBy", fields: [changedByUserId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   identities      OpenCreditRemoteIdentity[]
+  events          OpenCreditCommercialAccessEvent[]
 
   @@unique([companyId, providerScope], map: "OCCommercial_company_scope_key")
+  @@unique([id, companyId, providerScope], map: "OCCommercial_id_company_scope_key")
   @@index([changedByUserId], map: "OCCommercial_actor_idx")
+}
+
+model OpenCreditCommercialAccessEvent {
+  id                 String   @id @default(cuid())
+  commercialAccessId String
+  companyId          String
+  providerScope      String
+  actorUserId        String
+  action             String
+  previousEnabled    Boolean?
+  nextEnabled        Boolean
+  createdAt          DateTime @default(now())
+  commercialAccess   OpenCreditCommercialAccess @relation(fields: [commercialAccessId, companyId, providerScope], references: [id, companyId, providerScope], onDelete: Restrict, onUpdate: NoAction)
+  actor              User @relation("OpenCreditCommercialAccessEventActor", fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([commercialAccessId, createdAt, id], map: "OCAccessEvent_access_created_id_idx")
+  @@index([actorUserId], map: "OCAccessEvent_actor_idx")
 }
 
 model OpenCreditRemoteIdentity {
@@ -438,6 +457,7 @@ model User {
   assignedProposals Proposal[] @relation("AssignedProposals")
   proposalHistoryEvents ProposalHistory[] @relation("ProposalHistoryUser")
   openCreditCommercialAccessChanges OpenCreditCommercialAccess[] @relation("OpenCreditCommercialAccessChangedBy")
+  openCreditCommercialAccessEvents OpenCreditCommercialAccessEvent[] @relation("OpenCreditCommercialAccessEventActor")
   openCreditRemoteIdentitiesCreated OpenCreditRemoteIdentity[] @relation("OpenCreditRemoteIdentityCreatedBy")
 
   @@index([companyId])
