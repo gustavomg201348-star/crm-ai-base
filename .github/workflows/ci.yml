@@ -51,7 +51,7 @@ jobs:
         run: npx --yes tsx@4.20.6 src/lib/opencredit-onboarding.test.ts
 
       - name: Validate chatbot definition and fail-closed scope
-        run: npx --yes tsx@4.20.6 --test src/lib/chatbot-definition.test.ts src/lib/chatbot-foundation-scope.test.ts
+        run: npx --yes tsx@4.20.6 --test src/lib/chatbot-definition.test.ts src/lib/chatbot-foundation-scope.test.ts src/lib/chatbot-execution-engine.test.ts
 
       - name: Validate OpenCredit commercial identity schemas and safety guards
         run: npx --yes tsx@4.20.6 src/lib/opencredit-commercial-identity-storage.test.ts
