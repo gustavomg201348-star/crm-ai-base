@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { ChatbotError, validateChatbotDefinition } from "./chatbot-definition";
+import { canonicalChatbotValue as canonical } from "./chatbot-canonical";
 
 type Scope = { companyId: string; channelId: string; sessionId: string };
 type Tx = Prisma.TransactionClient;
@@ -34,14 +35,6 @@ function timestamp(value: Date) {
   ensure(value instanceof Date && Number.isFinite(value.getTime()), "INVALID_TIME");
   return value;
 }
-function canonical(value: unknown): string {
-  if (value === null || typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
-  if (typeof value === "number" && Number.isFinite(value)) return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  ensure(value && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype, "INVALID_PAYLOAD");
-  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`).join(",")}}`;
-}
-
 // No default database: callers must explicitly provide their authorized environment.
 export function createChatbotFoundation(db: PrismaClient, clock: () => Date = () => new Date()) {
   async function transaction<T>(action: (tx: Tx) => Promise<T>): Promise<T> {
