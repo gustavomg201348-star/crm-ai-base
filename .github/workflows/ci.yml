@@ -65,6 +65,9 @@ jobs:
       - name: Validate OpenCredit remote identity audit contract
         run: npx --yes tsx@4.20.6 src/lib/opencredit-remote-identity-audit.test.ts
 
+      - name: Validate OpenCredit remote identity transactional service
+        run: npx --yes tsx@4.20.6 src/lib/opencredit-remote-identity-service.test.ts
+
       - name: Validate passive Meta reply formats and scope
         run: npx --yes tsx@4.20.6 --test src/lib/meta-reply-correlation.test.ts src/lib/message-reply.test.ts src/lib/inbound-message.test.ts src/lib/meta-webhook-security.test.ts src/lib/webhook-channel-secrets.test.ts
 
@@ -138,6 +141,11 @@ jobs:
         run: npx --yes tsx@4.20.6 src/lib/opencredit-remote-identity-audit-postgres.integration.ts
         env:
           OPENCREDIT_REMOTE_IDENTITY_AUDIT_POSTGRES_TEST: "1"
+
+      - name: Validate OpenCredit remote identity service transactions and concurrency
+        run: npx --yes tsx@4.20.6 src/lib/opencredit-remote-identity-service-postgres.integration.ts
+        env:
+          OPENCREDIT_REMOTE_IDENTITY_SERVICE_POSTGRES_TEST: "1"
 
       - name: Create dedicated disposable chatbot database
         run: echo 'CREATE DATABASE qevora_chatbot_test;' | npx prisma db execute --stdin --schema prisma/schema.postgres.prisma

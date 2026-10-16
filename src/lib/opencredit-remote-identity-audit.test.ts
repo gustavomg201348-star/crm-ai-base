@@ -66,7 +66,7 @@ test("migration only adds event structure; no ACL, trigger, backfill or manual a
 
 // Conservative syntactic boundary, not a claim of whole-program taint analysis.
 // Delegate/method extraction is rejected rather than trusting an alias or dynamic call.
-function auditRuntime(source: string, allowCreate = true): string[] {
+function auditRuntime(source: string, allowCreate = true, onCreate?: () => void): string[] {
   const file = ts.createSourceFile("runtime.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const errors: string[] = [];
   const delegate = "openCreditRemoteIdentityEvent";
@@ -93,6 +93,8 @@ function auditRuntime(source: string, allowCreate = true): string[] {
         : ts.isElementAccessExpression(member) ? name(member.argumentExpression) : undefined;
       if (!method || !allowed.has(method) || !allowCreate && method === "create" || !ts.isCallExpression(member.parent) || member.parent.expression !== member) {
         errors.push("AUDIT_EVENT_MUTATOR_OR_DELEGATE_ESCAPE");
+      } else if (method === "create") {
+        onCreate?.();
       }
     }
     if (ts.isBindingElement(node)) {
@@ -128,18 +130,22 @@ test("runtime guard permits future direct insert/read, rejects dynamic methods a
   for (const source of ["db.openCreditRemoteIdentityEvent[method]({})", "return db.openCreditRemoteIdentityEvent",
     "external(db.openCreditRemoteIdentityEvent)"]) assert.ok(auditRuntime(source).length > 0);
 });
-test("production sources currently contain no event writer, mutators or obvious delegate aliases", () => {
+test("production sources contain exactly the expected service event writer and no mutators or delegate escapes", () => {
+  const writers: string[] = [];
   function scan(dir: URL) {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = new URL(entry.name + (entry.isDirectory() ? "/" : ""), dir);
       if (entry.isDirectory()) scan(path);
       else if (/\.(?:tsx?|m?js|cjs)$/.test(entry.name) && !/\.(?:test|integration)\.(?:tsx?|m?js|cjs)$/.test(entry.name)) {
-        assert.deepEqual(auditRuntime(readFileSync(path, "utf8"), false), [], path.pathname);
+        const source = readFileSync(path, "utf8");
+        const expected = path.pathname.endsWith("/src/lib/opencredit-remote-identity.service.ts");
+        assert.deepEqual(auditRuntime(source, expected, () => writers.push("service.create")), [], path.pathname);
       }
     }
   }
   scan(new URL("../", import.meta.url));
   scan(new URL("../../scripts/", import.meta.url));
+  assert.deepEqual(writers, ["service.create"]);
 });
 test("CI includes new unit/material tests and guard precedes client construction", () => {
   const ci = read(".github/workflows/ci.yml");
