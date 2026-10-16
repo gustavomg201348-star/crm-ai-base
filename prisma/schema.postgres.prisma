@@ -214,6 +214,7 @@ model Company {
   openCreditLeads OpenCreditLead[]
   openCreditEvents OpenCreditEvent[]
   openCreditCommercialAccesses OpenCreditCommercialAccess[]
+  openCreditCommercialOperations OpenCreditCommercialOperation[]
   openCreditRemoteIdentities OpenCreditRemoteIdentity[]
   chatbotFlows ChatbotFlow[]
 }
@@ -268,6 +269,7 @@ model OpenCreditRemoteIdentity {
   commercialAccess OpenCreditCommercialAccess @relation(fields: [companyId, providerScope], references: [companyId, providerScope], onDelete: Restrict, onUpdate: NoAction)
   createdBy       User @relation("OpenCreditRemoteIdentityCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   events          OpenCreditRemoteIdentityEvent[]
+  operations      OpenCreditCommercialOperation[]
 
   @@unique([id, companyId, providerScope], map: "OCRemoteIdentity_id_company_scope_key")
   @@unique([providerScope, normalizedCpf], map: "OCRemote_scope_cpf_key")
@@ -291,6 +293,48 @@ model OpenCreditRemoteIdentityEvent {
 
   @@index([remoteIdentityId, createdAt, id], map: "OCRemoteEvent_identity_created_id_idx")
   @@index([actorUserId], map: "OCRemoteEvent_actor_idx")
+}
+
+model OpenCreditCommercialOperation {
+  id               String   @id @default(cuid())
+  companyId        String
+  remoteIdentityId String
+  providerScope    String
+  operationKind    String
+  intentKey        String
+  state            String   @default("PREPARED")
+  revision         Int      @default(0)
+  createdByUserId  String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  company          Company @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  remoteIdentity   OpenCreditRemoteIdentity @relation(fields: [remoteIdentityId, companyId, providerScope], references: [id, companyId, providerScope], onDelete: Restrict, onUpdate: NoAction)
+  createdBy        User @relation("OpenCreditCommercialOperationCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  events           OpenCreditCommercialOperationEvent[]
+
+  @@unique([companyId, providerScope, intentKey], map: "OCOperation_company_scope_intent_key")
+  @@unique([id, companyId, providerScope], map: "OCOperation_id_company_scope_key")
+  @@index([remoteIdentityId, createdAt, id], map: "OCOperation_identity_created_id_idx")
+  @@index([companyId, providerScope, state, createdAt, id], map: "OCOperation_scope_state_created_id_idx")
+  @@index([createdByUserId], map: "OCOperation_actor_idx")
+}
+
+model OpenCreditCommercialOperationEvent {
+  id            String   @id @default(cuid())
+  operationId   String
+  companyId     String
+  providerScope String
+  actorUserId   String
+  action        String
+  previousState String?
+  nextState     String
+  revision      Int
+  createdAt     DateTime @default(now())
+  operation     OpenCreditCommercialOperation @relation(fields: [operationId, companyId, providerScope], references: [id, companyId, providerScope], onDelete: Restrict, onUpdate: NoAction)
+  actor         User @relation("OpenCreditCommercialOperationEventActor", fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([operationId, createdAt, id], map: "OCOperationEvent_operation_created_id_idx")
+  @@index([actorUserId], map: "OCOperationEvent_actor_idx")
 }
 
 model OpenCreditIntegration {
@@ -479,6 +523,8 @@ model User {
   openCreditCommercialAccessEvents OpenCreditCommercialAccessEvent[] @relation("OpenCreditCommercialAccessEventActor")
   openCreditRemoteIdentitiesCreated OpenCreditRemoteIdentity[] @relation("OpenCreditRemoteIdentityCreatedBy")
   openCreditRemoteIdentityEvents OpenCreditRemoteIdentityEvent[] @relation("OpenCreditRemoteIdentityEventActor")
+  openCreditCommercialOperationsCreated OpenCreditCommercialOperation[] @relation("OpenCreditCommercialOperationCreatedBy")
+  openCreditCommercialOperationEvents OpenCreditCommercialOperationEvent[] @relation("OpenCreditCommercialOperationEventActor")
 
   @@index([companyId])
 }

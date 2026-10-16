@@ -862,8 +862,9 @@ for production. Synthetic fixtures remain only until the disposable database is 
 
 CommercialAccess is NOT consent and does NOT authorize proposal/simulation/client POST.
 It is only local administrative permission to let a Company enter a future commercial
-flow. No remote identity, claim/reuse, operation record, dispatch or credit call exists
-in this slice. Serializable local state does not solve future HTTP revocation races.
+flow. The access service adds no identity/operation writer, dispatch or credit call;
+the later foundations/services below remain local only. Serializable local state
+does not solve future HTTP revocation races.
 The application append-only limitation remains: owner/superuser can modify history
 with database privileges; no ACL, trigger or role separation was added.
 Rollback: revert the service/CI/documentation commit; this slice has no schema,
@@ -874,8 +875,9 @@ migration, backfill or operational data to undo. Existing audit tables are prese
 OpenCreditRemoteIdentityEvent introduces persistent history before any functional
 identity writer. The internal transactional service documented below now implements
 claim/enable/disable. There is still no endpoint, route, server action, UI, runtime
-caller, provider call, operation record or consent mechanism for remote identity.
-No real identity, access grant or operational scope is created.
+caller, provider call or consent mechanism for remote identity. The later operation
+ledger below supplies storage only, with no writer. No real identity, access grant
+or operational scope is created.
 
 Future transition shapes are CLAIMED null -> false, ENABLED false -> true and
 DISABLED true -> false. action remains String, with no native enum or manual CHECK.
@@ -1125,3 +1127,124 @@ contract or operation-specific retry guidance is published. Do not infer replay
 safety for financial operations. No validate HTTP code, POST client code or provider
 request is implemented. The endpoint identity is proven; a complete unambiguous
 request/response runtime contract is NOT PROVEN.
+
+## Commercial operation durable ledger foundation
+
+OpenCreditCommercialOperation and OpenCreditCommercialOperationEvent supply durable
+local structure BEFORE any non-idempotent provider request. There is no creation,
+reservation, transition or dispatch service, endpoint, UI, runtime caller, provider
+request, real operation/identity/scope, consent/evidence mechanism or external
+reconciliation in this slice. This foundation does NOT authorize financial activity.
+The Contact adapter and client-profile contract remain pure and unchanged.
+
+Operation fields are exactly id, companyId, remoteIdentityId, providerScope,
+operationKind, intentKey, state, revision, createdByUserId, createdAt and updatedAt.
+Event fields are exactly id, operationId, companyId, providerScope, actorUserId,
+action, previousState (nullable), nextState, revision and createdAt. Event has no
+updatedAt. Neither ledger copies CPF, normalizedCpf, name, phone, email, payload,
+request/response body, provider raw data, credentials, tokens, notes, stack, error
+message or arbitrary URL. Do not create CPF/payload/request hashes: low-entropy CPF
+is enumerable under a simple hash. No new encryption/HMAC key or env is introduced.
+
+Operation explicitly references Company.id and createdBy User.id. Its strong
+(remoteIdentityId,companyId,providerScope) FK references the existing
+RemoteIdentity(id,companyId,providerScope) unique. Events reference
+Operation(id,companyId,providerScope) through (operationId,companyId,providerScope),
+and actor User.id. Every new FK uses RESTRICT / NO ACTION. Platform actors may
+structurally belong to a different Company; the future service must authorize them.
+Only the necessary Company/User/RemoteIdentity inverse relations are added; existing
+ownership uniqueness, reservation and disable semantics are unchanged.
+
+Unique(companyId,providerScope,intentKey), OCOperation_company_scope_intent_key,
+identifies one LOCAL QEVORA intention, not provider idempotency. The redundant
+unique(id,companyId,providerScope), OCOperation_id_company_scope_key, supports the
+Event composite FK. Indexes cover identity/createdAt/id, Company/scope/state/createdAt/id,
+Operation creator, Event operation/createdAt/id and Event actor. createdAt plus id
+supports stable listing, not proof of a global temporal order.
+
+No writer means no intent-key syntax validator yet. A future service must require an
+opaque securely random key, stable across retries of the SAME intention, scoped by
+Company and providerScope, never derived from CPF/name/phone/email, Contact id,
+payload hash, token or credentials. The currently audited create-client contract
+publishes no provider idempotency-key support. Do not send Idempotency-Key, intentKey
+or operationId to the provider without a future formal contract.
+
+operationKind remains String. The first PLANNED local kind is CLIENT_PROFILE_UPSERT,
+matching the documented createClient POST's create-or-update-fields description.
+The word UPSERT is NOT a provider idempotency guarantee. Future SIMULATION/PROPOSAL
+kinds require separate review; no such flow is implemented.
+
+state also remains String, with structural default PREPARED. No Prisma enum, manual
+CHECK, trigger or transition enforcement is supplied. Future meanings:
+
+| State | Future meaning |
+| --- | --- |
+| PREPARED | Durable local intention; no dispatch has been authorized as sent. |
+| IN_FLIGHT | Final dispatch CAS/reservation persisted BEFORE HTTP; may have been sent. |
+| SUCCEEDED | A positive remote result was received, validated and persisted. |
+| FAILED | A definitive known result establishes lack of successful acceptance. |
+| UNKNOWN | Provider receipt/application cannot be proved or excluded. |
+
+revision is Int default 0 for future optimistic concurrency/CAS. A future transition
+must match id + expected revision + expected state, increment revision and append
+the coherent action/previousState/nextState/revision Event in the SAME transaction.
+Example only: PREPARED/revision 0 -> IN_FLIGHT/revision 1 with an Event carrying
+previousState=PREPARED, nextState=IN_FLIGHT, revision=1. No CAS/writer is implemented.
+Synthetic state inserts prove storage ONLY, not a functioning state machine;
+arbitrary other strings are not blocked by these tables.
+
+**NO AUTOMATIC POST REPLAY.** After IN_FLIGHT, abandoned/crashed execution cannot be
+assumed unsent, silently reset to PREPARED or retried automatically. UNKNOWN must
+never be automatically resent; future explicit reconciliation is required.
+Timeout, socket reset, process crash, lost/truncated/invalid response, or provider
+5xx when acceptance cannot be excluded must not automatically mean FAILED.
+They may require UNKNOWN. Exact classification belongs to the future HTTP boundary.
+
+The future PREPARED -> IN_FLIGHT reservation must use a short transaction rereading
+actor/session, Company, enabled CommercialAccess/RemoteIdentity, current unarchived
+Contact, CPF snapshot equality, ambiguity, trusted server-resolved providerScope,
+applicable authorization/evidence and operation state/revision. Reconstruct the DTO
+from fresh data BEFORE final CAS; do not persist it in this ledger. Treatment of the
+exact request after CAS remains a separately reviewed boundary, not an invented
+payload store. HTTP happens OUTSIDE the transaction. This reduces but does not
+eliminate the commit-to-request revocation window. Revoke/disable must prevent new
+reservations; a previously IN_FLIGHT operation remains possibly sent, and subsequent
+revocation cannot pretend it never happened. No such service is implemented here.
+
+GET /api/tenants/{tenantId}/integration/clients/validate remains identified but its
+full runtime contract remains NOT PROVEN because formal required parameters conflict
+with the description. It is neither implemented nor used for automatic reconciliation.
+Consent/evidence remains a separate operational boundary; there is no consent=true,
+generic consent boolean or fictional evidenceId in these models.
+
+**APPLICATION APPEND-ONLY, NOT DATABASE IMMUTABILITY.** Event history must not be
+updated/deleted/upserted by application code. The current conservative TypeScript
+inventory requires ZERO functional writers or runtime references for BOTH delegates,
+including create. It rejects obvious delegate extraction/aliases and dynamic mutator
+calls; reusable read syntax is tested separately. Future writer PRs must deliberately
+update this contract, not weaken existing audit guards. This is not complete taint
+analysis or arbitrary raw SQL enforcement. PostgreSQL owner/superuser can still
+alter/delete data. No role split, ACL/GRANT/REVOKE, trigger/function or separate
+DATABASE_URL is introduced. No history cleanup bypass is added.
+
+Migration 20261016230000_add_opencredit_commercial_operation_foundation adds only
+two tables, two unique indexes, five nonunique indexes and five FKs. No DML, seed,
+backfill or change to existing data. SQLite/PostgreSQL new logical models are
+equivalent; PostgreSQL FK names follow Prisma's native <=63-character convention.
+CI preserves all prior gates and adds unit/storage and material PostgreSQL tests.
+The dedicated guard precedes client construction and requires CI=true,
+GITHUB_ACTIONS=true, OPENCREDIT_COMMERCIAL_OPERATION_POSTGRES_TEST=1, PostgreSQL
+loopback, ports 5432/55432, database/user qevora_ci, fictitious CI password and exactly
+schema=public. Fixtures are synthetic; the invalid repeated-digit CPF exists only
+in the required RemoteIdentity parent, never in the new ledger or logs.
+
+Material tests inspect exact columns/defaults/PKs/uniques/indexes/FKs and exercise
+cross-company/scope rejection, independent intent namespaces, missing actors,
+RESTRICT, NO ACTION and actual rollback after a final FK failure following valid
+Operation/Event inserts. Fixtures remain only until the disposable DB is destroyed;
+no Event deletion or cleanup API exists. Local tests are not a completed GitHub run.
+
+Rollback before real use: revert this slice and separately approve a database plan
+for the two empty new tables. Never automatically drop tables once real intentions
+or history exist. No production migration, Railway change, remote POST, retry,
+reconciliation or real operation is performed by this development.
