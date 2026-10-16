@@ -32,6 +32,21 @@ function withEncryptionKey<T>(callback: () => T) {
   }
 }
 
+function withoutEnvVerifyToken<T>(callback: () => T) {
+  const previous = process.env.META_VERIFY_TOKEN;
+  delete process.env.META_VERIFY_TOKEN;
+
+  try {
+    return callback();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.META_VERIFY_TOKEN;
+    } else {
+      process.env.META_VERIFY_TOKEN = previous;
+    }
+  }
+}
+
 function signBody(rawBody: string, secret: string) {
   return `sha256=${createHmac("sha256", secret).update(rawBody).digest("hex")}`;
 }
@@ -42,7 +57,7 @@ function replaceEnvelopePart(envelope: string, index: number, value: string) {
   return parts.join(":");
 }
 
-test("webhook GET aceita verifyToken legado e enc:v1", () => {
+test("webhook GET aceita verifyToken legado e enc:v1", () => withoutEnvVerifyToken(() => {
   const encryptedVerifyToken = encryptSecret(verifyToken, encryptionOptions);
 
   const accepted = withEncryptionKey(() =>
@@ -56,7 +71,7 @@ test("webhook GET aceita verifyToken legado e enc:v1", () => {
   );
 
   assert.deepEqual(accepted, [verifyToken, verifyToken]);
-});
+}));
 
 test("webhook GET preserva token plaintext saudavel quando outro Channel tem enc:v1 ilegivel", () => {
   const encryptedVerifyToken = encryptSecret(verifyToken, encryptionOptions);
@@ -106,7 +121,7 @@ test("webhook GET rejeita token pertencente a Channel ilegivel", () => {
   assert.equal(accepted.includes("token-b"), false);
 });
 
-test("webhook GET rejeita quando todos os Channel tokens estao ilegiveis e nao ha env token", () => {
+test("webhook GET rejeita quando todos os Channel tokens estao ilegiveis e nao ha env token", () => withoutEnvVerifyToken(() => {
   const encryptedTokenA = encryptSecret("token-a", encryptionOptions);
   const encryptedTokenB = "enc:v1:aes-256-gcm:v1:iv:tag";
 
@@ -119,7 +134,7 @@ test("webhook GET rejeita quando todos os Channel tokens estao ilegiveis e nao h
   );
 
   assert.deepEqual(accepted, []);
-});
+}));
 
 test("webhook GET preserva META_VERIFY_TOKEN quando Channel tem verifyToken ilegivel", () => {
   const encryptedVerifyToken = encryptSecret(verifyToken, encryptionOptions);
