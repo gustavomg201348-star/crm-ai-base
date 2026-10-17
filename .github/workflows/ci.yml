@@ -86,6 +86,9 @@ jobs:
       - name: Validate durable conversation inbound event contract
         run: npx --yes tsx@4.20.6 src/lib/conversation-inbound-event.test.ts
 
+      - name: Validate authenticated inbound provenance boundary and static guards
+        run: npx --yes tsx@4.20.6 src/lib/meta-inbound-provenance.test.ts
+
       - name: Validate passive Meta reply formats and scope
         run: npx --yes tsx@4.20.6 --test src/lib/meta-reply-correlation.test.ts src/lib/message-reply.test.ts src/lib/inbound-message.test.ts src/lib/meta-webhook-security.test.ts src/lib/webhook-channel-secrets.test.ts
 
@@ -113,6 +116,7 @@ jobs:
           trap 'rm -f "${DATABASE_URL#file:}" "${DATABASE_URL#file:}-journal" "${DATABASE_URL#file:}-wal" "${DATABASE_URL#file:}-shm"' EXIT
           npx prisma db push --schema prisma/schema.prisma --skip-generate
           npx --yes tsx@4.20.6 src/lib/conversation-inbound-event.integration.ts
+          npx --yes tsx@4.20.6 src/lib/meta-inbound-provenance.integration.ts
         env:
           INBOUND_EVENT_SQLITE_TEST: "1"
           TMPDIR: ${{ runner.temp }}
@@ -167,6 +171,11 @@ jobs:
 
       - name: Validate durable inbound event PostgreSQL constraints and concurrency
         run: npx --yes tsx@4.20.6 src/lib/conversation-inbound-event.integration.ts
+        env:
+          INBOUND_EVENT_POSTGRES_TEST: "1"
+
+      - name: Validate authenticated provenance PostgreSQL integrity and HTTP ingestion
+        run: npx --yes tsx@4.20.6 src/lib/meta-inbound-provenance.integration.ts
         env:
           INBOUND_EVENT_POSTGRES_TEST: "1"
 

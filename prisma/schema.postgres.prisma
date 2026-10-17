@@ -8,6 +8,8 @@ datasource db {
 }
 
 model ConversationInboundEvent {
+  provenanceKind String?
+  provenanceVersion Int?
   id             String @id @default(cuid())
   companyId      String
   contactId      String

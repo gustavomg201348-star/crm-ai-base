@@ -33,7 +33,16 @@ export async function inboundEventTransaction<T>(
 export async function createInboundMessageWithDurableEvent(
   tx: Prisma.TransactionClient, companyId: string, data: Prisma.MessageUncheckedCreateInput,
   expectedBinding?: Readonly<{ contactId: string; channelId: string | null }>,
+  provenance?: unknown,
 ) {
+  if (Object.keys(data).some(key => !Object.prototype.hasOwnProperty.call(Prisma.MessageScalarFieldEnum, key))) {
+    throw new InboundEventError("INVALID_INBOUND");
+  }
+  // Scalar snapshot prevents nested Message writers and caller mutation across awaits.
+  data = structuredClone(data);
+  expectedBinding = expectedBinding ? { contactId: expectedBinding.contactId, channelId: expectedBinding.channelId } : undefined;
+  const provenanceFields = provenance === undefined ? {} : (await import("./meta-inbound-provenance"))
+    .provenanceForInboundPersistence(provenance, companyId, data, expectedBinding);
   if (data.direction !== "inbound") throw new InboundEventError("INVALID_INBOUND");
   if (typeof companyId !== "string" || !companyId || typeof data.conversationId !== "string" || !data.conversationId) {
     throw new InboundEventError("INVALID_SCOPE");
@@ -53,10 +62,16 @@ export async function createInboundMessageWithDurableEvent(
     if (current && (current.inboundEventSequence < BigInt("0") || current.inboundEventSequence >= MAX_SEQUENCE)) throw new InboundEventError("SEQUENCE_EXHAUSTED");
     throw new InboundEventError("INVALID_SCOPE");
   }
+  if (provenance !== undefined && data.replyToMessageId) {
+    const referenced = await tx.message.findFirst({ where: { id: data.replyToMessageId,
+      conversationId: conversation.id, direction: "outbound", providerMessageId: data.replyToProviderMessageId } });
+    if (!referenced) throw new InboundEventError("INVALID_SCOPE");
+  }
   const message = await tx.message.create({ data });
   await tx.conversationInboundEvent.create({ data: {
     companyId, contactId: conversation.contactId, channelId: conversation.channelId,
     conversationId: conversation.id, messageId: message.id, sequence: conversation.inboundEventSequence,
+    ...provenanceFields,
   } });
   return message;
 }

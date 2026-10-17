@@ -47,7 +47,8 @@ export async function updateMessageDeliveryStatus({
   const scopedWhere = buildMessageDeliveryScope({ companyId, channelId, providerMessageId });
   const failedMessages = normalizedStatus === "failed" && errorMessage
     ? await prisma.message.findMany({
-        where: { ...scopedWhere, status: { not: normalizedStatus } },
+        where: { ...scopedWhere, status: { not: normalizedStatus },
+          NOT: { inboundEvent: { is: { provenanceKind: "META_WEBHOOK_HMAC_SHA256_VERIFIED", provenanceVersion: 1 } } } },
         select: { id: true, body: true }
       })
     : [];

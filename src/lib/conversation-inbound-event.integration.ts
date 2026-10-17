@@ -52,7 +52,7 @@ function material(name: string, work: (f: Fixture) => Promise<void>) {
 material("01 schema columns, PK, unique indexes, composite FKs and conservative actions", async f => {
   if (provider === "postgresql") {
     const columns = await db.$queryRaw<Array<{ column_name: string }>>`SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='ConversationInboundEvent'`;
-    assert.deepEqual(columns.map(row => row.column_name).sort(), ["id", "companyId", "contactId", "channelId", "conversationId", "messageId", "sequence", "createdAt"].sort());
+    assert.deepEqual(columns.map(row => row.column_name).sort(), ["id", "companyId", "contactId", "channelId", "conversationId", "messageId", "sequence", "createdAt", "provenanceKind", "provenanceVersion"].sort());
     const constraints = await db.$queryRaw<Array<{ contype: string; confdeltype: string; confupdtype: string }>>`SELECT contype::text, confdeltype::text, confupdtype::text FROM pg_constraint WHERE conrelid='"ConversationInboundEvent"'::regclass`;
     assert.equal(constraints.filter(row => row.contype === "p").length, 1);
     const fks = constraints.filter(row => row.contype === "f"); assert.equal(fks.length, 6);
@@ -64,7 +64,7 @@ material("01 schema columns, PK, unique indexes, composite FKs and conservative 
     for (const fields of ['("companyId", "contactId")', '("companyId", "channelId")', '("conversationId", "contactId", "channelId")', '("messageId", "conversationId")']) assert.ok(definitions.some(row => row.definition.includes(fields)));
   } else {
     const columns = await db.$queryRawUnsafe<Array<{ name: string; pk: bigint }>>('PRAGMA table_info("ConversationInboundEvent")');
-    assert.deepEqual(columns.map(row => row.name).sort(), ["id", "companyId", "contactId", "channelId", "conversationId", "messageId", "sequence", "createdAt"].sort());
+    assert.deepEqual(columns.map(row => row.name).sort(), ["id", "companyId", "contactId", "channelId", "conversationId", "messageId", "sequence", "createdAt", "provenanceKind", "provenanceVersion"].sort());
     assert.equal(columns.filter(row => Number(row.pk) === 1).length, 1);
     const fks = await db.$queryRawUnsafe<Array<{ id: bigint; on_delete: string; on_update: string }>>('PRAGMA foreign_key_list("ConversationInboundEvent")');
     assert.equal(new Set(fks.map(row => String(row.id))).size, 6);
@@ -76,7 +76,8 @@ material("02 first sequence, exact Message linkage, monotonicity and no duplicat
   const a = await f.write(); const b = await f.write(); const rows = await f.events();
   assert.deepEqual(rows.map(row => row.sequence), [BigInt("1"), BigInt("2")]);
   assert.deepEqual(rows.map(row => row.messageId), [a.id, b.id]);
-  assert.deepEqual(Object.keys(rows[0]).sort(), ["id", "companyId", "contactId", "channelId", "conversationId", "messageId", "sequence", "createdAt"].sort());
+  assert.deepEqual(Object.keys(rows[0]).sort(), ["id", "companyId", "contactId", "channelId", "conversationId", "messageId", "sequence", "createdAt", "provenanceKind", "provenanceVersion"].sort());
+  assert.equal(rows[0].provenanceKind, null); assert.equal(rows[0].provenanceVersion, null);
   assert.equal(rows[0].companyId, f.company.id); assert.equal(rows[0].channelId, f.channel.id);
   assert.ok(rows[0].createdAt instanceof Date);
   const after = await db.conversation.findUniqueOrThrow({ where: { id: f.conversation.id } });

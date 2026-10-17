@@ -20,9 +20,9 @@ function fakeDb(channel: { id: string; companyId: string; appSecret: string | nu
   return {
     db: {
       channel: {
-        findFirst: async (input: unknown) => {
+        findMany: async (input: unknown) => {
           args = input;
-          return channel;
+          return channel ? [channel] : [];
         }
       }
     } as never,
@@ -164,7 +164,8 @@ test("lookup exige Channel Meta ativo ou conectado", async () => {
       status: { in: ["ACTIVE", "CONNECTED"] },
       OR: [{ phoneNumberId: "phone-a" }, { externalId: "phone-a" }]
     },
-    select: { id: true, companyId: true, appSecret: true }
+    select: { id: true, companyId: true, appSecret: true },
+    take: 2
   });
 });
 
@@ -286,7 +287,7 @@ test("status sem alvo scoped nao atualiza nem o Channel", () => {
 test("fluxo de message usa o mesmo resolver fail-closed", () => {
   const source = readFileSync("src/app/api/webhooks/whatsapp/route.ts", "utf8");
   const messageStart = source.indexOf("const metaMessages");
-  const resolver = source.indexOf("resolveVerifiedMetaWebhookChannel", messageStart);
+  const resolver = source.indexOf("authenticateMetaInboundBatch", messageStart);
   const inboundWrite = source.indexOf("processInboundMessage", resolver);
   assert.ok(messageStart >= 0 && resolver > messageStart && inboundWrite > resolver);
 });

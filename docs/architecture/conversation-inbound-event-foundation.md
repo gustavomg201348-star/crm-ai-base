@@ -1,6 +1,7 @@
 # Conversation inbound durable event foundation
 
 READY FOR DURABLE INBOUND CAPTURE (subject to validation/rollout).
+Authenticated transport evidence is described in [durable inbound provenance](./durable-inbound-provenance.md).
 PROSPECTA BRIDGE BLOCKED.
 RUNTIME AUTHORITY INTEGRATION BLOCKED.
 OUTBOUND LEDGER INTEGRATION BLOCKED.
@@ -51,8 +52,9 @@ The losing duplicate transaction rolls back its allocation; replay consumes no n
 
 ## References and nullable Channel
 
-Event fields are only id, companyId, contactId, channelId?, conversationId, messageId,
-sequence and createdAt. No message body, phone, CPF, name, email, media URL/bytes,
+Event fields are id, companyId, contactId, channelId?, conversationId, messageId,
+sequence, createdAt and the nullable provenanceKind/provenanceVersion classifiers.
+No message body, phone, CPF, name, email, media URL/bytes,
 provider payload, header, token or credential is duplicated.
 
 UNIQUE(messageId) enforces one event per Message. UNIQUE(conversationId,sequence)
