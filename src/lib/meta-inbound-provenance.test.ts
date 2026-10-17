@@ -6,6 +6,12 @@ import { before, test } from "node:test";
 import { createReplySnapshot, replyContentDigest } from "./meta-reply-snapshot";
 import { createInboundMessageWithDurableEvent } from "./conversation-inbound-event";
 import type { Prisma } from "@prisma/client";
+import ts from "typescript";
+import { NextRequest, NextResponse } from "next/server";
+import * as realLogger from "./safe-logger";
+import * as metaWhatsapp from "./meta-whatsapp";
+import { publicErrorResponse } from "./http-error-response";
+import { ReplyEvidencePersistenceError } from "./meta-reply-ingestion";
 
 let security: typeof import("./meta-inbound-provenance");
 before(async () => {
@@ -112,4 +118,120 @@ test("static guard: sole issuer, sole Event writer, no consumer/transport or ext
   assert.ok(route.indexOf("await authenticateMetaInboundBatch") < route.indexOf("data: { lastWebhookReceivedAt"));
   for (const file of ["src/app/api/channels/simulate/route.ts", "src/app/api/conversations/[id]/messages/route.ts"])
     assert.doesNotMatch(readFileSync(file, "utf8"), /provenanceKind|provenanceVersion|capability/);
+});
+
+// Run the actual route body with the real logger and response serializer. Only
+// persistence/providers are replaced; invalid input must never reach either.
+async function jsonBoundaryProbe(body: string | Uint8Array, options: {
+  signature?: string; production?: boolean; failure?: Error;
+} = {}) {
+  const calls = { reads: 0, writes: 0, ingestion: 0, external: 0 };
+  const logs: unknown[][] = [];
+  const unexpected = () => { calls.external++; throw new Error("UNEXPECTED_FUNCTIONAL_EFFECT"); };
+  const db = new Proxy({}, { get(_target, key) {
+    if (key !== "channel") { calls.writes++; throw new Error("UNEXPECTED_DATABASE_ACCESS"); }
+    return {
+      findMany: async () => { calls.reads++; return [{ id: "channel", companyId: "company", appSecret: secret }]; },
+      update: async () => { calls.writes++; return {}; },
+    };
+  } });
+  const dependencies: Record<string, unknown> = {
+    "next/server": { NextResponse },
+    "@/lib/safe-logger": realLogger,
+    "@/lib/http-error-response": { publicErrorResponse },
+    "@/lib/meta-inbound-provenance": security,
+    "@/lib/meta-whatsapp": metaWhatsapp,
+    "@/lib/db": { prisma: db },
+    "@/lib/meta-reply-ingestion": { ReplyEvidencePersistenceError },
+    "@/lib/inbound-message": { processInboundMessage: async (input: SecurityInput & { provenance: unknown }) => {
+      calls.ingestion++;
+      security.assertMetaInboundCapability(input.provenance, input);
+      if (options.failure) throw options.failure;
+      return { id: "synthetic-conversation" };
+    } },
+    "@/lib/campaigns": { updateCampaignDeliveryStatus: unexpected },
+    "@/lib/message-delivery": { updateMessageDeliveryStatus: unexpected },
+    "@/lib/webhook-delivery-scope": { applyWebhookDeliveryUpdates: unexpected },
+    "@/lib/webhook-channel-secrets": { resolveWebhookAcceptedVerifyTokens: unexpected, resolveVerifiedMetaWebhookChannel: unexpected },
+  };
+  const compiled = ts.transpileModule(readFileSync("src/app/api/webhooks/whatsapp/route.ts", "utf8"), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const loaded = { exports: {} as { POST(request: NextRequest): Promise<Response> } };
+  new Function("require", "module", "exports", compiled)((name: string) => {
+    assert.ok(Object.hasOwn(dependencies, name), "Unmocked route dependency"); return dependencies[name];
+  }, loaded, loaded.exports);
+  const env: Record<string, string | undefined> = process.env;
+  const saved = { info: console.info, warn: console.warn, error: console.error, fetch: globalThis.fetch, env: env.NODE_ENV };
+  try {
+    console.info = console.warn = console.error = (...args: unknown[]) => { logs.push(args); };
+    globalThis.fetch = async () => { calls.external++; throw new Error("EXTERNAL_HTTP_FORBIDDEN"); };
+    env.NODE_ENV = options.production ? "production" : "test";
+    const response = await loaded.exports.POST(new NextRequest("https://synthetic.invalid/api/webhooks/whatsapp", {
+      method: "POST", body: typeof body === "string" ? body : new Uint8Array(body),
+      headers: options.signature ? { "x-hub-signature-256": options.signature } : {},
+    }));
+    return { status: response.status, response: await response.json(), logs, calls };
+  } finally {
+    console.info = saved.info; console.warn = saved.warn; console.error = saved.error; globalThis.fetch = saved.fetch;
+    if (saved.env === undefined) delete env.NODE_ENV; else env.NODE_ENV = saved.env;
+  }
+}
+type SecurityInput = import("./meta-inbound-provenance").MetaInboundInput;
+
+const logSentinel = "QEVORA_SYNTHETIC_SECRET_BODY_DO_NOT_LOG";
+for (const [label, body, reason] of [
+  ["invalid JSON", logSentinel, "malformed-json"],
+  ["truncated JSON", '{"private":"' + logSentinel, "malformed-json"],
+  ["invalid string escape", '"\\q' + logSentinel + '"', "malformed-json"],
+  ["valid string root", JSON.stringify(logSentinel), "invalid-payload-shape"],
+  ["number root", "123", "invalid-payload-shape"],
+  ["boolean root", "true", "invalid-payload-shape"],
+  ["array root", JSON.stringify([logSentinel]), "invalid-payload-shape"],
+] as const) test("real logger: " + label + " never emits parser input or performs functional work", async () => {
+  const result = await jsonBoundaryProbe(body);
+  assert.equal(result.status, 400);
+  assert.deepEqual(result.response, { error: "INVALID_REQUEST", message: "Requisicao invalida." });
+  // Exact sink allowlist excludes raw exceptions, stack, snippets and dynamic labels.
+  assert.deepEqual(result.logs, [["[whatsapp-webhook-audit]", "invalid-json", {
+    event: "invalid-json", operation: "webhook-post", reason,
+  }]]);
+  assert.deepEqual(result.calls, { reads: 0, writes: 0, ingestion: 0, external: 0 });
+  assert.doesNotMatch(JSON.stringify([result.logs, result.response]), /QEVORA|SyntaxError|TypeError|Unexpected token|stack|private/);
+});
+
+test("real logger: empty body keeps local and production contracts with zero effects", async () => {
+  for (const production of [false, true]) {
+    const result = await jsonBoundaryProbe("", { production });
+    assert.equal(result.status, production ? 403 : 400);
+    assert.equal(result.response.error, production ? "FORBIDDEN" : "INVALID_REQUEST");
+    assert.deepEqual(result.calls, { reads: 0, writes: 0, ingestion: 0, external: 0 });
+    assert.doesNotMatch(JSON.stringify(result.logs), /SyntaxError|TypeError|stack|rawBody/);
+  }
+});
+
+test("real logger: invalid UTF-8 and invalid HMAC never emit request data", async () => {
+  for (const [body, sig] of [[new Uint8Array([0x80]), undefined], [payload(), "sha256=invalid"]] as const) {
+    const result = await jsonBoundaryProbe(body, { signature: sig });
+    assert.equal(result.status, 403); assert.equal(result.response.error, "FORBIDDEN");
+    assert.equal(result.calls.writes, 0); assert.equal(result.calls.ingestion, 0); assert.equal(result.calls.external, 0);
+    assert.doesNotMatch(JSON.stringify([result.logs, result.response]), /Synthetic message|sha256|SyntaxError|stack/);
+  }
+});
+
+test("real logger: valid signed JSON still reaches verified ingestion", async () => {
+  const raw = payload(); const result = await jsonBoundaryProbe(raw, { signature: signature(raw) });
+  assert.equal(result.status, 200); assert.equal(result.response.ok, true);
+  assert.deepEqual(result.calls, { reads: 1, writes: 1, ingestion: 1, external: 0 });
+  assert.doesNotMatch(JSON.stringify(result.logs), /Synthetic message|synthetic-provenance-test-secret|sha256/);
+});
+
+test("parse handling does not swallow classified persistence or unexpected failures", async () => {
+  const raw = payload();
+  for (const failure of [new ReplyEvidencePersistenceError(), new Error("SYNTHETIC_UNEXPECTED_FAILURE")]) {
+    const result = await jsonBoundaryProbe(raw, { signature: signature(raw), failure });
+    assert.equal(result.status, failure instanceof ReplyEvidencePersistenceError ? 503 : 500);
+    assert.equal(result.response.error, "INTERNAL_ERROR"); assert.equal(result.calls.ingestion, 1);
+    if (!(failure instanceof ReplyEvidencePersistenceError)) assert.ok(result.logs.some(row => row[1] === "error"));
+  }
 });

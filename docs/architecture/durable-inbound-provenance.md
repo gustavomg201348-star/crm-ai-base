@@ -18,6 +18,10 @@ every message before returning the batch.
 The route decodes raw bytes as fatal UTF-8, preserving BOM instead of normalizing
 bytes before HMAC. Selected persisted text also rejects NUL/unpaired surrogates
 that PostgreSQL cannot preserve exactly. These failures precede functional writes.
+Malformed JSON and string/number/boolean/array roots return HTTP 400 INVALID_REQUEST
+before processing. Parser exceptions never reach the generic error logger: only fixed
+invalid-json event/reason labels are emitted, without body, parser text or stack.
+An empty body keeps the existing local/production rejection behavior.
 Its issuer is private: a WeakMap binds
 an opaque, non-serializable capability to a private copy of the authenticated item.
 Object literals, spreads, structured clones and TypeScript casts are not authority.

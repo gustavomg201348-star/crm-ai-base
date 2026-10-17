@@ -103,7 +103,7 @@ export async function POST(request: NextRequest) {
     let rawBody: string;
     try { rawBody = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(await request.arrayBuffer()); }
     catch { throw new InboundProvenanceError("INVALID_ITEM"); }
-    const body = (rawBody ? JSON.parse(rawBody) : null) as
+    let body:
       | {
           companyId?: string;
           channelId?: string;
@@ -112,6 +112,18 @@ export async function POST(request: NextRequest) {
           message?: string;
         }
       | null;
+
+    try { body = rawBody ? JSON.parse(rawBody) : null; }
+    catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+      logWebhookAudit("invalid-json", { operation: "webhook-post", reason: "malformed-json" });
+      return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
+    }
+    // Primitive roots can otherwise reach `in` and expose their value in TypeError.
+    if (body !== null && (typeof body !== "object" || Array.isArray(body))) {
+      logWebhookAudit("invalid-json", { operation: "webhook-post", reason: "invalid-payload-shape" });
+      return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
+    }
 
     logWebhookAudit("received", summarizeMetaWebhookPayload(body));
 
