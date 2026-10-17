@@ -44,7 +44,7 @@ test("chatbot foundation integration on an explicitly isolated database", { skip
     const campaign = await db.campaign.create({ data: { companyId: company.id, channelId: channel.id, name: "Synthetic campaign fixture", message: "Not sent" } });
     const recipient = await db.campaignRecipient.create({ data: { campaignId: campaign.id, contactId: contact.id, conversationId: conversation.id, phone: contact.phone, status: "SENT", providerMessageId: "synthetic-outbound-fixture" } });
     const campaignBefore = JSON.stringify(await db.campaign.findMany());
-    const before = JSON.stringify(await db.conversation.findMany({ orderBy: { id: "asc" } }));
+    const before = JSON.stringify(await db.conversation.findMany({ orderBy: { id: "asc" } }), (_key, value) => typeof value === "bigint" ? value.toString() : value);
     const draft = await service.createDraft({ companyId: company.id, name: "Draft", definition });
     const scopeFlow = { companyId: company.id, flowId: draft.flow.id };
     await t.test("draft is not executable and invalid definitions never publish", async () => {
@@ -187,7 +187,7 @@ test("chatbot foundation integration on an explicitly isolated database", { skip
       }
     });
     await t.test("foundation never changes commercial entities or sends messages", async () => {
-      assert.equal(JSON.stringify(await db.conversation.findMany({ orderBy: { id: "asc" } })), before);
+      assert.equal(JSON.stringify(await db.conversation.findMany({ orderBy: { id: "asc" } }), (_key, value) => typeof value === "bigint" ? value.toString() : value), before);
       assert.equal(await db.message.count(), 0);
       assert.equal(await db.task.count(), 0);
       assert.equal(await db.proposal.count(), 0);

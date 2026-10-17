@@ -7,6 +7,27 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model ConversationInboundEvent {
+  id             String @id @default(cuid())
+  companyId      String
+  contactId      String
+  channelId      String?
+  conversationId String
+  messageId      String @unique(map: "InboundEvent_message_key")
+  sequence       BigInt
+  createdAt      DateTime @default(now())
+  company        Company @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  contact        Contact @relation(fields: [companyId, contactId], references: [companyId, id], onDelete: Restrict, onUpdate: NoAction)
+  channel        Channel? @relation(fields: [companyId, channelId], references: [companyId, id], onDelete: Restrict, onUpdate: NoAction)
+  conversation   Conversation @relation("InboundEventConversation", fields: [conversationId, contactId], references: [id, contactId], onDelete: Restrict, onUpdate: NoAction)
+  channelConversation Conversation? @relation("InboundEventChannel", fields: [conversationId, contactId, channelId], references: [id, contactId, channelId], onDelete: Restrict, onUpdate: NoAction)
+  message        Message @relation(fields: [messageId, conversationId], references: [id, conversationId], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([messageId, conversationId], map: "InboundEvent_message_conversation_key")
+  @@unique([conversationId, sequence], map: "InboundEvent_conversation_sequence_key")
+  @@index([companyId, channelId, createdAt], map: "InboundEvent_scope_created_idx")
+}
+
 model ConversationAuthority {
   id             String @id @default(cuid())
   companyId      String
@@ -298,6 +319,7 @@ model Company {
   openCreditCommercialOperations OpenCreditCommercialOperation[]
   openCreditRemoteIdentities OpenCreditRemoteIdentity[]
   chatbotFlows ChatbotFlow[]
+  inboundEvents ConversationInboundEvent[]
 }
 
 model OpenCreditCommercialAccess {
@@ -504,6 +526,7 @@ model Channel {
   company       Company    @relation(fields: [companyId], references: [id])
   campaigns     Campaign[]
   conversations Conversation[] @relation("ConversationChannel")
+  inboundEvents ConversationInboundEvent[]
   conversationAuthorities ConversationAuthority[]
   chatbotSessions ChatbotSession[]
   replyCorrelations ChatbotReplyCorrelation[]
@@ -734,6 +757,7 @@ model Contact {
   replyCorrelations ChatbotReplyCorrelation[]
   conversationAuthorities ConversationAuthority[]
   @@unique([companyId, id])
+  inboundEvents ConversationInboundEvent[]
   @@index([companyId])
   @@index([companyId, phone])
   @@index([companyId, normalizedPhone])
@@ -982,6 +1006,7 @@ model Conversation {
   aiProfile     String?
   aiPaused      Boolean        @default(false)
   aiLastSuggestion String?
+  inboundEventSequence BigInt @default(0)
   unreadCount   Int            @default(0)
   lastMessageAt DateTime?
   lastMessagePreview String?
@@ -1002,6 +1027,9 @@ model Conversation {
   replyCorrelations ChatbotReplyCorrelation[]
   @@unique([id, contactId, channelId])
   authority ConversationAuthority?
+  inboundEvents ConversationInboundEvent[] @relation("InboundEventConversation")
+  inboundChannelEvents ConversationInboundEvent[] @relation("InboundEventChannel")
+  @@unique([id, contactId])
   @@index([contactId])
   @@index([channelId])
   @@index([contactId, channelId, status])
@@ -1060,6 +1088,7 @@ model Message {
   replies           Message[]    @relation("MessageReplies")
   inboundReplyCorrelations ChatbotReplyCorrelation[] @relation("ChatbotReplyInbound")
   sourceReplyCorrelations ChatbotReplyCorrelation[] @relation("ChatbotReplySource")
+  inboundEvent ConversationInboundEvent?
 
   @@unique([id, conversationId])
 

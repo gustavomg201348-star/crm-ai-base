@@ -17,6 +17,7 @@ import { canAccessConversation } from "@/lib/permissions";
 import { digitsOnlyPhone } from "@/lib/phone-normalization.service";
 import { safeLogError } from "@/lib/safe-logger";
 import { enforceRateLimits, rateLimitPolicies } from "@/lib/rate-limit";
+import { createInboundMessageWithDurableEvent, inboundEventTransaction } from "@/lib/conversation-inbound-event";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -101,20 +102,23 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ conversation: updated });
     }
 
-    const updated = await prisma.$transaction(async (tx) => {
+    const updated = await inboundEventTransaction(prisma, async (tx) => {
       const now = new Date();
 
-      await tx.message.create({
-        data: {
-          conversationId: conversation.id,
-          direction,
-          senderType: "customer",
-          body: messageBody,
-          type: "text",
-          status: "sent",
-          readAt: null
-        }
-      });
+      const messageData = {
+        conversationId: conversation.id,
+        direction,
+        senderType: "customer",
+        body: messageBody,
+        type: "text",
+        status: "sent",
+        readAt: null
+      };
+      if (direction === "inbound") {
+        await createInboundMessageWithDurableEvent(tx, session.companyId, messageData);
+      } else {
+        await tx.message.create({ data: messageData });
+      }
 
       await createActivity(tx, {
         contactId: conversation.contactId,

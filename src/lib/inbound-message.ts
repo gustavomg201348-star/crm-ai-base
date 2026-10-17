@@ -361,7 +361,7 @@ export async function processInboundMessage({
         mimeType: mimeType ?? null,
         providerMessageId: providerMessageId ?? null,
         ...replyFields
-    }, replyMetadata && channelId ? { companyId, channelId, contactId: contact.id, senderPhone: phone, contextProviderMessageId, metadata: replyMetadata } : undefined);
+    }, replyMetadata && channelId ? { companyId, channelId, contactId: contact.id, senderPhone: phone, contextProviderMessageId, metadata: replyMetadata } : undefined, companyId);
   } catch (error) {
     if (providerMessageId && isProviderMessageIdUniqueViolation(error)) {
       const existingMessage = await prisma.message.findFirst({

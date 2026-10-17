@@ -7,7 +7,7 @@ import { readMetaReplyMetadata } from "./meta-reply-metadata";
 import { createMetaReplyCorrelation } from "./meta-reply-correlation.service";
 import { persistInboundMessage, preserveReplyReplay } from "./meta-reply-ingestion";
 import { installReplySqliteIntegrity } from "./meta-reply-sqlite-integrity";
-import { replyContentDigest } from "./meta-reply-snapshot";
+import { createReplySnapshot, replyContentDigest } from "./meta-reply-snapshot";
 
 test("passive Meta correlation on an explicitly disposable database", { skip: !process.env.CHATBOT_REPLY_TEST_DATABASE_URL && !process.env.CI }, async (t) => {
   const url = process.env.CHATBOT_REPLY_TEST_DATABASE_URL;
@@ -65,7 +65,7 @@ test("passive Meta correlation on an explicitly disposable database", { skip: !p
     const input = async (contextProviderMessageId: string | null, senderPhone = "47999999999", metadata = readMetaReplyMetadata({ type: "button", timestamp: "1792065600", button: { payload: "yes", text: "Sim" } })) => {
       const providerMessageId = "reply-" + (++sequence) + suffix;
       const evidence = { ...scope, contactId: contact.id, providerMessageId, contextProviderMessageId, senderPhone, metadata, contentDigest: replyContentDigest({ body: "Synthetic reply" }) };
-      const incoming = await persistInboundMessage(db, { conversationId: conversation.id, direction: "inbound", senderType: "customer", body: "Synthetic reply", providerMessageId }, evidence);
+      const incoming = await persistInboundMessage(db, { conversationId: conversation.id, direction: "inbound", senderType: "customer", body: "Synthetic reply", providerMessageId }, evidence, company.id);
       return { ...evidence, incoming };
     };
     const capture = async (request: Awaited<ReturnType<typeof input>>) => {
@@ -79,7 +79,7 @@ test("passive Meta correlation on an explicitly disposable database", { skip: !p
         db.message.findMany({ orderBy: { id: "asc" } }).then(rows => rows.map(row => Object.fromEntries(Object.entries(row).filter(([key]) => !["metaReplySnapshot", "metaReplyConflictSnapshot"].includes(key))))), db.campaign.findMany({ orderBy: { id: "asc" } }),
         db.campaignRecipient.findMany({ orderBy: { id: "asc" } }), db.chatbotSession.findMany(),
         db.chatbotEvent.findMany(), db.chatbotOutbox.findMany()
-      ]));
+      ]), (_key, value) => typeof value === "bigint" ? value.toString() : value);
       const before = await snapshot();
       await operation();
       assert.equal(await snapshot(), before, "Only correlation receipts may mutate");
@@ -256,11 +256,21 @@ test("passive Meta correlation on an explicitly disposable database", { skip: !p
         await assert.rejects(db.chatbotReplyCorrelation.update({ where: { id: receipt.id }, data }));
       }
     });
-    await t.test("passive metadata does not prevent existing message deletion", async () => {
+    await t.test("passive metadata permits historical deletion; durable inbound event restricts new deletion", async () => {
       const request = await input(recent.providerMessageId);
       const receipt = await capture(request);
-      await db.message.delete({ where: { id: request.incoming.id } });
-      assert.equal(await db.chatbotReplyCorrelation.count({ where: { id: receipt.id } }), 0);
+      await assert.rejects(db.message.delete({ where: { id: request.incoming.id } }));
+      assert.equal(await db.chatbotReplyCorrelation.count({ where: { id: receipt.id } }), 1);
+      const providerMessageId = "synthetic-historical-" + suffix;
+      const historical = await db.message.create({ data: {
+        conversationId: conversation.id, direction: "inbound", senderType: "customer",
+        body: "Synthetic historical fixture", providerMessageId,
+        metaReplySnapshot: createReplySnapshot({ ...request, providerMessageId }),
+      } });
+      const historicalReceipt = await service.processMessage({ ...scope, messageId: historical.id });
+      assert.ok(historicalReceipt);
+      await db.message.delete({ where: { id: historical.id } });
+      assert.equal(await db.chatbotReplyCorrelation.count({ where: { id: historicalReceipt.id } }), 0);
     });
     await t.test("historical destination A vs sender/current contact B is rejected, but historical A remains authoritative", async () => {
       const sent = await campaign("historical-phone");
@@ -340,7 +350,7 @@ test("passive Meta correlation on an explicitly disposable database", { skip: !p
     await t.test("failed message/snapshot INSERT does not leave a message or consume an event", async () => {
       const before = await db.message.count();
       await assert.rejects(persistInboundMessage(db, { conversationId: "nonexistent", direction: "inbound", body: "Synthetic failure", providerMessageId: "fail" + suffix },
-        { ...scope, contactId: contact.id, senderPhone: contact.phone, metadata: readMetaReplyMetadata({ type: "text" }) }));
+        { ...scope, contactId: contact.id, senderPhone: contact.phone, metadata: readMetaReplyMetadata({ type: "text" }) }, company.id));
       assert.equal(await db.message.count(), before);
     });
     await t.test("a failed correlation stays pending and does not stop the next batch item", async () => {
@@ -397,7 +407,7 @@ test("passive Meta correlation on an explicitly disposable database", { skip: !p
       assert.equal(await db.chatbotReplyCorrelation.count({ where: { inboundMessageId: request.incoming.id } }), 0);
       assert.equal((await capture(request)).status, "CONFIRMED");
     });
-    await t.test("single-INSERT ingestion overhead benchmark, not a full HTTP benchmark", async () => {
+    await t.test("atomic inbound capture overhead benchmark, not a full HTTP benchmark", async () => {
       const baseline: number[] = []; const snapshot: number[] = [];
       for (let n = 0; n < 45; n++) {
         const basic = async () => {
@@ -413,20 +423,13 @@ test("passive Meta correlation on an explicitly disposable database", { skip: !p
         if (n % 2) { await basic(); await durable(); } else { await durable(); await basic(); }
       }
       const percentile = (values: number[], p: number) => values.sort((a,b) => a-b)[Math.min(values.length-1, Math.floor(values.length*p))];
-      console.info(JSON.stringify({ benchmark: "message INSERT vs atomic snapshot INSERT", provider, samples: 40,
+      console.info(JSON.stringify({ benchmark: "message INSERT vs Message/snapshot/Event transaction", provider, samples: 40,
         baselineP50: percentile(baseline,.5), baselineP95: percentile(baseline,.95), snapshotP50: percentile(snapshot,.5), snapshotP95: percentile(snapshot,.95) }));
       assert(percentile(snapshot,.95) < percentile(baseline,.95) + 250);
     });
   } finally {
-    // Delete only synthetic companies and their fixtures, never preexisting records.
-    await db.chatbotReplyCorrelation.deleteMany({ where: { companyId: { in: companies } } });
-    await db.campaignRecipient.deleteMany({ where: { campaign: { companyId: { in: companies } } } });
-    await db.campaign.deleteMany({ where: { companyId: { in: companies } } });
-    await db.message.deleteMany({ where: { conversation: { contact: { companyId: { in: companies } } } } });
-    await db.conversation.deleteMany({ where: { contact: { companyId: { in: companies } } } });
-    await db.contact.deleteMany({ where: { companyId: { in: companies } } });
-    await db.channel.deleteMany({ where: { companyId: { in: companies } } });
-    await db.company.deleteMany({ where: { id: { in: companies } } });
+    // Durable inbound Event parent references are RESTRICT. Retain synthetic history
+    // until this explicitly disposable test database is discarded; never bypass it.
     await db.$disconnect();
   }
 });
