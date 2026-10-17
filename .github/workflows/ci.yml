@@ -80,6 +80,16 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Validate shared authority on disposable SQLite
+        shell: bash
+        run: |
+          export AUTHORITY_TEST_DATABASE_URL="file:${RUNNER_TEMP}/qevora-authority-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.db"
+          export DATABASE_URL="$AUTHORITY_TEST_DATABASE_URL"
+          npx prisma db push --schema prisma/schema.prisma --skip-generate
+          npx --yes tsx@4.20.6 --test src/lib/conversation-authority.test.ts
+        env:
+          TMPDIR: ${{ runner.temp }}
+
   postgres-migrations:
     name: PostgreSQL migrations and rate limiter
     runs-on: ubuntu-latest
@@ -177,3 +187,17 @@ jobs:
         env:
           CHATBOT_REPLY_TEST_DATABASE_URL: postgresql://qevora_ci:qevora_ci_password@127.0.0.1:5432/qevora_chatbot_test?schema=public
           CHATBOT_REPLY_POSTGRES_TEST: "1"
+
+      - name: Create dedicated disposable shared authority database
+        run: echo 'CREATE DATABASE qevora_authority_test;' | npx prisma db execute --stdin --schema prisma/schema.postgres.prisma
+
+      - name: Apply shared authority migration chain
+        run: npm run prisma:migrate:prod
+        env:
+          DATABASE_URL: postgresql://qevora_ci:qevora_ci_password@127.0.0.1:5432/qevora_authority_test?schema=public
+
+      - name: Validate shared authority constraints, audit and concurrency
+        run: npx --yes tsx@4.20.6 --test src/lib/conversation-authority.test.ts
+        env:
+          AUTHORITY_POSTGRES_TEST: "1"
+          AUTHORITY_TEST_DATABASE_URL: postgresql://qevora_ci:qevora_ci_password@127.0.0.1:5432/qevora_authority_test?schema=public

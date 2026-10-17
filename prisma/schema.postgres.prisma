@@ -7,6 +7,87 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model ConversationAuthority {
+  id             String @id @default(cuid())
+  companyId      String
+  channelId      String
+  contactId      String
+  conversationId String @unique
+  state          String
+  generation     BigInt @default(0)
+  ownerUserId    String?
+  owner          User? @relation("AuthorityOwner", fields: [companyId, ownerUserId], references: [companyId, id], onDelete: Restrict, onUpdate: Restrict)
+  policyVersion  Int @default(1)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  contact        Contact @relation(fields: [companyId, contactId], references: [companyId, id], onDelete: Restrict, onUpdate: Restrict)
+  channel        Channel @relation(fields: [companyId, channelId], references: [companyId, id], onDelete: Restrict, onUpdate: Restrict)
+  conversation   Conversation @relation(fields: [conversationId, contactId, channelId], references: [id, contactId, channelId], onDelete: Restrict, onUpdate: Restrict)
+  operations     OutboundOperation[]
+  events         AuthorityEvent[]
+  @@unique([companyId, channelId, conversationId, id])
+  @@unique([conversationId, contactId, channelId])
+  @@index([companyId, channelId, state])
+}
+
+model OutboundOperation {
+  id                 String @id @default(cuid())
+  companyId          String
+  channelId          String
+  conversationId     String
+  authorityId        String
+  logicalKey         String
+  fingerprint        String
+  origin             String
+  actorUserId        String?
+  actor              User? @relation("OutboundActor", fields: [companyId, actorUserId], references: [companyId, id], onDelete: Restrict, onUpdate: Restrict)
+  payload            String
+  authorityGeneration BigInt
+  status             String @default("PREPARED")
+  activeSlot         String? @unique
+  reservationToken   String?
+  leaseUntil         DateTime?
+  dispatchDeadline   DateTime?
+  providerMessageId  String?
+  resultFingerprint  String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  authority          ConversationAuthority @relation(fields: [companyId, channelId, conversationId, authorityId], references: [companyId, channelId, conversationId, id], onDelete: Restrict, onUpdate: Restrict)
+  events             AuthorityEvent[]
+  @@unique([companyId, channelId, conversationId, id])
+  @@unique([companyId, channelId, logicalKey])
+  @@unique([companyId, channelId, providerMessageId])
+  @@index([authorityId, status])
+  @@index([status, leaseUntil])
+}
+
+model AuthorityEvent {
+  id             String @id @default(cuid())
+  companyId      String
+  channelId      String
+  conversationId String
+  authorityId    String
+  logicalKey     String
+  fingerprint    String
+  actorUserId    String
+  actor          User @relation("AuthorityActor", fields: [companyId, actorUserId], references: [companyId, id], onDelete: Restrict, onUpdate: Restrict)
+  kind           String
+  fromState      String?
+  toState        String
+  fromGeneration BigInt
+  toGeneration   BigInt
+  fromOwnerUserId String?
+  toOwnerUserId   String?
+  auditTransactionId String @default("")
+  operationId    String?
+  operation      OutboundOperation? @relation(fields: [companyId, channelId, conversationId, operationId], references: [companyId, channelId, conversationId, id], onDelete: Restrict, onUpdate: Restrict)
+  reason         String
+  createdAt      DateTime @default(now())
+  authority      ConversationAuthority @relation(fields: [companyId, channelId, conversationId, authorityId], references: [companyId, channelId, conversationId, id], onDelete: Restrict, onUpdate: Restrict)
+  @@unique([companyId, channelId, logicalKey])
+  @@index([authorityId, createdAt])
+}
+
 model ChatbotReplyCorrelation {
   id                       String @id @default(cuid())
   companyId                String
@@ -423,6 +504,7 @@ model Channel {
   company       Company    @relation(fields: [companyId], references: [id])
   campaigns     Campaign[]
   conversations Conversation[] @relation("ConversationChannel")
+  conversationAuthorities ConversationAuthority[]
   chatbotSessions ChatbotSession[]
   replyCorrelations ChatbotReplyCorrelation[]
 
@@ -525,6 +607,10 @@ model User {
   openCreditRemoteIdentityEvents OpenCreditRemoteIdentityEvent[] @relation("OpenCreditRemoteIdentityEventActor")
   openCreditCommercialOperationsCreated OpenCreditCommercialOperation[] @relation("OpenCreditCommercialOperationCreatedBy")
   openCreditCommercialOperationEvents OpenCreditCommercialOperationEvent[] @relation("OpenCreditCommercialOperationEventActor")
+  ownedAuthorities ConversationAuthority[] @relation("AuthorityOwner")
+  authorityEvents AuthorityEvent[] @relation("AuthorityActor")
+  outboundOperations OutboundOperation[] @relation("OutboundActor")
+  @@unique([companyId, id])
 
   @@index([companyId])
 }
@@ -646,6 +732,7 @@ model Contact {
   chatbotSessions ChatbotSession[]
   openCreditRemoteIdentities OpenCreditRemoteIdentity[]
   replyCorrelations ChatbotReplyCorrelation[]
+  conversationAuthorities ConversationAuthority[]
   @@unique([companyId, id])
   @@index([companyId])
   @@index([companyId, phone])
@@ -914,6 +1001,7 @@ model Conversation {
   chatbotSessions ChatbotSession[]
   replyCorrelations ChatbotReplyCorrelation[]
   @@unique([id, contactId, channelId])
+  authority ConversationAuthority?
   @@index([contactId])
   @@index([channelId])
   @@index([contactId, channelId, status])
