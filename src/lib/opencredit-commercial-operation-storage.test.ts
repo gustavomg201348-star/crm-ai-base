@@ -51,11 +51,11 @@ test("migration is structural only, additive and identifier lengths are safe", (
 });
 
 // Conservative syntax check, not whole-program taint analysis or raw SQL enforcement.
-function ledgerRuntime(source: string) {
+function ledgerRuntime(source: string, allowService = false) {
   const file = ts.createSourceFile("runtime.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const delegates = new Set(["openCreditCommercialOperation", "openCreditCommercialOperationEvent"]);
   const reads = new Set(["findUnique", "findUniqueOrThrow", "findFirst", "findFirstOrThrow", "findMany", "count", "aggregate", "groupBy"]);
-  const constants = new Map<string, string>(); const errors: string[] = []; let references = 0;
+  const constants = new Map<string, string>(); const errors: string[] = []; const writers: string[] = []; let references = 0;
   function collect(node: ts.Node) {
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && (ts.isStringLiteral(node.initializer) || ts.isNoSubstitutionTemplateLiteral(node.initializer))) constants.set(node.name.text, node.initializer.text);
     ts.forEachChild(node, collect);
@@ -67,7 +67,9 @@ function ledgerRuntime(source: string) {
     if (key && delegates.has(key)) {
       references++; const member = node.parent;
       const method = ts.isPropertyAccessExpression(member) ? member.name.text : ts.isElementAccessExpression(member) ? name(member.argumentExpression) : undefined;
-      if (!method || !reads.has(method) || !ts.isCallExpression(member.parent) || member.parent.expression !== member) errors.push("LEDGER_WRITER_OR_DELEGATE_ESCAPE");
+      const allowedWriter = allowService && (key === "openCreditCommercialOperation" ? method === "create" || method === "updateMany" : method === "create");
+      if (!method || !reads.has(method) && !allowedWriter || !ts.isCallExpression(member.parent) || member.parent.expression !== member) errors.push("LEDGER_WRITER_OR_DELEGATE_ESCAPE");
+      else if (allowedWriter) writers.push(key + "." + method);
     }
     if (ts.isBindingElement(node)) {
       const key = node.propertyName;
@@ -76,7 +78,7 @@ function ledgerRuntime(source: string) {
     }
     ts.forEachChild(node, visit);
   }
-  visit(file); return { errors, references };
+  visit(file); return { errors, references, writers };
 }
 for (const delegate of ["openCreditCommercialOperation", "openCreditCommercialOperationEvent"]) {
   for (const method of ["create", "createMany", "update", "updateMany", "delete", "deleteMany", "upsert"]) test(delegate + " rejects " + method + " and obvious escapes/aliases", () => {
@@ -98,17 +100,36 @@ for (const delegate of ["openCreditCommercialOperation", "openCreditCommercialOp
     for (const source of ["db." + delegate + "[method]({})", "return db." + delegate, "external(db." + delegate + ")"]) assert.ok(ledgerRuntime(source).errors.length > 0);
   });
 }
-test("production source and scripts contain zero ledger writers or runtime references", () => {
+test("only the approved service has the exact ledger writers; all other production sources/scripts remain read-only", () => {
+  const writers: string[] = [];
   function scan(dir: URL) {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = new URL(entry.name + (entry.isDirectory() ? "/" : ""), dir);
       if (entry.isDirectory()) scan(path);
       else if (/\.(?:tsx?|m?js|cjs)$/.test(entry.name) && !/\.(?:test|integration)\.(?:tsx?|m?js|cjs)$/.test(entry.name)) {
-        assert.deepEqual(ledgerRuntime(readFileSync(path, "utf8")), { errors: [], references: 0 }, path.pathname);
+        const expected = path.pathname.endsWith("/src/lib/opencredit-commercial-operation.service.ts");
+        const result = ledgerRuntime(readFileSync(path, "utf8"), expected);
+        assert.deepEqual(result.errors, [], path.pathname);
+        writers.push(...result.writers);
       }
     }
   }
   scan(new URL("../", import.meta.url)); scan(new URL("../../scripts/", import.meta.url));
+  assert.deepEqual(writers.sort(), ["openCreditCommercialOperation.create",
+    "openCreditCommercialOperation.updateMany", "openCreditCommercialOperation.updateMany",
+    "openCreditCommercialOperationEvent.create", "openCreditCommercialOperationEvent.create", "openCreditCommercialOperationEvent.create"].sort());
+});
+test("service exception permits only operation create/updateMany and Event create; no aliases or dynamic mutations", () => {
+  for (const delegate of ["openCreditCommercialOperation", "openCreditCommercialOperationEvent"]) {
+    for (const method of ["create", "createMany", "update", "updateMany", "delete", "deleteMany", "upsert"]) {
+      const permitted = method === "create" || delegate === "openCreditCommercialOperation" && method === "updateMany";
+      assert.equal(ledgerRuntime("db." + delegate + "." + method + "({})", true).errors.length === 0, permitted);
+      for (const source of ["const d = db." + delegate + "; d." + method + "({})",
+        "const { " + delegate + ": d } = db; d." + method + "({})",
+        "const mutate = db." + delegate + "." + method + "; mutate({})",
+        "db." + delegate + "[method]({})"]) assert.ok(ledgerRuntime(source, true).errors.length > 0);
+    }
+  }
 });
 const env = { CI: "true", GITHUB_ACTIONS: "true", OPENCREDIT_COMMERCIAL_OPERATION_POSTGRES_TEST: "1", DATABASE_URL: "postgresql://qevora_ci:qevora_ci_password@127.0.0.1:5432/qevora_ci?schema=public" };
 for (const host of ["localhost", "127.0.0.1"]) for (const port of [5432, 55432]) test("guard accepts disposable " + host + ":" + port, () => assert.doesNotThrow(() => assertOpenCreditCommercialOperationTestDatabase({ ...env, DATABASE_URL: env.DATABASE_URL.replace("127.0.0.1:5432", host + ":" + port) })));
