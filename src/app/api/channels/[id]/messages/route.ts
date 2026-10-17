@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import type { Contact, Conversation } from "@prisma/client";
 import { getSessionFromRequest } from "@/lib/auth";
+import { observeTextOutboundAuthority } from "@/lib/authority-text-shadow-runtime";
 import { createActivity } from "@/lib/activities";
 import { resolveChannelAccessToken } from "@/lib/channel-secrets";
 import { conversationMatchesChannel } from "@/lib/conversation-channel.service";
@@ -138,6 +139,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
           channelId: channel.id
         })
       : null;
+    observeTextOutboundAuthority(request, {
+      companyId: session.companyId, channelId: channel.id, conversationId: conversation?.id ?? null,
+      actorUserId: session.id, assignedUserId: conversation?.agentId ?? null,
+      source: "CHANNEL_TEXT", intentId: null
+    });
     const sent = await sendMetaTextMessage({
       phoneNumberId: channel.phoneNumberId,
       accessToken,

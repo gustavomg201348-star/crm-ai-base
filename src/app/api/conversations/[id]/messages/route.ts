@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
+import { observeTextOutboundAuthority } from "@/lib/authority-text-shadow-runtime";
 import { createActivity } from "@/lib/activities";
 import {
   getConversationIntegration,
@@ -83,6 +84,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
         companyId: session.companyId,
         conversationId: conversation.id,
         channelId: channel.id
+      });
+      observeTextOutboundAuthority(request, {
+        companyId: session.companyId, channelId: channel.id, conversationId: integrationConversation.id,
+        actorUserId: session.id, assignedUserId: integrationConversation.agentId,
+        source: "CONVERSATION_TEXT", intentId: null
       });
       const sent = await sendMetaTextMessage({
         phoneNumberId: channel.phoneNumberId!,
