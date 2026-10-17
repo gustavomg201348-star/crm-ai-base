@@ -1335,3 +1335,74 @@ revocation, UNKNOWN, actor/event atomicity and real FK failure AFTER observed mu
 to prove full rollback. No production failpoint or Event cleanup/deletion is added.
 This service slice changes no schema, migration or dependencies. Rollback before
 runtime adoption is reverting this code/CI slice; no automatic ledger deletion is safe.
+
+## Strict raw JSON parser foundation
+
+`parseOpenCreditStrictJson(raw: string)` in `opencredit-strict-json.ts` is a pure,
+synchronous server-only primitive. It accepts a primitive JavaScript string, NOT
+bytes/Buffer/Response, and returns any JSON root value: object, array, string,
+number, boolean or null. Non-string inputs fail without coercion or property reads.
+Byte limits, raw UTF-8 decoding, Content-Type/charset validation and complete stream
+deadlines belong to the future HTTP boundary BEFORE calling this parser. A JS string
+cannot prove that its original bytes were valid UTF-8.
+
+A bounded recursive-descent scanner constructs values directly: it never calls
+JSON.parse. Each object has its own Set of decoded keys; duplicate detection occurs
+before insertion and before parsing the duplicate value. Escape-equivalent keys
+(for example `a` and `\u0061`, or literal/escaped supplementary Unicode) are duplicates,
+even for identical values. Equal keys in different objects are allowed. No Unicode
+normalization/case-folding is performed: distinct code-unit sequences stay distinct.
+
+Only standard JSON tokens/whitespace (space/tab/CR/LF) are accepted. Comments,
+trailing commas, BOM/non-JSON whitespace outside strings, malformed/truncated JSON,
+unknown escapes, literal U+0000..U+001F in strings, and trailing root data are rejected.
+All JSON escapes are decoded. LOCAL STRICT UNICODE POLICY: decoded keys and strings
+must contain paired UTF-16 surrogates; isolated high/low surrogates are rejected,
+whether literal or escaped. Mixed literal/escaped valid pairs are accepted.
+
+Objects are created with Object.create(null), including nested objects. Every field
+is an own enumerable data property. __proto__, constructor and prototype are inert
+ordinary JSON keys, not operations on prototypes. This does not authorize unsafe
+merging into ordinary objects downstream; contract consumers still need allowlists.
+
+LOCAL QEVORA DEFENSIVE LIMITS, not provider guarantees:
+
+| Limit | Value | Measurement |
+| --- | --- | --- |
+| Raw string | 1,000,000 | UTF-16 code units |
+| Container nesting | 64 | Root container depth 1; scalar root depth 0 |
+| Object keys | 10,000 | Per object, after escape decoding |
+| Array items | 100,000 | Per array |
+| Total nodes | 200,000 | All values/containers; excludes key strings |
+| Decoded string/key | 262,144 | UTF-16 code units, including both surrogate units |
+
+Numbers use strict JSON grammar and IEEE-754 binary64, NOT arbitrary precision.
+Integer results must be Number.isSafeInteger. Fraction/exponent lexemes additionally
+allow at most 15 significant decimal digits (leading/trailing mantissa zeros excluded).
+This deliberately rejects some representable numbers, such as a 16-digit safe integer
+written with `e0`, rather than promising precision for arbitrary decimal input.
+Ordinary binary64 fractional rounding remains possible; overflow and nonzero underflow
+to zero are rejected. Signed zero is preserved. Future exact Decimal/financial
+contracts require a separately reviewed representation; do not use this primitive
+to claim exact monetary precision.
+
+Closed errors use OPENCREDIT_STRICT_JSON_<CODE>: INVALID_INPUT, TOO_LARGE, TOO_DEEP,
+TOO_MANY_NODES, TOO_MANY_OBJECT_KEYS, TOO_MANY_ARRAY_ITEMS, STRING_TOO_LARGE,
+UNEXPECTED_TOKEN, UNEXPECTED_END, INVALID_STRING, INVALID_ESCAPE, INVALID_UNICODE,
+INVALID_NUMBER, DUPLICATE_KEY and TRAILING_DATA. Diagnostics contain no input,
+duplicate key, offset, excerpt, raw provider body, original exception/cause or parser
+stack. No partial result escapes after failure.
+
+This slice introduces zero HTTP/fetch/provider call/API client/DB/Prisma, endpoint,
+UI, runtime caller, commercial ledger integration, retry/replay, authorization/evidence
+or providerScope resolver. Existing object-only parseOpenCreditClientProfileResult,
+API client and CommercialOperation service remain unchanged and unconnected. A future
+boundary may compose raw string -> strict JSON -> operation-specific contract parser.
+Structural JSON integrity does NOT prove the provider response contract or classify
+createClient results. SUCCEEDED/FAILED classification remains BLOCKED; validate runtime
+contract remains NOT PROVEN. Shared conversation authority foundation is unchanged.
+
+CI adds only the tsx@4.20.6 unit gate and preserves all existing gates, including
+shared authority. Tests cover decoded-key duplicates, Unicode, grammar, all inclusive
+limit boundaries, hostile inputs, inert prototype-related keys and no-side-effect /
+no-caller guards. No dependency, schema, migration or PostgreSQL gate is added.
