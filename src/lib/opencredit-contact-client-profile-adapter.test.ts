@@ -108,7 +108,7 @@ test("hostile exceptions never escape, including thrown proxies and injected Ada
     const value = new Proxy({}, { getPrototypeOf() { throw error; } }); denied(value, "INVALID_INPUT");
   }
 });
-test("public server-only marker, exact exports, only pure imports and no runtime caller", () => {
+test("public server-only marker, exact exports, pure imports and only the local operation service consumer", () => {
   const source = readFileSync(new URL("./opencredit-contact-client-profile-adapter.ts", import.meta.url), "utf8");
   assert.match(source, /^import "server-only";/);
   const ast = ts.createSourceFile("adapter.ts", source, ts.ScriptTarget.Latest, true); const imports: string[] = [];
@@ -122,10 +122,18 @@ test("public server-only marker, exact exports, only pure imports and no runtime
   visit(ast); assert.deepEqual(imports, ["server-only", "./opencredit-client-profile-contract", "./opencredit-commercial-identity-policy"]);
   assert.doesNotMatch(source, /\b(?:Prisma|prisma|fetch|process|console|logger|XMLHttpRequest|localStorage|sessionStorage|setTimeout|setInterval|async|await)\b|node:|opencredit-api-client|https?:\/\//);
   assert.deepEqual(Object.keys(adapter).sort(), ["OpenCreditContactClientProfileAdapterError", "buildOpenCreditClientProfileFromContact"].sort());
+  const consumers: string[] = [];
+  const approvedConsumer = new URL("./opencredit-commercial-operation.service.ts", import.meta.url).href;
   function scan(dir: URL) { for (const e of readdirSync(dir, { withFileTypes: true })) {
     const path = new URL(e.name + (e.isDirectory() ? "/" : ""), dir); if (e.isDirectory()) scan(path);
-    else if (/\.(tsx?|m?js|cjs)$/.test(e.name) && !/\.(test|integration)\./.test(e.name) && e.name !== "opencredit-contact-client-profile-adapter.ts") assert.doesNotMatch(readFileSync(path, "utf8"), /(?:import|require)[\s\S]{0,250}["'][^"']*opencredit-contact-client-profile-adapter["']/);
+    else if (/\.(tsx?|m?js|cjs)$/.test(e.name) && !/\.(test|integration)\./.test(e.name) && e.name !== "opencredit-contact-client-profile-adapter.ts") {
+      const text = readFileSync(path, "utf8");
+      const reference = /(?:import|require)[\s\S]{0,250}["'][^"']*opencredit-contact-client-profile-adapter["']/;
+      if (path.href === approvedConsumer) { assert.match(text, reference); consumers.push(path.href); }
+      else assert.doesNotMatch(text, reference);
+    }
   } }
   scan(new URL("../", import.meta.url)); scan(new URL("../../scripts/", import.meta.url));
+  assert.deepEqual(consumers, [approvedConsumer]);
   const ci = readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8"); assert.match(ci, /tsx@4\.20\.6 src\/lib\/opencredit-contact-client-profile-adapter.test.ts/);
 });
