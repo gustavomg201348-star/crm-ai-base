@@ -1131,10 +1131,11 @@ request/response runtime contract is NOT PROVEN.
 ## Commercial operation durable ledger foundation
 
 OpenCreditCommercialOperation and OpenCreditCommercialOperationEvent supply durable
-local structure BEFORE any non-idempotent provider request. There is no creation,
-reservation, transition or dispatch service, endpoint, UI, runtime caller, provider
-request, real operation/identity/scope, consent/evidence mechanism or external
-reconciliation in this slice. This foundation does NOT authorize financial activity.
+local structure BEFORE any non-idempotent provider request. The initial foundation
+introduced no writer. The transactional service documented below now supplies local
+preparation, reservation and UNKNOWN transitions only. There is still no dispatch
+service, endpoint, UI, runtime caller, provider request, real operation/identity/scope,
+consent/evidence mechanism or external reconciliation. This foundation does NOT authorize financial activity.
 The Contact adapter and client-profile contract remain pure and unchanged.
 
 Operation fields are exactly id, companyId, remoteIdentityId, providerScope,
@@ -1151,7 +1152,7 @@ Operation explicitly references Company.id and createdBy User.id. Its strong
 RemoteIdentity(id,companyId,providerScope) unique. Events reference
 Operation(id,companyId,providerScope) through (operationId,companyId,providerScope),
 and actor User.id. Every new FK uses RESTRICT / NO ACTION. Platform actors may
-structurally belong to a different Company; the future service must authorize them.
+structurally belong to a different Company; the service must authorize them.
 Only the necessary Company/User/RemoteIdentity inverse relations are added; existing
 ownership uniqueness, reservation and disable semantics are unchanged.
 
@@ -1162,20 +1163,21 @@ Event composite FK. Indexes cover identity/createdAt/id, Company/scope/state/cre
 Operation creator, Event operation/createdAt/id and Event actor. createdAt plus id
 supports stable listing, not proof of a global temporal order.
 
-No writer means no intent-key syntax validator yet. A future service must require an
-opaque securely random key, stable across retries of the SAME intention, scoped by
+The initial foundation had no intent-key syntax validator. The service below now
+requires a canonical lowercase UUID v4, stable across retries of the SAME intention, scoped by
 Company and providerScope, never derived from CPF/name/phone/email, Contact id,
 payload hash, token or credentials. The currently audited create-client contract
 publishes no provider idempotency-key support. Do not send Idempotency-Key, intentKey
 or operationId to the provider without a future formal contract.
 
-operationKind remains String. The first PLANNED local kind is CLIENT_PROFILE_UPSERT,
+operationKind remains String. The only implemented local kind is CLIENT_PROFILE_UPSERT,
 matching the documented createClient POST's create-or-update-fields description.
 The word UPSERT is NOT a provider idempotency guarantee. Future SIMULATION/PROPOSAL
 kinds require separate review; no such flow is implemented.
 
 state also remains String, with structural default PREPARED. No Prisma enum, manual
-CHECK, trigger or transition enforcement is supplied. Future meanings:
+CHECK, trigger or database transition enforcement is supplied. The service enforces
+only the transitions below; SUCCEEDED/FAILED remain future boundary meanings:
 
 | State | Future meaning |
 | --- | --- |
@@ -1185,12 +1187,12 @@ CHECK, trigger or transition enforcement is supplied. Future meanings:
 | FAILED | A definitive known result establishes lack of successful acceptance. |
 | UNKNOWN | Provider receipt/application cannot be proved or excluded. |
 
-revision is Int default 0 for future optimistic concurrency/CAS. A future transition
+revision is Int default 0 for optimistic concurrency/CAS. A service transition
 must match id + expected revision + expected state, increment revision and append
 the coherent action/previousState/nextState/revision Event in the SAME transaction.
 Example only: PREPARED/revision 0 -> IN_FLIGHT/revision 1 with an Event carrying
-previousState=PREPARED, nextState=IN_FLIGHT, revision=1. No CAS/writer is implemented.
-Synthetic state inserts prove storage ONLY, not a functioning state machine;
+previousState=PREPARED, nextState=IN_FLIGHT, revision=1. The service below implements
+that CAS. Synthetic foundation state inserts prove storage ONLY;
 arbitrary other strings are not blocked by these tables.
 
 **NO AUTOMATIC POST REPLAY.** After IN_FLIGHT, abandoned/crashed execution cannot be
@@ -1200,16 +1202,17 @@ Timeout, socket reset, process crash, lost/truncated/invalid response, or provid
 5xx when acceptance cannot be excluded must not automatically mean FAILED.
 They may require UNKNOWN. Exact classification belongs to the future HTTP boundary.
 
-The future PREPARED -> IN_FLIGHT reservation must use a short transaction rereading
+The PREPARED -> IN_FLIGHT reservation uses a short transaction rereading
 actor/session, Company, enabled CommercialAccess/RemoteIdentity, current unarchived
-Contact, CPF snapshot equality, ambiguity, trusted server-resolved providerScope,
-applicable authorization/evidence and operation state/revision. Reconstruct the DTO
+Contact, CPF snapshot equality, ambiguity and operation state/revision. A future caller
+must additionally establish trusted server-resolved providerScope and applicable
+authorization/evidence. Reconstruct the DTO
 from fresh data BEFORE final CAS; do not persist it in this ledger. Treatment of the
 exact request after CAS remains a separately reviewed boundary, not an invented
 payload store. HTTP happens OUTSIDE the transaction. This reduces but does not
 eliminate the commit-to-request revocation window. Revoke/disable must prevent new
 reservations; a previously IN_FLIGHT operation remains possibly sent, and subsequent
-revocation cannot pretend it never happened. No such service is implemented here.
+revocation cannot pretend it never happened. No HTTP boundary is implemented here.
 
 GET /api/tenants/{tenantId}/integration/clients/validate remains identified but its
 full runtime contract remains NOT PROVEN because formal required parameters conflict
@@ -1219,10 +1222,11 @@ generic consent boolean or fictional evidenceId in these models.
 
 **APPLICATION APPEND-ONLY, NOT DATABASE IMMUTABILITY.** Event history must not be
 updated/deleted/upserted by application code. The current conservative TypeScript
-inventory requires ZERO functional writers or runtime references for BOTH delegates,
-including create. It rejects obvious delegate extraction/aliases and dynamic mutator
-calls; reusable read syntax is tested separately. Future writer PRs must deliberately
-update this contract, not weaken existing audit guards. This is not complete taint
+inventory originally required ZERO writers. It now permits only the service below:
+Operation.create/updateMany and Event.create. All other production sources and scripts
+remain forbidden writers. Event update/delete/upsert/createMany remain forbidden
+everywhere. It rejects obvious delegate extraction/aliases and dynamic mutator
+calls; reusable read syntax is tested separately. This is not complete taint
 analysis or arbitrary raw SQL enforcement. PostgreSQL owner/superuser can still
 alter/delete data. No role split, ACL/GRANT/REVOKE, trigger/function or separate
 DATABASE_URL is introduced. No history cleanup bypass is added.
@@ -1248,3 +1252,86 @@ Rollback before real use: revert this slice and separately approve a database pl
 for the two empty new tables. Never automatically drop tables once real intentions
 or history exist. No production migration, Railway change, remote POST, retry,
 reconciliation or real operation is performed by this development.
+
+## Commercial operation transactional service
+
+`opencredit-commercial-operation.service.ts` is server-only, has no default client
+and takes an explicitly injected transaction-capable DB. It is the sole approved
+ledger writer, with no runtime caller. Only CLIENT_PROFILE_UPSERT is derived internally;
+the caller cannot select an operation kind, remote identity, CPF or payload.
+
+PREPARE takes actor, companyId, contactId, providerScope and intentKey. Inputs are
+closed data snapshots: unknown keys, accessors, coercion and silent normalization
+are rejected. The intentKey must be canonical lowercase UUID v4; a future trusted
+caller must generate it securely with randomUUID and preserve it for the same local
+intention. It is not derived from identifiers/PII, is never hashed, and is never a
+provider idempotency key.
+
+Each transaction first rereads the actor (id/companyId/role/normalized email),
+reapplies the current Platform Admin rule and confirms Company. Platform Admin is a
+temporary conservative gate, NOT final commercial authorization or consent/evidence.
+PREPARE then looks up the existing Company/scope/intent BEFORE freshness checks.
+A matching kind and linked Contact is a strict no-op in PREPARED, IN_FLIGHT,
+SUCCEEDED, FAILED or UNKNOWN, preserving creator/timestamps/revision/events even after
+revocation or Contact changes. Different kind/Contact/binding is INTENT_CONFLICT;
+unrecognized stored state fails closed. No second intention is silently generated.
+
+Only a new intent requires a current unarchived tenant Contact, strictly canonicalizable
+CPF, enabled CommercialAccess, enabled correctly bound RemoteIdentity, matching CPF
+snapshot and global scope/CPF ownership of that same identity. Ambiguity includes
+archived Contacts, searches canonical digits plus conventional formatting under the
+same Company with take:2, and requires exactly the target Contact. The adapter must
+accept fresh snapshots; PROFILE_INVALID is sanitized without PII or cause. PREPARE
+discards the profile and atomically creates PREPARED/revision0 and one PREPARED Event
+(null -> PREPARED) with the effective actor. Its result contains only changed,
+operationId, state and revision, including on existing-intent no-op.
+
+RESERVE takes actor, companyId, operationId, providerScope and expectedRevision;
+it accepts no caller Contact, identity or intent. It requires the scoped persisted
+CLIENT_PROFILE_UPSERT operation to be PREPARED at the expected revision, rereads all
+freshness facts and reconstructs the profile BEFORE CAS. CAS updateMany matches
+id/companyId/providerScope/state PREPARED/revision and requires count=1, setting
+IN_FLIGHT and revision+1. RESERVED_FOR_DISPATCH Event and CAS commit atomically.
+Only AFTER commit does the winner receive operationId/state/revision/profile.
+The fresh profile is PII in memory, intended only for a future trusted HTTP boundary:
+no persistence, logging, Event, error or endpoint serialization is introduced.
+The loser or any repeated IN_FLIGHT reservation MUST fail with state/revision conflict,
+never success/no-op or a profile. This prevents treating repeated reservation as permission
+to send again. expectedRevision must be a safe integer >=0 and <=2147483646 so +1
+fits PostgreSQL Int. Semantic state/revision conflicts remain distinct from retries exhausted.
+
+markOpenCreditCommercialOperationUnknown takes the same transition input. It rereads
+actor, Company and operation, but deliberately NOT access/identity/Contact freshness.
+After IN_FLIGHT, revocation, identity disable, archived Contact, changed CPF or
+ambiguity must not block the protective classification: CAS IN_FLIGHT/revision ->
+UNKNOWN/revision+1 and MARKED_UNKNOWN Event are atomic. Repeated UNKNOWN is a safe
+no-op returning the current revision without another Event, even for an older valid
+expectedRevision. PREPARED/SUCCEEDED/FAILED/other states are rejected. UNKNOWN never
+returns to PREPARED or IN_FLIGHT; no reset/replay/resume/automatic dispatch retry API exists.
+
+Transactions use Serializable, maxWait=2000ms, timeout=5000ms and at most three total
+attempts without sleep. P2034 retries the WHOLE local transaction and authorization.
+Only PREPARE may also retry P2002 for OCOperation_company_scope_intent_key (or its
+equivalent fields for the correct model), then reread the winning intention. Unexpected
+P2002 becomes STORAGE_ERROR; exhausted eligible retries become CONCURRENT_CONFLICT.
+These are LOCAL DB retries, not HTTP replay. Error messages are fixed closed codes
+prefixed OPENCREDIT_COMMERCIAL_OPERATION_, without cause/raw Prisma metadata/PII.
+
+There is still no HTTP, API client, POST /clients, validate, simulation, proposal,
+polling, response classification/reconciliation, SUCCEEDED or FAILED writer, provider
+idempotency header or real identity/scope. parseOpenCreditProviderScope validates
+ONLY syntax. Before ANY real caller, the remote namespace must be confirmed and scope
+resolved from a trusted server-side source, with appropriate authorization/evidence.
+No consent=true or fictional evidence is supplied. The commit-to-dispatch revocation
+window remains a future boundary concern. The validate route remains identified but
+its complete runtime contract remains NOT PROVEN and cannot serve as reconciliation.
+
+CI adds service unit and PostgreSQL material gates without removing prior gates.
+The dedicated guard runs before client construction, requiring CI=true,
+GITHUB_ACTIONS=true, OPENCREDIT_COMMERCIAL_OPERATION_SERVICE_POSTGRES_TEST=1 and the
+same strict disposable loopback qevora_ci database/credentials/schema/ports. Tests use
+only synthetic fixtures and cover concurrent prepare/reserve, fresh profile rebuild,
+revocation, UNKNOWN, actor/event atomicity and real FK failure AFTER observed mutation
+to prove full rollback. No production failpoint or Event cleanup/deletion is added.
+This service slice changes no schema, migration or dependencies. Rollback before
+runtime adoption is reverting this code/CI slice; no automatic ledger deletion is safe.
