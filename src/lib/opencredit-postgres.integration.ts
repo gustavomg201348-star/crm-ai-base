@@ -271,10 +271,55 @@ test("real signed handlers concurrently ingest the same event without duplicatio
   const responses = await Promise.all([f.send(), f.send()]);
   const statuses = responses.map(r => r.status);
   console.log(JSON.stringify({ scenario: "opencredit-concurrency", httpStatuses: statuses }));
-  assert.deepEqual(statuses, [200, 200]);
-  const bodies = await Promise.all(responses.map(r => r.json())) as Array<{ ok: boolean; duplicate: boolean }>;
-  assert.ok(bodies.every(b => b.ok));
-  assert.equal(bodies.filter(b => b.duplicate).length, 1);
+  const bodies = await Promise.all(responses.map(r => r.json())) as Array<{
+    ok?: boolean; duplicate?: boolean; code?: string;
+  }>;
+  const successes = bodies.filter((body, index) => {
+    if (responses[index].status === 200) {
+      assert.equal(body.ok, true);
+      assert.equal(typeof body.duplicate, "boolean");
+      return true;
+    }
+    // Only the bounded concurrent ingestion conflict is retryable here.
+    assert.equal(responses[index].status, 503);
+    assert.equal(body.code, "INGESTION_BUSY");
+    assert.notEqual(body.ok, true);
+    return false;
+  });
+  assert.ok(successes.length >= 1);
+  assert.equal(successes.filter(body => body.duplicate === false).length, 1);
+  assert.equal(successes.filter(body => body.duplicate === true).length, successes.length - 1);
+  assert.deepEqual(await f.counts(), { contacts: 1, leads: 1, events: 1 });
+
+  const snapshot = async () => ({
+    contacts: await db.contact.findMany({ where: { companyId: f.companyA } }),
+    leads: await db.openCreditLead.findMany({ where: { companyId: f.companyA } }),
+    events: await db.openCreditEvent.findMany({ where: { companyId: f.companyA } })
+  });
+  const committed = await snapshot();
+  assert.equal(committed.leads[0].contactId, committed.contacts[0].id);
+  assert.equal(committed.leads[0].integrationId, f.integration.id);
+  assert.equal(committed.events[0].integrationId, f.integration.id);
+  assert.equal(committed.events[0].externalLeadId, committed.leads[0].externalLeadId);
+  assert.equal(committed.events[0].processingStatus, "PROCESSED");
+
+  // A deliberate provider replay after completion, not a retry hiding a failure.
+  const replay = await f.send();
+  assert.equal(replay.status, 200);
+  assert.deepEqual(await replay.json(), { ok: true, duplicate: true });
+  assert.deepEqual(await f.counts(), { contacts: 1, leads: 1, events: 1 });
+  assert.deepEqual(await snapshot(), committed);
+}));
+
+test("concurrent replays of a committed event are both confirmed duplicates", async () => withFixture(async f => {
+  const first = await f.send();
+  assert.equal(first.status, 200);
+  assert.deepEqual(await first.json(), { ok: true, duplicate: false });
+  const responses = await Promise.all([f.send(), f.send()]);
+  for (const response of responses) {
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true, duplicate: true });
+  }
   assert.deepEqual(await f.counts(), { contacts: 1, leads: 1, events: 1 });
 }));
 

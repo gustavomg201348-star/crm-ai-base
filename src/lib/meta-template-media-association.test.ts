@@ -1,6 +1,10 @@
 import type { MediaAsset } from "@prisma/client";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import path from "node:path";
 import test from "node:test";
+import ts from "typescript";
 import {
   MetaTemplateServiceError,
   validateTemplateHeaderImageMediaAssetForAssociation
@@ -76,7 +80,7 @@ test("permite associar media local legivel", async () => {
   });
 });
 
-test("bloqueia associacao e marca como BROKEN quando arquivo nao existe", async () => {
+test("bloqueia associacao e delega arquivo ausente ao callback", async () => {
   const mediaAsset = createReadyHeaderImageAsset({ storageProvider: "local" });
   const markedStatuses: string[] = [];
 
@@ -131,7 +135,7 @@ test("bloqueia associacao de objeto R2 inexistente", async () => {
   assert.equal(markedUnavailable, true);
 });
 
-test("timeout bloqueia associacao sem marcar permanentemente como BROKEN", async () => {
+test("timeout bloqueia associacao e informa o callback sem prometer persistencia", async () => {
   const mediaAsset = createReadyHeaderImageAsset();
   let markedUnavailable = false;
 
@@ -145,7 +149,10 @@ test("timeout bloqueia associacao sem marcar permanentemente como BROKEN", async
           "Operacao de storage R2 excedeu o tempo limite."
         );
       },
-      markUnavailable: async () => {
+      markUnavailable: async ({ companyId, mediaAsset: unavailableAsset, error }) => {
+        assert.equal(companyId, mediaAsset.companyId);
+        assert.equal(unavailableAsset, mediaAsset);
+        assert.equal(error.code, "STORAGE_OPERATION_TIMEOUT");
         markedUnavailable = true;
       }
     }),
@@ -154,8 +161,61 @@ test("timeout bloqueia associacao sem marcar permanentemente como BROKEN", async
       error.code === "TEMPLATE_MEDIA_UNAVAILABLE"
   );
 
-  assert.equal(markedUnavailable, false);
+  assert.equal(markedUnavailable, true);
 });
+
+for (const code of ["STORAGE_OPERATION_TIMEOUT", "STORAGE_READ_FAILED", "STORAGE_FILE_NOT_FOUND"] as const) {
+  test(`helper padrao persiste BROKEN somente para ausencia definitiva: ${code}`, async () => {
+    const mediaAsset = createReadyHeaderImageAsset();
+    const now = new Date("2026-10-17T12:00:00.000Z");
+    const writes: unknown[][] = [];
+    const persisted = { ...mediaAsset };
+    const file = path.resolve("src/lib/meta-template-service.ts");
+    const fromService = createRequire(file);
+    const loaded = { exports: {} as typeof import("./meta-template-service") };
+    const compiled = ts.transpileModule(readFileSync(file, "utf8"), {
+      compilerOptions: {
+        module: ts.ModuleKind.CommonJS,
+        target: ts.ScriptTarget.ES2022,
+        esModuleInterop: true
+      }
+    }).outputText;
+    // Exercise the real default helper; replace only the repository write boundary.
+    new Function("require", "module", "exports", compiled)((name: string) => {
+      if (name === "@/lib/media-asset-repository") {
+        return {
+          ...fromService(name),
+          updateMediaAssetStatus: async (companyId: string, id: string, update: Partial<MediaAsset>) => {
+            writes.push([companyId, id, update]);
+            Object.assign(persisted, update);
+            return persisted;
+          }
+        };
+      }
+      return fromService(name);
+    }, loaded, loaded.exports);
+
+    await assert.rejects(loaded.exports.validateTemplateHeaderImageMediaAssetForAssociation({
+      companyId: mediaAsset.companyId,
+      mediaAsset,
+      now,
+      readMedia: async () => { throw new TemplateMediaStorageError(code, "Controlled storage failure"); }
+    }), (error: unknown) => error instanceof loaded.exports.MetaTemplateServiceError &&
+      error.code === "TEMPLATE_MEDIA_UNAVAILABLE");
+
+    if (code === "STORAGE_FILE_NOT_FOUND") {
+      assert.deepEqual(writes, [[mediaAsset.companyId, mediaAsset.id, {
+        status: "BROKEN",
+        lastValidatedAt: now,
+        validationError: "template_header_image_unavailable:STORAGE_FILE_NOT_FOUND"
+      }]]);
+      assert.equal(persisted.status, "BROKEN");
+    } else {
+      assert.deepEqual(writes, []);
+      assert.deepEqual(persisted, mediaAsset);
+    }
+  });
+}
 
 test("falha ao marcar BROKEN nao substitui erro publico de midia indisponivel", async () => {
   const mediaAsset = createReadyHeaderImageAsset();
