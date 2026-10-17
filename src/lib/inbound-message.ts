@@ -29,7 +29,7 @@ import {
 } from "@/lib/prisma-errors";
 import { safeLogError, safeLogWarn } from "@/lib/safe-logger";
 import { buildInboundReplyFields } from "@/lib/message-reply";
-import { persistInboundMessage, preserveReplyReplay } from "./meta-reply-ingestion";
+import { persistInboundMessage, preserveReplyReplay, validateAuthenticatedInboundReplay } from "./meta-reply-ingestion";
 import type { MetaReplyMetadata } from "./meta-reply-metadata";
 import { replyContentDigest } from "./meta-reply-snapshot";
 
@@ -54,7 +54,8 @@ export async function processInboundMessage({
   mimeType,
   providerMessageId,
   contextProviderMessageId,
-  replyMetadata
+  replyMetadata,
+  provenance
 }: {
   companyId: string;
   channelId?: string | null;
@@ -68,7 +69,18 @@ export async function processInboundMessage({
   providerMessageId?: string | null;
   contextProviderMessageId?: string | null;
   replyMetadata?: MetaReplyMetadata;
+  provenance?: unknown;
 }) {
+  const authenticatedInput = provenance === undefined ? undefined : {
+    companyId, channelId: channelId as string, name, phone, body, type, mediaId, fileName, mimeType,
+    providerMessageId: providerMessageId as string, contextProviderMessageId, replyMetadata: replyMetadata as MetaReplyMetadata,
+  };
+  if (authenticatedInput) {
+    const captured = (await import("./meta-inbound-provenance")).assertMetaInboundCapability(provenance, authenticatedInput);
+    // Use the private captured copy, never caller-owned objects/getters across awaits.
+    replyMetadata = captured.replyMetadata;
+    authenticatedInput.replyMetadata = replyMetadata!;
+  }
   const normalizedPhone = normalizeContactPhone(phone);
   const contactNormalizedPhone = getContactNormalizedPhone(normalizedPhone);
   const messageBody = body.trim();
@@ -89,7 +101,8 @@ export async function processInboundMessage({
     });
 
     if (existingMessage) {
-      if (replyMetadata && channelId) await preserveReplyReplay(prisma, existingMessage, {
+      if (authenticatedInput) await validateAuthenticatedInboundReplay(prisma, existingMessage, authenticatedInput, provenance);
+      else if (replyMetadata && channelId) await preserveReplyReplay(prisma, existingMessage, {
         companyId, channelId, conversationId: existingMessage.conversationId, contactId: existingMessage.conversation.contactId,
         providerMessageId, contextProviderMessageId, senderPhone: phone, metadata: replyMetadata,
         contentDigest: replyContentDigest({ body: messageBody, type, mediaId, fileName, mimeType })
@@ -361,7 +374,7 @@ export async function processInboundMessage({
         mimeType: mimeType ?? null,
         providerMessageId: providerMessageId ?? null,
         ...replyFields
-    }, replyMetadata && channelId ? { companyId, channelId, contactId: contact.id, senderPhone: phone, contextProviderMessageId, metadata: replyMetadata } : undefined, companyId);
+    }, replyMetadata && channelId ? { companyId, channelId, contactId: contact.id, senderPhone: phone, contextProviderMessageId, metadata: replyMetadata } : undefined, companyId, provenance);
   } catch (error) {
     if (providerMessageId && isProviderMessageIdUniqueViolation(error)) {
       const existingMessage = await prisma.message.findFirst({
@@ -375,7 +388,8 @@ export async function processInboundMessage({
       });
 
       if (existingMessage) {
-        if (replyMetadata && channelId) await preserveReplyReplay(prisma, existingMessage, {
+        if (authenticatedInput) await validateAuthenticatedInboundReplay(prisma, existingMessage, authenticatedInput, provenance);
+        else if (replyMetadata && channelId) await preserveReplyReplay(prisma, existingMessage, {
           companyId, channelId, conversationId: existingMessage.conversationId, contactId: existingMessage.conversation.contactId,
           providerMessageId, contextProviderMessageId, senderPhone: phone, metadata: replyMetadata,
           contentDigest: replyContentDigest({ body: messageBody, type, mediaId, fileName, mimeType })

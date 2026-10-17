@@ -110,7 +110,8 @@ test("message INSERT retains original snapshot inside the durable-event transact
 test("webhook has no correlation consumer, async fire-and-forget or campaign resolution", () => {
   const route = readFileSync("src/app/api/webhooks/whatsapp/route.ts", "utf8");
   assert.doesNotMatch(route, /createMetaReplyCorrelation|captureMetaReplySafely|processBatch|Promise\.race|waitUntil/);
-  assert.match(route, /replyMetadata: message.replyMetadata/);
+  assert.match(route, /processInboundMessage\(\{ \.\.\.input, provenance: capability \}\)/);
+  assert.match(readFileSync("src/lib/meta-inbound-provenance.ts", "utf8"), /replyMetadata: message.replyMetadata/);
   assert.match(route, /ReplyEvidencePersistenceError/);
   assert.match(route, /status: 503/);
   const inbound = readFileSync("src/lib/inbound-message.ts", "utf8");

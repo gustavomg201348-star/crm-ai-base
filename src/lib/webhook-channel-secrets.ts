@@ -15,7 +15,7 @@ export type VerifiedMetaWebhookChannelResult =
     }
   | {
       ok: false;
-      reason: "channel-not-found" | "app-secret-unavailable" | "invalid-signature";
+      reason: "channel-not-found" | "channel-ambiguous" | "app-secret-unavailable" | "invalid-signature";
     };
 
 export function resolveWebhookAcceptedVerifyTokens(
@@ -68,19 +68,22 @@ export async function resolveVerifiedMetaWebhookChannel({
   rawBody: string;
   signature?: string | null;
 }): Promise<VerifiedMetaWebhookChannelResult> {
-  const channel = await db.channel.findFirst({
+  const channels = await db.channel.findMany({
     where: {
       type: "whatsapp",
       provider: "meta",
       status: { in: ["ACTIVE", "CONNECTED"] },
       OR: [{ phoneNumberId }, { externalId: phoneNumberId }]
     },
-    select: { id: true, companyId: true, appSecret: true }
+    select: { id: true, companyId: true, appSecret: true },
+    take: 2
   });
 
-  if (!channel) {
+  if (!channels.length) {
     return { ok: false, reason: "channel-not-found" };
   }
+  if (channels.length !== 1) return { ok: false, reason: "channel-ambiguous" };
+  const channel = channels[0];
 
   if (!channel.appSecret) {
     return { ok: false, reason: "app-secret-unavailable" };

@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { processInboundMessage } from "@/lib/inbound-message";
 import { ReplyEvidencePersistenceError } from "@/lib/meta-reply-ingestion";
+import { authenticateMetaInboundBatch, InboundProvenanceError } from "@/lib/meta-inbound-provenance";
 import {
   parseMetaWebhookMessages,
   parseMetaWebhookStatuses
@@ -97,7 +98,11 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const rawBody = await request.text();
+    // Fatal decoding prevents different invalid byte sequences from becoming the same
+    // replacement-character string before HMAC. Preserve BOM rather than stripping bytes.
+    let rawBody: string;
+    try { rawBody = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(await request.arrayBuffer()); }
+    catch { throw new InboundProvenanceError("INVALID_ITEM"); }
     const body = (rawBody ? JSON.parse(rawBody) : null) as
       | {
           companyId?: string;
@@ -111,36 +116,25 @@ export async function POST(request: NextRequest) {
     logWebhookAudit("received", summarizeMetaWebhookPayload(body));
 
     const metaMessages = parseMetaWebhookMessages(body);
-    if (metaMessages.length) {
+    const hasMessageItems = Boolean((body as MetaWebhookPayload | null)?.entry?.some(entry =>
+      entry.changes?.some(change => (change.value?.messages?.length ?? 0) > 0)));
+    if (metaMessages.length || hasMessageItems) {
+      // Authenticate the ENTIRE batch before channel touches or inbound functional writes.
+      const authenticated = await authenticateMetaInboundBatch({ db: prisma, rawBody,
+        signature: request.headers.get("x-hub-signature-256") });
       const results = [];
       let evidenceRetryRequired = false;
 
-      for (const message of metaMessages) {
+      for (const { input, capability, phoneNumberId } of authenticated) {
         logWebhookAudit("message-parsed", {
-          hasChannelExternalId: Boolean(message.phoneNumberId),
-          hasSender: Boolean(message.from),
-          type: message.type ?? null,
-          hasBody: Boolean(message.body),
-          hasMedia: Boolean(message.mediaId),
-          hasProviderMessageId: Boolean(message.messageId)
+          hasChannelExternalId: true,
+          hasSender: true,
+          type: input.type ?? null,
+          hasBody: Boolean(input.body),
+          hasMedia: Boolean(input.mediaId),
+          hasProviderMessageId: true
         });
-
-        const verified = await resolveVerifiedMetaWebhookChannel({
-          db: prisma,
-          phoneNumberId: message.phoneNumberId,
-          rawBody,
-          signature: request.headers.get("x-hub-signature-256")
-        });
-
-        if (!verified.ok) {
-          logWebhookAudit("message-discarded", {
-            reason: verified.reason,
-            hasChannelExternalId: Boolean(message.phoneNumberId),
-            hasSender: Boolean(message.from)
-          });
-          return publicErrorResponse({ code: "FORBIDDEN", status: 403 });
-        }
-        const channel = verified.channel;
+        const channel = { id: input.channelId, companyId: input.companyId };
 
         await prisma.channel.update({
           where: { id: channel.id },
@@ -148,28 +142,15 @@ export async function POST(request: NextRequest) {
         });
 
         try {
-          const conversation = await processInboundMessage({
-            companyId: channel.companyId,
-            channelId: channel.id,
-            name: message.name,
-            phone: message.from,
-            body: message.body,
-            type: message.type,
-            mediaId: message.mediaId,
-            fileName: message.fileName,
-            mimeType: message.mimeType,
-            providerMessageId: message.messageId,
-            contextProviderMessageId: message.contextMessageId,
-            replyMetadata: message.replyMetadata
-          });
+          const conversation = await processInboundMessage({ ...input, provenance: capability });
 
           logWebhookAudit("message-processed", {
             channelId: channel.id,
             companyId: channel.companyId,
-            hasChannelExternalId: Boolean(message.phoneNumberId),
-            hasSender: Boolean(message.from)
+            hasChannelExternalId: true,
+            hasSender: true
           });
-          results.push({ phoneNumberId: message.phoneNumberId, ok: true, conversation });
+          results.push({ phoneNumberId, ok: true, conversation });
         } catch (error) {
           if (!(error instanceof ReplyEvidencePersistenceError)) throw error;
           evidenceRetryRequired = true;
@@ -294,6 +275,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ ok: true, conversation });
   } catch (error) {
+    if (error instanceof InboundProvenanceError) {
+      return publicErrorResponse({ code: "FORBIDDEN", status: error.code.startsWith("REPLAY_") ? 409 : 403 });
+    }
     safeLogError("whatsapp-webhook-audit", error, {
       operation: "webhook-post"
     });
