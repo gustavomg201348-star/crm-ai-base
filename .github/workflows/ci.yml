@@ -80,6 +80,9 @@ jobs:
       - name: Validate OpenCredit strict raw JSON parser
         run: npx --yes tsx@4.20.6 src/lib/opencredit-strict-json.test.ts
 
+      - name: Validate OpenCredit trusted provider scope resolver
+        run: npx --yes tsx@4.20.6 src/lib/opencredit-provider-scope-resolver.test.ts
+
       - name: Validate passive Meta reply formats and scope
         run: npx --yes tsx@4.20.6 --test src/lib/meta-reply-correlation.test.ts src/lib/message-reply.test.ts src/lib/inbound-message.test.ts src/lib/meta-webhook-security.test.ts src/lib/webhook-channel-secrets.test.ts
 

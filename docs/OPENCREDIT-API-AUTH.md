@@ -603,9 +603,9 @@ run is also rejected so a CPF cannot be embedded as a scope identifier. No trimm
 or case conversion occurs. Syntax cannot prove that an arbitrary string is not a
 secret or that a namespace is authorized: the future service must supply only a
 trusted server-resolved logical scope, never a browser choice or credential-derived
-fingerprint. Rotating a key does not define a new namespace. The actual remote
-namespace still needs confirmation with Prospecta; no tenant/account equivalence
-or dynamic scope allowlist is invented here.
+fingerprint. Rotating a key does not define a new namespace. Operational onboarding
+confirmation and the trusted resolver are documented below; no global partnerId
+uniqueness, tenant/account equivalence or dynamic scope allowlist is invented here.
 
 Ownership CPF accepts EXACTLY eleven ASCII digits or the conventional
 NNN.NNN.NNN-NN mask. Only after format validation are the known dots/hyphen removed.
@@ -737,7 +737,8 @@ is accepted only for the expected static FK and a PostgreSQL constraint violatio
 Unexpected failures are sanitized before reaching node:test.
 
 No real identity or operational integration was created by development/tests.
-The effective provider namespace still requires confirmation with Prospecta.
+The current integration's namespace is operationally confirmed as documented below;
+this is not a formal OpenAPI guarantee.
 Consent/evidence remains separate. Storage constraints do not authorize any operation,
 provide operation idempotency or solve revocation/dispatch races. The internal claim
 service below is reservation-only; no dispatch service exists. Rollback before real
@@ -826,9 +827,9 @@ missing targets produce COMPANY_NOT_FOUND before any Access mutation.
 
 providerScope is a branded input AND is revalidated with the existing strict parser.
 Syntax is not trust: the future caller must use a trusted server-side resolver,
-never browser scope or email/password/token-derived namespaces. That resolver is
-not implemented; the real provider namespace remains blocked pending Prospecta
-confirmation. No real access/scope is configured or granted by this development.
+never browser scope or email/password/token-derived namespaces. The resolver below
+implements that primitive using operationally confirmed tenantId + partnerId, but
+has no runtime consumer. No real access/scope is configured or granted by development.
 
 Grant absent creates enabled=true plus GRANTED null -> true. Grant disabled updates
 enabled/changedByUserId plus GRANTED false -> true. Revoke enabled updates those
@@ -944,8 +945,8 @@ Local validation is not a completed GitHub run.
 
 Rollback before operational use requires reverting this slice and a separately
 approved database plan for its empty Event table/redundant parent key. Once real
-history exists, do not automatically erase it. The namespace still requires
-Prospecta confirmation and trusted server-side resolution; operation
+history exists, do not automatically erase it. The namespace confirmation and
+trusted resolver are documented below; operation
 authorization/evidence, final freshness and revocation/dispatch gates remain
 separate blockers before commercial execution.
 
@@ -967,8 +968,9 @@ an arbitrary browser-supplied object is not an authentication boundary.
 Input accepts only actor/companyId/contactId/providerScope. IDs use the existing
 strict syntax and the branded scope is reparsed at runtime. Syntax is not trust:
 the future caller must obtain scope exclusively from a trusted server-side resolver,
-not browser input, tenantId, partnerId, email, password or token. No real resolver
-is implemented here. Output contains only changed/enabled/identityId. Errors contain
+not browser input or raw tenantId/partnerId, email, password or token. The resolver
+below derives the namespace from trusted server IDs only, with no runtime consumer.
+Output contains only changed/enabled/identityId. Errors contain
 closed codes, never CPF, identifiers, conflicting owners, raw Prisma metadata or cause.
 
 CLAIM is a local ownership reservation, NOT consent or remote registration. New
@@ -1320,8 +1322,9 @@ prefixed OPENCREDIT_COMMERCIAL_OPERATION_, without cause/raw Prisma metadata/PII
 There is still no HTTP, API client, POST /clients, validate, simulation, proposal,
 polling, response classification/reconciliation, SUCCEEDED or FAILED writer, provider
 idempotency header or real identity/scope. parseOpenCreditProviderScope validates
-ONLY syntax. Before ANY real caller, the remote namespace must be confirmed and scope
-resolved from a trusted server-side source, with appropriate authorization/evidence.
+ONLY syntax. Namespace identification is now operationally confirmed and the trusted
+resolver is implemented below. Before ANY real caller, its integration and appropriate
+consumer authorization/evidence remain required and BLOCKED.
 No consent=true or fictional evidence is supplied. The commit-to-dispatch revocation
 window remains a future boundary concern. The validate route remains identified but
 its complete runtime contract remains NOT PROVEN and cannot serve as reconciliation.
@@ -1406,3 +1409,78 @@ CI adds only the tsx@4.20.6 unit gate and preserves all existing gates, includin
 shared authority. Tests cover decoded-key duplicates, Unicode, grammar, all inclusive
 limit boundaries, hostile inputs, inert prototype-related keys and no-side-effect /
 no-caller guards. No dependency, schema, migration or PostgreSQL gate is added.
+
+## Trusted providerScope resolver
+
+Operational Prospecta/OpenCredit onboarding confirmation received on 2026-10-17:
+clients registered by CPF remain bound to the store/promoter code used as partnerId;
+rotating username/password does not change that binding or move existing clients.
+This is operational onboarding information, NOT a formal published OpenAPI contract.
+The public API paths remain tenant-scoped. QEVORA therefore conservatively identifies
+the current remote namespace by the EXACT pair tenantId + partnerId. Global partnerId
+uniqueness across tenants has not been proven and is not assumed.
+
+`opencredit-provider-scope-resolver.ts` is server-only and exports:
+
+- `resolveOpenCreditProviderScope(config: Readonly<{ tenantId: string; partnerId: string }>)`
+  returning the existing branded OpenCreditProviderScope;
+- `resolveConfiguredOpenCreditProviderScope()`, a small wrapper reading ONLY
+  OPENCREDIT_TENANT_ID and OPENCREDIT_PARTNER_ID;
+- OpenCreditProviderScopeResolverError, code CONFIGURATION, fixed message
+  OPENCREDIT_PROVIDER_SCOPE_CONFIGURATION, with no raw configuration, cause or
+  detailed internal stack.
+
+Both IDs must satisfy configuredOpenCreditId: 1..128 restricted ASCII characters,
+alphanumeric first, then alphanumeric/underscore/hyphen. An additional exact-character
+check rejects the terminal-newline exception permitted by the shared validator's `$`
+anchor; the existing validator itself is unchanged. Missing/invalid IDs fail closed.
+The injectable API accepts own data properties only; it never executes getters.
+There is no trim, case conversion, Unicode normalization, replacement or fallback.
+Validated IDs are hashed exactly as configured.
+
+Version 1 derivation is fixed:
+
+```text
+digest = SHA256(UTF8("qevora/opencredit/provider-scope/v1\0")
+                || UTF8(JSON.stringify([tenantId, partnerId]))).hexLowercase
+scope = "ocp-" + digest[0:10] + "f" + digest[10:20] + "f"
+        + digest[20:30] + "f" + digest[30:40] + "f"
+        + digest[40:50] + "f" + digest[50:55]
+```
+
+The domain contains a literal NUL byte after v1. The closed two-string JSON array
+provides unambiguous deterministic encoding for these ASCII IDs. The output has
+exactly 64 characters: ocp- plus 55 digest hex characters and five fixed hexadecimal
+`f` separators. This retains 220 bits of the truncated SHA-256 digest, not 240/256.
+Truncation is intentional; no absolute collision-free guarantee is claimed. Separators
+are fixed regardless of digest content and guarantee at most ten consecutive decimal
+digits, preserving the UNCHANGED parseOpenCreditProviderScope rule. The final value is
+reparsed by that parser. Changing this algorithm/version later would change namespaces
+and requires a separate migration/compatibility decision, never silent replacement.
+
+Output is built ONLY from the fixed prefix, digest slices and fixed separators.
+Raw tenantId/partnerId are never deliberately inserted into the output. Short IDs
+may naturally coincide with digest substrings; substring exclusion is not promised.
+The scope is a local opaque, deterministic, hash-pseudonymized, non-self-explanatory
+identifier. It is NOT secret or encrypted. Unkeyed SHA-256 does not prevent enumeration
+or brute force of predictable/low-entropy IDs. No HMAC or new secret is introduced.
+
+OPENCREDIT_API_EMAIL, OPENCREDIT_API_PASSWORD, access/refresh tokens, credential
+fingerprints and unverified JWT claims do not participate. Credential rotation with
+the same exact tenantId + partnerId preserves the scope. Browser/request body/query,
+Company, Contact, CPF and webhook data are not configuration sources. Future callers
+must use trusted server configuration; the injectable signature does not establish
+provenance or grant browser callers permission to choose scopes.
+
+The hash is NOT authorization, consent or proof of provider access. CommercialAccess
+and enabled RemoteIdentity with their Company/Contact ownership checks remain required.
+Consumer authorization/evidence remains BLOCKED; the resolver alone does not authorize
+POST /clients. SUCCEEDED/FAILED writers and createClient dispatch remain BLOCKED.
+
+Current state: remote namespace identification RESOLVED for this integration on the
+operational confirmation above; trusted providerScope primitive IMPLEMENTED; runtime
+consumer NONE; consumer authorization/evidence BLOCKED; createClient dispatch BLOCKED.
+No endpoint, UI, service connection, HTTP/provider request, login, DB/Prisma access,
+schema/migration, polling, validate/simulation/proposal or Railway change is introduced.
+CI adds only its tsx@4.20.6 unit gate and preserves all existing gates. No PostgreSQL
+gate or database dependency is added for the resolver.
