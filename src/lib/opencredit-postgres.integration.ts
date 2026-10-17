@@ -132,6 +132,9 @@ async function rejectsPrismaCode(operation: () => Promise<unknown>, code: string
 async function rejectsDeleteRestrict(operation: () => Promise<unknown>, constraints: string[], context: string) {
   try { await operation(); }
   catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003" &&
+        constraints.some(constraint => error.meta?.field_name === constraint ||
+          error.meta?.field_name === constraint + " (index)")) return;
     if (error instanceof Prisma.PrismaClientUnknownRequestError &&
         constraints.some(constraint => new RegExp("\\b" + constraint + "\\b").test(error.message)) &&
         (/code:\s*"(?:23001|23503)"/.test(error.message) ||
