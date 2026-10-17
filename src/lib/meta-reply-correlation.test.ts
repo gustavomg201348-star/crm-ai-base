@@ -81,17 +81,29 @@ test("snapshot serialization is canonical, bounded and contains no raw sender ph
   assert.throws(() => readReplySnapshot(JSON.stringify({ ...snapshot, senderIdentityHash: "fake" })));
 });
 
-test("one INSERT persists message and snapshot; a failed INSERT leaves no secondary write", async () => {
+test("message INSERT retains original snapshot inside the durable-event transaction", async () => {
   let writes = 0;
   let stored: Record<string, unknown> | undefined;
-  const db = { message: { create: async ({ data }: { data: Record<string, unknown> }) => { writes++; stored = data; return data; } } } as unknown as PrismaClient;
+  const tx = {
+    $queryRaw: async () => [{ id: "conversation", contactId: base.contactId, channelId: base.channelId, inboundEventSequence: BigInt("1") }],
+    conversation: {
+      findFirst: async () => ({ id: "conversation", contactId: base.contactId, channelId: base.channelId, updatedAt: new Date(0), channelRef: { companyId: base.companyId } }),
+      updateMany: async () => ({ count: 1 }),
+      findUniqueOrThrow: async () => ({ inboundEventSequence: BigInt("1") }),
+    },
+    message: { create: async ({ data }: { data: Record<string, unknown> }) => { writes++; stored = data; return { ...data, id: "message" }; } },
+    conversationInboundEvent: { create: async () => ({ id: "event" }) },
+  };
+  const db = { $transaction: async (work: (value: unknown) => unknown) => work(tx) } as unknown as PrismaClient;
   const start = performance.now();
-  await persistInboundMessage(db, { conversationId: "conversation", providerMessageId: "inbound", direction: "inbound", senderType: "customer", body: "Synthetic" }, base);
+  await persistInboundMessage(db, { conversationId: "conversation", providerMessageId: "inbound", direction: "inbound", senderType: "customer", body: "Synthetic" }, base, base.companyId);
   assert.equal(writes, 1);
   assert.equal(readReplySnapshot(stored!.metaReplySnapshot as string).providerMessageId, "inbound");
   assert(performance.now() - start < 1000);
-  const failed = { message: { create: async () => { writes++; throw new Error("SYNTHETIC_STORAGE_FAILURE"); } } } as unknown as PrismaClient;
-  await assert.rejects(persistInboundMessage(failed, { conversationId: "conversation", providerMessageId: "inbound", direction: "inbound", body: "Synthetic" }, base), /SYNTHETIC_STORAGE_FAILURE/);
+  const failed = { $transaction: async (work: (value: unknown) => unknown) => work({
+    ...tx, message: { create: async () => { writes++; throw new Error("SYNTHETIC_STORAGE_FAILURE"); } },
+  }) } as unknown as PrismaClient;
+  await assert.rejects(persistInboundMessage(failed, { conversationId: "conversation", providerMessageId: "inbound", direction: "inbound", body: "Synthetic" }, base, base.companyId), /SYNTHETIC_STORAGE_FAILURE/);
   assert.equal(writes, 2);
 });
 

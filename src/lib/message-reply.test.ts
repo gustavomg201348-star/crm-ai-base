@@ -213,7 +213,8 @@ test("idempotencia continua antes da resolucao de contexto", () => {
   const insert = source.indexOf("persistInboundMessage(prisma");
   assert.ok(insert !== -1);
   assert.ok(source.indexOf("const referencedMessage") < insert);
-  assert.match(readFileSync("src/lib/meta-reply-ingestion.ts", "utf8"), /db\.message\.create/);
+  assert.match(readFileSync("src/lib/meta-reply-ingestion.ts", "utf8"), /inboundEventTransaction\(db, tx => createInboundMessageWithDurableEvent/);
+  assert.match(readFileSync("src/lib/conversation-inbound-event.ts", "utf8"), /tx\.message\.create/);
 });
 
 test("status continua correlacionado pelo providerMessageId da propria mensagem", () => {
