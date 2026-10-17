@@ -108,6 +108,7 @@ jobs:
           export DATABASE_URL="$AUTHORITY_TEST_DATABASE_URL"
           npx prisma db push --schema prisma/schema.prisma --skip-generate
           npx --yes tsx@4.20.6 --test src/lib/conversation-authority.test.ts
+          npx --yes tsx@4.20.6 --test src/lib/human-conversation-authority.test.ts
           npx --yes tsx@4.20.6 --test src/lib/authority-text-shadow.integration.test.ts
         env:
           TMPDIR: ${{ runner.temp }}
@@ -247,6 +248,12 @@ jobs:
 
       - name: Validate shared authority constraints, audit and concurrency
         run: npx --yes tsx@4.20.6 --test src/lib/conversation-authority.test.ts
+        env:
+          AUTHORITY_POSTGRES_TEST: "1"
+          AUTHORITY_TEST_DATABASE_URL: postgresql://qevora_ci:qevora_ci_password@127.0.0.1:5432/qevora_authority_test?schema=public
+
+      - name: Validate passive human authority commands and atomic projection
+        run: npx --yes tsx@4.20.6 --test src/lib/human-conversation-authority.test.ts
         env:
           AUTHORITY_POSTGRES_TEST: "1"
           AUTHORITY_TEST_DATABASE_URL: postgresql://qevora_ci:qevora_ci_password@127.0.0.1:5432/qevora_authority_test?schema=public

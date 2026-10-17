@@ -38,6 +38,20 @@ export function authorityStorage({ db, provider }: AuthorityDatabase) {
     requireAuthority(row, "AUTHORITY_NOT_FOUND");
     return row;
   }
+  async function lockConversation(tx: AuthorityTx, companyId: string, conversationId: string) {
+    requireReference(companyId); requireReference(conversationId);
+    if (provider === "postgresql") {
+      await tx.$queryRaw(Prisma.sql`SELECT c.id FROM "Conversation" c
+        JOIN "Contact" p ON p.id = c."contactId"
+        WHERE c.id = ${conversationId} AND p."companyId" = ${companyId} FOR UPDATE OF c`);
+    }
+    const conversation = await tx.conversation.findFirst({ where: {
+      id: conversationId, contact: { companyId, archivedAt: null },
+      channelRef: { companyId, provider: "meta", type: "whatsapp" }
+    } });
+    requireAuthority(conversation?.channelId, "INVALID_CONVERSATION_SCOPE");
+    return conversation;
+  }
   async function actor(tx: AuthorityTx, companyId: string, userId: string, admin = false) {
     requireReference(companyId); requireReference(userId);
     const user = await tx.user.findFirst({ where: { id: userId, companyId } });
@@ -52,5 +66,5 @@ export function authorityStorage({ db, provider }: AuthorityDatabase) {
     }
     return new Date();
   }
-  return { transaction, lock, actor, now };
+  return { transaction, lock, lockConversation, actor, now };
 }
