@@ -153,16 +153,17 @@ test("public marker, exact exports, no side effects, dependencies or runtime cal
     if (e.isDirectory()) scan(path);
     else if (/\.(tsx?|m?js|cjs)$/.test(e.name) && !/\.(test|integration)\./.test(e.name) && e.name !== "opencredit-strict-json.ts") {
       let checked = readFileSync(path, "utf8");
-      // One exact passive composition only. Its own CI guard forbids production
-      // consumers; do not exempt this basename in any other directory.
-      if (path.href === new URL("./opencredit-http-json-boundary.ts", import.meta.url).href) {
+      // Exact passive composition and approved human admin boundary only.
+      const admin = path.href === new URL("./opencredit-consumer-authorization-admin-handler.ts", import.meta.url).href;
+      if (admin || path.href === new URL("./opencredit-http-json-boundary.ts", import.meta.url).href) {
         const boundary = ts.createSourceFile("boundary.ts", checked, ts.ScriptTarget.Latest, true);
         const allowed = boundary.statements.filter(ts.isImportDeclaration)
           .filter(node => (node.moduleSpecifier as ts.StringLiteral).text === "./opencredit-strict-json");
         assert.equal(allowed.length, 1);
         const bindings = allowed[0].importClause?.namedBindings;
         assert(bindings && ts.isNamedImports(bindings));
-        assert.deepEqual(bindings.elements.map(binding => binding.name.text), ["parseOpenCreditStrictJson", "OpenCreditJsonValue"]);
+        assert.deepEqual(bindings.elements.map(binding => binding.name.text), admin ? ["parseOpenCreditStrictJson"] : ["parseOpenCreditStrictJson", "OpenCreditJsonValue"]);
+        assert.equal(bindings.elements.some(binding => binding.propertyName), false);
         // Remove only the checked import, then apply the original prohibition
         // to everything else (including require/dynamic/extra imports).
         checked = checked.slice(0, allowed[0].pos) + checked.slice(allowed[0].end);
