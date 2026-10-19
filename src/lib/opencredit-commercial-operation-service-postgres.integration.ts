@@ -1,23 +1,33 @@
 import assert from "node:assert/strict";
 import { before, after, test } from "node:test";
 import Module from "node:module";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHmac } from "node:crypto";
 import { Prisma, PrismaClient } from "@prisma/client";
 import type { SessionUser } from "./auth";
 import type { OpenCreditPrepareClientProfileInput, OpenCreditOperationTransitionInput, OpenCreditCommercialOperationServiceCode } from "./opencredit-commercial-operation.service";
 import type { OpenCreditCreateClientObservation } from "./opencredit-create-client-outcome";
 import { assertOpenCreditCommercialOperationServiceTestDatabase } from "./opencredit-commercial-operation-service-postgres.guard";
+import { classifyPhoneNormalization } from "./phone-normalization.service";
+import { persistInboundMessage } from "./meta-reply-ingestion";
 
 assertOpenCreditCommercialOperationServiceTestDatabase(process.env);
 const db = new PrismaClient({ log: [] });
 let service: typeof import("./opencredit-commercial-operation.service");
+let authorizationService: typeof import("./opencredit-consumer-authorization.service");
+let provenance: typeof import("./meta-inbound-provenance");
+const originalFetch = globalThis.fetch;
 before(async () => {
+  globalThis.fetch = async () => { throw new Error("EXTERNAL_HTTP_FORBIDDEN_IN_RESERVATION_TEST"); };
   const loader = Module as typeof Module & { _load(specifier: string, ...args: unknown[]): unknown };
   const original = loader._load;
   loader._load = (specifier, ...args) => specifier === "server-only" ? {} : original.call(loader, specifier, ...args);
-  try { service = await import("./opencredit-commercial-operation.service"); } finally { loader._load = original; }
+  try {
+    service = await import("./opencredit-commercial-operation.service");
+    authorizationService = await import("./opencredit-consumer-authorization.service");
+    provenance = await import("./meta-inbound-provenance");
+  } finally { loader._load = original; }
 });
-after(async () => { await db.$disconnect(); });
+after(async () => { globalThis.fetch = originalFetch; await db.$disconnect(); });
 type Db = Parameters<typeof service.prepareOpenCreditClientProfileOperation>[0];
 type Options = { isolationLevel?: Prisma.TransactionIsolationLevel; maxWait?: number; timeout?: number };
 type Fixture = Awaited<ReturnType<typeof fixture>>;
@@ -27,14 +37,34 @@ async function fixture() {
   const user = await db.user.create({ data: { companyId: platform, name: "Synthetic admin", email: randomUUID() + "@example.invalid", passwordHash: "NOT_A_REAL_PASSWORD_HASH", role: "ADMIN" } });
   const actor: SessionUser = { id: user.id, companyId: user.companyId, name: user.name, email: user.email, role: "ADMIN" };
   const scope = "synthetic-" + randomUUID().replace(/\d/g, d => String.fromCharCode(103 + Number(d)));
-  const contact = await db.contact.create({ data: { companyId, name: "Synthetic person", phone: "11900000000", email: "synthetic@example.invalid", cpf: "00000000000" } });
+  const contact = await db.contact.create({ data: { companyId, name: "Synthetic person", phone: "11900000000", normalizedPhone: classifyPhoneNormalization("11900000000").normalizedPhone, email: "synthetic@example.invalid", cpf: "00000000000" } });
   const access = await db.openCreditCommercialAccess.create({ data: { companyId, providerScope: scope, enabled: true, changedByUserId: actor.id } });
   const identity = await db.openCreditRemoteIdentity.create({ data: { companyId, contactId: contact.id, providerScope: scope, normalizedCpf: "00000000000", enabled: true, createdByUserId: actor.id } });
   const input: OpenCreditPrepareClientProfileInput = { actor, companyId, contactId: contact.id, providerScope: scope as OpenCreditPrepareClientProfileInput["providerScope"], intentKey: randomUUID() };
   const where = { companyId, providerScope: scope };
   const current = () => db.openCreditCommercialOperation.findFirst({ where });
   const events = () => db.openCreditCommercialOperationEvent.findMany({ where, orderBy: [{ revision: "asc" }, { id: "asc" }] });
-  return { companyId, otherCompany, platform, actor, contact, access, identity, input, where, current, events };
+  let evidenceId: string | undefined;
+  async function attest() {
+    if (!evidenceId) {
+      const secret = "synthetic-reservation-hmac";
+      const channel = await db.channel.create({ data: { companyId, name: "Synthetic", provider: "meta", type: "whatsapp", status: "ACTIVE", appSecret: secret, phoneNumberId: randomUUID() } });
+      const conversation = await db.conversation.create({ data: { contactId: contact.id, channelId: channel.id, status: "PENDING" } });
+      const raw = JSON.stringify({ entry: [{ changes: [{ value: { metadata: { phone_number_id: channel.phoneNumberId },
+        messages: [{ id: randomUUID(), from: contact.phone, type: "text", text: { body: "Synthetic reviewed evidence" }, timestamp: "1792238400" }]
+      } }] }] });
+      const [item] = await provenance.authenticateMetaInboundBatch({ db, rawBody: raw, signature: "sha256=" + createHmac("sha256", secret).update(raw).digest("hex") });
+      const message = await persistInboundMessage(db, { conversationId: conversation.id, direction: "inbound", senderType: "customer",
+        body: item.input.body.trim(), type: "text", providerMessageId: item.input.providerMessageId }, {
+        companyId, contactId: contact.id, channelId: channel.id, senderPhone: item.input.phone, metadata: item.input.replyMetadata
+      }, companyId, item.capability);
+      evidenceId = (await db.conversationInboundEvent.findUniqueOrThrow({ where: { messageId: message.id } })).id;
+    }
+    return authorizationService.grantOpenCreditConsumerAuthorizationFromInboundEvidence(db,
+      { actor, companyId, contactId: contact.id, providerScope: input.providerScope, inboundEventId: evidenceId });
+  }
+  const revokeInput = { actor, companyId, contactId: contact.id, providerScope: input.providerScope };
+  return { companyId, otherCompany, platform, actor, contact, access, identity, input, where, current, events, attest, revokeInput };
 }
 function material(name: string, run: (f: Fixture) => Promise<void>) {
   test(name, async () => {
@@ -55,14 +85,21 @@ function material(name: string, run: (f: Fixture) => Promise<void>) {
 async function denied(run: () => Promise<unknown>, code: OpenCreditCommercialOperationServiceCode) {
   await assert.rejects(run, e => e instanceof service.OpenCreditCommercialOperationServiceError && e.code === code && e.message === "OPENCREDIT_COMMERCIAL_OPERATION_" + code && !("cause" in e) && !("profile" in e));
 }
-async function prepared(f: Fixture): Promise<OpenCreditOperationTransitionInput> {
+async function prepared(f: Fixture, authorized = true): Promise<OpenCreditOperationTransitionInput> {
   const r = await service.prepareOpenCreditClientProfileOperation(db, f.input);
+  if (authorized) await f.attest();
   return { actor: f.actor, companyId: f.companyId, providerScope: f.input.providerScope, operationId: r.operationId, expectedRevision: 0 };
 }
 async function event(f: Fixture, count: number, action: string, previous: string | null, next: string, revision: number, actor = f.actor.id) {
   const events = await f.events(); assert.equal(events.length, count); const e = events[events.length - 1];
   assert.equal(e.action, action); assert.equal(e.previousState, previous); assert.equal(e.nextState, next); assert.equal(e.revision, revision); assert.equal(e.actorUserId, actor);
-  assert.deepEqual(Object.keys(e).sort(), ["id", "operationId", "companyId", "providerScope", "actorUserId", "action", "previousState", "nextState", "revision", "createdAt"].sort());
+  assert.deepEqual(Object.keys(e).sort(), ["id", "operationId", "companyId", "providerScope", "actorUserId", "action", "previousState", "nextState", "revision", "createdAt", "dispatchAuthorizationEventId"].sort());
+  if (action === "RESERVED_FOR_DISPATCH") {
+    assert.ok(e.dispatchAuthorizationEventId);
+    const grant = await db.openCreditConsumerAuthorizationEvent.findUniqueOrThrow({ where: { id: e.dispatchAuthorizationEventId } });
+    assert.equal(grant.companyId, f.companyId); assert.equal(grant.providerScope, f.input.providerScope);
+    assert.equal(grant.action, "GRANTED"); assert.equal(grant.nextActive, true);
+  } else assert.equal(e.dispatchAuthorizationEventId, null);
   assert.deepEqual(Object.keys((await f.current())!).sort(), ["id", "companyId", "remoteIdentityId", "providerScope", "operationKind", "intentKey", "state", "revision", "createdByUserId", "createdAt", "updatedAt"].sort());
 }
 material("PREPARE creates only PREPARED revision zero and one atomic event without PII", async f => {
@@ -133,7 +170,7 @@ for (const mode of freshness) material("new PREPARE rejects " + mode + " without
 material("RESERVE rebuilds fresh profile and commits IN_FLIGHT revision one with no payload persistence", async f => {
   const i = await prepared(f); await db.contact.update({ where: { id: f.contact.id }, data: { name: "Fresh synthetic person", phone: "21900000000", email: "fresh@example.invalid" } });
   const r = await service.reserveOpenCreditClientProfileOperationForDispatch(db, i);
-  assert.equal(r.state, "IN_FLIGHT"); assert.equal(r.revision, 1); assert.deepEqual(Object.keys(r).sort(), ["operationId", "profile", "revision", "state"]);
+  assert.equal(r.state, "IN_FLIGHT"); assert.equal(r.revision, 1); assert.deepEqual(Object.keys(r).sort(), ["operationId", "profile", "revision", "state", "dispatchAuthorization"].sort());
   assert.equal(r.profile.nome, "Fresh synthetic person"); assert.equal(r.profile.email, "fresh@example.invalid");
   assert.ok(JSON.stringify(r.profile).includes("21900000000")); await event(f, 2, "RESERVED_FOR_DISPATCH", "PREPARED", "IN_FLIGHT", 1);
 });
@@ -264,6 +301,141 @@ material("material concurrent SUCCEEDED observations converge to one terminal CA
   assert(["MARKED_SUCCEEDED_CREATED", "MARKED_SUCCEEDED_UPDATED"].includes(events[2].action));
   assert.equal(events[2].previousState, "IN_FLIGHT"); assert.equal(events[2].nextState, "SUCCEEDED"); assert.equal(events[2].revision, 2);
   assert.equal((await f.current())!.state, "SUCCEEDED"); assert.equal((await f.current())!.revision, 2);
+});
+material("19 migrations applied; nullable legacy RESERVED_FOR_DISPATCH remains unbound", async f => {
+  const rows = await db.$queryRaw<{ count: number }[]>`SELECT count(*)::int AS count FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`;
+  assert.equal(rows[0].count, 19);
+  const op = await service.prepareOpenCreditClientProfileOperation(db, f.input);
+  assert.equal(await db.openCreditConsumerAuthorization.count({ where: { companyId: f.companyId } }), 0);
+  // Synthetic representation of a pre-enforcement event using only historical columns.
+  const legacy = await db.openCreditCommercialOperationEvent.create({ data: {
+    operationId: op.operationId, companyId: f.companyId, providerScope: f.input.providerScope, actorUserId: f.actor.id,
+    action: "RESERVED_FOR_DISPATCH", previousState: "PREPARED", nextState: "IN_FLIGHT", revision: 1
+  } });
+  assert.equal(legacy.dispatchAuthorizationEventId, null);
+  await f.attest();
+  assert.deepEqual(await db.openCreditCommercialOperationEvent.findUnique({ where: { id: legacy.id } }), legacy);
+});
+material("missing authorization blocks reservation and releases no profile", async f => {
+  const i = await prepared(f, false); const before = await f.current();
+  await denied(() => service.reserveOpenCreditClientProfileOperationForDispatch(db, i), "CONSUMER_AUTHORIZATION_MISSING");
+  assert.deepEqual(await f.current(), before); assert.equal((await f.events()).length, 1);
+});
+material("revoke before reserve blocks without CAS or RESERVED event", async f => {
+  const i = await prepared(f); await authorizationService.revokeOpenCreditConsumerAuthorization(db, f.revokeInput);
+  await denied(() => service.reserveOpenCreditClientProfileOperationForDispatch(db, i), "CONSUMER_AUTHORIZATION_INACTIVE");
+  assert.equal((await f.current())!.state, "PREPARED"); assert.equal((await f.events()).length, 1);
+});
+material("reservation preserves exact current GRANTED binding and closed result", async f => {
+  const i = await prepared(f);
+  const authorization = await db.openCreditConsumerAuthorization.findFirstOrThrow({ where: f.where });
+  const granted = await db.openCreditConsumerAuthorizationEvent.findUniqueOrThrow({ where: { authorizationId_revision: { authorizationId: authorization.id, revision: 0 } } });
+  const r = await service.reserveOpenCreditClientProfileOperationForDispatch(db, i);
+  assert.deepEqual(r.dispatchAuthorization, { authorizationId: authorization.id, authorizationRevision: 0, authorizationEventId: granted.id });
+  assert.deepEqual(Object.keys(r.dispatchAuthorization).sort(), ["authorizationId", "authorizationRevision", "authorizationEventId"].sort());
+  assert.equal((await f.events())[1].dispatchAuthorizationEventId, granted.id);
+});
+material("regrant revision2 is bound, never historical GRANTED revision0", async f => {
+  const i = await prepared(f); const first = await db.openCreditConsumerAuthorizationEvent.findFirstOrThrow({ where: f.where });
+  await authorizationService.revokeOpenCreditConsumerAuthorization(db, f.revokeInput); await f.attest();
+  const a = await db.openCreditConsumerAuthorization.findFirstOrThrow({ where: f.where });
+  const current = await db.openCreditConsumerAuthorizationEvent.findUniqueOrThrow({ where: { authorizationId_revision: { authorizationId: a.id, revision: 2 } } });
+  const r = await service.reserveOpenCreditClientProfileOperationForDispatch(db, i);
+  assert.equal(r.dispatchAuthorization.authorizationRevision, 2);
+  assert.equal(r.dispatchAuthorization.authorizationEventId, current.id); assert.notEqual(current.id, first.id);
+});
+material("AuthorizationEvent revision unique rejects duplicate current audit fact", async f => {
+  await f.attest();
+  const original = await db.openCreditConsumerAuthorizationEvent.findFirstOrThrow({ where: f.where });
+  const { id: _id, createdAt: _at, ...data } = original;
+  await assert.rejects(db.openCreditConsumerAuthorizationEvent.create({ data }), e =>
+    e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002"
+    && (e.meta?.target === "OCConsumerAuthEvent_authorization_revision_key"
+      || Array.isArray(e.meta?.target) && JSON.stringify(e.meta.target) === JSON.stringify(["authorizationId", "revision"])));
+});
+for (const foreign of ["company", "scope"]) material("dispatch FK rejects authorization event from other " + foreign, async f => {
+  await f.attest();
+  const granted = await db.openCreditConsumerAuthorizationEvent.findFirstOrThrow({ where: f.where });
+  const companyId = foreign === "company" ? f.otherCompany : f.companyId;
+  const providerScope = foreign === "scope" ? "synthetic-other-" + randomUUID().replace(/\d/g, "x") : f.input.providerScope;
+  const contact = await db.contact.create({ data: { companyId, name: "Synthetic", phone: "synthetic" } });
+  await db.openCreditCommercialAccess.create({ data: { companyId, providerScope, enabled: true, changedByUserId: f.actor.id } });
+  const identity = await db.openCreditRemoteIdentity.create({ data: { companyId, providerScope, contactId: contact.id, normalizedCpf: "11111111111", createdByUserId: f.actor.id } });
+  const operation = await db.openCreditCommercialOperation.create({ data: { companyId, providerScope, remoteIdentityId: identity.id, operationKind: "CLIENT_PROFILE_UPSERT", intentKey: randomUUID(), createdByUserId: f.actor.id } });
+  await assert.rejects(db.openCreditCommercialOperationEvent.create({ data: { operationId: operation.id, companyId, providerScope,
+    actorUserId: f.actor.id, action: "RESERVED_FOR_DISPATCH", previousState: "PREPARED", nextState: "IN_FLIGHT", revision: 1, dispatchAuthorizationEventId: granted.id } }),
+    e => e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2003" && String(e.meta?.field_name).includes("OCOperationEvent_dispatch_auth_fkey"));
+});
+material("dispatch binding CHECK rejects non-reservation action, without requiring historical binding", async f => {
+  const i = await prepared(f); const granted = await db.openCreditConsumerAuthorizationEvent.findFirstOrThrow({ where: f.where });
+  await assert.rejects(db.openCreditCommercialOperationEvent.create({ data: { operationId: i.operationId, companyId: f.companyId,
+    providerScope: f.input.providerScope, actorUserId: f.actor.id, action: "MARKED_UNKNOWN", previousState: "IN_FLIGHT", nextState: "UNKNOWN", revision: 2, dispatchAuthorizationEventId: granted.id } }));
+  assert.equal((await f.events()).length, 1);
+});
+// Both transactions observe the same active authorization before either may mutate.
+function reserveRevokeBarrier(): Db {
+  let arrivals = 0; let release!: () => void; const barrier = new Promise<void>(r => { release = r; });
+  return { $transaction: <T>(run: (tx: Prisma.TransactionClient) => Promise<T>, options?: Options) => db.$transaction(tx => {
+    const delegate = new Proxy(tx.openCreditConsumerAuthorization, { get(target, key) {
+      if (key === "findUnique") return async (args: Parameters<typeof target.findUnique>[0]) => {
+        const result = await target.findUnique(args);
+        if (arrivals < 2) { arrivals++; if (arrivals === 2) release(); await barrier; }
+        return result;
+      };
+      return Reflect.get(target, key);
+    } });
+    return run(new Proxy(tx, { get: (target, key) => key === "openCreditConsumerAuthorization" ? delegate : Reflect.get(target, key) }));
+  }, options) } as Db;
+}
+material("concurrent reserve vs revoke has only a coherent serial history", async f => {
+  const i = await prepared(f); const client = reserveRevokeBarrier();
+  const results = await Promise.allSettled([service.reserveOpenCreditClientProfileOperationForDispatch(client, i),
+    authorizationService.revokeOpenCreditConsumerAuthorization(client, f.revokeInput)]);
+  assert.equal(results[1].status, "fulfilled");
+  const a = await db.openCreditConsumerAuthorization.findFirstOrThrow({ where: f.where });
+  assert.equal(a.active, false); assert.equal(a.revision, 1);
+  const events = await f.events(); const reserved = events.filter(e => e.action === "RESERVED_FOR_DISPATCH");
+  const result = results[0]; const op = (await f.current())!;
+  if (result.status === "fulfilled") {
+    assert.equal(op.state, "IN_FLIGHT"); assert.equal(op.revision, 1); assert.equal(reserved.length, 1);
+    assert.equal(reserved[0].dispatchAuthorizationEventId, (result.value as Awaited<ReturnType<typeof service.reserveOpenCreditClientProfileOperationForDispatch>>).dispatchAuthorization.authorizationEventId);
+  } else {
+    assert.equal(result.reason.code, "CONSUMER_AUTHORIZATION_INACTIVE");
+    assert.equal(op.state, "PREPARED"); assert.equal(op.revision, 0); assert.equal(reserved.length, 0);
+  }
+  assert.equal(new Set(events.map(e => e.revision)).size, events.length);
+});
+for (const terminal of ["SUCCEEDED", "UNKNOWN"] as const) material("revoke after commit-to-dispatch preserves history and permits " + terminal, async f => {
+  const i = await prepared(f); const reservation = await service.reserveOpenCreditClientProfileOperationForDispatch(db, i);
+  await authorizationService.revokeOpenCreditConsumerAuthorization(db, f.revokeInput);
+  assert.equal((await f.current())!.state, "IN_FLIGHT");
+  assert.equal((await f.events())[1].dispatchAuthorizationEventId, reservation.dispatchAuthorization.authorizationEventId);
+  const next = { ...i, expectedRevision: 1 };
+  const r = terminal === "SUCCEEDED" ? await service.applyOpenCreditCreateClientObservation(db, next, observation())
+    : await service.markOpenCreditCommercialOperationUnknown(db, next);
+  assert.equal(r.state, terminal); assert.equal((await f.events())[1].dispatchAuthorizationEventId, reservation.dispatchAuthorization.authorizationEventId);
+  await denied(() => service.reserveOpenCreditClientProfileOperationForDispatch(db, { ...i, expectedRevision: 2 }), "OPERATION_STATE_CONFLICT");
+  // New intent for the same Contact remains PREPARED after revocation.
+  const other = await service.prepareOpenCreditClientProfileOperation(db, { ...f.input, intentKey: randomUUID() });
+  await denied(() => service.reserveOpenCreditClientProfileOperationForDispatch(db, { ...i, operationId: other.operationId }), "CONSUMER_AUTHORIZATION_INACTIVE");
+});
+material("real dispatch binding FK failure rolls back IN_FLIGHT mutation and event", async f => {
+  const i = await prepared(f); let observed = false; let realFk = false;
+  const client = { $transaction: <T>(run: (tx: Prisma.TransactionClient) => Promise<T>, options?: Options) => db.$transaction(tx => {
+    const delegate = new Proxy(tx.openCreditCommercialOperationEvent, { get(target, key) {
+      if (key === "create") return async (args: Prisma.OpenCreditCommercialOperationEventCreateArgs) => {
+        assert.equal((await tx.openCreditCommercialOperation.findUniqueOrThrow({ where: { id: i.operationId } })).state, "IN_FLIGHT"); observed = true;
+        try { return await target.create({ ...args, data: { ...args.data as Prisma.OpenCreditCommercialOperationEventUncheckedCreateInput, dispatchAuthorizationEventId: "missing-synthetic-grant" } }); }
+        catch (e) { realFk = e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2003" && String(e.meta?.field_name).includes("OCOperationEvent_dispatch_auth_fkey"); throw e; }
+      };
+      return Reflect.get(target, key);
+    } });
+    return run(new Proxy(tx, { get: (target, key) => key === "openCreditCommercialOperationEvent" ? delegate : Reflect.get(target, key) }));
+  }, options) } as Db;
+  await denied(() => service.reserveOpenCreditClientProfileOperationForDispatch(client, i), "STORAGE_ERROR");
+  assert.equal(observed, true); assert.equal(realFk, true);
+  assert.equal((await f.current())!.state, "PREPARED"); assert.equal((await f.current())!.revision, 0);
+  assert.equal((await f.events()).length, 1);
 });
 material("material competing SUCCEEDED and UNKNOWN preserve only the first terminal winner", async f => {
   const i = await inFlight(f), concurrent = barrierDb("settle");

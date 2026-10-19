@@ -67,11 +67,11 @@ for (const table of [op, event]) material("exact columns/types/nullability/defau
     SELECT column_name AS name, data_type AS type, is_nullable AS nullable, column_default AS default
     FROM information_schema.columns WHERE table_schema='public' AND table_name=${table} ORDER BY ordinal_position
   `;
-  const expected = table === op ? ["id", "companyId", "remoteIdentityId", "providerScope", "operationKind", "intentKey", "state", "revision", "createdByUserId", "createdAt", "updatedAt"] : ["id", "operationId", "companyId", "providerScope", "actorUserId", "action", "previousState", "nextState", "revision", "createdAt"];
+  const expected = table === op ? ["id", "companyId", "remoteIdentityId", "providerScope", "operationKind", "intentKey", "state", "revision", "createdByUserId", "createdAt", "updatedAt"] : ["id", "operationId", "companyId", "providerScope", "actorUserId", "action", "previousState", "nextState", "revision", "createdAt", "dispatchAuthorizationEventId"];
   assert.deepEqual(columns.map(c => c.name), expected);
   for (const c of columns) {
     assert.equal(c.type, c.name.endsWith("At") ? "timestamp without time zone" : c.name === "revision" ? "integer" : "text");
-    assert.equal(c.nullable, c.name === "previousState" ? "YES" : "NO");
+    assert.equal(c.nullable, ["previousState", "dispatchAuthorizationEventId"].includes(c.name) ? "YES" : "NO");
     if (c.name === "createdAt") assert.match(c.default ?? "", /CURRENT_TIMESTAMP/);
     else if (table === op && c.name === "state") assert.equal(c.default, "'PREPARED'::text");
     else if (table === op && c.name === "revision") assert.equal(c.default, "0");
@@ -79,7 +79,7 @@ for (const table of [op, event]) material("exact columns/types/nullability/defau
     assert.doesNotMatch(c.name, /cpf|payload|response|credential|password|token|hash|consent|evidence/i);
   }
 });
-material("both PKs, two uniques and five exact ordered indexes are valid and unconditional", async () => {
+material("both PKs, two uniques and six exact ordered indexes are valid and unconditional", async () => {
   const rows = await db.$queryRaw<Array<{ table: string; name: string; unique: boolean; primary: boolean; valid: boolean; partial: boolean; columns: string[] }>>`
     SELECT t.relname::text AS table, x.relname::text AS name, i.indisunique AS "unique", i.indisprimary AS "primary", i.indisvalid AS valid,
       (i.indpred IS NOT NULL OR i.indexprs IS NOT NULL) AS partial,
@@ -96,12 +96,13 @@ material("both PKs, two uniques and five exact ordered indexes are valid and unc
     [op, "OCOperation_scope_state_created_id_idx", false, false, ["companyId", "providerScope", "state", "createdAt", "id"]],
     [op, "OCOperation_actor_idx", false, false, ["createdByUserId"]],
     [event, "OCOperationEvent_operation_created_id_idx", false, false, ["operationId", "createdAt", "id"]],
-    [event, "OCOperationEvent_actor_idx", false, false, ["actorUserId"]]
+    [event, "OCOperationEvent_actor_idx", false, false, ["actorUserId"]],
+    [event, "OCOperationEvent_dispatch_auth_idx", false, false, ["dispatchAuthorizationEventId"]]
   ] as const;
   assert.equal(rows.length, expected.length);
   for (const [table, name, unique, primary, columns] of expected) assert.ok(rows.some(r => r.table === table && r.name === name && r.unique === unique && r.primary === primary && r.valid && !r.partial && JSON.stringify(r.columns) === JSON.stringify(columns)));
 });
-material("five actual FKs have exact names/columns/references with RESTRICT and NO ACTION", async () => {
+material("six actual FKs have exact names/columns/references with RESTRICT and NO ACTION", async () => {
   const rows = await db.$queryRaw<Array<{ table: string; name: string; reference: string; columns: string[]; refs: string[]; del: string; upd: string; valid: boolean }>>`
     SELECT t.relname::text AS table, c.conname::text AS name, r.relname::text AS reference,
       ARRAY(SELECT a.attname::text FROM unnest(c.conkey) WITH ORDINALITY k(n,pos) JOIN pg_attribute a ON a.attrelid=c.conrelid AND a.attnum=k.n ORDER BY k.pos) AS columns,
@@ -110,13 +111,14 @@ material("five actual FKs have exact names/columns/references with RESTRICT and 
     FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid JOIN pg_class r ON r.oid=c.confrelid JOIN pg_namespace ns ON ns.oid=t.relnamespace
     WHERE ns.nspname='public' AND c.contype='f' AND t.relname IN ('OpenCreditCommercialOperation','OpenCreditCommercialOperationEvent')
   `;
-  assert.equal(rows.length, 5);
+  assert.equal(rows.length, 6);
   for (const [table, name, reference, columns, refs] of [
     [op, companyFk, "Company", ["companyId"], ["id"]],
     [op, identityFk, "OpenCreditRemoteIdentity", ["remoteIdentityId", "companyId", "providerScope"], ["id", "companyId", "providerScope"]],
     [op, creatorFk, "User", ["createdByUserId"], ["id"]],
     [event, operationFk, op, ["operationId", "companyId", "providerScope"], ["id", "companyId", "providerScope"]],
-    [event, actorFk, "User", ["actorUserId"], ["id"]]
+    [event, actorFk, "User", ["actorUserId"], ["id"]],
+    [event, "OCOperationEvent_dispatch_auth_fkey", "OpenCreditConsumerAuthorizationEvent", ["dispatchAuthorizationEventId", "companyId", "providerScope"], ["id", "companyId", "providerScope"]]
   ] as const) {
     assert.ok(name.length <= 63);
     assert.ok(rows.some(r => r.table === table && r.name === name && r.reference === reference && r.valid && r.del === "r" && r.upd === "a" && JSON.stringify(r.columns) === JSON.stringify(columns) && JSON.stringify(r.refs) === JSON.stringify(refs)));
@@ -160,7 +162,8 @@ material("same intent in another valid Company is independent", async f => {
 });
 material("valid Event persists only exact approved facts; platform actor need not share target Company", async f => {
   const operation = await db.openCreditCommercialOperation.create({ data: f.data }); const row = await db.openCreditCommercialOperationEvent.create({ data: f.eventData(operation.id) });
-  assert.deepEqual(Object.keys(row).sort(), ["id", "operationId", "companyId", "providerScope", "actorUserId", "action", "previousState", "nextState", "revision", "createdAt"].sort());
+  assert.deepEqual(Object.keys(row).sort(), ["id", "operationId", "companyId", "providerScope", "actorUserId", "action", "previousState", "nextState", "revision", "createdAt", "dispatchAuthorizationEventId"].sort());
+  assert.equal(row.dispatchAuthorizationEventId, null);
   assert.equal(row.previousState, null); assert.equal(row.revision, 0); assert.equal(row.actorUserId, f.actor.id); assert.notEqual(f.actor.companyId, row.companyId);
 });
 for (const wrong of ["company", "scope", "actor"] as const) material("Event rejects wrong " + wrong, async f => {

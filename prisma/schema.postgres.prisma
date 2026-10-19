@@ -35,6 +35,7 @@ model OpenCreditConsumerAuthorization {
 }
 
 model OpenCreditConsumerAuthorizationEvent {
+  dispatchOperations OpenCreditCommercialOperationEvent[] @relation("OpenCreditOperationDispatchAuthorizationEvent")
   id String @id @default(cuid())
   authorizationId String
   companyId String
@@ -49,6 +50,8 @@ model OpenCreditConsumerAuthorizationEvent {
   authorization OpenCreditConsumerAuthorization @relation(fields: [authorizationId, companyId, providerScope], references: [id, companyId, providerScope], onDelete: Restrict, onUpdate: NoAction, map: "OCConsumerAuthEvent_authorization_fkey")
   actor User @relation("ConsumerAuthorizationEventActor", fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "OCConsumerAuthEvent_actor_fkey")
   evidence ConversationInboundEvent @relation("ConsumerAuthorizationEventEvidence", fields: [evidenceInboundEventId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "OCConsumerAuthEvent_evidence_fkey")
+  @@unique([authorizationId, revision], map: "OCConsumerAuthEvent_authorization_revision_key")
+  @@unique([id, companyId, providerScope], map: "OCConsumerAuthEvent_id_company_scope_key")
   @@index([authorizationId, createdAt, id], map: "OCConsumerAuthEvent_authorization_idx")
   @@index([actorUserId], map: "OCConsumerAuthEvent_actor_idx")
   @@index([evidenceInboundEventId], map: "OCConsumerAuthEvent_evidence_idx")
@@ -477,6 +480,8 @@ model OpenCreditCommercialOperation {
 }
 
 model OpenCreditCommercialOperationEvent {
+  dispatchAuthorizationEventId String?
+  dispatchAuthorizationEvent OpenCreditConsumerAuthorizationEvent? @relation("OpenCreditOperationDispatchAuthorizationEvent", fields: [dispatchAuthorizationEventId, companyId, providerScope], references: [id, companyId, providerScope], onDelete: Restrict, onUpdate: NoAction, map: "OCOperationEvent_dispatch_auth_fkey")
   id            String   @id @default(cuid())
   operationId   String
   companyId     String
@@ -490,6 +495,7 @@ model OpenCreditCommercialOperationEvent {
   operation     OpenCreditCommercialOperation @relation(fields: [operationId, companyId, providerScope], references: [id, companyId, providerScope], onDelete: Restrict, onUpdate: NoAction)
   actor         User @relation("OpenCreditCommercialOperationEventActor", fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
+  @@index([dispatchAuthorizationEventId], map: "OCOperationEvent_dispatch_auth_idx")
   @@index([operationId, createdAt, id], map: "OCOperationEvent_operation_created_id_idx")
   @@index([actorUserId], map: "OCOperationEvent_actor_idx")
 }

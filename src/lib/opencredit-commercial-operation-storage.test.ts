@@ -9,10 +9,10 @@ const op = "OpenCreditCommercialOperation"; const event = op + "Event";
 const model = (source: string, name: string) => source.match(new RegExp("^model " + name + " \\{[\\s\\S]*?^\\}", "m"))?.[0];
 const fields = (source: string) => source.split(/\r?\n/).slice(1).map(l => l.trim()).filter(l => /^[a-z]/.test(l)).map(l => l.split(/\s+/)[0]);
 const operationFields = ["id", "companyId", "remoteIdentityId", "providerScope", "operationKind", "intentKey", "state", "revision", "createdByUserId", "createdAt", "updatedAt", "company", "remoteIdentity", "createdBy", "events"];
-const eventFields = ["id", "operationId", "companyId", "providerScope", "actorUserId", "action", "previousState", "nextState", "revision", "createdAt", "operation", "actor"];
+const eventFields = ["dispatchAuthorizationEventId", "dispatchAuthorizationEvent", "id", "operationId", "companyId", "providerScope", "actorUserId", "action", "previousState", "nextState", "revision", "createdAt", "operation", "actor"];
 test("both logical models, exact fields and inverse relations are equivalent across providers", () => {
   const sqlite = read("prisma/schema.prisma"); const pg = read("prisma/schema.postgres.prisma");
-  for (const name of [op, event]) { assert.ok(model(sqlite, name)); assert.equal(model(sqlite, name), model(pg, name)); }
+  for (const name of [op, event]) { assert.ok(model(sqlite, name)); assert.equal(model(sqlite, name)?.replace(/, map: "OCOperationEvent_dispatch_auth_fkey"/g, ""), model(pg, name)?.replace(/, map: "OCOperationEvent_dispatch_auth_fkey"/g, "")); }
   for (const schema of [sqlite, pg]) {
     const operation = model(schema, op)!; const history = model(schema, event)!;
     assert.deepEqual(fields(operation), operationFields); assert.deepEqual(fields(history), eventFields);
@@ -29,7 +29,9 @@ test("both logical models, exact fields and inverse relations are equivalent acr
     assert.match(history, /fields: \[operationId, companyId, providerScope\], references: \[id, companyId, providerScope\]/);
     assert.match(history, /fields: \[actorUserId\], references: \[id\]/);
     assert.equal((operation.match(/onDelete: Restrict, onUpdate: NoAction/g) ?? []).length, 3);
-    assert.equal((history.match(/onDelete: Restrict, onUpdate: NoAction/g) ?? []).length, 2);
+    assert.equal((history.match(/onDelete: Restrict, onUpdate: NoAction/g) ?? []).length, 3);
+    assert.match(history, /dispatchAuthorizationEventId String\?/);
+    assert.match(history, /fields: \[dispatchAuthorizationEventId, companyId, providerScope\], references: \[id, companyId, providerScope\]/);
     assert.match(operation, /@@unique\(\[companyId, providerScope, intentKey\], map: "OCOperation_company_scope_intent_key"\)/);
     assert.match(operation, /@@unique\(\[id, companyId, providerScope\], map: "OCOperation_id_company_scope_key"\)/);
     assert.match(model(schema, "Company")!, /openCreditCommercialOperations OpenCreditCommercialOperation\[\]/);

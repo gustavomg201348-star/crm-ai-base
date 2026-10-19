@@ -1,6 +1,121 @@
 # OpenCredit API authentication (not webhook authentication)
 
-## Consumer authorization evidence foundation
+## Reservation authorization enforcement
+
+The passive local reservation boundary now requires persisted operational human
+authorization. This does NOT establish LGPD consent, legal basis, contractual
+acceptance or provider permission; external legal/policy review remains necessary.
+There is still no human authorization runtime flow or real dispatcher.
+
+The literal flow inside the same Serializable transaction is:
+
+```text
+current Platform Admin + Company
+→ PREPARED operation + matching expectedRevision
+→ linked RemoteIdentity + existing Contact/access/CPF/profile freshness
+→ ACTIVE ConsumerAuthorization for company/scope/contact/CLIENT_PROFILE_UPSERT
+→ matching current GRANTED AuthorizationEvent
+→ atomic PREPARED -> IN_FLIGHT CAS
+→ RESERVED_FOR_DISPATCH bound to that exact AuthorizationEvent
+→ successful transaction commit
+```
+
+PREPARE remains an unauthorised local intention and does NOT require consumer
+authorization. Reserve checks the exact current slot, matching remoteIdentityId,
+closed purpose, boolean active, safe nonnegative revision and valid evidence id.
+Missing/inactive/mismatched authorization fails closed without releasing a profile.
+Its unique (authorizationId, revision) must yield an Event with valid id, exact
+parent/company/scope/revision/evidence, action GRANTED and nextActive=true.
+No Message/body is read, no HMAC is rechecked and no semantic interpretation occurs.
+The operation service reads the two Prisma models directly; it does not import
+the separate grant/revoke mutation service.
+
+New sanitized codes are CONSUMER_AUTHORIZATION_MISSING,
+CONSUMER_AUTHORIZATION_INACTIVE, CONSUMER_AUTHORIZATION_MISMATCH and
+CONSUMER_AUTHORIZATION_EVENT_INVALID, under the existing service error prefix.
+Existing transaction bounds/retries, intentKey, prepare and settlement rules
+remain unchanged.
+
+The successful IN_FLIGHT commit is the **LOCAL COMMIT-TO-DISPATCH POINT**.
+Authorization must be active in the winning reservation transaction. Treat a
+committed IN_FLIGHT as potentially sent even if the process crashes before HTTP.
+There is no HTTP in this transaction (or anywhere in this slice).
+
+A later revoke leaves the operation IN_FLIGHT and preserves the historical
+GRANTED binding; it is not retroactive and cannot roll back the reservation.
+It blocks new reservations. Settlement SUCCEEDED/UNKNOWN does not reread
+Authorization, evidence, Contact or identity. UNKNOWN -> SUCCEEDED remains
+blocked, FAILED has no writer, and automatic replay remains FORBIDDEN.
+No transaction may be held open during future HTTP.
+
+Concurrent reserve/revoke is interpreted by Serializable transaction order,
+not an assumed wall-clock order: reserve-first can commit one bound IN_FLIGHT
+before revocation; revoke-first makes reserve reject INACTIVE and remain PREPARED.
+CAS still requires exactly one winner and operation Event creation is atomic.
+Event FK/commit failure rolls back the reservation and cannot release a profile.
+After GRANTED rev0 -> REVOKED rev1 -> GRANTED rev2, a new reservation binds rev2,
+never rev0.
+
+Reservation returns the existing operationId/state/revision/profile plus only:
+
+```text
+dispatchAuthorization: {
+  authorizationId,
+  authorizationRevision,
+  authorizationEventId
+}
+```
+
+This is a fresh closed audit object, not replay permission. No body, provider
+message id, raw evidence row or additional CPF is returned.
+
+The additive migration
+`20261019200000_add_opencredit_dispatch_authorization_binding` adds AuthorizationEvent
+uniques (authorizationId, revision) and (id, companyId, providerScope), plus nullable
+OperationEvent.dispatchAuthorizationEventId, its index and scoped RESTRICT/NO ACTION
+FK. A defensive CHECK permits a nonnull binding only for RESERVED_FOR_DISPATCH.
+It deliberately does NOT require nonnull binding on historical reservation rows.
+No DML/backfill, inferred authorization or historical rewrite is introduced.
+Duplicate preexisting authorization revisions would make the unique migration
+fail closed; this slice never repairs or deletes such data automatically.
+
+Every NEW reservation through the service records a binding. Historical IN_FLIGHT
+operations without it must not be automatically resent; they require separate
+future reconciliation. A future dispatcher must accept only new-flow reservations.
+Neither dispatcher nor reconciliation is implemented here.
+
+Validation covers unit corruption/fail-closed cases, PostgreSQL migration/FK/unique/
+CHECK enforcement, current rev2 binding, concurrent reserves, reserve/revoke,
+post-revoke settlement, real Event FK rollback and nullable legacy compatibility.
+Only disposable local/guarded CI PostgreSQL is permitted. Existing material/static
+storage tests now account for exactly the new nullable field/index/FK, preserving
+the old constraints. Existing service/authorization CI gates are reused; explicit
+profile-contract and mocked API-client gates fill the two previously absent gates.
+
+Rollback plan (not executed): revert application enforcement before considering
+removal of the optional binding FK/index/CHECK/column and new uniques, with audit
+retention/dependency review. Do not delete evidence or backfill historical rows.
+No production/Railway operation, environment/dependency change, runtime caller,
+endpoint, UI, AI/chatbot, automatic grant, provider request or dispatch is added.
+
+```text
+HTTP JSON RESPONSE BOUNDARY: IMPLEMENTED
+CREATE CLIENT REQUEST CONTRACT: IMPLEMENTED
+CREATE CLIENT OUTCOME POLICY: IMPLEMENTED
+CREATE CLIENT OUTCOME LEDGER SETTLEMENT: IMPLEMENTED
+TRUSTED PROVIDER SCOPE: IMPLEMENTED
+COMMERCIAL OPERATION LOCAL LEDGER: IMPLEMENTED
+AUTHENTICATED INBOUND EVIDENCE: IMPLEMENTED
+CONSUMER AUTHORIZATION EVIDENCE FOUNDATION: IMPLEMENTED
+COMMERCIAL OPERATION AUTHORIZATION ENFORCEMENT: IMPLEMENTED
+HUMAN AUTHORIZATION RUNTIME FLOW: BLOCKED
+CREATE CLIENT DISPATCH: BLOCKED
+FAILED TRANSITION: BLOCKED
+RECONCILIATION: BLOCKED
+AUTOMATIC REPLAY: FORBIDDEN
+```
+
+## Consumer authorization evidence foundation (original passive slice)
 
 This passive foundation adds an operational human attestation, NOT automatic
 LGPD consent, legal basis, contractual acceptance or provider authorization.
@@ -82,7 +197,7 @@ review retention and dependencies before removing Event then Authorization table
 and their indexes/FKs, and only then the new inbound unique. Never delete retained
 evidence or modify old provenance triggers. No production migration is run here.
 
-Current status (earlier slice sections below are historical):
+Status at completion of the original evidence foundation (historical; enforcement above supersedes it):
 
 ```text
 HTTP JSON RESPONSE BOUNDARY: IMPLEMENTED

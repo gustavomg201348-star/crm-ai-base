@@ -74,6 +74,12 @@ jobs:
       - name: Validate OpenCredit contact client profile adapter
         run: npx --yes tsx@4.20.6 src/lib/opencredit-contact-client-profile-adapter.test.ts
 
+      - name: Validate OpenCredit client profile contract
+        run: npx --yes tsx@4.20.6 src/lib/opencredit-client-profile-contract.test.ts
+
+      - name: Validate OpenCredit API client with mocked provider
+        run: npx --yes tsx@4.20.6 src/lib/opencredit-api-client.test.ts
+
       - name: Validate OpenCredit commercial operation storage contract
         run: npx --yes tsx@4.20.6 src/lib/opencredit-commercial-operation-storage.test.ts
 
