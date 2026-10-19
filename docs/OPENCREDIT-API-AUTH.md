@@ -1,5 +1,114 @@
 # OpenCredit API authentication (not webhook authentication)
 
+## One-shot createClient dispatcher core
+
+Current authoritative status (older sections below describe their original slices):
+
+```text
+HTTP JSON RESPONSE BOUNDARY: IMPLEMENTED
+CREATE CLIENT REQUEST CONTRACT: IMPLEMENTED
+CREATE CLIENT OUTCOME POLICY: IMPLEMENTED
+CREATE CLIENT OUTCOME LEDGER SETTLEMENT: IMPLEMENTED
+TRUSTED PROVIDER SCOPE: IMPLEMENTED
+COMMERCIAL OPERATION LOCAL LEDGER: IMPLEMENTED
+AUTHENTICATED INBOUND EVIDENCE: IMPLEMENTED
+CONSUMER AUTHORIZATION EVIDENCE FOUNDATION: IMPLEMENTED
+COMMERCIAL OPERATION AUTHORIZATION ENFORCEMENT: IMPLEMENTED
+HUMAN AUTHORIZATION ADMIN COMMAND API: IMPLEMENTED
+HUMAN AUTHORIZATION ADMIN CONTEXT API: IMPLEMENTED
+HUMAN AUTHORIZATION REVIEW UI: IMPLEMENTED
+CREATE CLIENT ONE-SHOT DISPATCHER CORE: IMPLEMENTED
+RUNTIME CREATE CLIENT COMMAND: BLOCKED
+LIVE CREATE CLIENT DISPATCH: NOT EXERCISED
+FAILED TRANSITION: BLOCKED
+RECONCILIATION: BLOCKED
+AUTOMATIC REPLAY: FORBIDDEN
+```
+
+`dispatchOpenCreditCreateClient` is server-only and has **no runtime caller**.
+There is no dispatch endpoint, button, worker, cron, webhook, AI or chatbot caller.
+It never prepares an operation or grants authorization automatically. It accepts
+only actor/companyId/operationId/expectedRevision, using closed own data properties.
+The existing service revalidates the current persisted actor in each transaction.
+
+Literal flow:
+
+```text
+trusted configured tenantId + providerScope snapshot
+-> authenticate (login/refresh as needed, before reservation)
+-> reserve PREPARED -> IN_FLIGHT and commit
+-> ONE POST
+-> strict HTTP JSON response boundary
+-> createClient contract parser
+-> conservative outcome policy
+-> SUCCEEDED/UNKNOWN settlement using reservation.revision
+```
+
+`resolveConfiguredOpenCreditProviderContext()` validates tenantId and partnerId
+once and derives the same stable scope from that exact snapshot. It returns only
+tenantId/providerScope, not credentials or partnerId. The existing scope-only
+functions delegate and preserve their previous derivation. No browser/request
+supplies tenant, scope, profile, CPF, authorization IDs, URL, headers or token.
+
+`postJsonAfterCommit(path, commit)` validates its path before authenticating, builds
+the internal bearer and fixed JSON headers before the callback, then awaits that
+callback exactly once. Its callback receives no token. Only after callback success
+does it attempt one fixed-method POST. The client does not serialize/read the body,
+refresh, login or replay after commit. A business 401 returns its Response and
+expires only the matching cached access token for a future operation. Existing
+`request()` GET/HEAD behavior is unchanged. No 4xx/5xx triggers one-shot retry.
+The new primitive additionally rejects percent-encoded/ambiguous paths and
+backslashes/control characters; configured tenant IDs are already restricted ASCII,
+so no encoded auth alias or traversal is needed or accepted by this one-shot path.
+
+Inside the existing Serializable reservation transaction the order is freshness,
+current ACTIVE authorization/current GRANTED binding, closed deterministic profile
+serialization, PREPARED CAS, RESERVED_FOR_DISPATCH Event, commit. Serialization
+failure aborts before CAS/Event. `profile` remains compatible; added `profileJson`
+contains only the 19 contract fields in fixed order. It is transient memory only,
+never persisted, logged, placed in an Event or exposed to a browser. No HTTP,
+authentication or API client runs inside the transaction.
+
+The business path is exactly
+`/api/tenants/${encodeURIComponent(tenantId)}/integration/clients`, with no query.
+The body is exactly the committed reservation's pre-serialized `profileJson`.
+No intentKey, provider idempotency key or authorization IDs are sent to OpenCredit.
+There is **no published provider idempotency guarantee** being claimed.
+
+| Observation | Settlement |
+| --- | --- |
+| Parsed HTTP 201, success=true, created=true | SUCCEEDED / CREATED |
+| Parsed HTTP 201, success=true, created=false | SUCCEEDED / UPDATED |
+| Parsed HTTP 201, false/false or false/true | UNKNOWN |
+| Any non-201, including 401/403/429/5xx | UNKNOWN |
+| INVALID_CONTENT_TYPE / TOO_LARGE / INVALID_UTF8 / INVALID_JSON / STREAM_ERROR / INVALID_RESPONSE | UNREADABLE_RESPONSE -> UNKNOWN |
+| Valid JSON rejected by operation contract | UNREADABLE_RESPONSE / INVALID_CONTRACT -> UNKNOWN |
+| Response body read deadline | NO_RESPONSE / TIMEOUT -> UNKNOWN |
+| Transport timeout/network after committed reservation | NO_RESPONSE / TIMEOUT or NETWORK -> UNKNOWN |
+
+Response.ok is not a business decision. The two additional technical unreadable
+reasons do not introduce any new positive classification. **Zero paths emit FAILED.**
+Configuration/auth/login/refresh/network/timeout failures before reservation leave
+the operation PREPARED, with no business POST or UNKNOWN settlement. Reservation
+domain errors remain closed domain errors. All dispatcher errors use fixed codes
+and messages without raw provider errors, causes, credentials or payloads.
+
+Once committed IN_FLIGHT, crashes/transport ambiguity are potentially sent, never
+permission to retry. If local settlement fails, the dispatcher throws fixed
+`OPENCREDIT_CREATE_CLIENT_DISPATCH_SETTLEMENT_FAILED`, does not report success,
+does not revert to PREPARED and never repeats the POST. IN_FLIGHT may remain and
+requires future review/reconciliation; no reconciliation is implemented here.
+Revocation after reservation does not invalidate the authorized commit-to-dispatch
+fact: settlement never rereads Authorization/freshness. Concurrent commands for the
+same PREPARED revision compete through the database/CAS, not an in-memory lock.
+
+Results are only operationId/state/revision, plus created for SUCCEEDED. No profile,
+CPF, raw observation, response, headers, URL, scope, tenant/partner or authorization
+IDs escape. Tests exclusively use fake/in-memory transport and disposable local
+PostgreSQL. No live createClient was exercised, no production/Railway was accessed,
+and this slice does not declare legal/LGPD review complete. Runtime activation,
+operational recovery policy and legal review remain separate gates.
+
 ## Human authorization review UI
 
 Current slice: an authenticated Platform Admin can review technical inbound evidence
@@ -1977,7 +2086,8 @@ provider messages or errors. The closed discriminated union accepts:
 - PARSED_RESPONSE: integer HTTP status 100..599 and an exact success/created
   boolean pair already validated by the operation-specific parser;
 - UNREADABLE_RESPONSE: the same status range and only INVALID_CONTENT_TYPE,
-  TOO_LARGE, INVALID_UTF8, INVALID_JSON or STREAM_ERROR;
+  TOO_LARGE, INVALID_UTF8, INVALID_JSON, STREAM_ERROR, INVALID_RESPONSE or
+  INVALID_CONTRACT;
 - NO_RESPONSE: only TIMEOUT or NETWORK. A body-read timeout is represented as
   NO_RESPONSE/TIMEOUT for this policy even if headers were previously obtained;
   either representation of untrustworthy results must never imply remote failure.

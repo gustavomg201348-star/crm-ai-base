@@ -4,7 +4,7 @@ import type { SessionUser } from "./auth";
 import { isPlatformAdmin } from "./permissions";
 import { canonicalizeOpenCreditOwnershipCpf, parseOpenCreditProviderScope, type OpenCreditProviderScope } from "./opencredit-commercial-identity-policy";
 import { buildOpenCreditClientProfileFromContact } from "./opencredit-contact-client-profile-adapter";
-import type { OpenCreditClientProfilePayload } from "./opencredit-client-profile-contract";
+import { serializeOpenCreditClientProfilePayload, type OpenCreditClientProfilePayload } from "./opencredit-client-profile-contract";
 import { classifyOpenCreditCreateClientOutcome, type OpenCreditCreateClientObservation } from "./opencredit-create-client-outcome";
 
 const CODES = ["NOT_AUTHORIZED", "INVALID_COMPANY", "INVALID_CONTACT", "INVALID_OPERATION", "INVALID_PROVIDER_SCOPE",
@@ -29,7 +29,7 @@ export type OpenCreditCommercialOperationState = "PREPARED" | "IN_FLIGHT" | "SUC
 export type OpenCreditCommercialOperationResult<S extends OpenCreditCommercialOperationState = OpenCreditCommercialOperationState> =
   Readonly<{ changed: boolean; operationId: string; state: S; revision: number }>;
 export type OpenCreditClientProfileReservation = Readonly<{
-  operationId: string; state: "IN_FLIGHT"; revision: number; profile: OpenCreditClientProfilePayload;
+  operationId: string; state: "IN_FLIGHT"; revision: number; profile: OpenCreditClientProfilePayload; profileJson: string;
   dispatchAuthorization: Readonly<{ authorizationId: string; authorizationRevision: number; authorizationEventId: string }>;
 }>;
 const KIND = "CLIENT_PROFILE_UPSERT";
@@ -206,11 +206,14 @@ export async function reserveOpenCreditClientProfileOperationForDispatch(db: Db,
     if (!identity) return fail("IDENTITY_NOT_FOUND");
     const { profile } = await fresh(tx, input, identity.contactId, identity);
     const authorization = await dispatchAuthorization(tx, input, identity);
+    let profileJson: string;
+    try { profileJson = serializeOpenCreditClientProfilePayload(profile); }
+    catch { return fail("PROFILE_INVALID"); }
     const revision = input.expectedRevision + 1;
     const result = await tx.openCreditCommercialOperation.updateMany({ where: { id: operation.id, companyId: input.companyId, providerScope: input.providerScope, state: "PREPARED", revision: input.expectedRevision }, data: { state: "IN_FLIGHT", revision } });
     if (result.count !== 1) return fail(result.count === 0 ? "OPERATION_REVISION_CONFLICT" : "STORAGE_ERROR");
     await tx.openCreditCommercialOperationEvent.create({ data: { operationId: operation.id, companyId: input.companyId, providerScope: input.providerScope, actorUserId: actorId, action: "RESERVED_FOR_DISPATCH", previousState: "PREPARED", nextState: "IN_FLIGHT", revision, dispatchAuthorizationEventId: authorization.authorizationEventId }, select: { id: true } });
-    return { operationId: operation.id, state: "IN_FLIGHT", revision, profile, dispatchAuthorization: authorization };
+    return { operationId: operation.id, state: "IN_FLIGHT", revision, profile, profileJson, dispatchAuthorization: authorization };
   });
 }
 /** Protective classification only: post-dispatch revocation/freshness cannot block UNKNOWN. */

@@ -10,9 +10,21 @@ import type { OpenCreditPrepareClientProfileInput, OpenCreditOperationTransition
 import { assertOpenCreditCommercialOperationServiceTestDatabase } from "./opencredit-commercial-operation-service-postgres.guard";
 
 let service: typeof import("./opencredit-commercial-operation.service");
+let serializerFailure = false;
 before(async () => {
   const loader = Module as typeof Module & { _load(specifier: string, ...args: unknown[]): unknown }; const original = loader._load;
-  loader._load = (specifier, ...args) => specifier === "server-only" ? {} : original.call(loader, specifier, ...args);
+  loader._load = (specifier, ...args) => {
+    if (specifier === "server-only") return {};
+    const value = original.call(loader, specifier, ...args);
+    if (specifier === "./opencredit-client-profile-contract") {
+      const contract = value as typeof import("./opencredit-client-profile-contract");
+      return { ...contract, serializeOpenCreditClientProfilePayload: (input: unknown) => {
+        if (serializerFailure) throw Error("synthetic serializer fault");
+        return contract.serializeOpenCreditClientProfilePayload(input);
+      } };
+    }
+    return value;
+  };
   try { service = await import("./opencredit-commercial-operation.service"); } finally { loader._load = original; }
 });
 const actor: SessionUser = { id: "synthetic-admin", companyId: "synthetic-platform", role: "ADMIN", name: "Synthetic", email: "synthetic@example.invalid" };
@@ -121,8 +133,16 @@ for (const kind of ["SIMULATION", "PROPOSAL", "OTHER"]) test("prepare rejects ar
 test("existing intent with another Contact is conflict", () => configured(async () => { const f = fake("PREPARED"); f.state.identity!.contactId = "other"; await denied(() => invoke("prepare", f), "INTENT_CONFLICT"); }));
 test("unrecognized stored state is not interpreted", () => configured(async () => { const f = fake("OTHER"); await denied(() => invoke("prepare", f), "OPERATION_STATE_INVALID"); }));
 test("reserve returns freshly mapped memory-only profile only after commit", () => configured(async () => {
-  const f = fake("PREPARED"); const result = await invoke("reserve", f); assert.deepEqual(result, { operationId: "synthetic-operation", state: "IN_FLIGHT", revision: 1, profile: { cpf: "00000000000", nome: f.state.contact!.name, celular: f.state.contact!.phone, email: f.state.contact!.email }, dispatchAuthorization: { authorizationId: "synthetic-authorization", authorizationRevision: 0, authorizationEventId: "synthetic-granted" } });
+  const f = fake("PREPARED"); const result = await invoke("reserve", f); const profile = { cpf: "00000000000", nome: f.state.contact!.name, celular: f.state.contact!.phone, email: f.state.contact!.email };
+  assert.deepEqual(result, { operationId: "synthetic-operation", state: "IN_FLIGHT", revision: 1, profile, profileJson: JSON.stringify(profile), dispatchAuthorization: { authorizationId: "synthetic-authorization", authorizationRevision: 0, authorizationEventId: "synthetic-granted" } });
   assert.deepEqual(f.state.events.map(e => [e.action, e.previousState, e.nextState, e.revision]), [["RESERVED_FOR_DISPATCH", "PREPARED", "IN_FLIGHT", 1]]);
+}));
+test("serialization fault after authorization aborts before CAS and Event", () => configured(async () => {
+  const f = fake("PREPARED"); serializerFailure = true;
+  try { await denied(() => invoke("reserve", f), "PROFILE_INVALID"); }
+  finally { serializerFailure = false; }
+  assert(f.calls.includes("authorization-event.read")); assert(!f.calls.includes("operation.cas"));
+  assert.equal(f.state.operation!.state, "PREPARED"); assert.deepEqual(f.state.events, []);
 }));
 for (const state of ["IN_FLIGHT", "SUCCEEDED", "FAILED", "UNKNOWN", "OTHER"]) test("reserve refuses " + state + " without exposing profile", () => configured(async () => { const f = fake(state, 1); await denied(() => invoke("reserve", f), "OPERATION_STATE_CONFLICT"); assert.equal(f.calls.includes("contact"), false); assert.deepEqual(f.state.events, []); }));
 test("wrong expected revision is semantic conflict before freshness/CAS", () => configured(async () => { const f = fake("PREPARED", 2); await denied(() => invoke("reserve", f), "OPERATION_REVISION_CONFLICT"); assert.equal(f.calls.includes("contact"), false); }));
@@ -199,7 +219,10 @@ test("exact exports, server-only, no provider/reset API or unrelated runtime cal
     else if (/\.(tsx?|m?js|cjs)$/.test(e.name) && !/\.(test|integration)\./.test(e.name) && path.href !== new URL("./opencredit-commercial-operation.service.ts", import.meta.url).href) {
       const ast = ts.createSourceFile(path.pathname, readFileSync(path,"utf8"), ts.ScriptTarget.Latest, true);
       const visit = (node: ts.Node): void => {
-        if (ts.isStringLiteralLike(node)) assert.doesNotMatch(node.text, /(?:^|\/)opencredit-commercial-operation\.service(?:\.[cm]?[jt]s)?$/);
+        if (ts.isStringLiteralLike(node) && /(?:^|\/)opencredit-commercial-operation\.service(?:\.[cm]?[jt]s)?$/.test(node.text)) {
+          assert.equal(path.href, new URL("./opencredit-create-client-dispatcher.ts", import.meta.url).href);
+          assert(ts.isImportDeclaration(node.parent));
+        }
         ts.forEachChild(node, visit);
       };
       visit(ast);
@@ -343,7 +366,8 @@ test("prepare needs no authorization and never reads it", () => configured(async
 test("reserve records current grant metadata in a fresh closed object before releasing profile", () => configured(async () => {
   const f = fake("PREPARED");
   const r = await service.reserveOpenCreditClientProfileOperationForDispatch(f.db, transition());
-  assert.deepEqual(Object.keys(r).sort(), ["operationId", "state", "revision", "profile", "dispatchAuthorization"].sort());
+  assert.deepEqual(Object.keys(r).sort(), ["operationId", "state", "revision", "profile", "profileJson", "dispatchAuthorization"].sort());
+  assert.deepEqual(JSON.parse(r.profileJson), r.profile);
   assert.deepEqual(Object.keys(r.dispatchAuthorization).sort(), ["authorizationId", "authorizationRevision", "authorizationEventId"].sort());
   assert.equal(r.dispatchAuthorization.authorizationEventId, f.state.events[0].dispatchAuthorizationEventId);
   assert.ok(f.calls.indexOf("authorization-event.read") < f.calls.indexOf("operation.cas"));
@@ -383,6 +407,8 @@ test("AST reservation-only authorization reads and audit binding; settlement/pre
   const reserve = fn("reserveOpenCreditClientProfileOperationForDispatch");
   assert.ok(reserve.indexOf("await fresh(") < reserve.indexOf("await dispatchAuthorization("));
   assert.ok(reserve.indexOf("await dispatchAuthorization(") < reserve.indexOf("openCreditCommercialOperation.updateMany"));
+  assert.ok(reserve.indexOf("await dispatchAuthorization(") < reserve.indexOf("serializeOpenCreditClientProfilePayload(profile)"));
+  assert.ok(reserve.indexOf("serializeOpenCreditClientProfilePayload(profile)") < reserve.indexOf("openCreditCommercialOperation.updateMany"));
   assert.match(reserve, /dispatchAuthorizationEventId: authorization.authorizationEventId/);
   assert.match(fn("dispatchAuthorization"), /authorizationId_revision/);
   let calls = 0;

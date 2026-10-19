@@ -80,6 +80,9 @@ jobs:
       - name: Validate OpenCredit API client with mocked provider
         run: npx --yes tsx@4.20.6 src/lib/opencredit-api-client.test.ts
 
+      - name: Validate OpenCredit one-shot createClient dispatcher with fake provider
+        run: npx --yes tsx@4.20.6 --test src/lib/opencredit-create-client-dispatcher.test.ts
+
       - name: Validate OpenCredit commercial operation storage contract
         run: npx --yes tsx@4.20.6 src/lib/opencredit-commercial-operation-storage.test.ts
 
@@ -248,6 +251,12 @@ jobs:
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-consumer-authorization-postgres.integration.ts
         env:
           OPENCREDIT_CONSUMER_AUTHORIZATION_POSTGRES_TEST: "1"
+
+      - name: Validate OpenCredit one-shot dispatcher on disposable PostgreSQL with fake provider
+        run: npx --yes tsx@4.20.6 --test src/lib/opencredit-create-client-dispatcher-postgres.integration.ts
+        env:
+          OPENCREDIT_COMMERCIAL_OPERATION_SERVICE_POSTGRES_TEST: "1"
+          OPENCREDIT_CREATE_CLIENT_DISPATCHER_POSTGRES_TEST: "1"
 
       - name: Validate OpenCredit authorization review context on disposable PostgreSQL
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-consumer-authorization-context-postgres.integration.ts

@@ -17,6 +17,15 @@ before(async () => {
   } finally { loader._load = original; }
 });
 const config = Object.freeze({ tenantId: "Synthetic-Tenant_1", partnerId: "Synthetic-Partner_2" });
+test("configured context returns the exact validated tenant and same-snapshot scope only", () => {
+  const context = resolver.resolveOpenCreditProviderContext(config);
+  assert.deepEqual(context, { tenantId: config.tenantId, providerScope: resolver.resolveOpenCreditProviderScope(config) });
+  assert.deepEqual(Object.keys(context).sort(), ["providerScope", "tenantId"]);
+  let gets = 0;
+  assert.throws(() => resolver.resolveOpenCreditProviderContext({ get tenantId() { gets++; return "x"; }, partnerId: "x" }));
+  assert.equal(gets, 0);
+  for (const value of ["", "x\n", " bad", "bad/path"]) assert.throws(() => resolver.resolveOpenCreditProviderContext({ tenantId: value, partnerId: "x" }));
+});
 type Config = Parameters<typeof resolver.resolveOpenCreditProviderScope>[0];
 function rejected(value: unknown) {
   assert.throws(() => resolver.resolveOpenCreditProviderScope(value as Config), error => {
@@ -120,7 +129,7 @@ test("all sampled scopes satisfy unchanged parser, even when plain digest has el
   assert.equal(plainRejected, true);
 });
 test("public exports are closed", () => {
-  assert.deepEqual(Object.keys(resolver).sort(), ["OpenCreditProviderScopeResolverError", "resolveConfiguredOpenCreditProviderScope", "resolveOpenCreditProviderScope"]);
+  assert.deepEqual(Object.keys(resolver).sort(), ["OpenCreditProviderScopeResolverError", "resolveConfiguredOpenCreditProviderContext", "resolveConfiguredOpenCreditProviderScope", "resolveOpenCreditProviderContext", "resolveOpenCreditProviderScope"]);
 });
 test("source boundary: public server-only marker, no I/O, time, normalization, credentials or raw output", () => {
   const source = readFileSync("src/lib/opencredit-provider-scope-resolver.ts", "utf8");
@@ -138,17 +147,18 @@ test("source boundary: public server-only marker, no I/O, time, normalization, c
   function collect(node: ts.Node) { if (ts.isIdentifier(node)) identifiers.push(node.text); ts.forEachChild(node, collect); }
   collect(output);
   assert.deepEqual(Array.from(new Set(identifiers)).sort(), ["digest", "slice"]);
-  assert.match(source, /return parseOpenCreditProviderScope\(scope\)/);
+  assert.match(source, /providerScope: parseOpenCreditProviderScope\(scope\)/);
 });
-test("only the approved human admin boundary imports the resolver", () => {
+test("only approved human admin boundaries and dispatcher core import the resolver", () => {
   for (const file of readdirSync("src", { recursive: true, encoding: "utf8" })) {
-    if (!/\.tsx?$/.test(file) || file.endsWith(".test.ts") || file.endsWith("opencredit-provider-scope-resolver.ts")) continue;
+    if (!/\.tsx?$/.test(file) || /\.(test|integration)\.ts$/.test(file) || file.endsWith("opencredit-provider-scope-resolver.ts")) continue;
     let source = readFileSync("src/" + file, "utf8");
-    if (["lib/opencredit-consumer-authorization-admin-handler.ts", "lib/opencredit-consumer-authorization-context-admin-handler.ts"].includes(file.replace(/\\/g, "/"))) {
+    const dispatcher = file.replace(/\\/g, "/") === "lib/opencredit-create-client-dispatcher.ts";
+    if (dispatcher || ["lib/opencredit-consumer-authorization-admin-handler.ts", "lib/opencredit-consumer-authorization-context-admin-handler.ts"].includes(file.replace(/\\/g, "/"))) {
       const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
       const imports = ast.statements.filter(ts.isImportDeclaration).filter(node => (node.moduleSpecifier as ts.StringLiteral).text === "./opencredit-provider-scope-resolver");
       assert.equal(imports.length, 1);
-      assert.equal(imports[0].getText(ast), 'import { resolveConfiguredOpenCreditProviderScope } from "./opencredit-provider-scope-resolver";');
+      assert.equal(imports[0].getText(ast), dispatcher ? 'import { resolveConfiguredOpenCreditProviderContext } from "./opencredit-provider-scope-resolver";' : 'import { resolveConfiguredOpenCreditProviderScope } from "./opencredit-provider-scope-resolver";');
       source = source.slice(0, imports[0].pos) + source.slice(imports[0].end);
     }
     assert.doesNotMatch(source, /opencredit-provider-scope-resolver/);

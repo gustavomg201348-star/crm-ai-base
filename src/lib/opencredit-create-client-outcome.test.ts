@@ -68,7 +68,7 @@ test("exhaustive closed observation space: no current path can emit FAILED", () 
   const states = new Set<string>();
   for (let status = 100; status <= 599; status++) {
     for (const [success, created] of cases) states.add(policy.classifyOpenCreditCreateClientOutcome(parsed(status, success, created)).state);
-    for (const reason of ["INVALID_CONTENT_TYPE", "TOO_LARGE", "INVALID_UTF8", "INVALID_JSON", "STREAM_ERROR"] as const) {
+    for (const reason of ["INVALID_CONTENT_TYPE", "TOO_LARGE", "INVALID_UTF8", "INVALID_JSON", "STREAM_ERROR", "INVALID_RESPONSE", "INVALID_CONTRACT"] as const) {
       states.add(policy.classifyOpenCreditCreateClientOutcome({ kind: "UNREADABLE_RESPONSE", status, reason }).state);
     }
   }
@@ -76,7 +76,7 @@ test("exhaustive closed observation space: no current path can emit FAILED", () 
   assert.deepEqual(Array.from(states).sort(), ["SUCCEEDED", "UNKNOWN"]);
   assert.equal(states.has("FAILED"), false);
 });
-for (const reason of ["INVALID_CONTENT_TYPE", "TOO_LARGE", "INVALID_UTF8", "INVALID_JSON", "STREAM_ERROR"] as const) {
+for (const reason of ["INVALID_CONTENT_TYPE", "TOO_LARGE", "INVALID_UTF8", "INVALID_JSON", "STREAM_ERROR", "INVALID_RESPONSE", "INVALID_CONTRACT"] as const) {
   test(`unreadable ${reason} is UNKNOWN at every HTTP status`, () => {
     for (let status = 100; status <= 599; status++) assert.deepEqual(policy.classifyOpenCreditCreateClientOutcome({ kind: "UNREADABLE_RESPONSE", status, reason }),
       { state: "UNKNOWN", basis: "UNREADABLE_RESPONSE" });
@@ -174,7 +174,7 @@ test("runtime browser protection fails closed", () => {
   Object.defineProperty(globalThis, "window", { configurable: true, value: {} });
   try { reject(parsed()); } finally { Reflect.deleteProperty(globalThis, "window"); }
 });
-test("passivity AST guard: only public marker, one exact passive service consumer, CI gate", () => {
+test("passivity AST guard: public marker, exact service/dispatcher consumers, CI gate", () => {
   const filename = path.resolve("src/lib/opencredit-create-client-outcome.ts"), source = readFileSync(filename, "utf8");
   const ast = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true);
   const imports: string[] = [];
@@ -202,7 +202,7 @@ test("passivity AST guard: only public marker, one exact passive service consume
       const tree = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
       const consumer = (node: ts.Node): void => {
         if (ts.isStringLiteralLike(node) && /(?:^|\/)opencredit-create-client-outcome(?:\.[cm]?[jt]s)?$/.test(node.text)) {
-          assert.equal(path.resolve(file), approvedConsumer, "Unexpected outcome consumer: " + file);
+          assert([approvedConsumer, path.resolve("src/lib/opencredit-create-client-dispatcher.ts")].includes(path.resolve(file)), "Unexpected outcome consumer: " + file);
           assert.equal(node.text, "./opencredit-create-client-outcome");
           const parent = node.parent;
           assert(ts.isImportDeclaration(parent));
@@ -222,7 +222,7 @@ test("passivity AST guard: only public marker, one exact passive service consume
     }
   }
   scan("src"); scan("scripts");
-  assert.equal(approvedImports, 1);
+  assert.equal(approvedImports, 2);
   assert(readFileSync(".github/workflows/ci.yml", "utf8").includes("npx --yes tsx@4.20.6 --test src/lib/opencredit-create-client-outcome.test.ts"));
   assert.equal(fetchCalls, 0);
 });

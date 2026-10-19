@@ -170,7 +170,8 @@ for (const mode of freshness) material("new PREPARE rejects " + mode + " without
 material("RESERVE rebuilds fresh profile and commits IN_FLIGHT revision one with no payload persistence", async f => {
   const i = await prepared(f); await db.contact.update({ where: { id: f.contact.id }, data: { name: "Fresh synthetic person", phone: "21900000000", email: "fresh@example.invalid" } });
   const r = await service.reserveOpenCreditClientProfileOperationForDispatch(db, i);
-  assert.equal(r.state, "IN_FLIGHT"); assert.equal(r.revision, 1); assert.deepEqual(Object.keys(r).sort(), ["operationId", "profile", "revision", "state", "dispatchAuthorization"].sort());
+  assert.equal(r.state, "IN_FLIGHT"); assert.equal(r.revision, 1); assert.deepEqual(Object.keys(r).sort(), ["operationId", "profile", "profileJson", "revision", "state", "dispatchAuthorization"].sort());
+  assert.deepEqual(JSON.parse(r.profileJson), r.profile);
   assert.equal(r.profile.nome, "Fresh synthetic person"); assert.equal(r.profile.email, "fresh@example.invalid");
   assert.ok(JSON.stringify(r.profile).includes("21900000000")); await event(f, 2, "RESERVED_FOR_DISPATCH", "PREPARED", "IN_FLIGHT", 1);
 });
