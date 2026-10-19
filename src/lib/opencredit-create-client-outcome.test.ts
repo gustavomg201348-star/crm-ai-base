@@ -219,5 +219,9 @@ if (false) {
   const leaked: OpenCreditCreateClientOutcome = { state: "UNKNOWN", basis: "NO_RESPONSE", created: false };
   // @ts-expect-error This passive policy cannot produce FAILED, even at type level.
   const failed: OpenCreditCreateClientOutcome = { state: "FAILED", basis: "HTTP_201_UNCONFIRMED_RESULT" };
-  void [arbitrary, extra, leaked, failed];
+  // @ts-expect-error CREATED basis requires created=true.
+  const impossibleCreated: OpenCreditCreateClientOutcome = { state: "SUCCEEDED", basis: "HTTP_201_SUCCESS_CREATED", created: false };
+  // @ts-expect-error UPDATED basis requires created=false.
+  const impossibleUpdated: OpenCreditCreateClientOutcome = { state: "SUCCEEDED", basis: "HTTP_201_SUCCESS_UPDATED", created: true };
+  void [arbitrary, extra, leaked, failed, impossibleCreated, impossibleUpdated];
 }

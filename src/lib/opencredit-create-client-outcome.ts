@@ -6,7 +6,8 @@ export type OpenCreditCreateClientObservation =
   | { kind: "NO_RESPONSE"; reason: "TIMEOUT" | "NETWORK" };
 
 export type OpenCreditCreateClientOutcome =
-  | { state: "SUCCEEDED"; basis: "HTTP_201_SUCCESS_CREATED" | "HTTP_201_SUCCESS_UPDATED"; created: boolean }
+  | { state: "SUCCEEDED"; basis: "HTTP_201_SUCCESS_CREATED"; created: true }
+  | { state: "SUCCEEDED"; basis: "HTTP_201_SUCCESS_UPDATED"; created: false }
   | { state: "UNKNOWN"; basis: "HTTP_201_UNCONFIRMED_RESULT" | "HTTP_201_CONTRADICTORY_RESULT" | "UNPUBLISHED_HTTP_STATUS" | "UNREADABLE_RESPONSE" | "NO_RESPONSE" };
 
 export class OpenCreditCreateClientOutcomeError extends Error {
@@ -64,9 +65,10 @@ export function classifyOpenCreditCreateClientOutcome(input: unknown): OpenCredi
     const result = closedRecord(observation.result, ["success", "created"]);
     if (typeof result.success !== "boolean" || typeof result.created !== "boolean") throw Error();
     if (status !== 201) return { state: "UNKNOWN", basis: "UNPUBLISHED_HTTP_STATUS" };
+    // Both fields already derive from the same boolean; this assertion is type-only.
     if (result.success) return {
       state: "SUCCEEDED", basis: result.created ? "HTTP_201_SUCCESS_CREATED" : "HTTP_201_SUCCESS_UPDATED", created: result.created
-    };
+    } as Extract<OpenCreditCreateClientOutcome, { state: "SUCCEEDED" }>;
     // Example-only booleans cannot prove that the remote operation was not applied.
     if (!result.created) return { state: "UNKNOWN", basis: "HTTP_201_UNCONFIRMED_RESULT" };
     return { state: "UNKNOWN", basis: "HTTP_201_CONTRADICTORY_RESULT" };
