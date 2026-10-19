@@ -86,6 +86,9 @@ jobs:
       - name: Validate passive OpenCredit strict HTTP JSON response boundary
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-http-json-boundary.test.ts
 
+      - name: Validate passive OpenCredit createClient outcome policy
+        run: npx --yes tsx@4.20.6 --test src/lib/opencredit-create-client-outcome.test.ts
+
       - name: Validate OpenCredit trusted provider scope resolver
         run: npx --yes tsx@4.20.6 src/lib/opencredit-provider-scope-resolver.test.ts
 
