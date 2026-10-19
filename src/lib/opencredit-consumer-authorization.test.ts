@@ -317,6 +317,14 @@ test("only approved human admin mutation boundary; reservation only reads author
             ts.forEachChild(node, visit);
           };
           visit(ast);
+        } else if (path === "src/lib/opencredit-consumer-authorization-context.service.ts") {
+          const source = readFileSync(path, "utf8");
+          assert.doesNotMatch(source, /grantOpenCreditConsumerAuthorization|revokeOpenCreditConsumerAuthorization|consumer-authorization\.service/);
+          const ast = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true);
+          const visit = (n: ts.Node): void => {
+            if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression)) assert(!["create", "createMany", "update", "updateMany", "upsert", "delete", "deleteMany", "$queryRaw", "$executeRaw"].includes(n.expression.name.text));
+            ts.forEachChild(n, visit);
+          }; visit(ast);
         } else if (path === "src/lib/opencredit-consumer-authorization-admin-handler.ts") {
           const source = readFileSync(path, "utf8");
           const ast = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true);
@@ -325,6 +333,13 @@ test("only approved human admin mutation boundary; reservation only reads author
           assert.doesNotMatch(source, /\.openCreditConsumerAuthorization(?:Event)?\b/);
         } else if (!["src/lib/opencredit-commercial-operation-service.test.ts", "src/lib/opencredit-commercial-operation-service-postgres.integration.ts",
           "src/lib/opencredit-consumer-authorization-admin-handler.test.ts",
+          "src/lib/opencredit-consumer-authorization-context.service.test.ts",
+          "src/lib/opencredit-consumer-authorization-context-postgres.integration.ts",
+          "src/lib/opencredit-consumer-authorization-context-admin-handler.ts",
+          "src/lib/opencredit-consumer-authorization-context-admin-handler.test.ts",
+          "src/lib/opencredit-consumer-authorization-ui.ts", "src/lib/opencredit-consumer-authorization-ui.test.ts",
+          "src/app/components/integrations/OpenCreditConsumerAuthorizationPanel.tsx",
+          "src/app/api/admin/integrations/opencredit/consumer-authorization/context/route.ts",
           "src/lib/opencredit-provider-scope-resolver.test.ts", "src/lib/opencredit-strict-json.test.ts",
           "src/app/api/admin/integrations/opencredit/consumer-authorization/grant/route.ts",
           "src/app/api/admin/integrations/opencredit/consumer-authorization/revoke/route.ts"].includes(path)) {

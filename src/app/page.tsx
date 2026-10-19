@@ -26,6 +26,7 @@ import { MotorCommercialPage } from "@/app/components/opportunities/MotorCommerc
 import { NextBestActionPage } from "@/app/components/opportunities/NextBestActionPage";
 import { TemplateLibraryPage } from "@/app/components/templates/TemplateLibraryPage";
 import { OpenCreditSettingsCard } from "@/app/components/integrations/OpenCreditSettingsCard";
+import { OpenCreditConsumerAuthorizationPanel } from "@/app/components/integrations/OpenCreditConsumerAuthorizationPanel";
 import { useNewMessageSound } from "@/app/hooks/use-new-message-sound";
 import { resolveConversationChannelId } from "@/lib/conversation-channel.service";
 import { serializeCsvCell } from "@/lib/csv-export";
@@ -4998,6 +4999,8 @@ export default function Home() {
                 availableTags={reference.tags}
                 attendants={attendants}
                 currentUserId={session.user.id}
+                companyId={session.company.id}
+                canAttemptOpenCreditAuthorization={session.user.role === "ADMIN"}
                 isAdmin={userCanManageOperation(session)}
                 loading={conversationLoading}
                 selectedConversation={selectedConversation}
@@ -7070,6 +7073,8 @@ function Atendimento({
   availableTags,
   attendants,
   currentUserId,
+  companyId,
+  canAttemptOpenCreditAuthorization,
   isAdmin,
   loading,
   selectedConversation,
@@ -7104,6 +7109,8 @@ function Atendimento({
   availableTags: ReferenceData["tags"];
   attendants: AttendantRow[];
   currentUserId: string;
+  companyId: string;
+  canAttemptOpenCreditAuthorization: boolean;
   isAdmin: boolean;
   loading: boolean;
   selectedConversation: ConversationRow | null;
@@ -8117,6 +8124,13 @@ function Atendimento({
             />
           </dl>
         </div>
+        {selectedConversation && <OpenCreditConsumerAuthorizationPanel
+          enabled={canAttemptOpenCreditAuthorization}
+          companyId={companyId}
+          contactId={selectedConversation.contact.id}
+          conversationId={selectedConversation.id}
+          messages={selectedConversation.messages.map(({ id, direction, body, createdAt, type }) => ({ id, direction, body, createdAt, type }))}
+        />}
         <OpportunitySummaryCard
           error={opportunityError}
           loading={opportunityLoading}

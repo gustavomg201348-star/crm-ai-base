@@ -1,5 +1,117 @@
 # OpenCredit API authentication (not webhook authentication)
 
+## Human authorization review UI
+
+Current slice: an authenticated Platform Admin can review technical inbound evidence
+in the current Atendimento conversation and explicitly command the existing grant /
+revoke endpoints. This is an operational human attestation, NOT an automatic LGPD
+consent declaration or legal-basis determination. Legal/policy review remains external.
+
+`POST /api/admin/integrations/opencredit/consumer-authorization/context` is a
+read-only administrative snapshot. POST deliberately keeps identifiers out of query
+strings. Body is EXACTLY `{companyId, contactId, conversationId}`. The boundary uses
+session -> requirePlatformAdmin -> sameOrigin -> reject query/Authorization header ->
+application/json -> 2048 actual bytes / 1000ms total deadline / fatal UTF-8 / existing
+strict JSON parser -> exact IDs -> shared rate limit -> trusted scope -> read service.
+Actor is server session only; providerScope is configured OPENCREDIT_TENANT_ID +
+OPENCREDIT_PARTNER_ID through resolveConfiguredOpenCreditProviderScope(). Neither is
+accepted from the browser or returned. Purpose remains internal CLIENT_PROFILE_UPSERT.
+Grant/revoke boundaries and domain semantics are unchanged.
+
+Context rate limits are actor 60/minute (session Company/id) and target 30/minute
+(Company/contact), using the existing HMAC limiter. Every response is no-store;
+only safe nonnegative integer Retry-After is preserved. The domain read performs
+ZERO functional writes; shared RateLimitBucket infrastructure writes remain allowed.
+
+The server-only read service uses a bounded Serializable read transaction and
+rereads current User id/Company/ADMIN role/email plus isPlatformAdmin. It validates
+Company, scoped Contact and Conversation/contact/Company bindings. Archived contacts
+remain readable so existing authorization can still be reviewed and revoked; read
+does not demand current CPF/access/identity freshness. Grant ALWAYS revalidates those
+facts and evidence inside its own transaction at the moment of the command.
+
+Authorization lookup is scoped Company/providerScope/contact/CLIENT_PROFILE_UPSERT.
+Persisted structure is validated; corruption yields STORAGE_ERROR. Current evidence
+is resolved independently of the recent-candidate window. If it belongs to another
+valid conversation of this same Contact, evidenceMessageId is null for this view.
+No association is inferred. Response is EXACTLY:
+
+```text
+{ ok: true,
+  authorization: { exists, active, revision, evidenceInboundEventId, evidenceMessageId },
+  evidenceCandidates: [{ inboundEventId, messageId }] }
+```
+
+Absent authorization uses false/false/null/null/null. No authorizationId, body,
+CPF/phone/email, providerMessageId, providerScope, tenant/partner, identity/access,
+actor, timestamps, legal basis or raw rows are returned. Errors are fixed: auth 401,
+platform/origin/domain actor 403, malformed request 400, missing targets 404, limiter
+429 or 503, configuration/storage/unknown 503. No arbitrary exception/Prisma data leaks.
+
+The service reads the 100 most recent inbound events by local sequence DESC and
+returns at most 50 eligible pairs in that order. These are LOCAL UI limits, not
+OpenCredit rules or an assertion of provider chronological ordering. Technical
+eligibility matches the existing grant evidence facts: authenticated Meta HMAC v1,
+concrete channel, coherent Company/contact/conversation/channel/message relations,
+inbound text with nonblank body/provider message id. Body is used transiently only
+for the nonblank structural check; no semantic regex, keyword or AI analysis occurs.
+
+The compact panel is mounted once in the shared details-content function next to
+Ficha rapida, reused by desktop and mobile. Page props contain only session Company,
+role-ADMIN attempt flag, current Contact/Conversation and reduced existing messages.
+Frontend ADMIN is ONLY a loading optimization: the server remains authoritative;
+401/403 hides the panel and SUPERVISOR/AGENT do not request context. Normal
+ConversationRow, conversationInclude and mapConversation expose NO inboundEventId.
+Message text comes exclusively from the already loaded conversation, joined by
+messageId; unavailable messages are not invented or selectable. The context endpoint
+is the exclusive source of candidate inboundEventId; there is no manual ID input.
+
+Grant requires selecting ONE candidate, reading its full text, checking the explicit
+operational attestation and clicking Registrar autorizacao. Selection, checkbox,
+inbound arrival, effects and timers NEVER grant. ACTIVE authorization blocks new
+grant and shows its current evidence when locally available; revoke is required
+before choosing a different active evidence. Revoke requires an explicit confirmed
+click. Its exact body is Company/contact; grant's exact body adds only the selected
+candidate inboundEventId. No actor/scope/purpose/state/consent is sent.
+
+Both mutation responses are defensively validated and followed by a fresh context
+read, never optimistic state inferred from the mutation body. Closed human messages
+replace raw errors; semantic conflicts refresh the context. AbortController and epoch
+checks protect context AND mutations. A key of Company/contact/conversation forces
+synchronous remount/reset on target changes; unmount aborts and invalidates old
+requests. Aborting a browser request does NOT promise rollback of a server command;
+future reads remain authoritative. No automatic retry of mutation is introduced.
+
+Context is a potentially stale UI snapshot, NOT dispatch permission and NOT a
+replacement for the grant service. No CommercialOperation is created/reserved or
+settled by this flow; no OpenCredit HTTP/login/createClient, API client connection,
+dispatcher, AI/chatbot, automatic grant, FAILED/replay/reconciliation, schema,
+migration, environment, dependency or Railway change is introduced.
+Rollback plan (not executed): remove the context route, panel/composition and read
+service; restore the prior narrow consumer guards. Existing grant/revoke API and
+persisted evidence/state remain intact; no database rollback is required.
+
+Current status (supersedes the historical slice status blocks below):
+
+```text
+HTTP JSON RESPONSE BOUNDARY: IMPLEMENTED
+CREATE CLIENT REQUEST CONTRACT: IMPLEMENTED
+CREATE CLIENT OUTCOME POLICY: IMPLEMENTED
+CREATE CLIENT OUTCOME LEDGER SETTLEMENT: IMPLEMENTED
+TRUSTED PROVIDER SCOPE: IMPLEMENTED
+COMMERCIAL OPERATION LOCAL LEDGER: IMPLEMENTED
+AUTHENTICATED INBOUND EVIDENCE: IMPLEMENTED
+CONSUMER AUTHORIZATION EVIDENCE FOUNDATION: IMPLEMENTED
+COMMERCIAL OPERATION AUTHORIZATION ENFORCEMENT: IMPLEMENTED
+HUMAN AUTHORIZATION ADMIN COMMAND API: IMPLEMENTED
+HUMAN AUTHORIZATION ADMIN CONTEXT API: IMPLEMENTED
+HUMAN AUTHORIZATION REVIEW UI: IMPLEMENTED
+CREATE CLIENT DISPATCH: BLOCKED
+FAILED TRANSITION: BLOCKED
+RECONCILIATION: BLOCKED
+AUTOMATIC REPLAY: FORBIDDEN
+```
+
 ## Human authorization admin command boundary
 
 Two server-side commands now expose the existing authorization service:

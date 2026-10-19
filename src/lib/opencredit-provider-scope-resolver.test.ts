@@ -144,7 +144,7 @@ test("only the approved human admin boundary imports the resolver", () => {
   for (const file of readdirSync("src", { recursive: true, encoding: "utf8" })) {
     if (!/\.tsx?$/.test(file) || file.endsWith(".test.ts") || file.endsWith("opencredit-provider-scope-resolver.ts")) continue;
     let source = readFileSync("src/" + file, "utf8");
-    if (file.replace(/\\/g, "/") === "lib/opencredit-consumer-authorization-admin-handler.ts") {
+    if (["lib/opencredit-consumer-authorization-admin-handler.ts", "lib/opencredit-consumer-authorization-context-admin-handler.ts"].includes(file.replace(/\\/g, "/"))) {
       const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
       const imports = ast.statements.filter(ts.isImportDeclaration).filter(node => (node.moduleSpecifier as ts.StringLiteral).text === "./opencredit-provider-scope-resolver");
       assert.equal(imports.length, 1);
