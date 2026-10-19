@@ -151,7 +151,24 @@ test("public marker, exact exports, no side effects, dependencies or runtime cal
   function scan(dir: URL) { for (const e of readdirSync(dir, { withFileTypes: true })) {
     const path = new URL(e.name + (e.isDirectory() ? "/" : ""), dir);
     if (e.isDirectory()) scan(path);
-    else if (/\.(tsx?|m?js|cjs)$/.test(e.name) && !/\.(test|integration)\./.test(e.name) && e.name !== "opencredit-strict-json.ts") assert.doesNotMatch(readFileSync(path, "utf8"), /(?:import|require)[\s\S]{0,250}["'][^"']*opencredit-strict-json["']/);
+    else if (/\.(tsx?|m?js|cjs)$/.test(e.name) && !/\.(test|integration)\./.test(e.name) && e.name !== "opencredit-strict-json.ts") {
+      let checked = readFileSync(path, "utf8");
+      // One exact passive composition only. Its own CI guard forbids production
+      // consumers; do not exempt this basename in any other directory.
+      if (path.href === new URL("./opencredit-http-json-boundary.ts", import.meta.url).href) {
+        const boundary = ts.createSourceFile("boundary.ts", checked, ts.ScriptTarget.Latest, true);
+        const allowed = boundary.statements.filter(ts.isImportDeclaration)
+          .filter(node => (node.moduleSpecifier as ts.StringLiteral).text === "./opencredit-strict-json");
+        assert.equal(allowed.length, 1);
+        const bindings = allowed[0].importClause?.namedBindings;
+        assert(bindings && ts.isNamedImports(bindings));
+        assert.deepEqual(bindings.elements.map(binding => binding.name.text), ["parseOpenCreditStrictJson", "OpenCreditJsonValue"]);
+        // Remove only the checked import, then apply the original prohibition
+        // to everything else (including require/dynamic/extra imports).
+        checked = checked.slice(0, allowed[0].pos) + checked.slice(allowed[0].end);
+      }
+      assert.doesNotMatch(checked, /(?:import|require)[\s\S]{0,250}["'][^"']*opencredit-strict-json["']/);
+    }
   } }
   scan(new URL("../", import.meta.url)); scan(new URL("../../scripts/", import.meta.url));
   assert.match(readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8"), /npx --yes tsx@4\.20\.6 src\/lib\/opencredit-strict-json\.test\.ts/);

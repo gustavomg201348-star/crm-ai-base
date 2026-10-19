@@ -83,6 +83,9 @@ jobs:
       - name: Validate OpenCredit strict raw JSON parser
         run: npx --yes tsx@4.20.6 src/lib/opencredit-strict-json.test.ts
 
+      - name: Validate passive OpenCredit strict HTTP JSON response boundary
+        run: npx --yes tsx@4.20.6 --test src/lib/opencredit-http-json-boundary.test.ts
+
       - name: Validate OpenCredit trusted provider scope resolver
         run: npx --yes tsx@4.20.6 src/lib/opencredit-provider-scope-resolver.test.ts
 
