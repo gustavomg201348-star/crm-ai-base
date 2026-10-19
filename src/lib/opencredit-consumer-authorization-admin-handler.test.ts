@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
-import Module from "node:module";
+import Module, { createRequire } from "node:module";
 import { readFileSync, readdirSync } from "node:fs";
 import * as ts from "typescript";
 import { NextRequest } from "next/server";
@@ -151,6 +151,79 @@ test("forged code/getter never leaks or executes", async () => {
   Object.defineProperty(failure, "code", { get() { assert.fail("getter invoked"); } });
   await error(await fixture("grant", { failure }).handler(request()), 503, "OPENCREDIT_CONSUMER_AUTHORIZATION_UNAVAILABLE");
   Object.defineProperty(failure, "code", { value: "toString" });
+  await error(await fixture("grant", { failure }).handler(request()), 503, "OPENCREDIT_CONSUMER_AUTHORIZATION_UNAVAILABLE");
+});
+
+test("domain error from a separately loaded module instance retains all specific mappings", async () => {
+  const require = createRequire(import.meta.url);
+  const path = require.resolve("./opencredit-consumer-authorization.service.ts");
+  const cached = require.cache[path];
+  const loader = Module as typeof Module & { _load(specifier: string, ...args: unknown[]): unknown };
+  const original = loader._load;
+  let independent: typeof domain;
+  try {
+    delete require.cache[path];
+    loader._load = (specifier, ...args) => specifier === "server-only" ? {} : original.call(loader, specifier, ...args);
+    independent = require(path) as typeof domain;
+  } finally {
+    loader._load = original;
+    if (cached) require.cache[path] = cached; else delete require.cache[path];
+  }
+  assert.notEqual(independent.OpenCreditConsumerAuthorizationServiceError, domain.OpenCreditConsumerAuthorizationServiceError);
+  for (const action of ["grant", "revoke"] as const) for (const code of ["NOT_AUTHORIZED", "INVALID_COMPANY", "INVALID_CONTACT", "INVALID_PROVIDER_SCOPE", "INVALID_EVIDENCE", ...semantic, "STORAGE_ERROR"] as OpenCreditConsumerAuthorizationCode[]) {
+    const failure = new independent.OpenCreditConsumerAuthorizationServiceError(code);
+    assert(failure instanceof Error);
+    assert.equal(failure instanceof domain.OpenCreditConsumerAuthorizationServiceError, false);
+    const status = code === "NOT_AUTHORIZED" ? 403 : code.startsWith("INVALID_") ? 400 : code === "STORAGE_ERROR" ? 503 : 409;
+    await error(await fixture(action, { failure }).handler(request(action)), status, "OPENCREDIT_CONSUMER_AUTHORIZATION_" + code);
+  }
+});
+function descriptorError(code = "COMPANY_NOT_FOUND") {
+  return Object.defineProperties(new Error(), {
+    name: { configurable: true, value: "OpenCreditConsumerAuthorizationServiceError" },
+    code: { configurable: true, value: code },
+    message: { configurable: true, value: "OPENCREDIT_CONSUMER_AUTHORIZATION_" + code },
+  });
+}
+test("plain object with valid code or even all matching fields is not a domain Error", async () => {
+  for (const failure of [{ code: "COMPANY_NOT_FOUND" }, { name: "OpenCreditConsumerAuthorizationServiceError", code: "COMPANY_NOT_FOUND", message: "OPENCREDIT_CONSUMER_AUTHORIZATION_COMPANY_NOT_FOUND" }]) {
+    await error(await fixture("grant", { failure }).handler(request()), 503, "OPENCREDIT_CONSUMER_AUTHORIZATION_UNAVAILABLE");
+  }
+});
+for (const key of ["name", "code", "message"] as const) {
+  test("missing own data descriptor " + key + " fails closed", async () => {
+    const failure = descriptorError(); delete (failure as unknown as Record<string, unknown>)[key];
+    await error(await fixture("grant", { failure }).handler(request()), 503, "OPENCREDIT_CONSUMER_AUTHORIZATION_UNAVAILABLE");
+  });
+  test("getter for " + key + " is never invoked", async () => {
+    let reads = 0; const failure = descriptorError(); Object.defineProperty(failure, key, { get() { reads++; throw new Error("sensitive"); } });
+    await error(await fixture("grant", { failure }).handler(request()), 503, "OPENCREDIT_CONSUMER_AUTHORIZATION_UNAVAILABLE"); assert.equal(reads, 0);
+  });
+  test("setter-only descriptor for " + key + " is rejected", async () => {
+    let writes = 0; const failure = descriptorError(); Object.defineProperty(failure, key, { set(_value: unknown) { writes++; } });
+    await error(await fixture("grant", { failure }).handler(request()), 503, "OPENCREDIT_CONSUMER_AUTHORIZATION_UNAVAILABLE"); assert.equal(writes, 0);
+  });
+}
+for (const [key, value] of [["name", "Error"], ["name", null], ["code", 409], ["message", "sensitive arbitrary provider body"], ["message", null]] as const) {
+  test("mismatched error contract " + key + JSON.stringify(value), async () => {
+    const failure = descriptorError(); Object.defineProperty(failure, key, { value });
+    await error(await fixture("grant", { failure }).handler(request()), 503, "OPENCREDIT_CONSUMER_AUTHORIZATION_UNAVAILABLE");
+  });
+}
+for (const code of ["toString", "__proto__", "constructor", "NOT_A_CODE", "COMPANY_NOT_FOUND\n"]) {
+  test("forged non-own STATUS code rejected " + JSON.stringify(code), async () => {
+    await error(await fixture("grant", { failure: descriptorError(code) }).handler(request()), 503, "OPENCREDIT_CONSUMER_AUTHORIZATION_UNAVAILABLE");
+    assert.equal(Object.getPrototypeOf({}), Object.prototype);
+  });
+}
+test("valid own descriptors map specifically without reading raw stack/cause/meta", async () => {
+  let reads = 0; const failure = descriptorError();
+  for (const key of ["stack", "cause", "meta"]) Object.defineProperty(failure, key, { get() { reads++; throw new Error("sensitive"); } });
+  await error(await fixture("grant", { failure }).handler(request()), 409, "OPENCREDIT_CONSUMER_AUTHORIZATION_COMPANY_NOT_FOUND"); assert.equal(reads, 0);
+});
+test("wrong message and raw cause/meta/stack never appear in fallback", async () => {
+  const failure = Object.assign(descriptorError(), { cause: "sensitive cause", meta: { password: "sensitive" } });
+  Object.defineProperty(failure, "message", { value: "sensitive raw response" });
   await error(await fixture("grant", { failure }).handler(request()), 503, "OPENCREDIT_CONSUMER_AUTHORIZATION_UNAVAILABLE");
 });
 for (const value of [{ ...result, revision: -1 }, { ...result, authorizationId: {} }, { ...result, active: "true" }, { ...result, changed: 1 }, Object.defineProperty({ ...result }, "changed", { get() { assert.fail("getter invoked"); } })]) {

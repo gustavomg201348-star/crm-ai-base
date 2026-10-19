@@ -6,7 +6,6 @@ import { sameOrigin } from "./opencredit-admin-request";
 import { parseOpenCreditStrictJson } from "./opencredit-strict-json";
 import { resolveConfiguredOpenCreditProviderScope } from "./opencredit-provider-scope-resolver";
 import {
-  OpenCreditConsumerAuthorizationServiceError,
   grantOpenCreditConsumerAuthorizationFromInboundEvidence,
   revokeOpenCreditConsumerAuthorization,
   type OpenCreditConsumerAuthorizationCode,
@@ -31,6 +30,20 @@ const STATUS: Readonly<Record<OpenCreditConsumerAuthorizationCode, number>> = {
   EVIDENCE_SCOPE_MISMATCH: 409, EVIDENCE_NOT_VERIFIED: 409, EVIDENCE_UNSUPPORTED: 409,
   AUTHORIZATION_CONFLICT: 409, CONCURRENT_CONFLICT: 409, STORAGE_ERROR: 503,
 };
+/** Module-independent closed error contract; never invoke exception accessors. */
+function readConsumerAuthorizationServiceCode(error: unknown): OpenCreditConsumerAuthorizationCode | null {
+  try {
+    if (!(error instanceof Error)) return null;
+    const name = Object.getOwnPropertyDescriptor(error, "name");
+    const code = Object.getOwnPropertyDescriptor(error, "code");
+    const message = Object.getOwnPropertyDescriptor(error, "message");
+    if (!name || !("value" in name) || !code || !("value" in code) || !message || !("value" in message)) return null;
+    if (name.value !== "OpenCreditConsumerAuthorizationServiceError" || typeof code.value !== "string"
+      || !Object.prototype.hasOwnProperty.call(STATUS, code.value)
+      || message.value !== "OPENCREDIT_CONSUMER_AUTHORIZATION_" + code.value) return null;
+    return code.value as OpenCreditConsumerAuthorizationCode;
+  } catch { return null; }
+}
 const validId = (value: unknown): value is string => typeof value === "string"
   && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?![\s\S])/.test(value);
 const reply = (body: object, status = 200) => NextResponse.json(body, {
@@ -130,15 +143,8 @@ export function createOpenCreditConsumerAuthorizationAdminHandler(action: "grant
       }
       return reply({ ok: true, changed: values.changed, authorizationId: values.authorizationId, active: values.active, revision: values.revision });
     } catch (error) {
-      try {
-        if (error instanceof OpenCreditConsumerAuthorizationServiceError) {
-          const descriptor = Object.getOwnPropertyDescriptor(error, "code");
-          const code: unknown = descriptor && "value" in descriptor ? descriptor.value : undefined;
-          if (typeof code === "string" && Object.prototype.hasOwnProperty.call(STATUS, code)) {
-            return reply({ error: "OPENCREDIT_CONSUMER_AUTHORIZATION_" + code }, STATUS[code as OpenCreditConsumerAuthorizationCode]);
-          }
-        }
-      } catch { /* Fail closed even for malformed exception objects. */ }
+      const code = readConsumerAuthorizationServiceCode(error);
+      if (code !== null) return reply({ error: "OPENCREDIT_CONSUMER_AUTHORIZATION_" + code }, STATUS[code]);
       return reply({ error: "OPENCREDIT_CONSUMER_AUTHORIZATION_UNAVAILABLE" }, 503);
     }
   };
