@@ -7,6 +7,53 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model OpenCreditConsumerAuthorization {
+  id String @id @default(cuid())
+  companyId String
+  contactId String
+  remoteIdentityId String
+  providerScope String
+  purpose String
+  evidenceInboundEventId String
+  active Boolean
+  revision Int
+  changedByUserId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  contact Contact @relation(fields: [companyId, contactId], references: [companyId, id], onDelete: Restrict, onUpdate: NoAction)
+  remoteIdentity OpenCreditRemoteIdentity @relation(fields: [remoteIdentityId, companyId, providerScope], references: [id, companyId, providerScope], onDelete: Restrict, onUpdate: NoAction)
+  evidence ConversationInboundEvent @relation("ConsumerAuthorizationEvidence", fields: [evidenceInboundEventId, companyId, contactId], references: [id, companyId, contactId], onDelete: Restrict, onUpdate: NoAction)
+  changedBy User @relation("ConsumerAuthorizationChangedBy", fields: [changedByUserId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  events OpenCreditConsumerAuthorizationEvent[]
+  @@unique([companyId, providerScope, contactId, purpose], map: "OCConsumerAuth_company_scope_contact_purpose_key")
+  @@unique([id, companyId, providerScope], map: "OCConsumerAuth_id_company_scope_key")
+  @@index([remoteIdentityId], map: "OCConsumerAuth_identity_idx")
+  @@index([changedByUserId], map: "OCConsumerAuth_actor_idx")
+  @@index([companyId, providerScope, active], map: "OCConsumerAuth_scope_active_idx")
+  @@index([evidenceInboundEventId], map: "OCConsumerAuth_evidence_idx")
+}
+
+model OpenCreditConsumerAuthorizationEvent {
+  id String @id @default(cuid())
+  authorizationId String
+  companyId String
+  providerScope String
+  actorUserId String
+  action String
+  previousActive Boolean?
+  nextActive Boolean
+  revision Int
+  evidenceInboundEventId String
+  createdAt DateTime @default(now())
+  authorization OpenCreditConsumerAuthorization @relation(fields: [authorizationId, companyId, providerScope], references: [id, companyId, providerScope], onDelete: Restrict, onUpdate: NoAction)
+  actor User @relation("ConsumerAuthorizationEventActor", fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  evidence ConversationInboundEvent @relation("ConsumerAuthorizationEventEvidence", fields: [evidenceInboundEventId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  @@index([authorizationId, createdAt, id], map: "OCConsumerAuthEvent_authorization_idx")
+  @@index([actorUserId], map: "OCConsumerAuthEvent_actor_idx")
+  @@index([evidenceInboundEventId], map: "OCConsumerAuthEvent_evidence_idx")
+}
+
 model ConversationInboundEvent {
   provenanceKind String?
   provenanceVersion Int?
@@ -25,6 +72,9 @@ model ConversationInboundEvent {
   channelConversation Conversation? @relation("InboundEventChannel", fields: [conversationId, contactId, channelId], references: [id, contactId, channelId], onDelete: Restrict, onUpdate: NoAction)
   message        Message @relation(fields: [messageId, conversationId], references: [id, conversationId], onDelete: Restrict, onUpdate: NoAction)
 
+  consumerAuthorizations OpenCreditConsumerAuthorization[] @relation("ConsumerAuthorizationEvidence")
+  consumerAuthorizationEvents OpenCreditConsumerAuthorizationEvent[] @relation("ConsumerAuthorizationEventEvidence")
+  @@unique([id, companyId, contactId], map: "InboundEvent_id_company_contact_key")
   @@unique([messageId, conversationId], map: "InboundEvent_message_conversation_key")
   @@unique([conversationId, sequence], map: "InboundEvent_conversation_sequence_key")
   @@index([companyId, channelId, createdAt], map: "InboundEvent_scope_created_idx")
@@ -283,6 +333,7 @@ model ChatbotOutbox {
 
 
 model Company {
+  openCreditConsumerAuthorizations OpenCreditConsumerAuthorization[]
   id            String          @id @default(cuid())
   name          String
   email         String?
@@ -360,6 +411,7 @@ model OpenCreditCommercialAccessEvent {
 }
 
 model OpenCreditRemoteIdentity {
+  consumerAuthorizations OpenCreditConsumerAuthorization[]
   id              String   @id @default(cuid())
   companyId       String
   contactId       String
@@ -601,6 +653,8 @@ model MediaAsset {
 }
 
 model User {
+  openCreditConsumerAuthorizationChanges OpenCreditConsumerAuthorization[] @relation("ConsumerAuthorizationChangedBy")
+  openCreditConsumerAuthorizationEvents OpenCreditConsumerAuthorizationEvent[] @relation("ConsumerAuthorizationEventActor")
   id            String            @id @default(cuid())
   companyId     String
   name          String
@@ -721,6 +775,7 @@ model NextBestActionEvent {
 }
 
 model Contact {
+  openCreditConsumerAuthorizations OpenCreditConsumerAuthorization[]
   id                 String              @id @default(cuid())
   companyId          String
   ownerId            String?
