@@ -174,7 +174,7 @@ test("runtime browser protection fails closed", () => {
   Object.defineProperty(globalThis, "window", { configurable: true, value: {} });
   try { reject(parsed()); } finally { Reflect.deleteProperty(globalThis, "window"); }
 });
-test("passivity AST guard: only public marker, no runtime consumers, preserved ledger, CI gate", () => {
+test("passivity AST guard: only public marker, one exact passive service consumer, CI gate", () => {
   const filename = path.resolve("src/lib/opencredit-create-client-outcome.ts"), source = readFileSync(filename, "utf8");
   const ast = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true);
   const imports: string[] = [];
@@ -192,6 +192,8 @@ test("passivity AST guard: only public marker, no runtime consumers, preserved l
   visit(ast); assert.deepEqual(imports, ["server-only"]);
   assert.doesNotMatch(source, /\b(fetch|Response|Prisma|process|console|Buffer|XMLHttpRequest|setTimeout|setInterval|localStorage|sessionStorage)\b|node:|\.request\(|opencredit-api-client|readOpenCreditStrictJsonResponse|markSucceeded|markFailed|markUnknown/);
   assert(source.includes('typeof window !== "undefined"'));
+  let approvedImports = 0;
+  const approvedConsumer = path.resolve("src/lib/opencredit-commercial-operation.service.ts");
   function scan(directory: string) {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
       const file = path.join(directory, entry.name);
@@ -199,13 +201,28 @@ test("passivity AST guard: only public marker, no runtime consumers, preserved l
       if (!/\.[cm]?[jt]sx?$/.test(file) || /\.(test|integration)\./.test(file) || path.resolve(file) === filename) continue;
       const tree = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
       const consumer = (node: ts.Node): void => {
-        if (ts.isStringLiteralLike(node) && /(?:^|\/)opencredit-create-client-outcome(?:\.[cm]?[jt]s)?$/.test(node.text)) assert.fail("Unexpected outcome consumer: " + file);
+        if (ts.isStringLiteralLike(node) && /(?:^|\/)opencredit-create-client-outcome(?:\.[cm]?[jt]s)?$/.test(node.text)) {
+          assert.equal(path.resolve(file), approvedConsumer, "Unexpected outcome consumer: " + file);
+          assert.equal(node.text, "./opencredit-create-client-outcome");
+          const parent = node.parent;
+          assert(ts.isImportDeclaration(parent));
+          assert.equal(parent.moduleSpecifier, node);
+          const clause = parent.importClause;
+          assert(clause && !clause.name && !clause.isTypeOnly);
+          assert(clause.namedBindings && ts.isNamedImports(clause.namedBindings));
+          assert.deepEqual(clause.namedBindings.elements.map(e => {
+            assert.equal(e.propertyName, undefined, "No aliases");
+            return [e.name.text, e.isTypeOnly];
+          }), [["classifyOpenCreditCreateClientOutcome", false], ["OpenCreditCreateClientObservation", true]]);
+          approvedImports++;
+        }
         ts.forEachChild(node, consumer);
       };
       consumer(tree);
     }
   }
   scan("src"); scan("scripts");
+  assert.equal(approvedImports, 1);
   assert(readFileSync(".github/workflows/ci.yml", "utf8").includes("npx --yes tsx@4.20.6 --test src/lib/opencredit-create-client-outcome.test.ts"));
   assert.equal(fetchCalls, 0);
 });

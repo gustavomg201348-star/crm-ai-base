@@ -5,13 +5,14 @@ import { isPlatformAdmin } from "./permissions";
 import { canonicalizeOpenCreditOwnershipCpf, parseOpenCreditProviderScope, type OpenCreditProviderScope } from "./opencredit-commercial-identity-policy";
 import { buildOpenCreditClientProfileFromContact } from "./opencredit-contact-client-profile-adapter";
 import type { OpenCreditClientProfilePayload } from "./opencredit-client-profile-contract";
+import { classifyOpenCreditCreateClientOutcome, type OpenCreditCreateClientObservation } from "./opencredit-create-client-outcome";
 
 const CODES = ["NOT_AUTHORIZED", "INVALID_COMPANY", "INVALID_CONTACT", "INVALID_OPERATION", "INVALID_PROVIDER_SCOPE",
   "INVALID_INTENT_KEY", "INVALID_REVISION", "COMPANY_NOT_FOUND", "CONTACT_NOT_FOUND", "CONTACT_ARCHIVED",
   "CONTACT_CPF_MISSING", "CONTACT_CPF_INVALID", "CONTACT_AMBIGUOUS", "COMMERCIAL_ACCESS_MISSING",
   "COMMERCIAL_ACCESS_DISABLED", "IDENTITY_NOT_FOUND", "IDENTITY_DISABLED", "IDENTITY_SNAPSHOT_MISMATCH",
   "IDENTITY_CONFLICT", "PROFILE_INVALID", "INTENT_CONFLICT", "OPERATION_NOT_FOUND", "OPERATION_KIND_MISMATCH",
-  "OPERATION_STATE_INVALID", "OPERATION_STATE_CONFLICT", "OPERATION_REVISION_CONFLICT", "CONCURRENT_CONFLICT", "STORAGE_ERROR"] as const;
+  "OPERATION_STATE_INVALID", "OPERATION_STATE_CONFLICT", "OPERATION_REVISION_CONFLICT", "INVALID_OBSERVATION", "CONCURRENT_CONFLICT", "STORAGE_ERROR"] as const;
 export type OpenCreditCommercialOperationServiceCode = typeof CODES[number];
 export class OpenCreditCommercialOperationServiceError extends Error {
   constructor(readonly code: OpenCreditCommercialOperationServiceCode) {
@@ -192,15 +193,32 @@ export async function reserveOpenCreditClientProfileOperationForDispatch(db: Db,
 /** Protective classification only: post-dispatch revocation/freshness cannot block UNKNOWN. */
 export async function markOpenCreditCommercialOperationUnknown(db: Db, supplied: OpenCreditOperationTransitionInput): Promise<OpenCreditCommercialOperationResult<"UNKNOWN">> {
   const input = transitionInput(supplied);
+  return settle(db, input, "UNKNOWN", "MARKED_UNKNOWN");
+}
+/** Passive post-dispatch fact recording, NOT permission to dispatch or reconcile. */
+export async function applyOpenCreditCreateClientObservation(db: Db, supplied: OpenCreditOperationTransitionInput,
+  observation: OpenCreditCreateClientObservation): Promise<OpenCreditCommercialOperationResult<"SUCCEEDED" | "UNKNOWN">> {
+  // Classify once before opening a transaction; retries reuse this sanitized outcome.
+  let outcome: ReturnType<typeof classifyOpenCreditCreateClientOutcome>;
+  try { outcome = classifyOpenCreditCreateClientOutcome(observation); }
+  catch { return fail("INVALID_OBSERVATION"); }
+  const input = transitionInput(supplied);
+  if (outcome.state === "UNKNOWN") return settle(db, input, "UNKNOWN", "MARKED_UNKNOWN");
+  return settle(db, input, "SUCCEEDED", outcome.created ? "MARKED_SUCCEEDED_CREATED" : "MARKED_SUCCEEDED_UPDATED");
+}
+/** One terminal CAS definition shared with the existing protective UNKNOWN API. */
+async function settle<S extends "SUCCEEDED" | "UNKNOWN">(db: Db, input: OpenCreditOperationTransitionInput, state: S,
+  action: S extends "SUCCEEDED" ? "MARKED_SUCCEEDED_CREATED" | "MARKED_SUCCEEDED_UPDATED" : "MARKED_UNKNOWN"):
+  Promise<OpenCreditCommercialOperationResult<S>> {
   return transaction(db, input, false, async (tx, actorId) => {
     const operation = await loadOperation(tx, input);
-    if (operation.state === "UNKNOWN") return { changed: false, operationId: operation.id, state: "UNKNOWN", revision: operation.revision };
+    if (operation.state === state) return { changed: false, operationId: operation.id, state, revision: operation.revision };
     if (operation.state !== "IN_FLIGHT") return fail("OPERATION_STATE_CONFLICT");
     if (operation.revision !== input.expectedRevision) return fail("OPERATION_REVISION_CONFLICT");
     const revision = input.expectedRevision + 1;
-    const result = await tx.openCreditCommercialOperation.updateMany({ where: { id: operation.id, companyId: input.companyId, providerScope: input.providerScope, state: "IN_FLIGHT", revision: input.expectedRevision }, data: { state: "UNKNOWN", revision } });
+    const result = await tx.openCreditCommercialOperation.updateMany({ where: { id: operation.id, companyId: input.companyId, providerScope: input.providerScope, state: "IN_FLIGHT", revision: input.expectedRevision }, data: { state, revision } });
     if (result.count !== 1) return fail(result.count === 0 ? "OPERATION_REVISION_CONFLICT" : "STORAGE_ERROR");
-    await tx.openCreditCommercialOperationEvent.create({ data: { operationId: operation.id, companyId: input.companyId, providerScope: input.providerScope, actorUserId: actorId, action: "MARKED_UNKNOWN", previousState: "IN_FLIGHT", nextState: "UNKNOWN", revision }, select: { id: true } });
-    return { changed: true, operationId: operation.id, state: "UNKNOWN", revision };
+    await tx.openCreditCommercialOperationEvent.create({ data: { operationId: operation.id, companyId: input.companyId, providerScope: input.providerScope, actorUserId: actorId, action, previousState: "IN_FLIGHT", nextState: state, revision }, select: { id: true } });
+    return { changed: true, operationId: operation.id, state, revision };
   });
 }

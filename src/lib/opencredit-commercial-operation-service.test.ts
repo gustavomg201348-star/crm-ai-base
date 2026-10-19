@@ -3,6 +3,8 @@ import { before, test } from "node:test";
 import Module from "node:module";
 import { readFileSync, readdirSync } from "node:fs";
 import { Prisma } from "@prisma/client";
+import * as ts from "typescript";
+import type { OpenCreditCreateClientObservation } from "./opencredit-create-client-outcome";
 import type { SessionUser } from "./auth";
 import type { OpenCreditPrepareClientProfileInput, OpenCreditOperationTransitionInput, OpenCreditCommercialOperationServiceCode } from "./opencredit-commercial-operation.service";
 import { assertOpenCreditCommercialOperationServiceTestDatabase } from "./opencredit-commercial-operation-service-postgres.guard";
@@ -89,11 +91,13 @@ async function denied(run: () => Promise<unknown>, code: OpenCreditCommercialOpe
     assert.doesNotMatch(error.message + JSON.stringify(error), /00000000000|synthetic-|Fixture@|private-fixture/); return true;
   });
 }
-const modes = ["prepare", "reserve", "unknown"] as const;
+const observed = (success = true, created = true, status = 201): OpenCreditCreateClientObservation => ({ kind: "PARSED_RESPONSE", status, result: { success, created } });
+const modes = ["prepare", "reserve", "unknown", "settle"] as const;
 async function invoke(mode: typeof modes[number], f: ReturnType<typeof fake>, supplied?: unknown) {
   return mode === "prepare" ? service.prepareOpenCreditClientProfileOperation(f.db, (supplied ?? prepare()) as OpenCreditPrepareClientProfileInput)
     : mode === "reserve" ? service.reserveOpenCreditClientProfileOperationForDispatch(f.db, (supplied ?? transition()) as OpenCreditOperationTransitionInput)
-    : service.markOpenCreditCommercialOperationUnknown(f.db, (supplied ?? transition(1)) as OpenCreditOperationTransitionInput);
+    : mode === "unknown" ? service.markOpenCreditCommercialOperationUnknown(f.db, (supplied ?? transition(1)) as OpenCreditOperationTransitionInput)
+    : service.applyOpenCreditCreateClientObservation(f.db, (supplied ?? transition(1)) as OpenCreditOperationTransitionInput, observed());
 }
 test("prepare creates exactly one PREPARED event atomically, returning no profile/PII", () => configured(async () => {
   const f = fake(); assert.deepEqual(await invoke("prepare", f), { changed: true, operationId: "synthetic-operation", state: "PREPARED", revision: 0 });
@@ -161,13 +165,13 @@ for (const [label, setup, code] of [
 ] as const) for (const mode of ["prepare", "reserve"] as const) test(mode + " fails closed for " + label, () => configured(async () => { const f = fake(mode === "prepare" ? undefined : "PREPARED"); setup(f); await denied(() => invoke(mode, f), code); assert.equal(f.calls.some(c => ["operation.create","operation.cas","event.create"].includes(c)), false); }));
 for (const target of ["OCOperation_company_scope_intent_key", ["companyId", "providerScope", "intentKey"]]) test("prepare bounded retry of expected P2002 metadata " + typeof target, () => configured(async () => { const f = fake(); f.faults.push(prismaError("P2002", { modelName: "OpenCreditCommercialOperation", target })); assert.equal((await invoke("prepare", f)).revision, 0); assert.equal(f.attempts(), 2); assert.equal(f.state.events.length, 1); }));
 for (const meta of [{ target: ["id"] }, { target: "OCOperation_id_company_scope_key" }, { target: "unknown" }, { modelName: "OpenCreditCommercialOperationEvent", target: "OCOperation_company_scope_intent_key" }]) test("unexpected P2002 not retried " + JSON.stringify(meta), () => configured(async () => { const f = fake(); f.faults.push(prismaError("P2002", meta)); await denied(() => invoke("prepare", f), "STORAGE_ERROR"); assert.equal(f.attempts(), 1); }));
-for (const mode of modes) test(mode + " P2034 bounded, rereads actor every attempt", () => configured(async () => { const f = fake(mode === "prepare" ? undefined : mode === "reserve" ? "PREPARED" : "IN_FLIGHT", mode === "unknown" ? 1 : 0); f.faults.push(...Array.from({ length: 3 }, () => prismaError("P2034"))); await denied(() => invoke(mode, f), "CONCURRENT_CONFLICT"); assert.equal(f.attempts(), 3); assert.equal(f.calls.filter(c => c === "actor").length, 3); assert.equal(f.state.events.length, 0); }));
+for (const mode of modes) test(mode + " P2034 bounded, rereads actor every attempt", () => configured(async () => { const f = fake(mode === "prepare" ? undefined : mode === "reserve" ? "PREPARED" : "IN_FLIGHT", mode === "unknown" || mode === "settle" ? 1 : 0); f.faults.push(...Array.from({ length: 3 }, () => prismaError("P2034"))); await denied(() => invoke(mode, f), "CONCURRENT_CONFLICT"); assert.equal(f.attempts(), 3); assert.equal(f.calls.filter(c => c === "actor").length, 3); assert.equal(f.state.events.length, 0); }));
 test("expected prepare P2002 exhaustion is bounded", () => configured(async () => { const f = fake(); f.faults.push(...Array.from({ length: 3 }, () => prismaError("P2002", { target: "OCOperation_company_scope_intent_key" }))); await denied(() => invoke("prepare", f), "CONCURRENT_CONFLICT"); assert.equal(f.attempts(), 3); }));
 test("prepare retry rereads winning intent rather than creating another", () => configured(async () => { const f = fake(); f.faults.push(prismaError("P2002", { target: "OCOperation_company_scope_intent_key" })); f.onAttempt(() => { if (f.attempts() === 2) f.state.operation = operation(); }); assert.equal((await invoke("prepare", f) as { changed: boolean }).changed, false); assert.equal(f.state.events.length, 0); }));
 test("reserve loser after transactional retry never gets profile", () => configured(async () => { const f = fake("PREPARED"); f.faults.push(prismaError("P2034")); f.onAttempt(() => { if (f.attempts() === 2) f.state.operation = operation("IN_FLIGHT", 1); }); await denied(() => invoke("reserve", f), "OPERATION_STATE_CONFLICT"); assert.equal(f.calls.filter(c => c === "contact").length, 1); }));
 test("retry revalidates stale actor", () => configured(async () => { const f = fake(); f.failEvent(prismaError("P2034")); f.onAttempt(() => { if (f.attempts() === 2) f.state.actor = null; }); await denied(() => invoke("prepare", f), "NOT_AUTHORIZED"); assert.equal(f.attempts(), 2); assert.equal(f.state.operation, null); }));
-for (const mode of ["reserve", "unknown"] as const) test(mode + " does not retry P2002", () => configured(async () => { const f = fake(mode === "reserve" ? "PREPARED" : "IN_FLIGHT", mode === "unknown" ? 1 : 0); f.faults.push(prismaError("P2002", { target: "OCOperation_company_scope_intent_key" })); await denied(() => invoke(mode, f), "STORAGE_ERROR"); assert.equal(f.attempts(), 1); }));
-for (const mode of modes) test(mode + " Event failure rolls back mutation", () => configured(async () => { const f = fake(mode === "prepare" ? undefined : mode === "reserve" ? "PREPARED" : "IN_FLIGHT", mode === "unknown" ? 1 : 0); const before = f.state.operation && { ...f.state.operation }; f.failEvent(prismaError("P2003")); await denied(() => invoke(mode, f), "STORAGE_ERROR"); assert.deepEqual(f.state.operation, before); assert.equal(f.state.events.length, 0); }));
+for (const mode of ["reserve", "unknown", "settle"] as const) test(mode + " does not retry P2002", () => configured(async () => { const f = fake(mode === "reserve" ? "PREPARED" : "IN_FLIGHT", mode !== "reserve" ? 1 : 0); f.faults.push(prismaError("P2002", { target: "OCOperation_company_scope_intent_key" })); await denied(() => invoke(mode, f), "STORAGE_ERROR"); assert.equal(f.attempts(), 1); }));
+for (const mode of modes) test(mode + " Event failure rolls back mutation", () => configured(async () => { const f = fake(mode === "prepare" ? undefined : mode === "reserve" ? "PREPARED" : "IN_FLIGHT", mode === "unknown" || mode === "settle" ? 1 : 0); const before = f.state.operation && { ...f.state.operation }; f.failEvent(prismaError("P2003")); await denied(() => invoke(mode, f), "STORAGE_ERROR"); assert.deepEqual(f.state.operation, before); assert.equal(f.state.events.length, 0); }));
 test("commit failure never returns the prebuilt profile", () => configured(async () => { const f = fake("PREPARED"); f.failCommit(new Error("private-fixture")); await denied(() => invoke("reserve", f), "STORAGE_ERROR"); assert.equal(f.state.operation!.state, "PREPARED"); assert.equal(f.state.events.length, 0); }));
 const env = { CI: "true", GITHUB_ACTIONS: "true", OPENCREDIT_COMMERCIAL_OPERATION_SERVICE_POSTGRES_TEST: "1", DATABASE_URL: "postgresql://qevora_ci:qevora_ci_password@127.0.0.1:5432/qevora_ci?schema=public" };
 test("material guard strictly limits flags, loopback, schema, credentials and ports", () => {
@@ -178,16 +182,151 @@ test("material guard strictly limits flags, loopback, schema, credentials and po
 test("exact exports, server-only, no provider/reset API or unrelated runtime caller", () => {
   const source = readFileSync(new URL("./opencredit-commercial-operation.service.ts", import.meta.url), "utf8");
   assert.match(source, /^import "server-only";/);
-  assert.doesNotMatch(source, /fetch\(|opencredit-api-client|console\.|process\.env|logger|\$executeRaw|\$queryRaw|setTimeout|new PrismaClient|\.delete\(|\.upsert\(|\.createMany\(/);
-  assert.deepEqual(Object.keys(service).sort(), ["OpenCreditCommercialOperationServiceError", "prepareOpenCreditClientProfileOperation", "reserveOpenCreditClientProfileOperationForDispatch", "markOpenCreditCommercialOperationUnknown"].sort());
-  assert.doesNotMatch(source, /data:\s*\{\s*state:\s*"(?:SUCCEEDED|FAILED|PREPARED)"/);
+  assert.doesNotMatch(source, /\bfetch\b|opencredit-api-client|readOpenCreditStrictJsonResponse|\.request\s*\(|console\.|process\.env|logger|\$executeRaw|\$queryRaw|setTimeout|new PrismaClient|\.delete\(|\.upsert\(|\.createMany\(/);
+  assert.deepEqual(Object.keys(service).sort(), ["OpenCreditCommercialOperationServiceError", "prepareOpenCreditClientProfileOperation", "reserveOpenCreditClientProfileOperationForDispatch", "markOpenCreditCommercialOperationUnknown", "applyOpenCreditCreateClientObservation"].sort());
+  assert.doesNotMatch(source, /data:\s*\{\s*state:\s*"(?:FAILED|PREPARED)"/);
   assert.match(source, /buildOpenCreditClientProfileFromContact/);
   function scan(dir: URL) { for (const e of readdirSync(dir, { withFileTypes: true })) {
     const path = new URL(e.name+(e.isDirectory()?"/":""),dir); if(e.isDirectory()) scan(path);
-    else if (/\.(tsx?|m?js|cjs)$/.test(e.name) && !/\.(test|integration)\./.test(e.name) && e.name !== "opencredit-commercial-operation.service.ts") assert.doesNotMatch(readFileSync(path,"utf8"), /(?:import|require)[\s\S]{0,250}["'][^"']*opencredit-commercial-operation\.service["']/);
+    else if (/\.(tsx?|m?js|cjs)$/.test(e.name) && !/\.(test|integration)\./.test(e.name) && path.href !== new URL("./opencredit-commercial-operation.service.ts", import.meta.url).href) {
+      const ast = ts.createSourceFile(path.pathname, readFileSync(path,"utf8"), ts.ScriptTarget.Latest, true);
+      const visit = (node: ts.Node): void => {
+        if (ts.isStringLiteralLike(node)) assert.doesNotMatch(node.text, /(?:^|\/)opencredit-commercial-operation\.service(?:\.[cm]?[jt]s)?$/);
+        ts.forEachChild(node, visit);
+      };
+      visit(ast);
+    }
   } }
   scan(new URL("../",import.meta.url)); scan(new URL("../../scripts/",import.meta.url));
   const ci = readFileSync(new URL("../../.github/workflows/ci.yml",import.meta.url),"utf8"); assert.match(ci,/tsx@4\.20\.6 src\/lib\/opencredit-commercial-operation-service.test.ts/); assert.match(ci,/OPENCREDIT_COMMERCIAL_OPERATION_SERVICE_POSTGRES_TEST: "1"/);
   const material = readFileSync(new URL("./opencredit-commercial-operation-service-postgres.integration.ts",import.meta.url),"utf8");
   const guardAt = material.indexOf("assertOpenCreditCommercialOperationServiceTestDatabase(process.env)"); assert.ok(guardAt >= 0 && material.indexOf("new PrismaClient") > guardAt);
+});
+
+for (const created of [true, false]) test("settlement SUCCEEDED " + created + " records only exact action and safe result, without freshness", () => configured(async () => {
+  const f = fake("IN_FLIGHT", 1); f.state.contact = null; f.state.identity = null; f.state.access = null; f.state.matches = [];
+  const result = await service.applyOpenCreditCreateClientObservation(f.db, transition(1), observed(true, created));
+  assert.deepEqual(result, { changed: true, operationId: "synthetic-operation", state: "SUCCEEDED", revision: 2 });
+  assert.deepEqual(f.calls, ["actor", "company", "operation.read", "operation.cas", "event.create"]);
+  assert.deepEqual(f.options, [{ isolationLevel: "Serializable", maxWait: 2000, timeout: 5000 }]);
+  assert.deepEqual(f.state.events, [{ operationId: "synthetic-operation", companyId: "synthetic-company", providerScope: scope, actorUserId: actor.id,
+    action: created ? "MARKED_SUCCEEDED_CREATED" : "MARKED_SUCCEEDED_UPDATED", previousState: "IN_FLIGHT", nextState: "SUCCEEDED", revision: 2 }]);
+  assert.equal(f.state.operation!.createdByUserId, "synthetic-original");
+}));
+const unknownObservations: OpenCreditCreateClientObservation[] = [observed(false, false), observed(false, true),
+  ...[200, 202, 400, 401, 403, 409, 422, 429, 500, 502, 503, 504].map(status => observed(true, true, status)),
+  ...(["INVALID_CONTENT_TYPE", "TOO_LARGE", "INVALID_UTF8", "INVALID_JSON", "STREAM_ERROR"] as const).map(reason => ({ kind: "UNREADABLE_RESPONSE" as const, status: 201, reason })),
+  { kind: "NO_RESPONSE", reason: "TIMEOUT" }, { kind: "NO_RESPONSE", reason: "NETWORK" }];
+for (const { index, observation } of unknownObservations.map((observation, index) => ({ index, observation }))) test("outcome UNKNOWN uses identical protective transition " + index, () => configured(async () => {
+  const f = fake("IN_FLIGHT", 1), original = fake("IN_FLIGHT", 1);
+  f.state.contact = null; f.state.access = null; f.state.identity = null;
+  assert.deepEqual(await service.applyOpenCreditCreateClientObservation(f.db, transition(1), observation), await service.markOpenCreditCommercialOperationUnknown(original.db, transition(1)));
+  assert.deepEqual(f.state.events, original.state.events); assert.deepEqual(f.state.operation, original.state.operation);
+  assert.deepEqual(f.calls, ["actor", "company", "operation.read", "operation.cas", "event.create"]);
+}));
+for (const state of ["SUCCEEDED", "UNKNOWN"] as const) test("same terminal " + state + " no-op ignores stale valid revision and preserves first history/timestamps", () => configured(async () => {
+  const f = fake(state, 2); f.state.events.push({ action: state === "SUCCEEDED" ? "MARKED_SUCCEEDED_CREATED" : "MARKED_UNKNOWN" });
+  const before = structuredClone(f.state.operation), events = structuredClone(f.state.events);
+  const observation = state === "SUCCEEDED" ? observed(true, false) : observed(false, false);
+  assert.deepEqual(await service.applyOpenCreditCreateClientObservation(f.db, transition(0), observation), { changed: false, operationId: "synthetic-operation", state, revision: 2 });
+  assert.deepEqual(f.calls, ["actor", "company", "operation.read"]); assert.deepEqual(f.state.operation, before); assert.deepEqual(f.state.events, events);
+}));
+for (const [state, observation] of [["UNKNOWN", observed()], ["SUCCEEDED", observed(false, false)],
+  ...["PREPARED", "FAILED", "UNRECOGNIZED"].flatMap(state => [[state, observed()], [state, observed(false, false)]])] as Array<[string, OpenCreditCreateClientObservation]>) {
+  test("settlement rejects terminal/direct/conflicting state " + state + "/" + JSON.stringify(observation), () => configured(async () => {
+    const f = fake(state, 1), before = { ...f.state.operation };
+    await denied(() => service.applyOpenCreditCreateClientObservation(f.db, transition(1), observation), "OPERATION_STATE_CONFLICT");
+    assert.deepEqual(f.state.operation, before); assert.deepEqual(f.state.events, []); assert.equal(f.calls.includes("operation.cas"), false);
+  }));
+}
+for (const key of ["state", "basis", "status", "success", "created"]) test("transition caller cannot select outcome through " + key, () => configured(async () => {
+  const f = fake("IN_FLIGHT", 1);
+  await denied(() => service.applyOpenCreditCreateClientObservation(f.db, { ...transition(1), [key]: true }, observed()), "INVALID_OPERATION");
+  assert.equal(f.attempts(), 0); assert.deepEqual(f.state.events, []);
+}));
+test("settlement wrong revision fails before CAS", () => configured(async () => {
+  const f = fake("IN_FLIGHT", 1); await denied(() => service.applyOpenCreditCreateClientObservation(f.db, transition(0), observed()), "OPERATION_REVISION_CONFLICT");
+  assert.equal(f.calls.includes("operation.cas"), false); assert.deepEqual(f.state.events, []);
+}));
+for (const count of [0, 2, -1, NaN]) test("settlement CAS count " + count + " fails with zero Event", () => configured(async () => {
+  const f = fake("IN_FLIGHT", 1); f.casCount(count);
+  await denied(() => service.applyOpenCreditCreateClientObservation(f.db, transition(1), observed()), count === 0 ? "OPERATION_REVISION_CONFLICT" : "STORAGE_ERROR");
+  assert.deepEqual(f.state.operation, operation("IN_FLIGHT", 1)); assert.deepEqual(f.state.events, []); assert.equal(f.calls.includes("event.create"), false);
+}));
+test("settlement commit failure cannot report success", () => configured(async () => {
+  const f = fake("IN_FLIGHT", 1); f.failCommit(new Error("private-fixture")); await denied(() => invoke("settle", f), "STORAGE_ERROR");
+  assert.deepEqual(f.state.operation, operation("IN_FLIGHT", 1)); assert.deepEqual(f.state.events, []);
+}));
+test("settlement P2034 rereads actor and operation then commits one terminal event", () => configured(async () => {
+  const f = fake("IN_FLIGHT", 1); f.faults.push(prismaError("P2034"));
+  assert.equal((await invoke("settle", f)).state, "SUCCEEDED"); assert.equal(f.attempts(), 2);
+  assert.equal(f.calls.filter(c => c === "actor").length, 2); assert.equal(f.calls.filter(c => c === "operation.read").length, 2);
+  assert.equal(f.state.events.length, 1); assert.equal(f.state.operation!.revision, 2);
+}));
+for (const winner of ["SUCCEEDED", "UNKNOWN"] as const) test("settlement retry observes terminal winner " + winner + " without overwrite", () => configured(async () => {
+  const f = fake("IN_FLIGHT", 1); f.faults.push(prismaError("P2034"));
+  f.onAttempt(() => { if (f.attempts() === 2) f.state.operation = operation(winner, 2); });
+  if (winner === "SUCCEEDED") assert.equal((await invoke("settle", f) as { changed: boolean }).changed, false);
+  else await denied(() => invoke("settle", f), "OPERATION_STATE_CONFLICT");
+  assert.deepEqual(f.state.events, []); assert.equal(f.state.operation!.state, winner); assert.equal(f.state.operation!.revision, 2);
+}));
+test("settlement retry cannot bypass newly stale actor", () => configured(async () => {
+  const f = fake("IN_FLIGHT", 1); f.faults.push(prismaError("P2034")); f.onAttempt(() => { if (f.attempts() === 2) f.state.actor = null; });
+  await denied(() => invoke("settle", f), "NOT_AUTHORIZED"); assert.deepEqual(f.state.events, []); assert.equal(f.state.operation!.state, "IN_FLIGHT");
+}));
+test("invalid/accessor/hostile observations reject without transaction or retained input", () => configured(async () => {
+  const f = fake("IN_FLIGHT", 1); let calls = 0;
+  const accessor = { kind: "PARSED_RESPONSE", status: 201, get result() { calls++; throw Error("private-fixture"); } };
+  const { proxy, revoke } = Proxy.revocable({}, {}); revoke();
+  for (const observation of [null, undefined, {}, { ...observed(), status: 99 }, { ...observed(), body: "private-fixture" },
+    { kind: "PARSED_RESPONSE", status: 201, result: { success: "true", created: true } }, accessor,
+    new Proxy({}, { getOwnPropertyDescriptor() { throw Error("private-fixture"); } }), proxy]) {
+    await denied(() => service.applyOpenCreditCreateClientObservation(f.db, transition(1), observation as OpenCreditCreateClientObservation), "INVALID_OBSERVATION");
+  }
+  assert.equal(calls, 0); assert.equal(f.attempts(), 0); assert.deepEqual(f.state.events, []); assert.deepEqual(f.state.operation, operation("IN_FLIGHT", 1));
+}));
+for (const [label, change] of [
+  ["scope", (f: ReturnType<typeof fake>) => { f.state.operation!.providerScope = "other"; }],
+  ["company", (f: ReturnType<typeof fake>) => { f.state.operation!.companyId = "other"; }],
+  ["kind", (f: ReturnType<typeof fake>) => { f.state.operation!.operationKind = "OTHER"; }],
+  ["missing", (f: ReturnType<typeof fake>) => { f.state.operation = null; }]
+] as const) test("settlement fails closed for " + label, () => configured(async () => {
+  const f = fake("IN_FLIGHT", 1); change(f); await denied(() => invoke("settle", f), label === "missing" ? "OPERATION_NOT_FOUND" : "OPERATION_KIND_MISMATCH");
+  assert.equal(f.calls.includes("operation.cas"), false);
+}));
+
+test("AST: no FAILED writer and only outcome-derived SUCCEEDED reaches private terminal CAS", () => {
+  const source = readFileSync(new URL("./opencredit-commercial-operation.service.ts", import.meta.url), "utf8");
+  const ast = ts.createSourceFile("service.ts", source, ts.ScriptTarget.Latest, true);
+  assert.deepEqual(ast.statements.filter(ts.isImportDeclaration).map(n => (n.moduleSpecifier as ts.StringLiteral).text),
+    ["server-only", "@prisma/client", "./auth", "./permissions", "./opencredit-commercial-identity-policy",
+      "./opencredit-contact-client-profile-adapter", "./opencredit-client-profile-contract", "./opencredit-create-client-outcome"]);
+  const settle = ast.statements.find((n): n is ts.FunctionDeclaration => ts.isFunctionDeclaration(n) && n.name?.text === "settle")!;
+  assert.equal(settle.typeParameters?.[0].constraint?.getText(ast), '"SUCCEEDED" | "UNKNOWN"');
+  assert.equal(settle.parameters[2].name.getText(ast), "state"); assert.equal(settle.parameters[2].type?.getText(ast), "S");
+  const writes: string[] = [], calls: string[] = [];
+  function visit(node: ts.Node) {
+    if (ts.isCallExpression(node)) {
+      const callee = node.expression.getText(ast);
+      assert.notEqual(node.expression.kind, ts.SyntaxKind.ImportKeyword); assert.notEqual(callee, "require");
+      if (callee === "settle") {
+        const state = node.arguments[2]; assert(ts.isStringLiteral(state)); calls.push(state.text);
+        assert(["SUCCEEDED", "UNKNOWN"].includes(state.text));
+      }
+      if (["tx.openCreditCommercialOperation.create", "tx.openCreditCommercialOperation.updateMany"].includes(callee)) {
+        const args = node.arguments[0]; assert(ts.isObjectLiteralExpression(args));
+        const data = args.properties.find(p => p.name?.getText(ast) === "data"); assert(data && ts.isPropertyAssignment(data) && ts.isObjectLiteralExpression(data.initializer));
+        const state = data.initializer.properties.find(p => p.name?.getText(ast) === "state"); assert(state);
+        if (ts.isShorthandPropertyAssignment(state)) { assert.equal(state.name.text, "state"); assert(node.pos >= settle.pos && node.end <= settle.end); writes.push("state"); }
+        else { assert(ts.isPropertyAssignment(state) && ts.isStringLiteral(state.initializer)); writes.push(state.initializer.text); }
+      }
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(ast); assert.deepEqual(writes.sort(), ["IN_FLIGHT", "PREPARED", "state"]); assert.deepEqual(calls.sort(), ["SUCCEEDED", "UNKNOWN", "UNKNOWN"]);
+  const apply = ast.statements.find((n): n is ts.FunctionDeclaration => ts.isFunctionDeclaration(n) && n.name?.text === "applyOpenCreditCreateClientObservation")!;
+  assert.match(apply.getText(ast), /outcome = classifyOpenCreditCreateClientOutcome\(observation\)/);
+  assert.match(apply.getText(ast), /if \(outcome.state === "UNKNOWN"\) return settle\(db, input, "UNKNOWN", "MARKED_UNKNOWN"\)/);
+  assert.match(apply.getText(ast), /return settle\(db, input, "SUCCEEDED", outcome.created \? "MARKED_SUCCEEDED_CREATED" : "MARKED_SUCCEEDED_UPDATED"\)/);
+  assert.doesNotMatch(source, /(?:state|nextState):\s*"FAILED"|markFailed|setFailed|markSucceeded|setSucceeded|forceSucceeded|completeSuccessfully/);
 });
