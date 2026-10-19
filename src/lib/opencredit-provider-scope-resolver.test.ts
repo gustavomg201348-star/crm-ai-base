@@ -140,9 +140,17 @@ test("source boundary: public server-only marker, no I/O, time, normalization, c
   assert.deepEqual(Array.from(new Set(identifiers)).sort(), ["digest", "slice"]);
   assert.match(source, /return parseOpenCreditProviderScope\(scope\)/);
 });
-test("no application consumer imports the resolver", () => {
+test("only the approved human admin boundary imports the resolver", () => {
   for (const file of readdirSync("src", { recursive: true, encoding: "utf8" })) {
     if (!/\.tsx?$/.test(file) || file.endsWith(".test.ts") || file.endsWith("opencredit-provider-scope-resolver.ts")) continue;
-    assert.doesNotMatch(readFileSync("src/" + file, "utf8"), /opencredit-provider-scope-resolver/);
+    let source = readFileSync("src/" + file, "utf8");
+    if (file.replace(/\\/g, "/") === "lib/opencredit-consumer-authorization-admin-handler.ts") {
+      const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+      const imports = ast.statements.filter(ts.isImportDeclaration).filter(node => (node.moduleSpecifier as ts.StringLiteral).text === "./opencredit-provider-scope-resolver");
+      assert.equal(imports.length, 1);
+      assert.equal(imports[0].getText(ast), 'import { resolveConfiguredOpenCreditProviderScope } from "./opencredit-provider-scope-resolver";');
+      source = source.slice(0, imports[0].pos) + source.slice(imports[0].end);
+    }
+    assert.doesNotMatch(source, /opencredit-provider-scope-resolver/);
   }
 });

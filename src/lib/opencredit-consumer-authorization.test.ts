@@ -297,7 +297,7 @@ test("server-only, closed runtime exports and passive AST", () => {
   assert.doesNotMatch(source, /\bfetch\s*\(|new PrismaClient|console\.|grantConsent|setConsent|legalBasis|https?:|opencredit-api-client|POST|strict-http/);
   assert.doesNotMatch(source, /\.body\.(?:match|includes|search|toLowerCase)|RegExp/);
 });
-test("no mutation-service consumer or automatic grant; only reservation reads authorization", () => {
+test("only approved human admin mutation boundary; reservation only reads authorization", () => {
   function walk(dir: string) {
     for (const file of readdirSync(dir, { withFileTypes: true })) {
       const path = dir + "/" + file.name;
@@ -317,7 +317,17 @@ test("no mutation-service consumer or automatic grant; only reservation reads au
             ts.forEachChild(node, visit);
           };
           visit(ast);
-        } else if (!["src/lib/opencredit-commercial-operation-service.test.ts", "src/lib/opencredit-commercial-operation-service-postgres.integration.ts"].includes(path)) {
+        } else if (path === "src/lib/opencredit-consumer-authorization-admin-handler.ts") {
+          const source = readFileSync(path, "utf8");
+          const ast = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true);
+          const imports = ast.statements.filter(ts.isImportDeclaration).filter(node => (node.moduleSpecifier as ts.StringLiteral).text === "./opencredit-consumer-authorization.service");
+          assert.equal(imports.length, 1);
+          assert.doesNotMatch(source, /\.openCreditConsumerAuthorization(?:Event)?\b/);
+        } else if (!["src/lib/opencredit-commercial-operation-service.test.ts", "src/lib/opencredit-commercial-operation-service-postgres.integration.ts",
+          "src/lib/opencredit-consumer-authorization-admin-handler.test.ts",
+          "src/lib/opencredit-provider-scope-resolver.test.ts", "src/lib/opencredit-strict-json.test.ts",
+          "src/app/api/admin/integrations/opencredit/consumer-authorization/grant/route.ts",
+          "src/app/api/admin/integrations/opencredit/consumer-authorization/revoke/route.ts"].includes(path)) {
           assert.doesNotMatch(readFileSync(path, "utf8"), /opencredit-consumer-authorization|grantOpenCreditConsumerAuthorizationFromInboundEvidence|revokeOpenCreditConsumerAuthorization|\.openCreditConsumerAuthorization(?:Event)?\b/, path);
         }
       }

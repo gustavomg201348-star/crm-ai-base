@@ -1,11 +1,85 @@
 # OpenCredit API authentication (not webhook authentication)
 
+## Human authorization admin command boundary
+
+Two server-side commands now expose the existing authorization service:
+
+- `POST /api/admin/integrations/opencredit/consumer-authorization/grant`
+  accepts exactly `{companyId, contactId, inboundEventId}`.
+- `POST /api/admin/integrations/opencredit/consumer-authorization/revoke`
+  accepts exactly `{companyId, contactId}`; evidence is not required for revocation.
+
+Both require an authenticated cookie/session, current Platform Admin and same-origin
+request. The exact session object supplies actor; the browser cannot supply actor,
+scope, purpose, state, revision, identity, consent, legal basis or evidence contents.
+Scope comes exclusively from `resolveConfiguredOpenCreditProviderScope()` using
+server configuration OPENCREDIT_TENANT_ID + OPENCREDIT_PARTNER_ID. Purpose remains
+closed inside the domain as CLIENT_PROFILE_UPSERT. No configuration is changed here.
+
+Order: session → Platform Admin → same-origin → no query/Authorization header →
+application/json (optionally charset=utf-8) → bounded body/strict JSON/exact IDs →
+shared rate limiter → trusted scope resolver → existing grant/revoke service.
+Body limit is 2048 actual bytes, with one 1000ms total read deadline and fatal UTF-8
+decoding. Empty/malformed/duplicate-decoded-key/extra-field requests fail closed.
+IDs are exact ASCII local identifiers, at most 128 characters, without normalization.
+
+The existing HMAC-based limiter applies both 20 actor requests/minute and 10 target
+requests/minute, separated by the fixed grant/revoke action. The actor key includes
+session Company/id; target includes requested Company/contact. Limited/unavailable
+responses are sanitized (429/503); only a safe integer Retry-After may be preserved.
+Scope configuration failure is a fixed 503 without tenant/partner details.
+
+The handler does not query domain tables, create Events, execute CAS or duplicate
+freshness logic. The service still rereads actor and validates Company/contact,
+access, identity and authenticated inbound evidence transactionally on grant.
+Revoke retains its existing independence from later evidence/freshness changes.
+The human selects/reviews inboundEventId outside this slice; neither the route nor
+ingestion interprets text, and receiving inbound never automatically grants access.
+This is an operational human attestation, NOT automatic LGPD consent or a resolved
+legal basis. External legal/policy review remains necessary.
+
+All responses use Cache-Control: no-store. Success is exactly
+`{ok:true, changed, authorizationId, active, revision}` (including no-op/null results).
+Errors use closed codes/statuses: authentication 401; admin/origin/domain actor 403;
+invalid request/domain input 400; prerequisites/conflicts 409; storage/configuration/
+unknown failures 503. Raw errors, Prisma metadata, evidence, message body, CPF,
+provider message id, identifiers of other entities and credentials are never returned
+or logged. Grant/revoke routes are thin composition only; narrow static guards permit
+no webhook, AI/chatbot, worker, cron, campaign or other automatic mutation consumers.
+
+No UI, OpenCredit HTTP/login/createClient, dispatcher or CommercialOperation
+prepare/reserve/settlement is invoked by either command. No schema, migration,
+environment, dependency or Railway change belongs to this slice. Existing material
+PostgreSQL tests validate the unchanged domain; HTTP tests need no database.
+Rollback plan (not executed): remove these two routes/composition and restore the
+strict no-admin-consumer guards; existing domain data/schema need no migration.
+
+Current status (the older sections below describe their original passive slices):
+
+```text
+HTTP JSON RESPONSE BOUNDARY: IMPLEMENTED
+CREATE CLIENT REQUEST CONTRACT: IMPLEMENTED
+CREATE CLIENT OUTCOME POLICY: IMPLEMENTED
+CREATE CLIENT OUTCOME LEDGER SETTLEMENT: IMPLEMENTED
+TRUSTED PROVIDER SCOPE: IMPLEMENTED
+COMMERCIAL OPERATION LOCAL LEDGER: IMPLEMENTED
+AUTHENTICATED INBOUND EVIDENCE: IMPLEMENTED
+CONSUMER AUTHORIZATION EVIDENCE FOUNDATION: IMPLEMENTED
+COMMERCIAL OPERATION AUTHORIZATION ENFORCEMENT: IMPLEMENTED
+HUMAN AUTHORIZATION ADMIN COMMAND API: IMPLEMENTED
+HUMAN AUTHORIZATION UI: BLOCKED
+CREATE CLIENT DISPATCH: BLOCKED
+FAILED TRANSITION: BLOCKED
+RECONCILIATION: BLOCKED
+AUTOMATIC REPLAY: FORBIDDEN
+```
+
 ## Reservation authorization enforcement
 
 The passive local reservation boundary now requires persisted operational human
 authorization. This does NOT establish LGPD consent, legal basis, contractual
 acceptance or provider permission; external legal/policy review remains necessary.
-There is still no human authorization runtime flow or real dispatcher.
+The human admin command boundary above is now implemented; there is no real dispatcher.
 
 The literal flow inside the same Serializable transaction is:
 
@@ -108,7 +182,8 @@ COMMERCIAL OPERATION LOCAL LEDGER: IMPLEMENTED
 AUTHENTICATED INBOUND EVIDENCE: IMPLEMENTED
 CONSUMER AUTHORIZATION EVIDENCE FOUNDATION: IMPLEMENTED
 COMMERCIAL OPERATION AUTHORIZATION ENFORCEMENT: IMPLEMENTED
-HUMAN AUTHORIZATION RUNTIME FLOW: BLOCKED
+HUMAN AUTHORIZATION ADMIN COMMAND API: IMPLEMENTED
+HUMAN AUTHORIZATION UI: BLOCKED
 CREATE CLIENT DISPATCH: BLOCKED
 FAILED TRANSITION: BLOCKED
 RECONCILIATION: BLOCKED
@@ -1046,7 +1121,8 @@ providerScope is a branded input AND is revalidated with the existing strict par
 Syntax is not trust: the future caller must use a trusted server-side resolver,
 never browser scope or email/password/token-derived namespaces. The resolver below
 implements that primitive using operationally confirmed tenantId + partnerId, but
-has no runtime consumer. No real access/scope is configured or granted by development.
+now has only the human authorization admin consumer documented above. This access
+service itself remains passive. No real access/scope is configured or granted by development.
 
 Grant absent creates enabled=true plus GRANTED null -> true. Grant disabled updates
 enabled/changedByUserId plus GRANTED false -> true. Revoke enabled updates those
@@ -1186,7 +1262,8 @@ Input accepts only actor/companyId/contactId/providerScope. IDs use the existing
 strict syntax and the branded scope is reparsed at runtime. Syntax is not trust:
 the future caller must obtain scope exclusively from a trusted server-side resolver,
 not browser input or raw tenantId/partnerId, email, password or token. The resolver
-below derives the namespace from trusted server IDs only, with no runtime consumer.
+below derives the namespace from trusted server IDs only. Its sole runtime consumer
+is now the human authorization admin boundary, not this remote-identity service.
 Output contains only changed/enabled/identityId. Errors contain
 closed codes, never CPF, identifiers, conflicting owners, raw Prisma metadata or cause.
 
@@ -1691,13 +1768,14 @@ provenance or grant browser callers permission to choose scopes.
 
 The hash is NOT authorization, consent or proof of provider access. CommercialAccess
 and enabled RemoteIdentity with their Company/Contact ownership checks remain required.
-Consumer authorization/evidence remains BLOCKED; the resolver alone does not authorize
-POST /clients. SUCCEEDED/FAILED writers and createClient dispatch remain BLOCKED.
+The resolver alone does not authorize POST /clients. The evidence foundation,
+reservation enforcement and human admin boundary documented above now supply the
+separate authorization layers; dispatch and FAILED writing remain BLOCKED.
 
 Current state: remote namespace identification RESOLVED for this integration on the
-operational confirmation above; trusted providerScope primitive IMPLEMENTED; runtime
-consumer NONE; consumer authorization/evidence BLOCKED; createClient dispatch BLOCKED.
-No endpoint, UI, service connection, HTTP/provider request, login, DB/Prisma access,
+operational confirmation above; trusted providerScope primitive IMPLEMENTED; sole
+runtime consumer is the human authorization admin boundary; createClient dispatch BLOCKED.
+The resolver itself introduces no endpoint, UI, HTTP/provider request, login, DB/Prisma access,
 schema/migration, polling, validate/simulation/proposal or Railway change is introduced.
 CI adds only its tsx@4.20.6 unit gate and preserves all existing gates. No PostgreSQL
 gate or database dependency is added for the resolver.

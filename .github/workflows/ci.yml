@@ -110,6 +110,9 @@ jobs:
       - name: Validate passive OpenCredit consumer authorization evidence
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-consumer-authorization.test.ts
 
+      - name: Validate OpenCredit human authorization admin boundary
+        run: npx --yes tsx@4.20.6 --test src/lib/opencredit-consumer-authorization-admin-handler.test.ts
+
       - name: Verify project
         run: npm run verify
         env:
