@@ -35,6 +35,20 @@ Definir a base minima de privacidade e protecao de dados para o CRM.
 
 ## Lacunas atuais
 
+### Atestacao operacional OpenCredit
+
+Existe uma fundacao tecnica passiva e auditavel para um Platform Admin atestar
+que revisou uma mensagem inbound autenticada Meta HMAC e que ela expressa
+autorizacao operacional especificamente para CLIENT_PROFILE_UPSERT. O registro
+referencia a ConversationInboundEvent existente; nao copia o conteudo nem CPF.
+O software valida autenticidade e escopo, mas nao interpreta o significado do texto.
+A revogacao preserva evidencia e historico. Nenhuma mensagem gera grant automatico.
+
+Isso NAO substitui determinacao de base legal, consentimento juridico ou revisao
+de adequacao LGPD. A revisao juridica/politica externa continua pendente.
+Nao ha endpoint/UI nem habilitacao de operacao OpenCredit por esta fundacao.
+O ledger comercial ainda nao consome a autorizacao.
+
 - Nao ha tabela formal de opt-out.
 - Nao ha politica de retencao implementada.
 - Nao ha criptografia de CPF/telefone.

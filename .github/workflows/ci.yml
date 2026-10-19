@@ -101,6 +101,14 @@ jobs:
       - name: Validate passive Meta reply formats and scope
         run: npx --yes tsx@4.20.6 --test src/lib/meta-reply-correlation.test.ts src/lib/message-reply.test.ts src/lib/inbound-message.test.ts src/lib/meta-webhook-security.test.ts src/lib/webhook-channel-secrets.test.ts
 
+      - name: Validate passive OpenCredit consumer authorization evidence
+        run: npx --yes tsx@4.20.6 --test src/lib/opencredit-consumer-authorization.test.ts
+
+      - name: Verify project
+        run: npm run verify
+        env:
+          DATABASE_URL: file:./dev.db
+
       - name: Build
         run: npm run build
 
@@ -223,6 +231,11 @@ jobs:
         run: npx --yes tsx@4.20.6 src/lib/opencredit-commercial-operation-service-postgres.integration.ts
         env:
           OPENCREDIT_COMMERCIAL_OPERATION_SERVICE_POSTGRES_TEST: "1"
+
+      - name: Validate OpenCredit consumer authorization evidence transactions and concurrency
+        run: npx --yes tsx@4.20.6 --test src/lib/opencredit-consumer-authorization-postgres.integration.ts
+        env:
+          OPENCREDIT_CONSUMER_AUTHORIZATION_POSTGRES_TEST: "1"
 
       - name: Create dedicated disposable chatbot database
         run: echo 'CREATE DATABASE qevora_chatbot_test;' | npx prisma db execute --stdin --schema prisma/schema.postgres.prisma

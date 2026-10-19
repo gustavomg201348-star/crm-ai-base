@@ -1,5 +1,107 @@
 # OpenCredit API authentication (not webhook authentication)
 
+## Consumer authorization evidence foundation
+
+This passive foundation adds an operational human attestation, NOT automatic
+LGPD consent, legal basis, contractual acceptance or provider authorization.
+The granting Platform Admin attests that they reviewed the referenced authenticated
+inbound text and that it authorizes the specific operational purpose
+`CLIENT_PROFILE_UPSERT`. Legal adequacy and external policy/legal review remain
+pending; this mechanism does not resolve them.
+
+The injected-DB, server-only service has only grant-from-inbound-evidence and
+revoke commands, without any endpoint, UI, worker, webhook/AI caller or automatic
+grant. Receiving an inbound message never creates an authorization. The commercial
+operation service is unchanged and does NOT consume this authorization yet.
+The next reservation/dispatch boundary must require ACTIVE authorization.
+No HTTP, OpenCredit login, createClient, replay or provider operation is enabled.
+
+Evidence must be an existing `ConversationInboundEvent` with exactly
+`META_WEBHOOK_HMAC_SHA256_VERIFIED`, version 1, a concrete Channel and a coherent
+Company/Contact/Conversation/Message binding. Message must be inbound text with
+nonblank body and providerMessageId. Existing HMAC provenance and immutability
+triggers are reused, not duplicated. Software checks only authenticity, scope
+and nonblank text; it does not interpret “sim”, “aceito”, “autorizo” or any meaning.
+Body is read transiently for this structural check, never copied, hashed, logged,
+returned or snapshotted into either new table. CPF is not stored there either.
+
+`OpenCreditConsumerAuthorization` stores id, companyId, contactId,
+remoteIdentityId, providerScope, fixed purpose, evidenceInboundEventId, active,
+revision, changedByUserId, createdAt and updatedAt. Its unique current slot is
+(companyId, providerScope, contactId, purpose). Composite FKs bind evidence to
+(id, companyId, contactId), identity to (id, companyId, providerScope), and Contact
+to its Company. The service additionally verifies identity.contactId and current
+CPF ownership/snapshot, including archived duplicates when detecting ambiguity.
+New `ConversationInboundEvent(id, companyId, contactId)` uniqueness supports
+the evidence FK without relaxing any existing constraint.
+
+`OpenCreditConsumerAuthorizationEvent` stores id, authorizationId, companyId,
+providerScope, actorUserId, action, previousActive, nextActive, revision,
+evidenceInboundEventId and createdAt. A composite FK binds it to the authorization;
+User and evidence FKs are RESTRICT/NO ACTION. Only GRANTED and REVOKED are accepted.
+Each transition preserves its own evidence reference. The service never updates
+or deletes Events. This is application append-only audit, not a claim of a new
+database-wide immutable audit trigger.
+
+| Existing state | Command | Result |
+| --- | --- | --- |
+| Absent | GRANT | Active, revision 0, GRANTED(null → true) |
+| Active, same evidence | GRANT | No-op, no Event/timestamp/revision change |
+| Active, different evidence | GRANT | AUTHORIZATION_CONFLICT |
+| Inactive | GRANT | Full freshness checks, CAS to active, revision +1, GRANTED |
+| Active | REVOKE | CAS to inactive, revision +1, REVOKED; evidence preserved |
+| Inactive / absent | REVOKE | No-op; absent returns null id/revision |
+
+Grant revalidates the effective current Platform Admin, Company, Contact,
+canonical/formatted CPF ambiguity, enabled CommercialAccess, enabled RemoteIdentity,
+global CPF ownership and authenticated evidence in the same Serializable
+transaction. Revoke revalidates actor/Company only; archived Contact, changed CPF,
+revoked access or disabled identity must not prevent revocation.
+State mutation and Event creation are atomic. CAS includes id/companyId/
+providerScope/active/revision and requires count=1. P2034 retries are bounded at
+three transactions (maxWait 2000, timeout 5000). P2002 is retryable only for
+creation of the expected current-slot unique; the winner is then reread.
+Errors expose only fixed codes, never raw database errors/metadata or content.
+
+The additive migration
+`20261019150000_add_opencredit_consumer_authorization_evidence` creates only the
+two tables, unique/indexes, defensive purpose/revision/action/transition CHECKs
+and FKs. It contains no DML/backfill or historical authorization inference.
+Existing databases begin with ZERO authorizations. SQLite schema mirrors the
+models/relations; these PostgreSQL CHECKs are migration-specific.
+
+Validation includes unit/static guards, guarded disposable PostgreSQL migrations,
+real HMAC evidence ingestion, scoped FKs/CHECKs, concurrent first grants, grant/
+revoke races, strict no-ops, and rollback on real Event FK failure. Test-only
+transaction proxies are not production failpoints. An extra dedicated test-only
+database guard rejects nonlocal/non-disposable contexts before client construction.
+All previous CI gates remain; new unit/material gates and project verify are added.
+
+Rollback plan (NOT executed): first revert application use of this passive service;
+review retention and dependencies before removing Event then Authorization tables
+and their indexes/FKs, and only then the new inbound unique. Never delete retained
+evidence or modify old provenance triggers. No production migration is run here.
+
+Current status (earlier slice sections below are historical):
+
+```text
+HTTP JSON RESPONSE BOUNDARY: IMPLEMENTED
+CREATE CLIENT REQUEST CONTRACT: IMPLEMENTED
+CREATE CLIENT OUTCOME POLICY: IMPLEMENTED
+CREATE CLIENT OUTCOME LEDGER SETTLEMENT: IMPLEMENTED
+TRUSTED PROVIDER SCOPE: IMPLEMENTED
+COMMERCIAL OPERATION LOCAL LEDGER: IMPLEMENTED
+AUTHENTICATED INBOUND EVIDENCE: IMPLEMENTED
+CONSUMER AUTHORIZATION EVIDENCE FOUNDATION: IMPLEMENTED
+COMMERCIAL OPERATION AUTHORIZATION ENFORCEMENT: BLOCKED
+CREATE CLIENT DISPATCH: BLOCKED
+FAILED TRANSITION: BLOCKED
+RECONCILIATION: BLOCKED
+AUTOMATIC REPLAY: FORBIDDEN
+```
+
+## Original authentication slice audit
+
 Audited against the official [partner documentation](https://core.api.opencredit.tech/api/partner-docs)
 and its [OpenAPI](https://core.api.opencredit.tech/api/partner-openapi.json), contract 2.8.0,
 on 2026-10-14. Existing inbound ingestion/HMAC and configuration are independent.
