@@ -1484,3 +1484,76 @@ No endpoint, UI, service connection, HTTP/provider request, login, DB/Prisma acc
 schema/migration, polling, validate/simulation/proposal or Railway change is introduced.
 CI adds only its tsx@4.20.6 unit gate and preserves all existing gates. No PostgreSQL
 gate or database dependency is added for the resolver.
+
+## Strict HTTP JSON response boundary
+
+`readOpenCreditStrictJsonResponse(response)` in `opencredit-http-json-boundary.ts`
+is a passive server-only primitive consuming an already-obtained native Response:
+
+```text
+provider Response bytes
+→ Content-Type check
+→ bounded stream
+→ fatal UTF-8 decode (BOM preserved)
+→ parseOpenCreditStrictJson
+→ operation-specific parser (future caller, composition tested locally)
+```
+
+Only application/json is accepted, optionally with a single UTF-8 charset parameter.
+Case-insensitive tokens, SP/HTAB optional whitespace and quoted UTF-8 are allowed;
+other charsets, extra/duplicate parameters, missing Content-Type, suffix media types
+and combined media types are rejected. Missing, consumed or caller-locked bodies
+are rejected; this primitive never releases a lock owned by another reader.
+
+LOCAL QEVORA LIMIT — NOT PROVIDER CONTRACT: maximum 64 KiB of actual body bytes,
+and a total 20-second body-read deadline, not a per-chunk idle timeout. These match
+the existing banks reader; the proposal status reader uses 32 KiB and 20 seconds.
+The new generic ceiling is not a reason to enlarge or replace either existing reader.
+A valid decimal Content-Length above the ceiling rejects before any read. Absent,
+malformed or understated lengths never bypass the actual streamed-byte counter.
+One deadline race bounds the whole read, avoiding retained deadline reactions per
+chunk; monotonic elapsed-time checks also cover continuously available/empty chunks.
+
+Incremental TextDecoder uses fatal:true and ignoreBOM:true. Despite its name, the
+latter preserves U+FEFF instead of silently stripping the signature: the existing
+strict parser therefore rejects a leading BOM, including one split across chunks.
+Malformed UTF-8 and an incomplete final encoding reject without replacement.
+The strict parser receives the decoded string without a JSON.parse shortcut, so
+duplicate decoded keys, trailing data, comments and malformed JSON still reject.
+Any valid JSON root is supported, not only objects. Only parsed JSON values are
+returned; raw strings/bytes are not returned as a separate transport diagnostic.
+A JSON string root is still a legitimate parsed JSON value.
+
+Errors have closed codes, fixed messages and a fixed diagnostic stack, with no
+original cause, raw body/headers/URL, PII, credentials, offsets or snippets. Failure
+cancels the owned body when appropriate and always releases its reader lock.
+Cancellation rejection is suppressed; cancellation is deliberately not awaited
+because an underlying source can leave that promise pending forever. A Response
+body is consumed by design (bodyUsed changes); headers/status and supplied bytes
+are not edited. HTTP status is not interpreted and remains the caller's concern.
+
+Local tests compose Response → boundary → strict parser → the existing
+parseOpenCreditClientProfileResult and preserve all four success/created boolean
+pairs. They are NOT authorization, consent, financial acceptance, guaranteed remote
+creation, idempotency or a ledger SUCCEEDED/FAILED/UNKNOWN classification.
+
+This slice makes no request, login, refresh or provider call. It has no production
+consumer, endpoint, UI, worker, webhook/cron integration, DB/Prisma or ledger writer.
+It does not alter the existing client/authentication/retry contract or readers.
+The operation service remains the sole existing ledger writer; PREPARED/IN_FLIGHT/
+UNKNOWN invariants are unchanged. No schema, migration, environment, dependency,
+secret or Railway change is introduced. The existing validate required/conditional
+parameter divergence remains unresolved; neither validate nor createClient is enabled.
+CI adds only the explicit boundary unit gate and preserves existing material gates.
+
+```text
+HTTP JSON RESPONSE BOUNDARY: IMPLEMENTED
+CREATE CLIENT REQUEST CONTRACT: IMPLEMENTED
+STRICT JSON PARSER: IMPLEMENTED
+TRUSTED PROVIDER SCOPE: IMPLEMENTED
+COMMERCIAL OPERATION LOCAL LEDGER: IMPLEMENTED
+RUNTIME CONSUMER AUTHORIZATION/EVIDENCE: BLOCKED
+CREATE CLIENT DISPATCH: BLOCKED
+SUCCEEDED/FAILED CLASSIFICATION: BLOCKED
+AUTOMATIC REPLAY: FORBIDDEN
+```
