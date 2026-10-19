@@ -146,7 +146,7 @@ for (const data of [{ action: "OTHER" }, { revision: -1 }, { action: "GRANTED", 
   material("event CHECK " + JSON.stringify(data), async f => {
     const a = await grant(f);
     await assert.rejects(db.openCreditConsumerAuthorizationEvent.create({ data: { authorizationId: a.authorizationId!, companyId: f.company.id,
-      providerScope: f.input.providerScope, actorUserId: f.actor.id, action: "GRANTED", previousActive: null, nextActive: true, revision: 0, evidenceInboundEventId: f.evidence.id, ...data } }));
+      providerScope: f.input.providerScope, actorUserId: f.actor.id, action: "GRANTED", previousActive: null, nextActive: true, revision: 1, evidenceInboundEventId: f.evidence.id, ...data } }));
     assert.equal((await f.events()).length, 1);
   });
 }

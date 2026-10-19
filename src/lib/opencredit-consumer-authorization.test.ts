@@ -297,18 +297,34 @@ test("server-only, closed runtime exports and passive AST", () => {
   assert.doesNotMatch(source, /\bfetch\s*\(|new PrismaClient|console\.|grantConsent|setConsent|legalBasis|https?:|opencredit-api-client|POST|strict-http/);
   assert.doesNotMatch(source, /\.body\.(?:match|includes|search|toLowerCase)|RegExp/);
 });
-test("no runtime consumer, automatic grant or operation-service integration", () => {
+test("no mutation-service consumer or automatic grant; only reservation reads authorization", () => {
   function walk(dir: string) {
     for (const file of readdirSync(dir, { withFileTypes: true })) {
       const path = dir + "/" + file.name;
       if (file.isDirectory()) walk(path);
       else if (/\.[cm]?[jt]sx?$/.test(path) && !/opencredit-consumer-authorization(?:\.service\.ts|\.test\.ts|-postgres\.(?:integration|guard)\.ts)$/.test(path)) {
-        assert.doesNotMatch(readFileSync(path, "utf8"), /opencredit-consumer-authorization|grantOpenCreditConsumerAuthorizationFromInboundEvidence|revokeOpenCreditConsumerAuthorization|\.openCreditConsumerAuthorization(?:Event)?\b/, path);
+        if (path === "src/lib/opencredit-commercial-operation.service.ts") {
+          const source = readFileSync(path, "utf8");
+          assert.doesNotMatch(source, /opencredit-consumer-authorization|grantOpenCreditConsumerAuthorizationFromInboundEvidence|revokeOpenCreditConsumerAuthorization/);
+          const ast = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true);
+          const visit = (node: ts.Node): void => {
+            if (ts.isPropertyAccessExpression(node) && ["openCreditConsumerAuthorization", "openCreditConsumerAuthorizationEvent"].includes(node.name.text)) {
+              assert.ok(ts.isPropertyAccessExpression(node.parent)); assert.equal(node.parent.name.text, "findUnique");
+              assert.ok(ts.isCallExpression(node.parent.parent) && node.parent.parent.expression === node.parent);
+              let owner: ts.Node | undefined = node; while (owner && !ts.isFunctionDeclaration(owner)) owner = owner.parent;
+              assert.ok(owner && ts.isFunctionDeclaration(owner)); assert.equal(owner.name?.text, "dispatchAuthorization");
+            }
+            ts.forEachChild(node, visit);
+          };
+          visit(ast);
+        } else if (!["src/lib/opencredit-commercial-operation-service.test.ts", "src/lib/opencredit-commercial-operation-service-postgres.integration.ts"].includes(path)) {
+          assert.doesNotMatch(readFileSync(path, "utf8"), /opencredit-consumer-authorization|grantOpenCreditConsumerAuthorizationFromInboundEvidence|revokeOpenCreditConsumerAuthorization|\.openCreditConsumerAuthorization(?:Event)?\b/, path);
+        }
       }
     }
   }
   walk("src"); walk("scripts");
-  assert.doesNotMatch(readFileSync("src/lib/opencredit-commercial-operation.service.ts", "utf8"), /ConsumerAuthorization|consumer-authorization/);
+  assert.doesNotMatch(readFileSync("src/lib/opencredit-commercial-operation.service.ts", "utf8"), /consumer-authorization\.service/);
 });
 test("schema parity, no body/CPF snapshot, scoped FKs and additive migration", () => {
   const sqlite = readFileSync("prisma/schema.prisma", "utf8"); const pg = readFileSync("prisma/schema.postgres.prisma", "utf8");

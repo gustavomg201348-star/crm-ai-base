@@ -35,7 +35,9 @@ function fake(initial?: string, revision = 0) {
     actor: { ...actor } as SessionUser | null, company: true, operation: initial === undefined ? null as Operation | null : operation(initial, revision),
     contact: { id: "synthetic-contact", companyId: "synthetic-company", name: " Synthetic profile ", phone: "0007A", email: " Fixture@Example.Invalid " as string | null, cpf: "00000000000" as string | null, archivedAt: null as Date | null } as { id: string; companyId: string; name: string; phone: string; email: string | null; cpf: string | null; archivedAt: Date | null } | null,
     identity: { id: "synthetic-identity", companyId: "synthetic-company", contactId: "synthetic-contact", providerScope: scope, normalizedCpf: "00000000000", enabled: true } as { id: string; companyId: string; contactId: string; providerScope: string; normalizedCpf: string; enabled: boolean } | null,
-    access: { enabled: true } as { enabled: boolean } | null, matches: [{ id: "synthetic-contact" }], globalIdentity: true, events: [] as Record<string, unknown>[]
+    access: { enabled: true } as { enabled: boolean } | null, matches: [{ id: "synthetic-contact" }], globalIdentity: true, events: [] as Record<string, unknown>[],
+    authorization: { id: "synthetic-authorization", companyId: "synthetic-company", providerScope: scope, contactId: "synthetic-contact", purpose: "CLIENT_PROFILE_UPSERT", remoteIdentityId: "synthetic-identity", active: true, revision: 0, evidenceInboundEventId: "synthetic-evidence" } as { id: string; companyId: string; providerScope: string; contactId: string; purpose: string; remoteIdentityId: string; active: boolean; revision: number; evidenceInboundEventId: string } | null,
+    authorizationEvent: { id: "synthetic-granted", authorizationId: "synthetic-authorization", companyId: "synthetic-company", providerScope: scope, revision: 0, action: "GRANTED", nextActive: true, evidenceInboundEventId: "synthetic-evidence" } as { id: string; authorizationId: string; companyId: string; providerScope: string; revision: number; action: string; nextActive: boolean; evidenceInboundEventId: string } | null
   };
   const calls: string[] = []; const faults: unknown[] = []; const options: unknown[] = []; let attempts = 0;
   let eventFailure: unknown; let commitFailure: unknown; let casCount: number | undefined; let onAttempt: (() => void) | undefined;
@@ -57,6 +59,12 @@ function fake(initial?: string, revision = 0) {
         else assert.deepEqual(args.where, { companyId_providerScope_contactId: { companyId: "synthetic-company", providerScope: scope, contactId: "synthetic-contact" } });
         return state.identity;
       } },
+      openCreditConsumerAuthorization: { findUnique: async (args: { where: unknown }) => {
+        calls.push("authorization.read"); assert.deepEqual(args.where, { companyId_providerScope_contactId_purpose: { companyId: "synthetic-company", providerScope: scope, contactId: "synthetic-contact", purpose: "CLIENT_PROFILE_UPSERT" } }); return state.authorization;
+      } },
+      openCreditConsumerAuthorizationEvent: { findUnique: async (args: { where: unknown }) => {
+        calls.push("authorization-event.read"); assert.deepEqual(args.where, { authorizationId_revision: { authorizationId: state.authorization!.id, revision: state.authorization!.revision } }); return state.authorizationEvent;
+      } },
       openCreditCommercialOperation: {
         findUnique: async (args: { where: Record<string, unknown> }) => { calls.push("operation.read");
           const key = args.where.companyId_providerScope_intentKey ?? args.where.id_companyId_providerScope;
@@ -75,7 +83,7 @@ function fake(initial?: string, revision = 0) {
       },
       openCreditCommercialOperationEvent: { create: async ({ data }: { data: Record<string, unknown> }) => {
         calls.push("event.create"); if (eventFailure) throw eventFailure;
-        assert.deepEqual(Object.keys(data).sort(), ["operationId", "companyId", "providerScope", "actorUserId", "action", "previousState", "nextState", "revision"].sort());
+        assert.deepEqual(Object.keys(data).sort(), ["operationId", "companyId", "providerScope", "actorUserId", "action", "previousState", "nextState", "revision", ...(data.action === "RESERVED_FOR_DISPATCH" ? ["dispatchAuthorizationEventId"] : [])].sort());
         events.push(data); return { id: "synthetic-event" };
       } }
     };
@@ -113,7 +121,7 @@ for (const kind of ["SIMULATION", "PROPOSAL", "OTHER"]) test("prepare rejects ar
 test("existing intent with another Contact is conflict", () => configured(async () => { const f = fake("PREPARED"); f.state.identity!.contactId = "other"; await denied(() => invoke("prepare", f), "INTENT_CONFLICT"); }));
 test("unrecognized stored state is not interpreted", () => configured(async () => { const f = fake("OTHER"); await denied(() => invoke("prepare", f), "OPERATION_STATE_INVALID"); }));
 test("reserve returns freshly mapped memory-only profile only after commit", () => configured(async () => {
-  const f = fake("PREPARED"); const result = await invoke("reserve", f); assert.deepEqual(result, { operationId: "synthetic-operation", state: "IN_FLIGHT", revision: 1, profile: { cpf: "00000000000", nome: f.state.contact!.name, celular: f.state.contact!.phone, email: f.state.contact!.email } });
+  const f = fake("PREPARED"); const result = await invoke("reserve", f); assert.deepEqual(result, { operationId: "synthetic-operation", state: "IN_FLIGHT", revision: 1, profile: { cpf: "00000000000", nome: f.state.contact!.name, celular: f.state.contact!.phone, email: f.state.contact!.email }, dispatchAuthorization: { authorizationId: "synthetic-authorization", authorizationRevision: 0, authorizationEventId: "synthetic-granted" } });
   assert.deepEqual(f.state.events.map(e => [e.action, e.previousState, e.nextState, e.revision]), [["RESERVED_FOR_DISPATCH", "PREPARED", "IN_FLIGHT", 1]]);
 }));
 for (const state of ["IN_FLIGHT", "SUCCEEDED", "FAILED", "UNKNOWN", "OTHER"]) test("reserve refuses " + state + " without exposing profile", () => configured(async () => { const f = fake(state, 1); await denied(() => invoke("reserve", f), "OPERATION_STATE_CONFLICT"); assert.equal(f.calls.includes("contact"), false); assert.deepEqual(f.state.events, []); }));
@@ -295,6 +303,108 @@ for (const [label, change] of [
   assert.equal(f.calls.includes("operation.cas"), false);
 }));
 
+const corruptAuthorization: [string, string, unknown][] = [
+  ["id", "id", ""], ["company", "companyId", "other"], ["scope", "providerScope", "other"],
+  ["contact", "contactId", "other"], ["purpose", "purpose", "OTHER"], ["identity", "remoteIdentityId", "other"],
+  ["active type", "active", "true"], ["negative revision", "revision", -1], ["fraction revision", "revision", 0.5],
+  ["unsafe revision", "revision", Number.MAX_SAFE_INTEGER + 1], ["NaN revision", "revision", NaN],
+  ["evidence empty", "evidenceInboundEventId", ""], ["evidence invalid", "evidenceInboundEventId", "bad/path"]
+];
+for (const [label, key, value] of corruptAuthorization) test("reserve blocks malformed authorization " + label, () => configured(async () => {
+  const f = fake("PREPARED"); (f.state.authorization as unknown as Record<string, unknown>)[key] = value;
+  await denied(() => invoke("reserve", f), "CONSUMER_AUTHORIZATION_MISMATCH");
+  assert.equal(f.state.operation!.state, "PREPARED"); assert.deepEqual(f.state.events, []);
+  assert.equal(f.calls.includes("operation.cas"), false);
+}));
+for (const active of [null, false]) test("reserve blocks authorization " + (active === null ? "missing" : "inactive"), () => configured(async () => {
+  const f = fake("PREPARED");
+  if (active === null) f.state.authorization = null; else f.state.authorization!.active = false;
+  await denied(() => invoke("reserve", f), active === null ? "CONSUMER_AUTHORIZATION_MISSING" : "CONSUMER_AUTHORIZATION_INACTIVE");
+  assert.equal(f.calls.includes("authorization-event.read"), false); assert.equal(f.calls.includes("operation.cas"), false);
+  assert.equal(f.state.operation!.state, "PREPARED"); assert.deepEqual(f.state.events, []);
+}));
+for (const [label, key, value] of [
+  ["id", "id", ""], ["parent", "authorizationId", "other"], ["company", "companyId", "other"], ["scope", "providerScope", "other"],
+  ["revision", "revision", 2], ["action revoked", "action", "REVOKED"], ["action unknown", "action", "OTHER"],
+  ["nextActive false", "nextActive", false], ["nextActive type", "nextActive", "true"], ["evidence", "evidenceInboundEventId", "other"]
+] as [string, string, unknown][]) test("reserve blocks malformed current GRANTED event " + label, () => configured(async () => {
+  const f = fake("PREPARED"); (f.state.authorizationEvent as unknown as Record<string, unknown>)[key] = value;
+  await denied(() => invoke("reserve", f), "CONSUMER_AUTHORIZATION_EVENT_INVALID");
+  assert.equal(f.calls.includes("operation.cas"), false); assert.deepEqual(f.state.events, []);
+}));
+test("reserve blocks missing current authorization event", () => configured(async () => {
+  const f = fake("PREPARED"); f.state.authorizationEvent = null;
+  await denied(() => invoke("reserve", f), "CONSUMER_AUTHORIZATION_EVENT_INVALID"); assert.deepEqual(f.state.events, []);
+}));
+test("prepare needs no authorization and never reads it", () => configured(async () => {
+  const f = fake(); f.state.authorization = null; f.state.authorizationEvent = null;
+  assert.equal((await invoke("prepare", f)).state, "PREPARED"); assert.equal(f.calls.some(c => c.startsWith("authorization")), false);
+}));
+test("reserve records current grant metadata in a fresh closed object before releasing profile", () => configured(async () => {
+  const f = fake("PREPARED");
+  const r = await service.reserveOpenCreditClientProfileOperationForDispatch(f.db, transition());
+  assert.deepEqual(Object.keys(r).sort(), ["operationId", "state", "revision", "profile", "dispatchAuthorization"].sort());
+  assert.deepEqual(Object.keys(r.dispatchAuthorization).sort(), ["authorizationId", "authorizationRevision", "authorizationEventId"].sort());
+  assert.equal(r.dispatchAuthorization.authorizationEventId, f.state.events[0].dispatchAuthorizationEventId);
+  assert.ok(f.calls.indexOf("authorization-event.read") < f.calls.indexOf("operation.cas"));
+  assert.equal("evidenceInboundEventId" in r.dispatchAuthorization, false);
+  assert.equal("body" in r, false); assert.equal("providerMessageId" in r, false);
+}));
+test("regrant revision2 binds current GRANTED rather than historical revision0", () => configured(async () => {
+  const f = fake("PREPARED"); f.state.authorization!.revision = 2;
+  f.state.authorizationEvent!.revision = 2; f.state.authorizationEvent!.id = "synthetic-granted-rev2";
+  const r = await service.reserveOpenCreditClientProfileOperationForDispatch(f.db, transition());
+  assert.deepEqual(r.dispatchAuthorization, { authorizationId: "synthetic-authorization", authorizationRevision: 2, authorizationEventId: "synthetic-granted-rev2" });
+  assert.equal(f.state.events[0].dispatchAuthorizationEventId, "synthetic-granted-rev2");
+}));
+for (const mode of ["unknown", "settle"] as const) test("committed reserve then revoke cannot block " + mode, () => configured(async () => {
+  const f = fake("PREPARED"); await invoke("reserve", f);
+  f.state.authorization!.active = false; f.state.authorization!.revision = 1; f.state.authorizationEvent!.action = "REVOKED";
+  f.calls.length = 0;
+  assert.equal((await invoke(mode, f)).state, mode === "unknown" ? "UNKNOWN" : "SUCCEEDED");
+  assert.equal(f.calls.some(c => c.startsWith("authorization")), false);
+  assert.equal(f.state.events[0].dispatchAuthorizationEventId, "synthetic-granted");
+  assert.equal("dispatchAuthorizationEventId" in f.state.events[1], false);
+}));
+test("authorization is reread on transaction retry and revocation blocks the loser", () => configured(async () => {
+  const f = fake("PREPARED"); f.faults.push(prismaError("P2034"));
+  f.onAttempt(() => { if (f.attempts() === 2) f.state.authorization!.active = false; });
+  await denied(() => invoke("reserve", f), "CONSUMER_AUTHORIZATION_INACTIVE");
+  assert.equal(f.state.operation!.state, "PREPARED"); assert.deepEqual(f.state.events, []);
+}));
+test("AST reservation-only authorization reads and audit binding; settlement/prepare remain independent", () => {
+  const source = readFileSync(new URL("./opencredit-commercial-operation.service.ts", import.meta.url), "utf8");
+  const ast = ts.createSourceFile("service.ts", source, ts.ScriptTarget.Latest, true);
+  const fn = (name: string) => ast.statements.find((n): n is ts.FunctionDeclaration => ts.isFunctionDeclaration(n) && n.name?.text === name)!.getText(ast);
+  assert.doesNotMatch(source, /consumer-authorization\.service|Message|provenanceKind|authenticateMeta|\bbody\b/);
+  for (const name of ["prepareOpenCreditClientProfileOperation", "settle", "markOpenCreditCommercialOperationUnknown", "applyOpenCreditCreateClientObservation"]) {
+    assert.doesNotMatch(fn(name), /dispatchAuthorization|openCreditConsumerAuthorization/);
+  }
+  const reserve = fn("reserveOpenCreditClientProfileOperationForDispatch");
+  assert.ok(reserve.indexOf("await fresh(") < reserve.indexOf("await dispatchAuthorization("));
+  assert.ok(reserve.indexOf("await dispatchAuthorization(") < reserve.indexOf("openCreditCommercialOperation.updateMany"));
+  assert.match(reserve, /dispatchAuthorizationEventId: authorization.authorizationEventId/);
+  assert.match(fn("dispatchAuthorization"), /authorizationId_revision/);
+  let calls = 0;
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && node.expression.getText(ast) === "dispatchAuthorization") {
+      calls++;
+      let owner: ts.Node | undefined = node;
+      while (owner && !ts.isFunctionDeclaration(owner)) owner = owner.parent;
+      assert.ok(owner && ts.isFunctionDeclaration(owner)); assert.equal(owner.name?.text, "reserveOpenCreditClientProfileOperationForDispatch");
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(ast); assert.equal(calls, 1);
+});
+test("dispatch binding migration is additive, nullable and never backfills legacy reservations", () => {
+  const sql = readFileSync("prisma/migrations/20261019200000_add_opencredit_dispatch_authorization_binding/migration.sql", "utf8");
+  assert.doesNotMatch(sql, /\b(?:INSERT|DELETE(?! RESTRICT)|UPDATE(?! NO ACTION)|DROP|TRUNCATE)\b/);
+  assert.match(sql, /ADD COLUMN "dispatchAuthorizationEventId" TEXT;/);
+  assert.match(sql, /"dispatchAuthorizationEventId" IS NULL OR "action" = 'RESERVED_FOR_DISPATCH'/);
+  assert.equal((sql.match(/CREATE UNIQUE INDEX/g) ?? []).length, 2);
+  assert.match(sql, /FOREIGN KEY \("dispatchAuthorizationEventId", "companyId", "providerScope"\)/);
+});
 test("AST: no FAILED writer and only outcome-derived SUCCEEDED reaches private terminal CAS", () => {
   const source = readFileSync(new URL("./opencredit-commercial-operation.service.ts", import.meta.url), "utf8");
   const ast = ts.createSourceFile("service.ts", source, ts.ScriptTarget.Latest, true);
