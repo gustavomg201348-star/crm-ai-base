@@ -1554,6 +1554,85 @@ TRUSTED PROVIDER SCOPE: IMPLEMENTED
 COMMERCIAL OPERATION LOCAL LEDGER: IMPLEMENTED
 RUNTIME CONSUMER AUTHORIZATION/EVIDENCE: BLOCKED
 CREATE CLIENT DISPATCH: BLOCKED
-SUCCEEDED/FAILED CLASSIFICATION: BLOCKED
+CREATE CLIENT OUTCOME POLICY: IMPLEMENTED
+LEDGER SUCCEEDED/FAILED TRANSITIONS: BLOCKED
+RECONCILIATION: BLOCKED
+AUTOMATIC REPLAY: FORBIDDEN
+```
+
+## CreateClient outcome classification policy
+
+`classifyOpenCreditCreateClientOutcome` in `opencredit-create-client-outcome.ts`
+is a pure, synchronous, passive server-only policy. It accepts only sanitized
+observations, not Response, raw JSON/body, headers, URL, CPF, IDs, credentials,
+provider messages or errors. The closed discriminated union accepts:
+
+- PARSED_RESPONSE: integer HTTP status 100..599 and an exact success/created
+  boolean pair already validated by the operation-specific parser;
+- UNREADABLE_RESPONSE: the same status range and only INVALID_CONTENT_TYPE,
+  TOO_LARGE, INVALID_UTF8, INVALID_JSON or STREAM_ERROR;
+- NO_RESPONSE: only TIMEOUT or NETWORK. A body-read timeout is represented as
+  NO_RESPONSE/TIMEOUT for this policy even if headers were previously obtained;
+  either representation of untrustworthy results must never imply remote failure.
+
+Root and nested objects must contain exactly the expected own enumerable data
+properties. Custom prototypes, inherited fields, accessors, symbols, hidden fields,
+extras and invalid values reject through one fixed sanitized error without cause,
+original exception or submitted data. Null-prototype records remain supported.
+
+| Observation | Local classification | Basis / extra output |
+| --- | --- | --- |
+| 201 + true/true | SUCCEEDED | HTTP_201_SUCCESS_CREATED; created=true |
+| 201 + true/false | SUCCEEDED | HTTP_201_SUCCESS_UPDATED; created=false |
+| 201 + false/false | UNKNOWN | HTTP_201_UNCONFIRMED_RESULT |
+| 201 + false/true | UNKNOWN | HTTP_201_CONTRADICTORY_RESULT |
+| non-201, any valid pair | UNKNOWN | UNPUBLISHED_HTTP_STATUS |
+| unreadable response, any valid status | UNKNOWN | UNREADABLE_RESPONSE |
+| no response | UNKNOWN | NO_RESPONSE |
+
+This is LOCAL QEVORA policy, NOT a formal provider response schema. The public
+OpenAPI 3.1.0 / version 2.8.0 was rechecked for IntegrationApiController_createClient:
+only HTTP 201 documents a positive result, with an example but no complete schema.
+The 400/401 examples do not justify negative classification. No schema
+for 4xx/5xx is invented. Every non-201, including 200/202, 401/403 and 5xx, stays
+UNKNOWN even with parsed true/false flags. A structurally validated 201 false/false
+does NOT prove non-application remotely: the booleans are documented only by example,
+without a complete formal schema or conclusive operational evidence. It remains
+UNKNOWN; false/true also remains UNKNOWN as contradictory. No observation in the
+current policy emits FAILED, and its output type is restricted to SUCCEEDED | UNKNOWN.
+FAILED in the existing ledger remains reserved for future conclusive evidence,
+not an invented future basis or a transition introduced by this slice.
+For 201 true/false the provider describes updating an existing CPF; this is NOT
+proof of idempotency. No guarantee of financial acceptance or remote uniqueness
+is inferred. Output is a fresh closed object: state and closed basis, plus created
+only on SUCCEEDED, without raw status or transport/provider diagnostics.
+
+The existing parser still preserves all four boolean pairs without classification;
+tests compose it with the policy without connecting production components. Earlier
+slice descriptions of blocked classification refer to their original scope; this
+slice implements only the in-memory policy, NOT ledger outcome transitions.
+
+No POST/request, API client, HTTP boundary call, runtime consumer, endpoint, UI,
+worker, webhook, cron, polling, DB/Prisma, ledger writer or side effect is added.
+The operation service remains unchanged: PREPARED -> IN_FLIGHT -> UNKNOWN. This
+policy does not authorize an operation, supply consumer consent/evidence, permit
+retry/replay, reserve identity, dispatch, reconcile or resolve ambiguous outcomes.
+Missing/unreadable responses cannot prove the provider did not apply an operation.
+401 never grants permission to replay a POST. No provider idempotency key, request
+hash or CPF-derived key is introduced; intentKey remains local intention identity.
+No schema, migration, environment, dependency or Railway change is introduced.
+CI adds one focused unit gate and preserves every existing gate; this DB-free
+policy needs no new material PostgreSQL gate.
+
+```text
+HTTP JSON RESPONSE BOUNDARY: IMPLEMENTED
+CREATE CLIENT REQUEST CONTRACT: IMPLEMENTED
+CREATE CLIENT OUTCOME POLICY: IMPLEMENTED
+TRUSTED PROVIDER SCOPE: IMPLEMENTED
+COMMERCIAL OPERATION LOCAL LEDGER: IMPLEMENTED
+RUNTIME CONSUMER AUTHORIZATION/EVIDENCE: BLOCKED
+CREATE CLIENT DISPATCH: BLOCKED
+LEDGER SUCCEEDED/FAILED TRANSITIONS: BLOCKED
+RECONCILIATION: BLOCKED
 AUTOMATIC REPLAY: FORBIDDEN
 ```
