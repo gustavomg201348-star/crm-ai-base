@@ -5,6 +5,7 @@ import Module from "node:module";
 
 let createOpenCreditApiClient: typeof import("./opencredit-api-client").createOpenCreditApiClient;
 let OpenCreditApiError: typeof import("./opencredit-api-client").OpenCreditApiError;
+let readApiErrorCode: typeof import("./opencredit-api-client").readOpenCreditApiErrorCode;
 
 // Standalone Node does not handle Next's public marker. Stub only that no-op
 // import for unit tests, and restore the loader immediately after loading.
@@ -19,12 +20,46 @@ before(async () => {
     const client = await import("./opencredit-api-client");
     createOpenCreditApiClient = client.createOpenCreditApiClient;
     OpenCreditApiError = client.OpenCreditApiError;
+    readApiErrorCode = client.readOpenCreditApiErrorCode;
   } finally {
     loader._load = original;
   }
 });
 
 const creds = { email: "partner@example.invalid", password: "fictitious-test-password" };
+for (const code of ["CONFIGURATION", "AUTH_FAILED", "INVALID_RESPONSE", "NETWORK", "TIMEOUT", "INVALID_PATH", "DISPOSED"] as const) {
+  test("closed API error reader accepts exact code/message " + code, () => {
+    for (const status of [undefined, 100, 401, 599]) assert.equal(readApiErrorCode(new OpenCreditApiError(code, status)), code);
+    const absent = new OpenCreditApiError(code); Reflect.deleteProperty(absent, "status"); assert.equal(readApiErrorCode(absent), code);
+  });
+}
+test("API error reader rejects plain, forged, inherited and malformed contracts", () => {
+  for (const value of [null, undefined, {}, { code: "AUTH_FAILED", message: "OPENCREDIT_API_AUTH_FAILED" }, new Error("wrong")]) assert.equal(readApiErrorCode(value), null);
+  for (const code of ["__proto__", "constructor", "toString", "OTHER"]) {
+    const error = Object.assign(new Error("OPENCREDIT_API_" + code), { code }); assert.equal(readApiErrorCode(error), null);
+  }
+  assert.equal(readApiErrorCode(Object.assign(new Error("wrong"), { code: "AUTH_FAILED" })), null);
+  const inherited = Object.create(new OpenCreditApiError("AUTH_FAILED")); assert(inherited instanceof Error); assert.equal(readApiErrorCode(inherited), null);
+  for (const status of [null, "401", 99, 600, 401.5, NaN, Infinity, {}, []]) {
+    const error = new OpenCreditApiError("AUTH_FAILED"); Object.defineProperty(error, "status", { value: status }); assert.equal(readApiErrorCode(error), null);
+  }
+});
+for (const key of ["code", "message", "status"]) test("API error reader never executes " + key + " accessors", () => {
+  let reads = 0;
+  for (const descriptor of [{ get() { reads++; throw Error("private"); } }, { set(_v: unknown) { reads++; } }]) {
+    const error = new OpenCreditApiError("AUTH_FAILED"); Object.defineProperty(error, key, descriptor); assert.equal(readApiErrorCode(error), null);
+  }
+  assert.equal(reads, 0);
+});
+test("API error reader ignores raw properties and rejects inherited status without getter reads", () => {
+  let reads = 0; const error = new OpenCreditApiError("TIMEOUT");
+  for (const key of ["stack", "cause", "body", "headers", "credentials"]) Object.defineProperty(error, key, { get() { reads++; throw Error("private"); } });
+  assert.equal(readApiErrorCode(error), "TIMEOUT"); assert.equal(reads, 0);
+  Reflect.deleteProperty(error, "status");
+  const prototype = Object.create(Error.prototype); Object.defineProperty(prototype, "status", { get() { reads++; throw Error("private"); } }); Object.setPrototypeOf(error, prototype);
+  assert.equal(readApiErrorCode(error), null); assert.equal(reads, 0);
+  const { proxy, revoke } = Proxy.revocable(new Error(), {}); revoke(); assert.equal(readApiErrorCode(proxy), null);
+});
 const pair = (suffix = "1", expiresIn = 28800) => Response.json({ data: {
   accessToken: `test-access-${suffix}`, refreshToken: `test-refresh-${suffix}`, expiresIn
 } });

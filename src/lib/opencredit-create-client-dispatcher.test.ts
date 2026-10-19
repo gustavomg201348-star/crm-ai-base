@@ -1,17 +1,30 @@
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
-import Module from "node:module";
+import Module, { createRequire } from "node:module";
 import { readFileSync, readdirSync } from "node:fs";
 import * as ts from "typescript";
 import type { SessionUser } from "./auth";
+import type { OpenCreditCreateClientObservation } from "./opencredit-create-client-outcome";
 
 let dispatcher: typeof import("./opencredit-create-client-dispatcher");
 let api: typeof import("./opencredit-api-client");
 let scope: typeof import("./opencredit-provider-scope-resolver");
+let operationService: typeof import("./opencredit-commercial-operation.service");
+const observations: OpenCreditCreateClientObservation[] = [];
 before(async () => {
   const loader = Module as typeof Module & { _load(s: string, ...a: unknown[]): unknown }; const original = loader._load;
-  loader._load = (s, ...a) => s === "server-only" ? {} : original.call(loader, s, ...a);
-  try { dispatcher = await import("./opencredit-create-client-dispatcher"); api = await import("./opencredit-api-client"); scope = await import("./opencredit-provider-scope-resolver"); }
+  loader._load = (s, ...a) => {
+    if (s === "server-only") return {};
+    const value = original.call(loader, s, ...a);
+    if (s === "./opencredit-commercial-operation.service") {
+      const domain = value as typeof import("./opencredit-commercial-operation.service");
+      return { ...domain, applyOpenCreditCreateClientObservation: (...args: Parameters<typeof domain.applyOpenCreditCreateClientObservation>) => {
+        observations.push(args[2]); return domain.applyOpenCreditCreateClientObservation(...args);
+      } };
+    }
+    return value;
+  };
+  try { dispatcher = await import("./opencredit-create-client-dispatcher"); api = await import("./opencredit-api-client"); scope = await import("./opencredit-provider-scope-resolver"); operationService = await import("./opencredit-commercial-operation.service"); }
   finally { loader._load = original; }
 });
 const actor: SessionUser = { id: "synthetic-admin", companyId: "synthetic-platform", role: "ADMIN", name: "Synthetic", email: "synthetic@example.invalid" };
@@ -46,6 +59,7 @@ function database() {
   return { db, state, order, transactions: () => transactions };
 }
 async function configured(run: (f: ReturnType<typeof database>) => Promise<void>) {
+  observations.length = 0;
   const keys = ["OPENCREDIT_TENANT_ID", "OPENCREDIT_PARTNER_ID", "PLATFORM_COMPANY_ID", "PLATFORM_ADMIN_EMAILS"];
   const old = keys.map(k => process.env[k]);
   ["Synthetic-Tenant", "Synthetic-Partner", actor.companyId, actor.email].forEach((v, i) => { process.env[keys[i]] = v; });
@@ -161,10 +175,82 @@ test("terminal Event failure rolls back settlement and never repeats POST", () =
   finally { c.instance.dispose(); }
 }));
 
+/** Exercise actual second module evaluation, not a subclass of the local class. */
+function independentModule<T>(specifier: string): T {
+  const require = createRequire(import.meta.url), filename = require.resolve(specifier), cached = require.cache[filename];
+  const loader = Module as typeof Module & { _load(s: string, ...a: unknown[]): unknown }; const original = loader._load;
+  try {
+    delete require.cache[filename];
+    loader._load = (s, ...a) => s === "server-only" ? {} : original.call(loader, s, ...a);
+    return require(filename) as T;
+  } finally { loader._load = original; if (cached) require.cache[filename] = cached; else delete require.cache[filename]; }
+}
+for (const code of ["AUTH_FAILED", "TIMEOUT"] as const) test("separately loaded API " + code + " maps before reservation", () => configured(async f => {
+  const other = independentModule<typeof api>("./opencredit-api-client.ts");
+  assert.notEqual(other.OpenCreditApiError, api.OpenCreditApiError);
+  const failure = new other.OpenCreditApiError(code, code === "AUTH_FAILED" ? 401 : undefined);
+  assert(failure instanceof Error); assert.equal(failure instanceof api.OpenCreditApiError, false);
+  let calls = 0;
+  const c = other.createOpenCreditApiClient({ credentials: () => ({ email: "synthetic", password: "synthetic" }), fetch: (async () => { calls++; throw failure; }) as typeof fetch });
+  try {
+    await assert.rejects(dispatcher.dispatchOpenCreditCreateClient(f.db, command(), { client: c }), { code: code === "AUTH_FAILED" ? "AUTHENTICATION" : "PRE_DISPATCH_UNAVAILABLE" });
+    assert.equal(calls, 1); assert.equal(f.transactions(), 0); assert.equal(f.state.operation.state, "PREPARED"); assert.deepEqual(observations, []);
+  } finally { c.dispose(); other.openCreditApiClient.dispose(); }
+}));
+test("separately loaded API TIMEOUT after commit records TIMEOUT, UNKNOWN, one attempt", () => configured(async f => {
+  const other = independentModule<typeof api>("./opencredit-api-client.ts");
+  assert.notEqual(other.OpenCreditApiError, api.OpenCreditApiError);
+  let posts = 0;
+  const c = other.createOpenCreditApiClient({ credentials: () => ({ email: "synthetic", password: "synthetic" }), fetch: (async (url) => {
+    if (String(url).endsWith("/api/auth/login")) return Response.json({ data: { accessToken: "synthetic", refreshToken: "synthetic", expiresIn: 28800 } });
+    posts++; assert.equal(f.state.operation.state, "IN_FLIGHT"); throw new other.OpenCreditApiError("TIMEOUT");
+  }) as typeof fetch });
+  try {
+    assert.equal((await dispatcher.dispatchOpenCreditCreateClient(f.db, command(), { client: c })).state, "UNKNOWN");
+    assert.deepEqual(observations, [{ kind: "NO_RESPONSE", reason: "TIMEOUT" }]); assert.equal(posts, 1);
+  } finally { c.dispose(); other.openCreditApiClient.dispose(); }
+}));
+for (const code of ["CONSUMER_AUTHORIZATION_INACTIVE", "IDENTITY_DISABLED", "COMMERCIAL_ACCESS_DISABLED", "OPERATION_STATE_CONFLICT"] as const) test("separate domain module preserves " + code + " in fresh error", () => configured(async f => {
+  const other = independentModule<typeof operationService>("./opencredit-commercial-operation.service.ts");
+  assert.notEqual(other.OpenCreditCommercialOperationServiceError, operationService.OpenCreditCommercialOperationServiceError);
+  const failure = new other.OpenCreditCommercialOperationServiceError(code);
+  assert(failure instanceof Error); assert.equal(failure instanceof operationService.OpenCreditCommercialOperationServiceError, false);
+  const c: Pick<typeof api.openCreditApiClient, "postJsonAfterCommit"> = { async postJsonAfterCommit() { throw failure; } };
+  await assert.rejects(dispatcher.dispatchOpenCreditCreateClient(f.db, command(), { client: c }), e => {
+    assert.notEqual(e, failure); assert.equal(operationService.readOpenCreditCommercialOperationServiceErrorCode(e), code); return true;
+  });
+  assert.equal(f.transactions(), 0); assert.deepEqual(observations, []);
+}));
+test("forged pre-dispatch errors fail closed and never execute getters", () => configured(async f => {
+  let reads = 0;
+  const getterCode = new Error("OPENCREDIT_API_AUTH_FAILED"); Object.defineProperty(getterCode, "code", { get() { reads++; throw Error("private"); } });
+  const getterMessage = Object.assign(new Error(), { code: "AUTH_FAILED" }); Object.defineProperty(getterMessage, "message", { get() { reads++; throw Error("private"); } });
+  const getterStatus = new api.OpenCreditApiError("AUTH_FAILED"); Object.defineProperty(getterStatus, "status", { get() { reads++; throw Error("private"); } });
+  const failures: unknown[] = [{ code: "AUTH_FAILED", message: "OPENCREDIT_API_AUTH_FAILED" }, Object.assign(new Error("wrong"), { code: "AUTH_FAILED" }), getterCode, getterMessage, getterStatus];
+  for (const code of ["__proto__", "constructor", "toString"]) failures.push(Object.assign(new Error("OPENCREDIT_API_" + code), { code }));
+  for (const failure of failures) {
+    const c: Pick<typeof api.openCreditApiClient, "postJsonAfterCommit"> = { async postJsonAfterCommit() { throw failure; } };
+    await assert.rejects(dispatcher.dispatchOpenCreditCreateClient(f.db, command(), { client: c }), { code: "PRE_DISPATCH_UNAVAILABLE" });
+  }
+  assert.equal(reads, 0); assert.equal(f.transactions(), 0); assert.deepEqual(observations, []);
+}));
+test("unrecognized post-commit error is NETWORK observation with no replay", () => configured(async f => {
+  let attempts = 0;
+  const failure = Object.assign(new Error("wrong"), { code: "TIMEOUT" });
+  const c: Pick<typeof api.openCreditApiClient, "postJsonAfterCommit"> = { async postJsonAfterCommit(_path, commit) { await commit(); attempts++; throw failure; } };
+  assert.equal((await dispatcher.dispatchOpenCreditCreateClient(f.db, command(), { client: c })).state, "UNKNOWN");
+  assert.deepEqual(observations, [{ kind: "NO_RESPONSE", reason: "NETWORK" }]); assert.equal(attempts, 1);
+}));
+test("runtime import guard covers extension variants", () => {
+  const pattern = /(?:^|\/)opencredit-create-client-dispatcher(?:\.[cm]?[jt]s)?$/;
+  for (const extension of ["", ".ts", ".js", ".cts", ".mts", ".cjs", ".mjs"]) assert(pattern.test("./opencredit-create-client-dispatcher" + extension));
+});
+
 test("AST guards: exact passive dispatcher, one-shot caller only; no runtime consumers", () => {
   const filename = "src/lib/opencredit-create-client-dispatcher.ts";
   const source = readFileSync(filename, "utf8");
   assert.match(source, /^import "server-only";/);
+  assert.doesNotMatch(source, /instanceof (?:OpenCreditApiError|OpenCreditCommercialOperationServiceError)/);
   assert.doesNotMatch(source, /\bfetch\b|console\.|\.request\(|prepareOpenCredit|grantOpenCredit|mark.*Failed|"FAILED"|setInterval|setTimeout|\bwhile\b/);
   const tree = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true);
   const execution = tree.statements.find((n): n is ts.FunctionDeclaration => ts.isFunctionDeclaration(n) && n.name?.text === "dispatchOpenCreditCreateClient")!;
@@ -175,7 +261,7 @@ test("AST guards: exact passive dispatcher, one-shot caller only; no runtime con
     if (!/\.[cm]?[jt]sx?$/.test(path) || /\.(test|integration)\./.test(path)) continue;
     const text = readFileSync(path, "utf8"); const ast = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
     const visit = (n: ts.Node): void => {
-      if (ts.isStringLiteralLike(n) && /(?:^|\/)opencredit-create-client-dispatcher$/.test(n.text)) assert.fail("Runtime dispatcher import: " + path);
+      if (ts.isStringLiteralLike(n) && /(?:^|\/)opencredit-create-client-dispatcher(?:\.[cm]?[jt]s)?$/.test(n.text)) assert.fail("Runtime dispatcher import: " + path);
       if (ts.isPropertyAccessExpression(n) && n.name.text === "postJsonAfterCommit") { callers++; assert.equal(path, filename); }
       if ((ts.isIdentifier(n) || ts.isStringLiteralLike(n)) && n.text === "postJsonAfterCommit") assert([filename, "src/lib/opencredit-api-client.ts"].includes(path));
       ts.forEachChild(n, visit);

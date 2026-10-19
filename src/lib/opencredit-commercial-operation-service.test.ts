@@ -28,6 +28,40 @@ before(async () => {
   try { service = await import("./opencredit-commercial-operation.service"); } finally { loader._load = original; }
 });
 const actor: SessionUser = { id: "synthetic-admin", companyId: "synthetic-platform", role: "ADMIN", name: "Synthetic", email: "synthetic@example.invalid" };
+test("module-stable operation error reader accepts all existing closed domain codes", () => {
+  const source = readFileSync("src/lib/opencredit-commercial-operation.service.ts", "utf8");
+  const ast = ts.createSourceFile("service.ts", source, ts.ScriptTarget.Latest, true);
+  const declarations = ast.statements.filter(ts.isVariableStatement).flatMap(n => [...n.declarationList.declarations]);
+  const initializer = declarations.find(n => n.name.getText(ast) === "CODES")!.initializer!;
+  assert(ts.isAsExpression(initializer) && ts.isArrayLiteralExpression(initializer.expression));
+  for (const node of initializer.expression.elements) {
+    assert(ts.isStringLiteral(node)); const code = node.text as OpenCreditCommercialOperationServiceCode;
+    assert.equal(service.readOpenCreditCommercialOperationServiceErrorCode(new service.OpenCreditCommercialOperationServiceError(code)), code);
+  }
+});
+test("operation error reader rejects forged codes/names/messages, plain or inherited records", () => {
+  const read = service.readOpenCreditCommercialOperationServiceErrorCode;
+  for (const code of ["__proto__", "constructor", "toString", "OTHER"]) assert.equal(read(Object.assign(new Error("OPENCREDIT_COMMERCIAL_OPERATION_" + code), { name: "OpenCreditCommercialOperationServiceError", code })), null);
+  for (const error of [null, {}, { name: "OpenCreditCommercialOperationServiceError", code: "NOT_AUTHORIZED", message: "OPENCREDIT_COMMERCIAL_OPERATION_NOT_AUTHORIZED" },
+    Object.assign(new Error("wrong"), { name: "OpenCreditCommercialOperationServiceError", code: "NOT_AUTHORIZED" }),
+    Object.assign(new Error("OPENCREDIT_COMMERCIAL_OPERATION_NOT_AUTHORIZED"), { name: "wrong", code: "NOT_AUTHORIZED" }),
+    Object.create(new service.OpenCreditCommercialOperationServiceError("NOT_AUTHORIZED"))]) assert.equal(read(error), null);
+});
+for (const key of ["name", "code", "message"]) test("operation error reader requires own data " + key + " without accessors", () => {
+  let calls = 0;
+  for (const descriptor of [{ get() { calls++; throw Error("private"); } }, { set(_value: unknown) { calls++; } }]) {
+    const error = new service.OpenCreditCommercialOperationServiceError("NOT_AUTHORIZED"); Object.defineProperty(error, key, descriptor);
+    assert.equal(service.readOpenCreditCommercialOperationServiceErrorCode(error), null);
+  }
+  const missing = new service.OpenCreditCommercialOperationServiceError("NOT_AUTHORIZED"); Reflect.deleteProperty(missing, key);
+  assert.equal(service.readOpenCreditCommercialOperationServiceErrorCode(missing), null); assert.equal(calls, 0);
+});
+test("operation error reader does not inspect stack, cause, raw response, headers or body", () => {
+  const error = new service.OpenCreditCommercialOperationServiceError("CONSUMER_AUTHORIZATION_INACTIVE"); let calls = 0;
+  for (const key of ["stack", "cause", "body", "headers", "credentials", "response"]) Object.defineProperty(error, key, { get() { calls++; throw Error("private"); } });
+  assert.equal(service.readOpenCreditCommercialOperationServiceErrorCode(error), "CONSUMER_AUTHORIZATION_INACTIVE"); assert.equal(calls, 0);
+  const { proxy, revoke } = Proxy.revocable(new Error(), {}); revoke(); assert.equal(service.readOpenCreditCommercialOperationServiceErrorCode(proxy), null);
+});
 const scope = "synthetic-service" as OpenCreditPrepareClientProfileInput["providerScope"];
 const intentKey = "00000000-0000-4000-8000-000000000000";
 const prepare = (changes: Partial<OpenCreditPrepareClientProfileInput> = {}): OpenCreditPrepareClientProfileInput => ({ actor: { ...actor }, companyId: "synthetic-company", contactId: "synthetic-contact", providerScope: scope, intentKey, ...changes });
@@ -211,7 +245,7 @@ test("exact exports, server-only, no provider/reset API or unrelated runtime cal
   const source = readFileSync(new URL("./opencredit-commercial-operation.service.ts", import.meta.url), "utf8");
   assert.match(source, /^import "server-only";/);
   assert.doesNotMatch(source, /\bfetch\b|opencredit-api-client|readOpenCreditStrictJsonResponse|\.request\s*\(|console\.|process\.env|logger|\$executeRaw|\$queryRaw|setTimeout|new PrismaClient|\.delete\(|\.upsert\(|\.createMany\(/);
-  assert.deepEqual(Object.keys(service).sort(), ["OpenCreditCommercialOperationServiceError", "prepareOpenCreditClientProfileOperation", "reserveOpenCreditClientProfileOperationForDispatch", "markOpenCreditCommercialOperationUnknown", "applyOpenCreditCreateClientObservation"].sort());
+  assert.deepEqual(Object.keys(service).sort(), ["OpenCreditCommercialOperationServiceError", "readOpenCreditCommercialOperationServiceErrorCode", "prepareOpenCreditClientProfileOperation", "reserveOpenCreditClientProfileOperationForDispatch", "markOpenCreditCommercialOperationUnknown", "applyOpenCreditCreateClientObservation"].sort());
   assert.doesNotMatch(source, /data:\s*\{\s*state:\s*"(?:FAILED|PREPARED)"/);
   assert.match(source, /buildOpenCreditClientProfileFromContact/);
   function scan(dir: URL) { for (const e of readdirSync(dir, { withFileTypes: true })) {

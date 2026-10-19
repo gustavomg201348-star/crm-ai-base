@@ -21,6 +21,20 @@ export class OpenCreditCommercialOperationServiceError extends Error {
     this.name = "OpenCreditCommercialOperationServiceError";
   }
 }
+
+/** Module-stable, closed domain error code only; no getters or retained error. */
+export function readOpenCreditCommercialOperationServiceErrorCode(error: unknown): OpenCreditCommercialOperationServiceCode | null {
+  try {
+    if (!(error instanceof Error)) return null;
+    const name = Object.getOwnPropertyDescriptor(error, "name");
+    const descriptor = Object.getOwnPropertyDescriptor(error, "code");
+    const message = Object.getOwnPropertyDescriptor(error, "message");
+    if (!name || !("value" in name) || name.value !== "OpenCreditCommercialOperationServiceError"
+      || !descriptor || !("value" in descriptor) || !message || !("value" in message)) return null;
+    const code = CODES.find(candidate => candidate === descriptor.value);
+    return code && message.value === "OPENCREDIT_COMMERCIAL_OPERATION_" + code ? code : null;
+  } catch { return null; }
+}
 type Db = Pick<PrismaClient, "$transaction">;
 type Common = Readonly<{ actor: SessionUser; companyId: string; providerScope: OpenCreditProviderScope }>;
 export type OpenCreditPrepareClientProfileInput = Common & Readonly<{ contactId: string; intentKey: string }>;

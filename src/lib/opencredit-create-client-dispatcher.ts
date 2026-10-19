@@ -1,10 +1,11 @@
 import "server-only";
 import type { SessionUser } from "./auth";
 import { isPlatformAdmin } from "./permissions";
-import { openCreditApiClient, OpenCreditApiError } from "./opencredit-api-client";
+import { openCreditApiClient, readOpenCreditApiErrorCode } from "./opencredit-api-client";
 import { resolveConfiguredOpenCreditProviderContext } from "./opencredit-provider-scope-resolver";
 import { reserveOpenCreditClientProfileOperationForDispatch, applyOpenCreditCreateClientObservation,
-  OpenCreditCommercialOperationServiceError, type OpenCreditClientProfileReservation } from "./opencredit-commercial-operation.service";
+  OpenCreditCommercialOperationServiceError, readOpenCreditCommercialOperationServiceErrorCode,
+  type OpenCreditClientProfileReservation } from "./opencredit-commercial-operation.service";
 import { readOpenCreditStrictJsonResponse, OpenCreditHttpJsonBoundaryError } from "./opencredit-http-json-boundary";
 import { parseOpenCreditClientProfileResult } from "./opencredit-client-profile-contract";
 import { classifyOpenCreditCreateClientOutcome, type OpenCreditCreateClientObservation } from "./opencredit-create-client-outcome";
@@ -85,14 +86,16 @@ export async function dispatchOpenCreditCreateClient(db: Db, supplied: Input, op
     });
     observation = await observe(execution.response);
   } catch (error) {
+    const apiCode = readOpenCreditApiErrorCode(error);
     if (!reservation) {
-      if (error instanceof OpenCreditCommercialOperationServiceError) throw new OpenCreditCommercialOperationServiceError(error.code);
-      if (error instanceof OpenCreditApiError && error.code === "CONFIGURATION") return fail("CONFIGURATION");
-      if (error instanceof OpenCreditApiError && ["AUTH_FAILED", "INVALID_RESPONSE"].includes(error.code)) return fail("AUTHENTICATION");
+      const domainCode = readOpenCreditCommercialOperationServiceErrorCode(error);
+      if (domainCode) throw new OpenCreditCommercialOperationServiceError(domainCode);
+      if (apiCode === "CONFIGURATION") return fail("CONFIGURATION");
+      if (apiCode === "AUTH_FAILED" || apiCode === "INVALID_RESPONSE") return fail("AUTHENTICATION");
       return fail("PRE_DISPATCH_UNAVAILABLE");
     }
     // The client contract guarantees one attempted transport after callback commit.
-    observation = { kind: "NO_RESPONSE", reason: error instanceof OpenCreditApiError && error.code === "TIMEOUT" ? "TIMEOUT" : "NETWORK" };
+    observation = { kind: "NO_RESPONSE", reason: apiCode === "TIMEOUT" ? "TIMEOUT" : "NETWORK" };
   }
   if (!reservation) return fail("PRE_DISPATCH_UNAVAILABLE");
   try {

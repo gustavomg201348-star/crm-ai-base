@@ -16,10 +16,30 @@ type Options = {
   credentials?: () => Credentials;
 };
 
+const API_ERROR_CODES = ["CONFIGURATION", "AUTH_FAILED", "INVALID_RESPONSE", "NETWORK", "TIMEOUT", "INVALID_PATH", "DISPOSED"] as const;
+type ApiErrorCode = typeof API_ERROR_CODES[number];
 export class OpenCreditApiError extends Error {
-  constructor(readonly code: "CONFIGURATION" | "AUTH_FAILED" | "INVALID_RESPONSE" | "NETWORK" | "TIMEOUT" | "INVALID_PATH" | "DISPOSED", readonly status?: number) {
+  constructor(readonly code: ApiErrorCode, readonly status?: number) {
     super(`OPENCREDIT_API_${code}`);
   }
+}
+
+/** Closed error contract across module loads. Never inspect raw exception data. */
+export function readOpenCreditApiErrorCode(error: unknown): ApiErrorCode | null {
+  try {
+    if (!(error instanceof Error)) return null;
+    const descriptor = Object.getOwnPropertyDescriptor(error, "code");
+    const message = Object.getOwnPropertyDescriptor(error, "message");
+    if (!descriptor || !("value" in descriptor) || !message || !("value" in message)) return null;
+    const code = API_ERROR_CODES.find(candidate => candidate === descriptor.value);
+    if (!code || message.value !== "OPENCREDIT_API_" + code) return null;
+    const status = Object.getOwnPropertyDescriptor(error, "status");
+    if (status) {
+      if (!("value" in status) || status.value !== undefined && (typeof status.value !== "number"
+        || !Number.isInteger(status.value) || status.value < 100 || status.value > 599)) return null;
+    } else if ("status" in error) return null;
+    return code;
+  } catch { return null; }
 }
 
 function assertServer() {
