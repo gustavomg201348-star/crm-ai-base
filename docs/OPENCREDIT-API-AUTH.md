@@ -1624,15 +1624,89 @@ No schema, migration, environment, dependency or Railway change is introduced.
 CI adds one focused unit gate and preserves every existing gate; this DB-free
 policy needs no new material PostgreSQL gate.
 
+## CreateClient outcome ledger settlement
+
+`applyOpenCreditCreateClientObservation(db, transitionInput, observation)` is the
+only new public settlement API. It classifies the closed observation through the
+UNCHANGED `classifyOpenCreditCreateClientOutcome` before opening any transaction.
+Invalid observations become the fixed service error
+OPENCREDIT_COMMERCIAL_OPERATION_INVALID_OBSERVATION, without original input/cause,
+transaction, mutation or event. The sanitized classification is captured once;
+transaction serialization retries do not reread the supplied observation.
+
+```text
+PARSED/validated observation (or closed unreadable/no-response fact)
+→ existing outcome policy
+→ authorized atomic local ledger settlement
+```
+
+| Outcome policy result | Allowed transition / final event |
+| --- | --- |
+| SUCCEEDED CREATED (201 true/true) | IN_FLIGHT → SUCCEEDED / MARKED_SUCCEEDED_CREATED |
+| SUCCEEDED UPDATED (201 true/false) | IN_FLIGHT → SUCCEEDED / MARKED_SUCCEEDED_UPDATED |
+| UNKNOWN (every other valid observation) | IN_FLIGHT → UNKNOWN / MARKED_UNKNOWN |
+| FAILED | Impossible: not emitted by the current policy; no writer |
+
+A private shared terminal CAS implements both the new API and the existing
+`markOpenCreditCommercialOperationUnknown`; the latter's public behavior is
+preserved. Each transaction remains Serializable, rereads the effective Platform
+Admin, Company and tenant/scope/kind-scoped operation, and CASes id + companyId +
+providerScope + IN_FLIGHT + expectedRevision. Exactly count=1 permits revision+1
+and an Event in the same transaction. Count=0 conflicts, unexpected counts fail
+as STORAGE_ERROR. Event or commit failure cannot return success; Event failure
+rolls the mutation back. P2034 retries stay bounded at three attempts, rereading
+actor and operation each time, without sleep/backoff or HTTP retry.
+
+The effective transaction actor is recorded, not assumed to be the creator. Only
+the existing Event.action distinguishes CREATED from UPDATED: no response, profile,
+CPF, boolean metadata, token, header, URL or provider diagnostic is persisted.
+Results contain only changed, operationId, state and revision, never the observation.
+`created=false` is NOT proof of provider idempotency.
+
+Settlement records a post-dispatch fact, not permission to dispatch. It does not
+reread Contact/CPF, CommercialAccess, RemoteIdentity or the profile adapter. Changes
+to these facts after dispatch (revocation, disabled identity, archived/changed or
+ambiguous Contact) cannot erase or block recording an already observed result.
+The existing actor/Platform Admin policy remains temporary and unchanged; consumer
+authorization/evidence still needs its own reviewed orchestration boundary.
+
+Repeated SUCCEEDED or UNKNOWN is an authorized/scoped safe no-op, even with an older
+valid expectedRevision: it returns the persisted revision without another event or
+timestamp mutation. The first terminal action remains authoritative even if a later
+positive observation differs on created. Conflicting terminal states reject:
+UNKNOWN → SUCCEEDED and SUCCEEDED → UNKNOWN are forbidden. PREPARED, FAILED and
+unrecognized states cannot be settled. No reset/resume/replay or reconciliation
+is introduced. The first committed terminal CAS wins concurrent attempts; at most
+one terminal revision/event is written. Ambiguity remains UNKNOWN, never FAILED.
+
+The outcome guard now permits exactly one static named import in exactly
+`src/lib/opencredit-commercial-operation.service.ts`, with only the classifier and
+its observation type, without aliases. All other production consumers, dynamic
+imports, requires, wildcards and re-exports remain forbidden. The service still
+has no external runtime caller. Its export list stays closed; no public generic
+markSucceeded or markFailed API exists. Static writer checks restrict the shared
+terminal primitive to SUCCEEDED/UNKNOWN and preserve existing ledger write sites.
+
+The unit/material PostgreSQL suites are expanded through existing CI gates; no CI
+change is needed. Material tests cover both positive actions, observation UNKNOWN,
+repeat/no-overwrite, real Event FK rollback and concurrent competing terminal CASes.
+Execution results must be reported separately; mock tests do not prove material
+PostgreSQL rollback/concurrency. Earlier sections describe their original slices;
+the outcome policy remains pure, while this section introduces its sole approved
+passive ledger consumer. No real HTTP/POST, provider call, endpoint, UI, worker,
+cron, webhook, AI/chatbot, validate/simulation/proposal integration, schema,
+migration, dependency, environment or Railway configuration is introduced.
+
 ```text
 HTTP JSON RESPONSE BOUNDARY: IMPLEMENTED
 CREATE CLIENT REQUEST CONTRACT: IMPLEMENTED
 CREATE CLIENT OUTCOME POLICY: IMPLEMENTED
+CREATE CLIENT OUTCOME LEDGER SETTLEMENT: IMPLEMENTED
 TRUSTED PROVIDER SCOPE: IMPLEMENTED
 COMMERCIAL OPERATION LOCAL LEDGER: IMPLEMENTED
 RUNTIME CONSUMER AUTHORIZATION/EVIDENCE: BLOCKED
 CREATE CLIENT DISPATCH: BLOCKED
-LEDGER SUCCEEDED/FAILED TRANSITIONS: BLOCKED
+FAILED TRANSITION: BLOCKED
 RECONCILIATION: BLOCKED
 AUTOMATIC REPLAY: FORBIDDEN
 ```

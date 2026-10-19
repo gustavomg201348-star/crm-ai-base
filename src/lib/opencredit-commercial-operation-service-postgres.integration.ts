@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { Prisma, PrismaClient } from "@prisma/client";
 import type { SessionUser } from "./auth";
 import type { OpenCreditPrepareClientProfileInput, OpenCreditOperationTransitionInput, OpenCreditCommercialOperationServiceCode } from "./opencredit-commercial-operation.service";
+import type { OpenCreditCreateClientObservation } from "./opencredit-create-client-outcome";
 import { assertOpenCreditCommercialOperationServiceTestDatabase } from "./opencredit-commercial-operation-service-postgres.guard";
 
 assertOpenCreditCommercialOperationServiceTestDatabase(process.env);
@@ -93,7 +94,7 @@ material("unknown historical state fails closed", async f => {
   await denied(() => service.prepareOpenCreditClientProfileOperation(db, f.input), "OPERATION_STATE_INVALID");
 });
 // Both first attempts read the same committed snapshot before either writer proceeds.
-function barrierDb(kind: "prepare" | "reserve"): Db {
+function barrierDb(kind: "prepare" | "reserve" | "settle"): Db {
   let arrivals = 0; let release!: () => void; const barrier = new Promise<void>(resolve => { release = resolve; });
   return { $transaction: <T>(run: (tx: Prisma.TransactionClient) => Promise<T>, options?: Options) => db.$transaction(tx => {
     const delegate = new Proxy(tx.openCreditCommercialOperation, { get(target, key) {
@@ -169,16 +170,16 @@ material("UNKNOWN remains available after all post-dispatch revocations and is r
 material("PREPARED cannot be marked UNKNOWN", async f => {
   const i = await prepared(f); await denied(() => service.markOpenCreditCommercialOperationUnknown(db, i), "OPERATION_STATE_CONFLICT"); assert.equal((await f.events()).length, 1);
 });
-for (const mode of ["prepare", "reserve", "unknown"] as const) material("real event FK failure rolls back observed operation mutation in " + mode, async f => {
+for (const mode of ["prepare", "reserve", "unknown", "settle"] as const) material("real event FK failure rolls back observed operation mutation in " + mode, async f => {
   let i: OpenCreditOperationTransitionInput | undefined;
   if (mode !== "prepare") i = await prepared(f);
-  if (mode === "unknown") { await service.reserveOpenCreditClientProfileOperationForDispatch(db, i!); i = { ...i!, expectedRevision: 1 }; }
+  if (mode === "unknown" || mode === "settle") { await service.reserveOpenCreditClientProfileOperationForDispatch(db, i!); i = { ...i!, expectedRevision: 1 }; }
   const before = await f.current(); const events = await f.events(); let observed = false; let fkRejected = false;
   const failpoint = { $transaction: <T>(run: (tx: Prisma.TransactionClient) => Promise<T>, options?: Options) => db.$transaction(tx => {
     const delegate = new Proxy(tx.openCreditCommercialOperationEvent, { get(target, key) {
       if (key === "create") return async (args: Prisma.OpenCreditCommercialOperationEventCreateArgs) => {
         const changed = await tx.openCreditCommercialOperation.findFirst({ where: f.where });
-        assert.ok(changed); assert.equal(changed.state, mode === "prepare" ? "PREPARED" : mode === "reserve" ? "IN_FLIGHT" : "UNKNOWN"); observed = true;
+        assert.ok(changed); assert.equal(changed.state, mode === "prepare" ? "PREPARED" : mode === "reserve" ? "IN_FLIGHT" : mode === "settle" ? "SUCCEEDED" : "UNKNOWN"); observed = true;
         try { return await target.create({ ...args, data: { ...args.data as Prisma.OpenCreditCommercialOperationEventUncheckedCreateInput, actorUserId: "missing-synthetic-actor-" + randomUUID() } }); }
         catch (e) { fkRejected = e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2003"; throw e; }
       };
@@ -186,7 +187,8 @@ for (const mode of ["prepare", "reserve", "unknown"] as const) material("real ev
     } });
     return run(new Proxy(tx, { get: (target, key) => key === "openCreditCommercialOperationEvent" ? delegate : Reflect.get(target, key) }));
   }, options) } as Db;
-  await denied(() => mode === "prepare" ? service.prepareOpenCreditClientProfileOperation(failpoint, f.input) : mode === "reserve" ? service.reserveOpenCreditClientProfileOperationForDispatch(failpoint, i!) : service.markOpenCreditCommercialOperationUnknown(failpoint, i!), "STORAGE_ERROR");
+  await denied(() => mode === "prepare" ? service.prepareOpenCreditClientProfileOperation(failpoint, f.input) : mode === "reserve" ? service.reserveOpenCreditClientProfileOperationForDispatch(failpoint, i!)
+    : mode === "settle" ? service.applyOpenCreditCreateClientObservation(failpoint, i!, observation()) : service.markOpenCreditCommercialOperationUnknown(failpoint, i!), "STORAGE_ERROR");
   assert.equal(observed, true); assert.equal(fkRejected, true); assert.deepEqual(await f.current(), before); assert.deepEqual(await f.events(), events);
 });
 material("effective transition actor differs from creator and is audited atomically", async f => {
@@ -196,6 +198,9 @@ material("effective transition actor differs from creator and is audited atomica
   process.env.PLATFORM_ADMIN_EMAILS = f.actor.email + "," + actor.email;
   await service.reserveOpenCreditClientProfileOperationForDispatch(db, { ...i, actor });
   await event(f, 2, "RESERVED_FOR_DISPATCH", "PREPARED", "IN_FLIGHT", 1, actor.id); assert.equal((await f.current())!.createdByUserId, f.actor.id);
+  await service.applyOpenCreditCreateClientObservation(db, { ...i, actor, expectedRevision: 1 }, observation());
+  await event(f, 3, "MARKED_SUCCEEDED_CREATED", "IN_FLIGHT", "SUCCEEDED", 2, actor.id);
+  assert.equal((await f.current())!.createdByUserId, f.actor.id);
 });
 material("cross-company and cross-scope operation reads fail closed without profile", async f => {
   const i = await prepared(f);
@@ -203,6 +208,8 @@ material("cross-company and cross-scope operation reads fail closed without prof
     await denied(() => fn(db, { ...i, companyId: f.otherCompany }), "OPERATION_NOT_FOUND");
     await denied(() => fn(db, { ...i, providerScope: "synthetic-other-scope" as typeof i.providerScope }), "OPERATION_NOT_FOUND");
   }
+  await denied(() => service.applyOpenCreditCreateClientObservation(db, { ...i, companyId: f.otherCompany }, observation()), "OPERATION_NOT_FOUND");
+  await denied(() => service.applyOpenCreditCreateClientObservation(db, { ...i, providerScope: "synthetic-other-scope" as typeof i.providerScope }, observation()), "OPERATION_NOT_FOUND");
   await denied(() => service.prepareOpenCreditClientProfileOperation(db, { ...f.input, companyId: f.otherCompany }), "CONTACT_NOT_FOUND"); assert.equal((await f.events()).length, 1);
 });
 material("stale platform actor cannot prepare, reserve or mark UNKNOWN", async f => {
@@ -210,4 +217,67 @@ material("stale platform actor cannot prepare, reserve or mark UNKNOWN", async f
   await denied(() => service.prepareOpenCreditClientProfileOperation(db, f.input), "NOT_AUTHORIZED");
   await denied(() => service.reserveOpenCreditClientProfileOperationForDispatch(db, i), "NOT_AUTHORIZED");
   await denied(() => service.markOpenCreditCommercialOperationUnknown(db, i), "NOT_AUTHORIZED"); assert.equal((await f.events()).length, 1);
+  await denied(() => service.applyOpenCreditCreateClientObservation(db, i, observation()), "NOT_AUTHORIZED"); assert.equal((await f.events()).length, 1);
+});
+
+function observation(success = true, created = true): OpenCreditCreateClientObservation {
+  return { kind: "PARSED_RESPONSE", status: 201, result: { success, created } };
+}
+async function inFlight(f: Fixture): Promise<OpenCreditOperationTransitionInput> {
+  const i = await prepared(f); await service.reserveOpenCreditClientProfileOperationForDispatch(db, i);
+  return { ...i, expectedRevision: 1 };
+}
+for (const created of [true, false]) material("material SUCCEEDED " + (created ? "CREATED" : "UPDATED") + " preserves post-dispatch fact and first terminal history", async f => {
+  const i = await inFlight(f);
+  for (const mode of ["access-disabled", "identity-disabled", "archived", "cpf-mismatch", "ambiguous"] as const) await invalidate(f, mode);
+  assert.deepEqual(await service.applyOpenCreditCreateClientObservation(db, i, observation(true, created)),
+    { changed: true, operationId: i.operationId, state: "SUCCEEDED", revision: 2 });
+  await event(f, 3, created ? "MARKED_SUCCEEDED_CREATED" : "MARKED_SUCCEEDED_UPDATED", "IN_FLIGHT", "SUCCEEDED", 2);
+  assert.deepEqual((await f.events()).map(e => [e.action, e.revision]), [["PREPARED", 0], ["RESERVED_FOR_DISPATCH", 1],
+    [created ? "MARKED_SUCCEEDED_CREATED" : "MARKED_SUCCEEDED_UPDATED", 2]]);
+  const before = await f.current(), events = await f.events();
+  assert.deepEqual(await service.applyOpenCreditCreateClientObservation(db, { ...i, expectedRevision: 0 }, observation(true, !created)),
+    { changed: false, operationId: i.operationId, state: "SUCCEEDED", revision: 2 });
+  await denied(() => service.applyOpenCreditCreateClientObservation(db, i, observation(false, false)), "OPERATION_STATE_CONFLICT");
+  await denied(() => service.markOpenCreditCommercialOperationUnknown(db, i), "OPERATION_STATE_CONFLICT");
+  await denied(() => service.reserveOpenCreditClientProfileOperationForDispatch(db, { ...i, expectedRevision: 2 }), "OPERATION_STATE_CONFLICT");
+  assert.deepEqual(await f.current(), before); assert.deepEqual(await f.events(), events);
+});
+material("material observation UNKNOWN is terminal with no promotion, reset or duplicate event", async f => {
+  const i = await inFlight(f);
+  assert.deepEqual(await service.applyOpenCreditCreateClientObservation(db, i, observation(false, false)),
+    { changed: true, operationId: i.operationId, state: "UNKNOWN", revision: 2 });
+  await event(f, 3, "MARKED_UNKNOWN", "IN_FLIGHT", "UNKNOWN", 2);
+  const before = await f.current(), events = await f.events();
+  assert.deepEqual(await service.applyOpenCreditCreateClientObservation(db, i, { kind: "NO_RESPONSE", reason: "TIMEOUT" }),
+    { changed: false, operationId: i.operationId, state: "UNKNOWN", revision: 2 });
+  await denied(() => service.applyOpenCreditCreateClientObservation(db, i, observation()), "OPERATION_STATE_CONFLICT");
+  assert.deepEqual(await f.current(), before); assert.deepEqual(await f.events(), events);
+});
+material("material concurrent SUCCEEDED observations converge to one terminal CAS and one event", async f => {
+  const i = await inFlight(f), concurrent = barrierDb("settle");
+  const results = await Promise.all([service.applyOpenCreditCreateClientObservation(concurrent, i, observation()),
+    service.applyOpenCreditCreateClientObservation(concurrent, i, observation(true, false))]);
+  assert.equal(results.filter(r => r.changed).length, 1);
+  for (const result of results) { assert.equal(result.state, "SUCCEEDED"); assert.equal(result.revision, 2); }
+  const events = await f.events(); assert.equal(events.length, 3);
+  assert(["MARKED_SUCCEEDED_CREATED", "MARKED_SUCCEEDED_UPDATED"].includes(events[2].action));
+  assert.equal(events[2].previousState, "IN_FLIGHT"); assert.equal(events[2].nextState, "SUCCEEDED"); assert.equal(events[2].revision, 2);
+  assert.equal((await f.current())!.state, "SUCCEEDED"); assert.equal((await f.current())!.revision, 2);
+});
+material("material competing SUCCEEDED and UNKNOWN preserve only the first terminal winner", async f => {
+  const i = await inFlight(f), concurrent = barrierDb("settle");
+  const results = await Promise.allSettled([service.applyOpenCreditCreateClientObservation(concurrent, i, observation()),
+    service.applyOpenCreditCreateClientObservation(concurrent, i, observation(false, false))]);
+  assert.equal(results.filter(r => r.status === "fulfilled").length, 1); assert.equal(results.filter(r => r.status === "rejected").length, 1);
+  const current = (await f.current())!, events = await f.events();
+  assert(["SUCCEEDED", "UNKNOWN"].includes(current.state)); assert.equal(current.revision, 2); assert.equal(events.length, 3);
+  assert.equal(events[2].revision, 2); assert.equal(events[2].previousState, "IN_FLIGHT"); assert.equal(events[2].nextState, current.state);
+  for (const result of results) {
+    if (result.status === "fulfilled") { assert.equal(result.value.changed, true); assert.equal(result.value.state, current.state); }
+    else { assert(result.reason instanceof service.OpenCreditCommercialOperationServiceError); assert(["OPERATION_STATE_CONFLICT", "OPERATION_REVISION_CONFLICT"].includes(result.reason.code)); }
+  }
+  const opposite = current.state === "SUCCEEDED" ? observation(false, false) : observation();
+  await denied(() => service.applyOpenCreditCreateClientObservation(db, i, opposite), "OPERATION_STATE_CONFLICT");
+  assert.deepEqual(await f.current(), current); assert.deepEqual(await f.events(), events);
 });
