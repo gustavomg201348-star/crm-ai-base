@@ -19,6 +19,7 @@ let dispatcher: typeof import("./opencredit-create-client-dispatcher");
 let api: typeof import("./opencredit-api-client");
 let resolver: typeof import("./opencredit-provider-scope-resolver");
 let boundary: typeof import("./opencredit-create-client-dispatch-admin-handler");
+let context: typeof import("./opencredit-create-client-context.service");
 const originalFetch = globalThis.fetch;
 before(async () => {
   globalThis.fetch = async () => { throw Error("LIVE_HTTP_FORBIDDEN"); };
@@ -29,6 +30,7 @@ before(async () => {
     provenance = await import("./meta-inbound-provenance"); dispatcher = await import("./opencredit-create-client-dispatcher");
     api = await import("./opencredit-api-client"); resolver = await import("./opencredit-provider-scope-resolver");
     boundary = await import("./opencredit-create-client-dispatch-admin-handler");
+    context = await import("./opencredit-create-client-context.service");
   } finally { loader._load = original; }
 });
 after(async () => { globalThis.fetch = originalFetch; await db.$disconnect(); });
@@ -68,8 +70,8 @@ async function fixture() {
     db: database, getSession: async () => actor, requirePlatformAdmin, enforceLimits: async () => null,
     dispatch: async (db, input) => { dispatches++; return dispatcher.dispatchOpenCreditCreateClient(db, input, { client }); },
   });
-  const request = () => new NextRequest("https://crm.example.invalid/api/admin/integrations/opencredit/create-client/dispatch", {
-    method: "POST", headers: { origin: "https://crm.example.invalid", "content-type": "application/json" }, body: JSON.stringify(command),
+  const request = (commandId = command.commandId) => new NextRequest("https://crm.example.invalid/api/admin/integrations/opencredit/create-client/dispatch", {
+    method: "POST", headers: { origin: "https://crm.example.invalid", "content-type": "application/json" }, body: JSON.stringify({ ...command, commandId }),
   });
   return { command, authInput, operations, events, client, handler, request, posts: () => posts, dispatches: () => dispatches };
 }
@@ -90,6 +92,9 @@ for (const ambiguous of [false, true]) material("real human command fake POST on
     const response = await f.handler(client)(f.request()); assert.equal(response.status, 200);
     const result = await response.json(); assert.deepEqual(result, { ok: true, operationId: (await f.operations())[0].id, state: ambiguous ? "UNKNOWN" : "SUCCEEDED", revision: 2, dispatched: true });
     assert.equal(f.posts(), 1); assert.deepEqual((await f.events()).map(e => e.action), ["PREPARED", "RESERVED_FOR_DISPATCH", ambiguous ? "MARKED_UNKNOWN" : "MARKED_SUCCEEDED_CREATED"]);
+    const blocked = await f.handler(client)(f.request(randomUUID())); assert.equal(blocked.status, 409);
+    assert.deepEqual(await blocked.json(), { error: "OPENCREDIT_COMMERCIAL_OPERATION_INTENT_CONFLICT" });
+    assert.equal((await f.operations()).length, 1); assert.equal(f.posts(), 1);
   } finally { client.dispose(); }
 });
 for (const ambiguous of [false, true]) material("same command sequential duplicate has zero second POST " + ambiguous, async f => {
@@ -110,11 +115,64 @@ material("same command concurrent duplicate has one operation, one PREPARED and 
     assert(!events.some(e => e.nextState === "FAILED"));
   } finally { client.dispose(); }
 });
-material("distinct commandIds are only distinct local preparations, no dispatch", async f => {
+for (const state of ["PREPARED", "IN_FLIGHT", "UNKNOWN", "SUCCEEDED", "FAILED"]) material("distinct commandId for same client profile intent is rejected after " + state, async f => {
   const first = await service.prepareOpenCreditClientProfileOperation(db, { ...f.authInput, intentKey: f.command.commandId });
-  const second = await service.prepareOpenCreditClientProfileOperation(db, { ...f.authInput, intentKey: randomUUID() });
-  assert.notEqual(first.operationId, second.operationId); assert.equal((await f.operations()).length, 2);
-  assert((await f.events()).every(e => e.action === "PREPARED")); assert.equal(f.posts(), 0); assert.equal(f.dispatches(), 0);
+  assert.equal(first.state, "PREPARED");
+  // Synthetic historical state only; not a new production transition/writer.
+  if (state !== "PREPARED") await db.openCreditCommercialOperation.update({ where: { id: first.operationId }, data: { state } });
+  const before = await f.operations(), events = await f.events();
+  await assert.rejects(service.prepareOpenCreditClientProfileOperation(db, { ...f.authInput, intentKey: randomUUID() }), { code: "INTENT_CONFLICT" });
+  assert.deepEqual(await f.operations(), before); assert.deepEqual(await f.events(), events);
+  assert.equal(before.length, 1); assert.equal(events.filter(e => e.action === "PREPARED").length, 1);
+  assert.equal(f.posts(), 0); assert.equal(f.dispatches(), 0);
+});
+// Both Serializable transactions read the absent identity/kind predicate before either inserts.
+function distinctIntentBarrier() {
+  let arrivals = 0, serializationFailures = 0; let release!: () => void;
+  const barrier = new Promise<void>(resolve => { release = resolve; });
+  const database = { $transaction: <T>(run: (tx: Prisma.TransactionClient) => Promise<T>, options?: { isolationLevel?: Prisma.TransactionIsolationLevel; maxWait?: number; timeout?: number }) => {
+    assert.equal(options?.isolationLevel, "Serializable");
+    return db.$transaction(tx => {
+      const delegate = new Proxy(tx.openCreditCommercialOperation, { get(target, key) {
+        if (key === "findFirst") return async (args: Parameters<typeof target.findFirst>[0]) => {
+          const result = await target.findFirst(args);
+          if (args?.where?.operationKind === "CLIENT_PROFILE_UPSERT" && arrivals < 2) {
+            assert.equal(result, null); arrivals++; if (arrivals === 2) release(); await barrier;
+          }
+          return result;
+        };
+        const value = Reflect.get(target, key); return typeof value === "function" ? value.bind(target) : value;
+      } });
+      return run(new Proxy(tx, { get: (target, key) => key === "openCreditCommercialOperation" ? delegate : Reflect.get(target, key) }));
+    }, options).catch(error => {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") serializationFailures++;
+      throw error;
+    });
+  } } as Db;
+  return { database, arrivals: () => arrivals, serializationFailures: () => serializationFailures };
+}
+for (let round = 1; round <= 3; round++) material("two confirmed tabs with null context and distinct commands serialize to one intention/POST, round " + round, async f => {
+  const [a, b] = await Promise.all([
+    context.getOpenCreditCreateClientContext(db, f.authInput), context.getOpenCreditCreateClientContext(db, f.authInput),
+  ]);
+  assert.deepEqual(a, { ok: true, operation: null }); assert.deepEqual(b, a);
+  const commands = [f.command.commandId, randomUUID()]; assert.notEqual(commands[0], commands[1]);
+  const concurrent = distinctIntentBarrier(), client = f.client(positive);
+  try {
+    const handler = f.handler(client, concurrent.database);
+    const responses = await Promise.all(commands.map(command => handler(f.request(command))));
+    assert.deepEqual(responses.map(r => r.status).sort(), [200, 409]);
+    const loser = responses.find(r => r.status === 409)!;
+    assert.equal(loser.headers.get("cache-control"), "no-store");
+    assert.deepEqual(await loser.json(), { error: "OPENCREDIT_COMMERCIAL_OPERATION_INTENT_CONFLICT" });
+    const operations = await f.operations(), events = await f.events();
+    assert.equal(concurrent.arrivals(), 2); assert(concurrent.serializationFailures() >= 1);
+    assert.equal(operations.length, 1); assert.equal(operations[0].state, "SUCCEEDED");
+    assert.equal(operations[0].intentKey, commands[responses.findIndex(r => r.status === 200)]);
+    assert.equal(events.filter(e => e.action === "PREPARED").length, 1);
+    assert.equal(events.filter(e => e.action === "RESERVED_FOR_DISPATCH").length, 1);
+    assert(!events.some(e => e.nextState === "FAILED")); assert.equal(f.posts(), 1); assert.equal(f.dispatches(), 1);
+  } finally { client.dispose(); }
 });
 material("revoked before reservation leaves PREPARED, zero reservation and zero POST", async f => {
   await authorization.revokeOpenCreditConsumerAuthorization(db, f.authInput);
@@ -154,5 +212,8 @@ material("settlement failure after one fake POST is not success and duplicate ne
     assert.deepEqual(await response.json(), { error: "OPENCREDIT_CREATE_CLIENT_DISPATCH_SETTLEMENT_FAILED" });
     assert.equal(f.posts(), 1); assert.equal((await f.operations())[0].state, "IN_FLIGHT"); assert.equal((await f.events()).length, 2);
     const repeat = await handler(f.request()); assert.equal(repeat.status, 200); assert.equal((await repeat.json()).dispatched, false); assert.equal(f.posts(), 1); assert.equal(f.dispatches(), 1);
+    const blocked = await handler(f.request(randomUUID())); assert.equal(blocked.status, 409);
+    assert.deepEqual(await blocked.json(), { error: "OPENCREDIT_COMMERCIAL_OPERATION_INTENT_CONFLICT" });
+    assert.equal((await f.operations()).length, 1); assert.equal((await f.events()).length, 2); assert.equal(f.posts(), 1);
   } finally { client.dispose(); }
 });

@@ -178,6 +178,12 @@ export async function prepareOpenCreditClientProfileOperation(db: Db, supplied: 
       return { changed: false, operationId: current.id, state: current.state as OpenCreditCommercialOperationState, revision: current.revision };
     }
     const { identity } = await fresh(tx, input, input.contactId);
+    // Single client-profile intention per identity until an explicit future update/sync flow exists.
+    // Keep this predicate read and the insert in the same Serializable transaction.
+    const existing = await tx.openCreditCommercialOperation.findFirst({ where: {
+      companyId: input.companyId, providerScope: input.providerScope, remoteIdentityId: identity.id, operationKind: KIND,
+    }, select: { id: true } });
+    if (existing) return fail("INTENT_CONFLICT");
     const operation = await tx.openCreditCommercialOperation.create({ data: { companyId: input.companyId, providerScope: input.providerScope,
       remoteIdentityId: identity.id, operationKind: KIND, intentKey: input.intentKey, state: "PREPARED", revision: 0, createdByUserId: actorId }, select: { id: true } });
     await tx.openCreditCommercialOperationEvent.create({ data: { operationId: operation.id, companyId: input.companyId, providerScope: input.providerScope, actorUserId: actorId, action: "PREPARED", previousState: null, nextState: "PREPARED", revision: 0 }, select: { id: true } });

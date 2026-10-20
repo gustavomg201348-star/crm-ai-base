@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { authorizationErrorMessage, authorizationEvidenceView, isAuthorizationMutationResponse, parseAuthorizationContext,
   type AuthorizationContext, type AuthorizationReviewMessage } from "@/lib/opencredit-consumer-authorization-ui";
+import { OpenCreditCreateClientPanel } from "./OpenCreditCreateClientPanel";
 
 type Props = { enabled: boolean; companyId: string; contactId: string; conversationId: string; messages: readonly AuthorizationReviewMessage[] };
 const base = "/api/admin/integrations/opencredit/consumer-authorization";
@@ -88,5 +89,6 @@ function Review({ companyId, contactId, conversationId, messages }: Props) {
       {context.authorization.exists && context.authorization.active && <button type="button" disabled={busy} onClick={() => void mutate("revoke")} className="mt-2 w-full rounded border border-rose-200 px-3 py-2 text-sm font-semibold text-rose-700 focus-visible:ring-2 focus-visible:ring-rose-500 disabled:opacity-50">Revogar autorização</button>}
     </>}
     <button type="button" disabled={busy} onClick={() => void load()} className="mt-2 text-xs font-semibold text-primary underline focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50">Atualizar painel</button>
+    <OpenCreditCreateClientPanel enabled={!hidden} companyId={companyId} contactId={contactId} authorizationActive={!busy && context?.authorization.active === true} />
   </section>;
 }
