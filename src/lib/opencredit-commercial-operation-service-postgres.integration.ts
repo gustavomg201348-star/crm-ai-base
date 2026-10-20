@@ -130,6 +130,31 @@ material("unknown historical state fails closed", async f => {
   const i = await prepared(f); await db.openCreditCommercialOperation.update({ where: { id: i.operationId }, data: { state: "UNRECOGNIZED" } });
   await denied(() => service.prepareOpenCreditClientProfileOperation(db, f.input), "OPERATION_STATE_INVALID");
 });
+material("historical multiple intentions are preserved, same command is idempotent and new command is blocked", async f => {
+  const first = await service.prepareOpenCreditClientProfileOperation(db, f.input);
+  await db.openCreditCommercialOperation.create({ data: { companyId: f.companyId, providerScope: f.input.providerScope,
+    remoteIdentityId: f.identity.id, operationKind: "CLIENT_PROFILE_UPSERT", intentKey: randomUUID(), state: "UNKNOWN", createdByUserId: f.actor.id } });
+  const where = { ...f.where, remoteIdentityId: f.identity.id }, before = await db.openCreditCommercialOperation.findMany({ where, orderBy: { id: "asc" } }), events = await f.events();
+  await denied(() => service.prepareOpenCreditClientProfileOperation(db, { ...f.input, intentKey: randomUUID() }), "INTENT_CONFLICT");
+  assert.deepEqual(await service.prepareOpenCreditClientProfileOperation(db, f.input), { ...first, changed: false });
+  assert.equal(before.length, 2); assert.deepEqual(await db.openCreditCommercialOperation.findMany({ where, orderBy: { id: "asc" } }), before);
+  assert.deepEqual(await f.events(), events);
+});
+material("single intention is scoped: another identity and another providerScope can prepare independently", async f => {
+  const first = await service.prepareOpenCreditClientProfileOperation(db, f.input);
+  const other = await db.contact.create({ data: { companyId: f.companyId, name: "Synthetic other", phone: "11900000001", cpf: "11111111111" } });
+  await db.openCreditRemoteIdentity.create({ data: { companyId: f.companyId, providerScope: f.input.providerScope, contactId: other.id,
+    normalizedCpf: "11111111111", enabled: true, createdByUserId: f.actor.id } });
+  const second = await service.prepareOpenCreditClientProfileOperation(db, { ...f.input, contactId: other.id, intentKey: randomUUID() });
+  const providerScope = (f.input.providerScope + "-other") as typeof f.input.providerScope;
+  await db.openCreditCommercialAccess.create({ data: { companyId: f.companyId, providerScope, enabled: true, changedByUserId: f.actor.id } });
+  await db.openCreditRemoteIdentity.create({ data: { companyId: f.companyId, providerScope, contactId: f.contact.id,
+    normalizedCpf: "00000000000", enabled: true, createdByUserId: f.actor.id } });
+  const third = await service.prepareOpenCreditClientProfileOperation(db, { ...f.input, providerScope, intentKey: randomUUID() });
+  assert.equal(new Set([first.operationId, second.operationId, third.operationId]).size, 3);
+  assert.equal(await db.openCreditCommercialOperation.count({ where: { companyId: f.companyId } }), 3);
+  assert.equal(await db.openCreditCommercialOperationEvent.count({ where: { companyId: f.companyId, action: "PREPARED" } }), 3);
+});
 // Both first attempts read the same committed snapshot before either writer proceeds.
 function barrierDb(kind: "prepare" | "reserve" | "settle"): Db {
   let arrivals = 0; let release!: () => void; const barrier = new Promise<void>(resolve => { release = resolve; });
@@ -416,9 +441,9 @@ for (const terminal of ["SUCCEEDED", "UNKNOWN"] as const) material("revoke after
     : await service.markOpenCreditCommercialOperationUnknown(db, next);
   assert.equal(r.state, terminal); assert.equal((await f.events())[1].dispatchAuthorizationEventId, reservation.dispatchAuthorization.authorizationEventId);
   await denied(() => service.reserveOpenCreditClientProfileOperationForDispatch(db, { ...i, expectedRevision: 2 }), "OPERATION_STATE_CONFLICT");
-  // New intent for the same Contact remains PREPARED after revocation.
-  const other = await service.prepareOpenCreditClientProfileOperation(db, { ...f.input, intentKey: randomUUID() });
-  await denied(() => service.reserveOpenCreditClientProfileOperationForDispatch(db, { ...i, operationId: other.operationId }), "CONSUMER_AUTHORIZATION_INACTIVE");
+  // A new command cannot create a second intention, regardless of terminal state or revocation.
+  await denied(() => service.prepareOpenCreditClientProfileOperation(db, { ...f.input, intentKey: randomUUID() }), "INTENT_CONFLICT");
+  assert.equal(await db.openCreditCommercialOperation.count({ where: f.where }), 1);
 });
 material("real dispatch binding FK failure rolls back IN_FLIGHT mutation and event", async f => {
   const i = await prepared(f); let observed = false; let realFk = false;

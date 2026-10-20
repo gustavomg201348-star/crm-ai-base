@@ -74,6 +74,19 @@ is cleared on 409/503, network/abort or malformed response.
 
 The exact dispatch body remains companyId/contactId/commandId only. A working ref
 and busy state stop double clicks; backend unique/CAS protection remains authority.
+The backend also enforces a single CLIENT_PROFILE_UPSERT intention per Company +
+providerScope + RemoteIdentity, independently of commandId and in every state.
+After same-intent lookup (whose idempotent behavior is unchanged), fresh identity
+resolution and a scoped identity/kind predicate read occur before creation in the
+same Serializable transaction. Existing P2034 retries re-read the predicate; a
+different command receives INTENT_CONFLICT. This closes cross-tab/administrator
+races even when both read operation:null. Only the same PREPARED commandId may
+continue via explicit human action. The UI is additional defense, not this guarantee.
+A future deliberate update/sync requires a separate flow, outside this slice.
+No provider idempotency guarantee is implied; remote one-shot remains mandatory.
+Historical multiple operations, if any, are not deleted or migrated: context still
+selects the latest deterministically, a new command is blocked, and existing
+same-command lookup stays idempotent. Historical reconciliation is out of scope.
 After valid response, conflict, provider/local failure or network exception the
 panel reloads server context, never performs automatic dispatch/retry. Failed reload
 disables new action and asks for state confirmation, not replay. SETTLEMENT_FAILED
@@ -97,7 +110,8 @@ restore their narrow guards/CI gates; no schema/data rollback is needed.
 ## Human createClient admin command (prior slice)
 
 Historical status for this slice; the read-context/human-UI section above supersedes
-its UI-activation status. Existing command/dispatcher behavior remains unchanged.
+its UI-activation and preparation-multiplicity status. Dispatcher and HTTP contracts
+remain unchanged.
 
 ```text
 HTTP JSON RESPONSE BOUNDARY: IMPLEMENTED
@@ -130,8 +144,9 @@ Company/contact IDs follow the existing ASCII administrative ID contract (1–12
 characters, no normalization). commandId is a canonical lowercase UUID v4, no trim
 or terminal newline. It is passed **unchanged as intentKey**, identifying the local
 human intention by companyId + server providerScope + intentKey. It is **not a
-provider idempotency key** and is never sent to the provider. New commandIds are
-distinct intentions, not a mechanism for replaying an ambiguous prior operation.
+provider idempotency key** and is never sent to the provider. A different commandId
+cannot create another CLIENT_PROFILE_UPSERT for an identity with an existing intention,
+nor replay an ambiguous prior operation; explicit future update/sync is out of scope.
 
 Order: session -> Platform Admin -> same-origin -> no query/Authorization header,
 JSON Content-Type (optional UTF-8 charset) -> strict bounded body -> rate limits ->
@@ -1986,7 +2001,9 @@ snapshot and global scope/CPF ownership of that same identity. Ambiguity include
 archived Contacts, searches canonical digits plus conventional formatting under the
 same Company with take:2, and requires exactly the target Contact. The adapter must
 accept fresh snapshots; PROFILE_INVALID is sanitized without PII or cause. PREPARE
-discards the profile and atomically creates PREPARED/revision0 and one PREPARED Event
+discards the profile, checks the same-transaction Company/scope/identity/kind predicate
+and rejects any existing intention as INTENT_CONFLICT, regardless of state. Only an
+absent predicate permits atomic creation of PREPARED/revision0 and one PREPARED Event
 (null -> PREPARED) with the effective actor. Its result contains only changed,
 operationId, state and revision, including on existing-intent no-op.
 

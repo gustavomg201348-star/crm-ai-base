@@ -78,7 +78,7 @@ type Operation = { id: string; companyId: string; providerScope: string; remoteI
 const operation = (state = "PREPARED", revision = 0): Operation => ({ id: "synthetic-operation", companyId: "synthetic-company", providerScope: scope, remoteIdentityId: "synthetic-identity", operationKind: "CLIENT_PROFILE_UPSERT", state, revision, intentKey, createdByUserId: "synthetic-original", updatedAt: 1 });
 function fake(initial?: string, revision = 0) {
   const state = {
-    actor: { ...actor } as SessionUser | null, company: true, operation: initial === undefined ? null as Operation | null : operation(initial, revision),
+    actor: { ...actor } as SessionUser | null, company: true, operation: initial === undefined ? null as Operation | null : operation(initial, revision), otherOperations: [] as Operation[],
     contact: { id: "synthetic-contact", companyId: "synthetic-company", name: " Synthetic profile ", phone: "0007A", email: " Fixture@Example.Invalid " as string | null, cpf: "00000000000" as string | null, archivedAt: null as Date | null } as { id: string; companyId: string; name: string; phone: string; email: string | null; cpf: string | null; archivedAt: Date | null } | null,
     identity: { id: "synthetic-identity", companyId: "synthetic-company", contactId: "synthetic-contact", providerScope: scope, normalizedCpf: "00000000000", enabled: true } as { id: string; companyId: string; contactId: string; providerScope: string; normalizedCpf: string; enabled: boolean } | null,
     access: { enabled: true } as { enabled: boolean } | null, matches: [{ id: "synthetic-contact" }], globalIdentity: true, events: [] as Record<string, unknown>[],
@@ -114,10 +114,17 @@ function fake(initial?: string, revision = 0) {
       openCreditCommercialOperation: {
         findUnique: async (args: { where: Record<string, unknown> }) => { calls.push("operation.read");
           const key = args.where.companyId_providerScope_intentKey ?? args.where.id_companyId_providerScope;
+          const requestedIntent = (key as { intentKey?: string }).intentKey;
           assert.deepEqual(args.where, args.where.companyId_providerScope_intentKey
-            ? { companyId_providerScope_intentKey: { companyId: "synthetic-company", providerScope: scope, intentKey } }
+            ? { companyId_providerScope_intentKey: { companyId: "synthetic-company", providerScope: scope, intentKey: requestedIntent } }
             : { id_companyId_providerScope: { id: "synthetic-operation", companyId: "synthetic-company", providerScope: scope } });
-          assert.ok(key); return current;
+          assert.ok(key); return requestedIntent !== undefined && current?.intentKey !== requestedIntent ? null : current;
+        },
+        findFirst: async (args: { where: { companyId: string; providerScope: string; remoteIdentityId: string; operationKind: string }; select: unknown }) => {
+          calls.push("operation.intent.read");
+          assert.deepEqual(args, { where: { companyId: "synthetic-company", providerScope: scope, remoteIdentityId: "synthetic-identity", operationKind: "CLIENT_PROFILE_UPSERT" }, select: { id: true } });
+          const found = [current, ...state.otherOperations].find(row => row && Object.entries(args.where).every(([k, v]) => row[k as keyof Operation] === v));
+          return found ? { id: found.id } : null;
         },
         create: async ({ data }: { data: Omit<Operation, "id" | "updatedAt"> }) => { calls.push("operation.create"); if (faults.length) throw faults.shift(); current = { ...data, id: "synthetic-operation", updatedAt: 2 }; return { id: current.id }; },
         updateMany: async ({ where, data }: { where: { id: string; companyId: string; providerScope: string; state: string; revision: number }; data: { state: string; revision: number } }) => {
@@ -162,6 +169,23 @@ for (const state of ["PREPARED", "IN_FLIGHT", "SUCCEEDED", "FAILED", "UNKNOWN"])
   const f = fake(state, 2); f.state.contact = null; f.state.access = null; f.state.identity!.enabled = false; const before = { ...f.state.operation };
   assert.deepEqual(await invoke("prepare", f), { changed: false, operationId: "synthetic-operation", state, revision: 2 });
   assert.deepEqual(f.state.operation, before); assert.deepEqual(f.state.events, []); assert.deepEqual(f.calls, ["actor", "company", "operation.read", "identity"]);
+}));
+for (const state of ["PREPARED", "IN_FLIGHT", "SUCCEEDED", "FAILED", "UNKNOWN"]) test("different intent for same RemoteIdentity is blocked after " + state, () => configured(async () => {
+  const f = fake(state, 2), before = structuredClone(f.state);
+  await denied(() => invoke("prepare", f, prepare({ intentKey: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" })), "INTENT_CONFLICT");
+  assert.deepEqual(f.state, before); assert(f.calls.includes("operation.intent.read"));
+  assert(!f.calls.includes("operation.create")); assert(!f.calls.includes("event.create"));
+}));
+for (const isolated of ["remoteIdentityId", "providerScope", "companyId", "operationKind"] as const) test("single-intent predicate isolates existing " + isolated, () => configured(async () => {
+  const f = fake(); f.state.otherOperations.push({ ...operation(), [isolated]: "synthetic-other" });
+  assert.equal((await service.prepareOpenCreditClientProfileOperation(f.db, prepare())).changed, true); assert.equal(f.state.events.length, 1);
+}));
+test("different intent after P2034 retry observes winning preparation and fails closed", () => configured(async () => {
+  const f = fake(); f.faults.push(prismaError("P2034"));
+  f.onAttempt(() => { if (f.attempts() === 2) f.state.operation = { ...operation(), intentKey: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }; });
+  await denied(() => invoke("prepare", f), "INTENT_CONFLICT");
+  assert.equal(f.attempts(), 2); assert.equal(f.state.events.length, 0);
+  assert.equal(f.calls.filter(c => c === "operation.create").length, 1);
 }));
 for (const kind of ["SIMULATION", "PROPOSAL", "OTHER"]) test("prepare rejects arbitrary kind of existing intention " + kind, () => configured(async () => { const f = fake("PREPARED"); f.state.operation!.operationKind = kind; await denied(() => invoke("prepare", f), "INTENT_CONFLICT"); }));
 test("existing intent with another Contact is conflict", () => configured(async () => { const f = fake("PREPARED"); f.state.identity!.contactId = "other"; await denied(() => invoke("prepare", f), "INTENT_CONFLICT"); }));
