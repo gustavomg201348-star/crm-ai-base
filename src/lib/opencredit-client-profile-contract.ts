@@ -89,6 +89,12 @@ export function buildOpenCreditClientProfilePayload(input: unknown): OpenCreditC
   }
 }
 
+/** Closed copy in fixed field order, before any commit-to-dispatch. Memory only. */
+export function serializeOpenCreditClientProfilePayload(input: unknown): string {
+  try { return JSON.stringify(buildOpenCreditClientProfilePayload(input)); }
+  catch { throw new OpenCreditClientProfileContractError("INVALID_INPUT"); }
+}
+
 /** Local conservative policy for a success response documented only by example. */
 export function parseOpenCreditClientProfileResult(payload: unknown): OpenCreditClientProfileResult {
   try {

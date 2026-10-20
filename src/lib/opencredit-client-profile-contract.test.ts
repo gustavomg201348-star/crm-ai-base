@@ -6,6 +6,7 @@ import * as ts from "typescript";
 import type { OpenCreditClientProfilePayload, OpenCreditClientProfileResult } from "./opencredit-client-profile-contract";
 
 let build: typeof import("./opencredit-client-profile-contract").buildOpenCreditClientProfilePayload;
+let serialize: typeof import("./opencredit-client-profile-contract").serializeOpenCreditClientProfilePayload;
 let parse: typeof import("./opencredit-client-profile-contract").parseOpenCreditClientProfileResult;
 let ContractError: typeof import("./opencredit-client-profile-contract").OpenCreditClientProfileContractError;
 before(async () => {
@@ -15,6 +16,7 @@ before(async () => {
   try {
     const contract = await import("./opencredit-client-profile-contract");
     build = contract.buildOpenCreditClientProfilePayload; parse = contract.parseOpenCreditClientProfileResult;
+    serialize = contract.serializeOpenCreditClientProfilePayload;
     ContractError = contract.OpenCreditClientProfileContractError;
   } finally { loader._load = original; }
 });
@@ -30,6 +32,21 @@ const fixture: OpenCreditClientProfilePayload = {
   endereco_cidade: " cidade ", endereco_uf: "uf-futura"
 };
 const fields = Object.keys(fixture) as (keyof OpenCreditClientProfilePayload)[];
+
+test("serializer CPF-only and all 19 fields are compact, closed, deterministic and immutable", () => {
+  assert.equal(serialize({ cpf }), JSON.stringify({ cpf }));
+  const reverse = Object.fromEntries(Object.entries(fixture).reverse()); const before = structuredClone(reverse);
+  assert.equal(serialize(reverse), JSON.stringify(build(fixture)));
+  assert.deepEqual(JSON.parse(serialize(reverse)), build(fixture)); assert.deepEqual(reverse, before);
+  assert.deepEqual(Object.keys(JSON.parse(serialize(reverse))), fields);
+});
+test("serializer rejects extras, getters and invalid profiles without retaining PII", () => {
+  let gets = 0;
+  for (const value of [{ cpf, extra: "private" }, {}, null, { cpf: 10 }, { get cpf() { gets++; throw Error("private"); } }]) {
+    assert.throws(() => serialize(value), e => e instanceof Error && e.message === "OPENCREDIT_CLIENT_PROFILE_INVALID_INPUT" && !e.message.includes(cpf) && !("cause" in e));
+  }
+  assert.equal(gets, 0);
+});
 function invalidInput(value: unknown) {
   assert.throws(() => build(value), error => {
     assert.ok(error instanceof ContractError); assert.equal(error.code, "INVALID_INPUT");

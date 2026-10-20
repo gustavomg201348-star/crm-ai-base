@@ -214,7 +214,7 @@ test("body boundary never interprets HTTP status and preserves Response metadata
   }
 });
 
-test("passive slice AST guard: only strict parser dependency, no production consumer, and an explicit CI gate", () => {
+test("passive boundary AST guard: strict parser dependency, exact dispatcher consumer and CI gate", () => {
   const filename = path.resolve("src/lib/opencredit-http-json-boundary.ts"), source = readFileSync(filename, "utf8");
   const ast = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true);
   const imports = ast.statements.filter(ts.isImportDeclaration).map(node => (node.moduleSpecifier as ts.StringLiteral).text);
@@ -228,8 +228,11 @@ test("passive slice AST guard: only strict parser dependency, no production cons
       if (!/\.[cm]?[jt]sx?$/.test(file) || /\.(test|integration)\./.test(file) || path.resolve(file) === filename) continue;
       const tree = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
       const visit = (node: ts.Node): void => {
-        // This slice deliberately has no production import/re-export/require consumer.
-        if (ts.isStringLiteralLike(node) && /(?:^|\/)opencredit-http-json-boundary(?:\.[cm]?[jt]s)?$/.test(node.text)) assert.fail("Unexpected boundary consumer: " + file);
+        // Only the explicit dispatcher core may compose this passive reader.
+        if (ts.isStringLiteralLike(node) && /(?:^|\/)opencredit-http-json-boundary(?:\.[cm]?[jt]s)?$/.test(node.text)) {
+          assert.equal(path.resolve(file), path.resolve("src/lib/opencredit-create-client-dispatcher.ts"));
+          assert(ts.isImportDeclaration(node.parent));
+        }
         ts.forEachChild(node, visit);
       };
       visit(tree);

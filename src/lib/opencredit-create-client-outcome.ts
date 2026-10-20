@@ -2,7 +2,7 @@ import "server-only";
 
 export type OpenCreditCreateClientObservation =
   | { kind: "PARSED_RESPONSE"; status: number; result: { success: boolean; created: boolean } }
-  | { kind: "UNREADABLE_RESPONSE"; status: number; reason: "INVALID_CONTENT_TYPE" | "TOO_LARGE" | "INVALID_UTF8" | "INVALID_JSON" | "STREAM_ERROR" }
+  | { kind: "UNREADABLE_RESPONSE"; status: number; reason: "INVALID_CONTENT_TYPE" | "TOO_LARGE" | "INVALID_UTF8" | "INVALID_JSON" | "STREAM_ERROR" | "INVALID_RESPONSE" | "INVALID_CONTRACT" }
   | { kind: "NO_RESPONSE"; reason: "TIMEOUT" | "NETWORK" };
 
 export type OpenCreditCreateClientOutcome =
@@ -59,7 +59,7 @@ export function classifyOpenCreditCreateClientOutcome(input: unknown): OpenCredi
     const status = observation.status;
     if (typeof status !== "number" || !Number.isInteger(status) || status < 100 || status > 599) throw Error();
     if (kind === "UNREADABLE_RESPONSE") {
-      if (!["INVALID_CONTENT_TYPE", "TOO_LARGE", "INVALID_UTF8", "INVALID_JSON", "STREAM_ERROR"].includes(observation.reason as string)) throw Error();
+      if (!["INVALID_CONTENT_TYPE", "TOO_LARGE", "INVALID_UTF8", "INVALID_JSON", "STREAM_ERROR", "INVALID_RESPONSE", "INVALID_CONTRACT"].includes(observation.reason as string)) throw Error();
       return { state: "UNKNOWN", basis: "UNREADABLE_RESPONSE" };
     }
     const result = closedRecord(observation.result, ["success", "created"]);

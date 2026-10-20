@@ -16,10 +16,30 @@ type Options = {
   credentials?: () => Credentials;
 };
 
+const API_ERROR_CODES = ["CONFIGURATION", "AUTH_FAILED", "INVALID_RESPONSE", "NETWORK", "TIMEOUT", "INVALID_PATH", "DISPOSED"] as const;
+type ApiErrorCode = typeof API_ERROR_CODES[number];
 export class OpenCreditApiError extends Error {
-  constructor(readonly code: "CONFIGURATION" | "AUTH_FAILED" | "INVALID_RESPONSE" | "NETWORK" | "TIMEOUT" | "INVALID_PATH" | "DISPOSED", readonly status?: number) {
+  constructor(readonly code: ApiErrorCode, readonly status?: number) {
     super(`OPENCREDIT_API_${code}`);
   }
+}
+
+/** Closed error contract across module loads. Never inspect raw exception data. */
+export function readOpenCreditApiErrorCode(error: unknown): ApiErrorCode | null {
+  try {
+    if (!(error instanceof Error)) return null;
+    const descriptor = Object.getOwnPropertyDescriptor(error, "code");
+    const message = Object.getOwnPropertyDescriptor(error, "message");
+    if (!descriptor || !("value" in descriptor) || !message || !("value" in message)) return null;
+    const code = API_ERROR_CODES.find(candidate => candidate === descriptor.value);
+    if (!code || message.value !== "OPENCREDIT_API_" + code) return null;
+    const status = Object.getOwnPropertyDescriptor(error, "status");
+    if (status) {
+      if (!("value" in status) || status.value !== undefined && (typeof status.value !== "number"
+        || !Number.isInteger(status.value) || status.value < 100 || status.value > 599)) return null;
+    } else if ("status" in error) return null;
+    return code;
+  } catch { return null; }
 }
 
 function assertServer() {
@@ -28,6 +48,18 @@ function assertServer() {
 
 function envCredentials(): Credentials {
   return { email: process.env.OPENCREDIT_API_EMAIL ?? "", password: process.env.OPENCREDIT_API_PASSWORD ?? "" };
+}
+
+function validatedPath(path: string): void {
+  try {
+    // Configured IDs are restricted ASCII. Reject encoded/ambiguous paths rather
+    // than allowing a provider/router to decode an auth alias or traversal later.
+    if (typeof path !== "string" || /[%\\\u0000-\u0020\u007f]/.test(path)) throw Error();
+    const url = new URL(path, ORIGIN);
+    if (!path.startsWith("/api/") || url.origin !== ORIGIN
+      || url.pathname !== path.split("?")[0] || url.hash || url.username || url.password
+      || url.pathname.startsWith("/api/auth/")) throw Error();
+  } catch { throw new OpenCreditApiError("INVALID_PATH"); }
 }
 
 /** Server-only partner account client. No Prisma, webhook binding, browser or logging. */
@@ -154,6 +186,18 @@ export function createOpenCreditApiClient(options: Options = {}) {
   }
 
   return {
+    /** Auth and headers are ready before the callback. Resolving it is a committed
+     * one-shot barrier: no auth, serialization, retry or response-body read follows. */
+    async postJsonAfterCommit<T>(path: string, commit: () => Promise<{ body: string; committed: T }>): Promise<{ response: Response; committed: T }> {
+      validatedPath(path);
+      const pair = await authenticate();
+      if (disposed) throw new OpenCreditApiError("DISPOSED");
+      const headers = new Headers({ "Content-Type": "application/json", Authorization: `Bearer ${pair.access}` });
+      const execution = await commit();
+      const response = await call(path, { method: "POST", headers, body: execution.body }) as Response;
+      if (response.status === 401 && tokens === pair) tokens.expiresAt = 0;
+      return { response, committed: execution.committed };
+    },
     async diagnoseAccess(tenant: string, partner: string) {
       assertServer();
       if (disposed) throw new OpenCreditApiError("DISPOSED");

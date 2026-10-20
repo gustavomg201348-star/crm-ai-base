@@ -18,9 +18,11 @@ function validExactId(value: unknown): value is string {
 }
 
 /** Trusted server configuration only. This namespace is NOT authorization or a secret. */
-export function resolveOpenCreditProviderScope(
+export type OpenCreditConfiguredProviderContext = Readonly<{ tenantId: string; providerScope: OpenCreditProviderScope }>;
+
+export function resolveOpenCreditProviderContext(
   config: Readonly<{ tenantId: string; partnerId: string }>,
-): OpenCreditProviderScope {
+): OpenCreditConfiguredProviderContext {
   try {
     if (typeof window !== "undefined" || !config || typeof config !== "object" || Array.isArray(config)) {
       throw new OpenCreditProviderScopeResolverError();
@@ -40,17 +42,25 @@ export function resolveOpenCreditProviderScope(
     const scope = "ocp-" + digest.slice(0, 10) + "f" + digest.slice(10, 20) + "f"
       + digest.slice(20, 30) + "f" + digest.slice(30, 40) + "f"
       + digest.slice(40, 50) + "f" + digest.slice(50, 55);
-    return parseOpenCreditProviderScope(scope);
+    return { tenantId: tenant.value, providerScope: parseOpenCreditProviderScope(scope) };
   } catch {
     // Never retain raw configuration, causes, parser errors or detailed internal stacks.
     throw new OpenCreditProviderScopeResolverError();
   }
 }
 
+export function resolveOpenCreditProviderScope(config: Readonly<{ tenantId: string; partnerId: string }>): OpenCreditProviderScope {
+  return resolveOpenCreditProviderContext(config).providerScope;
+}
+
 /** No credentials, JWT claims, request data or database configuration are consulted. */
 export function resolveConfiguredOpenCreditProviderScope(): OpenCreditProviderScope {
+  return resolveConfiguredOpenCreditProviderContext().providerScope;
+}
+
+export function resolveConfiguredOpenCreditProviderContext(): OpenCreditConfiguredProviderContext {
   try {
-    return resolveOpenCreditProviderScope({
+    return resolveOpenCreditProviderContext({
       tenantId: process.env.OPENCREDIT_TENANT_ID as string,
       partnerId: process.env.OPENCREDIT_PARTNER_ID as string,
     });

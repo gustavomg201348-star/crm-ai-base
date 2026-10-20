@@ -5,6 +5,7 @@ import Module from "node:module";
 
 let createOpenCreditApiClient: typeof import("./opencredit-api-client").createOpenCreditApiClient;
 let OpenCreditApiError: typeof import("./opencredit-api-client").OpenCreditApiError;
+let readApiErrorCode: typeof import("./opencredit-api-client").readOpenCreditApiErrorCode;
 
 // Standalone Node does not handle Next's public marker. Stub only that no-op
 // import for unit tests, and restore the loader immediately after loading.
@@ -19,12 +20,46 @@ before(async () => {
     const client = await import("./opencredit-api-client");
     createOpenCreditApiClient = client.createOpenCreditApiClient;
     OpenCreditApiError = client.OpenCreditApiError;
+    readApiErrorCode = client.readOpenCreditApiErrorCode;
   } finally {
     loader._load = original;
   }
 });
 
 const creds = { email: "partner@example.invalid", password: "fictitious-test-password" };
+for (const code of ["CONFIGURATION", "AUTH_FAILED", "INVALID_RESPONSE", "NETWORK", "TIMEOUT", "INVALID_PATH", "DISPOSED"] as const) {
+  test("closed API error reader accepts exact code/message " + code, () => {
+    for (const status of [undefined, 100, 401, 599]) assert.equal(readApiErrorCode(new OpenCreditApiError(code, status)), code);
+    const absent = new OpenCreditApiError(code); Reflect.deleteProperty(absent, "status"); assert.equal(readApiErrorCode(absent), code);
+  });
+}
+test("API error reader rejects plain, forged, inherited and malformed contracts", () => {
+  for (const value of [null, undefined, {}, { code: "AUTH_FAILED", message: "OPENCREDIT_API_AUTH_FAILED" }, new Error("wrong")]) assert.equal(readApiErrorCode(value), null);
+  for (const code of ["__proto__", "constructor", "toString", "OTHER"]) {
+    const error = Object.assign(new Error("OPENCREDIT_API_" + code), { code }); assert.equal(readApiErrorCode(error), null);
+  }
+  assert.equal(readApiErrorCode(Object.assign(new Error("wrong"), { code: "AUTH_FAILED" })), null);
+  const inherited = Object.create(new OpenCreditApiError("AUTH_FAILED")); assert(inherited instanceof Error); assert.equal(readApiErrorCode(inherited), null);
+  for (const status of [null, "401", 99, 600, 401.5, NaN, Infinity, {}, []]) {
+    const error = new OpenCreditApiError("AUTH_FAILED"); Object.defineProperty(error, "status", { value: status }); assert.equal(readApiErrorCode(error), null);
+  }
+});
+for (const key of ["code", "message", "status"]) test("API error reader never executes " + key + " accessors", () => {
+  let reads = 0;
+  for (const descriptor of [{ get() { reads++; throw Error("private"); } }, { set(_v: unknown) { reads++; } }]) {
+    const error = new OpenCreditApiError("AUTH_FAILED"); Object.defineProperty(error, key, descriptor); assert.equal(readApiErrorCode(error), null);
+  }
+  assert.equal(reads, 0);
+});
+test("API error reader ignores raw properties and rejects inherited status without getter reads", () => {
+  let reads = 0; const error = new OpenCreditApiError("TIMEOUT");
+  for (const key of ["stack", "cause", "body", "headers", "credentials"]) Object.defineProperty(error, key, { get() { reads++; throw Error("private"); } });
+  assert.equal(readApiErrorCode(error), "TIMEOUT"); assert.equal(reads, 0);
+  Reflect.deleteProperty(error, "status");
+  const prototype = Object.create(Error.prototype); Object.defineProperty(prototype, "status", { get() { reads++; throw Error("private"); } }); Object.setPrototypeOf(error, prototype);
+  assert.equal(readApiErrorCode(error), null); assert.equal(reads, 0);
+  const { proxy, revoke } = Proxy.revocable(new Error(), {}); revoke(); assert.equal(readApiErrorCode(proxy), null);
+});
 const pair = (suffix = "1", expiresIn = 28800) => Response.json({ data: {
   accessToken: `test-access-${suffix}`, refreshToken: `test-refresh-${suffix}`, expiresIn
 } });
@@ -42,6 +77,62 @@ function fixture(reply: (call: Call, index: number) => Response | Promise<Respon
   });
   return { client, calls, advance: (ms: number) => { time += ms; }, change: (value: typeof creds) => { credentials = value; } };
 }
+
+for (const path of ["https://elsewhere.invalid/api/test", "/api/auth/login", "/api/../auth/login", "/api/test#x", "/api/%2e%2e/test", "//elsewhere.invalid/api/test", "/api/%61uth/login", "/api/%252e%252e/auth/login", "/api/a%2f..%2fauth/login", "/api/a\\..\\auth/login", "/api/test\n"]) {
+  test("one-shot rejects path before auth/commit " + path, async () => {
+    const f = fixture(() => { throw Error(); }); let commits = 0;
+    await assert.rejects(f.client.postJsonAfterCommit(path, async () => { commits++; return { body: "{}", committed: 1 }; }), { code: "INVALID_PATH" });
+    assert.equal(commits, 0); assert.equal(f.calls.length, 0); f.client.dispose();
+  });
+}
+for (const status of [201, 401, 403, 429, 500]) test("one-shot auth -> commit -> single POST, status " + status, async () => {
+  const order: string[] = []; const response = new Response("DO_NOT_READ", { status });
+  const f = fixture(c => { order.push(c.path === "/api/auth/login" ? "auth" : "post"); return c.path === "/api/auth/login" ? pair() : response; });
+  let commits = 0;
+  const result = await f.client.postJsonAfterCommit("/api/tenants/test/integration/clients", async (...args: unknown[]) => {
+    assert.equal(args.length, 0); commits++; order.push("commit"); return { body: '{"cpf":"synthetic"}', committed: "opaque" };
+  });
+  assert.deepEqual(order, ["auth", "commit", "post"]); assert.equal(commits, 1);
+  assert.equal(result.response, response); assert.equal(response.bodyUsed, false); assert.equal(result.committed, "opaque");
+  const init = f.calls[1].init; assert.equal(init.method, "POST"); assert.equal(init.body, '{"cpf":"synthetic"}');
+  assert.equal(new Headers(init.headers).get("Content-Type"), "application/json");
+  assert.equal(new Headers(init.headers).get("Authorization"), "Bearer test-access-1");
+  assert.equal(f.calls.length, 2); f.client.dispose();
+});
+test("one-shot ignores extraneous caller method/header options and callback token injection", async () => {
+  const f = fixture(c => c.path === "/api/auth/login" ? pair() : new Response());
+  await f.client.postJsonAfterCommit("/api/test", async () => ({ body: "{}", committed: null,
+    method: "DELETE", headers: { Authorization: "caller", "Content-Type": "text/plain" } }));
+  assert.equal(f.calls[1].init.method, "POST"); assert.equal(new Headers(f.calls[1].init.headers).get("Authorization"), "Bearer test-access-1"); f.client.dispose();
+});
+test("one-shot commit failure never attempts business transport", async () => {
+  const f = fixture(() => pair()); const error = Error("synthetic commit failure");
+  await assert.rejects(f.client.postJsonAfterCommit("/api/test", async () => { throw error; }), e => e === error);
+  assert.equal(f.calls.length, 1); f.client.dispose();
+});
+for (const mode of ["NETWORK", "TIMEOUT"] as const) test("one-shot transport " + mode + " attempts once after commit", async t => {
+  if (mode === "TIMEOUT") t.mock.timers.enable({ apis: ["setTimeout"] });
+  const f = fixture(c => c.path === "/api/auth/login" ? pair() : mode === "NETWORK" ? Promise.reject(Error("private"))
+    : new Promise((_, reject) => c.init.signal!.addEventListener("abort", () => reject(Error("private")))));
+  let committed = false;
+  const pending = f.client.postJsonAfterCommit("/api/test", async () => { committed = true; return { body: "{}", committed: 1 }; });
+  const rejected = assert.rejects(pending, { code: mode, message: "OPENCREDIT_API_" + mode });
+  if (mode === "TIMEOUT") { while (f.calls.length < 2) await new Promise<void>(r => setImmediate(r)); t.mock.timers.tick(10_001); }
+  await rejected; assert.equal(committed, true); assert.equal(f.calls.length, 2); f.client.dispose();
+});
+test("one-shot 401 expires cached access for NEXT operation only", async () => {
+  const f = fixture(c => c.path === "/api/auth/login" ? pair() : c.path === "/api/auth/refresh" ? pair("2") : new Response(null, { status: 401 }));
+  const commit = async () => ({ body: "{}", committed: 1 });
+  await f.client.postJsonAfterCommit("/api/test", commit); assert.deepEqual(f.calls.map(c => c.path), ["/api/auth/login", "/api/test"]);
+  await f.client.postJsonAfterCommit("/api/test", commit); assert.deepEqual(f.calls.map(c => c.path), ["/api/auth/login", "/api/test", "/api/auth/refresh", "/api/test"]); f.client.dispose();
+});
+test("one-shot disposal while awaiting cached auth prevents the commit callback", async () => {
+  const f = fixture(c => c.path === "/api/auth/login" ? pair() : new Response());
+  await f.client.request("/api/warm"); let commits = 0;
+  const pending = f.client.postJsonAfterCommit("/api/test", async () => { commits++; return { body: "{}", committed: 1 }; });
+  f.client.dispose();
+  await assert.rejects(pending, { code: "DISPOSED" }); assert.equal(commits, 0); assert.equal(f.calls.length, 2);
+});
 
 test("lazy login uses official contract and reusable bearer; no redirects or HTTP cache", async () => {
   const f = fixture(c => c.path === "/api/auth/login" ? pair() : Response.json({ ok: true }));
