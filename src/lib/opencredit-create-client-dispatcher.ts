@@ -16,13 +16,27 @@ type Options = Readonly<{ client?: Pick<typeof openCreditApiClient, "postJsonAft
 export type OpenCreditCreateClientDispatchResult =
   | Readonly<{ operationId: string; state: "SUCCEEDED"; revision: number; created: boolean }>
   | Readonly<{ operationId: string; state: "UNKNOWN"; revision: number }>;
-type Code = "INVALID_INPUT" | "CONFIGURATION" | "AUTHENTICATION" | "PRE_DISPATCH_UNAVAILABLE" | "SETTLEMENT_FAILED";
+const CODES = ["INVALID_INPUT", "CONFIGURATION", "AUTHENTICATION", "PRE_DISPATCH_UNAVAILABLE", "SETTLEMENT_FAILED"] as const;
+type Code = typeof CODES[number];
 export class OpenCreditCreateClientDispatchError extends Error {
   constructor(readonly code: Code) {
     super("OPENCREDIT_CREATE_CLIENT_DISPATCH_" + code);
     this.name = "OpenCreditCreateClientDispatchError";
     this.stack = this.name + ": " + this.message;
   }
+}
+/** Closed, module-instance-stable error contract. Never invoke exception accessors. */
+export function readOpenCreditCreateClientDispatchErrorCode(error: unknown): Code | null {
+  try {
+    if (!(error instanceof Error)) return null;
+    const name = Object.getOwnPropertyDescriptor(error, "name");
+    const code = Object.getOwnPropertyDescriptor(error, "code");
+    const message = Object.getOwnPropertyDescriptor(error, "message");
+    if (!name || !("value" in name) || name.value !== "OpenCreditCreateClientDispatchError"
+      || !code || !("value" in code) || !message || !("value" in message)) return null;
+    const recognized = CODES.find(candidate => candidate === code.value);
+    return recognized && message.value === "OPENCREDIT_CREATE_CLIENT_DISPATCH_" + recognized ? recognized : null;
+  } catch { return null; }
 }
 const fail = (code: Code): never => { throw new OpenCreditCreateClientDispatchError(code); };
 function closed(value: unknown, keys: readonly string[]): Record<string, unknown> {
@@ -69,7 +83,7 @@ async function observe(response: Response): Promise<OpenCreditCreateClientObserv
   catch { return { kind: "UNREADABLE_RESPONSE", status: response.status, reason: "INVALID_CONTRACT" }; }
 }
 
-/** Explicit server core only. No runtime caller, automatic preparation or replay.
+/** Explicit server core, composed only by the human admin command. No automatic preparation or replay.
  * Auth completes before reservation; only the API client transports the one-shot POST. */
 export async function dispatchOpenCreditCreateClient(db: Db, supplied: Input, options: Options = {}): Promise<OpenCreditCreateClientDispatchResult> {
   const command = input(supplied);

@@ -154,7 +154,7 @@ test("only approved human admin boundaries and dispatcher core import the resolv
     if (!/\.tsx?$/.test(file) || /\.(test|integration)\.ts$/.test(file) || file.endsWith("opencredit-provider-scope-resolver.ts")) continue;
     let source = readFileSync("src/" + file, "utf8");
     const dispatcher = file.replace(/\\/g, "/") === "lib/opencredit-create-client-dispatcher.ts";
-    if (dispatcher || ["lib/opencredit-consumer-authorization-admin-handler.ts", "lib/opencredit-consumer-authorization-context-admin-handler.ts"].includes(file.replace(/\\/g, "/"))) {
+    if (dispatcher || ["lib/opencredit-consumer-authorization-admin-handler.ts", "lib/opencredit-consumer-authorization-context-admin-handler.ts", "lib/opencredit-create-client-dispatch-admin-handler.ts"].includes(file.replace(/\\/g, "/"))) {
       const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
       const imports = ast.statements.filter(ts.isImportDeclaration).filter(node => (node.moduleSpecifier as ts.StringLiteral).text === "./opencredit-provider-scope-resolver");
       assert.equal(imports.length, 1);
