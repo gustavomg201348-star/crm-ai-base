@@ -1,8 +1,98 @@
 # OpenCredit API authentication (not webhook authentication)
 
-## One-shot createClient dispatcher core
+## Human createClient admin command (current authoritative state)
 
-Current authoritative status (older sections below describe their original slices):
+```text
+HTTP JSON RESPONSE BOUNDARY: IMPLEMENTED
+CREATE CLIENT REQUEST CONTRACT: IMPLEMENTED
+CREATE CLIENT OUTCOME POLICY: IMPLEMENTED
+CREATE CLIENT OUTCOME LEDGER SETTLEMENT: IMPLEMENTED
+TRUSTED PROVIDER SCOPE: IMPLEMENTED
+COMMERCIAL OPERATION LOCAL LEDGER: IMPLEMENTED
+CONSUMER AUTHORIZATION EVIDENCE: IMPLEMENTED
+CONSUMER AUTHORIZATION ENFORCEMENT: IMPLEMENTED
+HUMAN AUTHORIZATION ADMIN/UI FLOW: IMPLEMENTED
+CREATE CLIENT ONE-SHOT DISPATCH CORE: IMPLEMENTED
+CREATE CLIENT HUMAN ADMIN COMMAND: IMPLEMENTED
+CREATE CLIENT HUMAN UI ACTIVATION: BLOCKED
+FAILED TRANSITION: BLOCKED
+RECONCILIATION: BLOCKED
+AUTOMATIC REPLAY: FORBIDDEN
+LIVE CREATE CLIENT DISPATCH: NOT EXERCISED
+```
+
+`POST /api/admin/integrations/opencredit/create-client/dispatch` is the only human
+command consumer of the dispatcher core. It is a Node.js, force-dynamic thin route,
+with no UI/button, AI/chatbot, webhook, worker, cron, bulk or automatic caller.
+Implementation does not itself execute a live provider request; if deployed and
+explicitly invoked by an authorized human, this endpoint can make the one-shot
+business POST. Legal/operational rollout review remains separate.
+
+The exact JSON body is `{ companyId, contactId, commandId }`, with no extra keys.
+Company/contact IDs follow the existing ASCII administrative ID contract (1–128
+characters, no normalization). commandId is a canonical lowercase UUID v4, no trim
+or terminal newline. It is passed **unchanged as intentKey**, identifying the local
+human intention by companyId + server providerScope + intentKey. It is **not a
+provider idempotency key** and is never sent to the provider. New commandIds are
+distinct intentions, not a mechanism for replaying an ambiguous prior operation.
+
+Order: session -> Platform Admin -> same-origin -> no query/Authorization header,
+JSON Content-Type (optional UTF-8 charset) -> strict bounded body -> rate limits ->
+server providerScope -> prepare -> closed state decision -> optional dispatcher.
+The body reader counts actual bytes (maximum 2048), ignores untrusted Content-Length,
+uses one total 1000ms deadline even for empty chunks, fatal UTF-8 and the existing
+strict JSON parser. BOM, duplicate decoded keys, trailing data, strange prototypes,
+accessors, missing/extra fields and browser provider/profile/revision inputs fail
+closed. Actor comes only from the session; domain services independently revalidate
+persisted authority and company scope.
+
+Shared rate limits are independent: actor [session.companyId, session.id] 10/60s,
+target [companyId, contactId] 3/60s, command [companyId, commandId] 3/60s. Failure
+returns 503 RATE_LIMIT_UNAVAILABLE; denial returns 429 RATE_LIMITED. Retry-After is
+copied only if canonical nonnegative decimal and a safe integer; it is NOT advice
+to retry a business operation. No provider resolution/domain mutation follows denial.
+
+Only PREPARED invokes the dispatcher, with the exact prepared operationId/revision.
+Prepare creates the local PREPARED intention before dispatcher authentication. If
+authentication fails before reservation, PREPARED remains, with zero reservation
+and zero business POST. A future explicit human invocation of the same commandId
+may try again while it is still PREPARED; this is not post-commit replay.
+Existing IN_FLIGHT, SUCCEEDED and UNKNOWN return a closed snapshot with dispatched=false,
+without invoking the dispatcher. FAILED/unrecognized state returns 409
+OPENCREDIT_COMMERCIAL_OPERATION_OPERATION_STATE_INVALID, never replay. A dispatcher
+SUCCEEDED/UNKNOWN result returns dispatched=true. The only success fields are
+`ok`, `operationId`, `state`, `revision`, `dispatched`; no `created`, PII, profile,
+provider status/body, authorization identifiers, tenant/scope, tokens or raw errors.
+All responses use Cache-Control: no-store.
+
+Domain and dispatcher errors use closed module-instance-stable readers: global
+Error plus exact own data name/code/message, no getters or original exception.
+Domain NOT_AUTHORIZED is 403; invalid input/scope/revision codes are 400; domain
+state/freshness/identity/authorization/concurrency conflicts are 409; STORAGE_ERROR
+and INVALID_OBSERVATION are 503. Dispatcher INVALID_INPUT is 400; CONFIGURATION,
+AUTHENTICATION, PRE_DISPATCH_UNAVAILABLE and SETTLEMENT_FAILED are 503. Unknown errors
+are 503 OPENCREDIT_CREATE_CLIENT_DISPATCH_UNAVAILABLE. Provider scope resolution
+failure is 503 OPENCREDIT_PROVIDER_SCOPE_CONFIGURATION. SETTLEMENT_FAILED may mean
+the POST occurred: never suggest retry, reset state or perform automatic replay.
+
+Material tests use real local disposable PostgreSQL and exclusively fake provider
+transport (global live fetch blocked). Sequential duplicates preserve operationId
+and make zero second POST; concurrent duplicates prove one operation, one PREPARED,
+one reservation and exactly one fake POST (losing CAS may be 409). Separate tests
+cover ambiguity, auth failure, revocation before/after reservation and settlement
+failure followed by an IN_FLIGHT snapshot with no replay. Distinct commandIds are
+tested only as local preparations, without multiple automatic dispatches. CI runs
+the new material suite sequentially after existing PostgreSQL gates.
+
+No changes to core dispatch ordering, auth/401, serializer, CAS, authorization,
+outcome/settlement, schema, migration, env, dependencies or Railway. Rollback before
+rollout: remove the thin command route/handler and restore the narrow consumer
+guards/CI steps; no database rollback is required. Future dispatch UI stays BLOCKED.
+
+## One-shot createClient dispatcher core (prior slice)
+
+Historical status at the dispatcher-core slice. The human command section above
+supersedes runtime-consumer/activation status; older sections describe their own slices:
 
 ```text
 HTTP JSON RESPONSE BOUNDARY: IMPLEMENTED

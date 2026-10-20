@@ -254,7 +254,8 @@ test("exact exports, server-only, no provider/reset API or unrelated runtime cal
       const ast = ts.createSourceFile(path.pathname, readFileSync(path,"utf8"), ts.ScriptTarget.Latest, true);
       const visit = (node: ts.Node): void => {
         if (ts.isStringLiteralLike(node) && /(?:^|\/)opencredit-commercial-operation\.service(?:\.[cm]?[jt]s)?$/.test(node.text)) {
-          assert.equal(path.href, new URL("./opencredit-create-client-dispatcher.ts", import.meta.url).href);
+          assert(["./opencredit-create-client-dispatcher.ts", "./opencredit-create-client-dispatch-admin-handler.ts"]
+            .some(file => path.href === new URL(file, import.meta.url).href));
           assert(ts.isImportDeclaration(node.parent));
         }
         ts.forEachChild(node, visit);

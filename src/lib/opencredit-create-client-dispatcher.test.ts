@@ -246,7 +246,7 @@ test("runtime import guard covers extension variants", () => {
   for (const extension of ["", ".ts", ".js", ".cts", ".mts", ".cjs", ".mjs"]) assert(pattern.test("./opencredit-create-client-dispatcher" + extension));
 });
 
-test("AST guards: exact passive dispatcher, one-shot caller only; no runtime consumers", () => {
+test("AST guards: exact dispatcher core, one-shot caller only; single human command consumer", () => {
   const filename = "src/lib/opencredit-create-client-dispatcher.ts";
   const source = readFileSync(filename, "utf8");
   assert.match(source, /^import "server-only";/);
@@ -261,7 +261,10 @@ test("AST guards: exact passive dispatcher, one-shot caller only; no runtime con
     if (!/\.[cm]?[jt]sx?$/.test(path) || /\.(test|integration)\./.test(path)) continue;
     const text = readFileSync(path, "utf8"); const ast = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
     const visit = (n: ts.Node): void => {
-      if (ts.isStringLiteralLike(n) && /(?:^|\/)opencredit-create-client-dispatcher(?:\.[cm]?[jt]s)?$/.test(n.text)) assert.fail("Runtime dispatcher import: " + path);
+      if (ts.isStringLiteralLike(n) && /(?:^|\/)opencredit-create-client-dispatcher(?:\.[cm]?[jt]s)?$/.test(n.text)) {
+        assert.equal(path, "src/lib/opencredit-create-client-dispatch-admin-handler.ts");
+        assert(ts.isImportDeclaration(n.parent));
+      }
       if (ts.isPropertyAccessExpression(n) && n.name.text === "postJsonAfterCommit") { callers++; assert.equal(path, filename); }
       if ((ts.isIdentifier(n) || ts.isStringLiteralLike(n)) && n.text === "postJsonAfterCommit") assert([filename, "src/lib/opencredit-api-client.ts"].includes(path));
       ts.forEachChild(n, visit);
