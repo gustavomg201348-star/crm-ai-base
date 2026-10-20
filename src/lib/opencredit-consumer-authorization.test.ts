@@ -338,6 +338,8 @@ test("only approved human admin mutation boundary; reservation only reads author
           "src/lib/opencredit-create-client-dispatcher-postgres.integration.ts",
           "src/lib/opencredit-create-client-dispatch-admin-postgres.integration.ts",
           "src/lib/opencredit-create-client-dispatch-admin-handler.test.ts",
+          "src/lib/opencredit-create-client-context-postgres.integration.ts",
+          "src/lib/opencredit-create-client-ui.test.ts",
           "src/lib/opencredit-consumer-authorization-context-admin-handler.ts",
           "src/lib/opencredit-consumer-authorization-context-admin-handler.test.ts",
           "src/lib/opencredit-consumer-authorization-ui.ts", "src/lib/opencredit-consumer-authorization-ui.test.ts",

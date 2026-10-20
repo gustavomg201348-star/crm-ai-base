@@ -86,6 +86,12 @@ jobs:
       - name: Validate OpenCredit human createClient admin command boundary
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-create-client-dispatch-admin-handler.test.ts
 
+      - name: Validate OpenCredit createClient read context
+        run: npx --yes tsx@4.20.6 --test src/lib/opencredit-create-client-context.service.test.ts src/lib/opencredit-create-client-context-admin-handler.test.ts
+
+      - name: Validate OpenCredit createClient human UI guards
+        run: npx --yes tsx@4.20.6 --test src/lib/opencredit-create-client-ui.test.ts
+
       - name: Validate OpenCredit commercial operation storage contract
         run: npx --yes tsx@4.20.6 src/lib/opencredit-commercial-operation-storage.test.ts
 
@@ -272,6 +278,12 @@ jobs:
         env:
           OPENCREDIT_COMMERCIAL_OPERATION_SERVICE_POSTGRES_TEST: "1"
           OPENCREDIT_CREATE_CLIENT_ADMIN_POSTGRES_TEST: "1"
+
+      - name: Validate OpenCredit createClient context on disposable PostgreSQL
+        run: npx --yes tsx@4.20.6 --test src/lib/opencredit-create-client-context-postgres.integration.ts
+        env:
+          OPENCREDIT_COMMERCIAL_OPERATION_SERVICE_POSTGRES_TEST: "1"
+          OPENCREDIT_CREATE_CLIENT_CONTEXT_POSTGRES_TEST: "1"
 
       - name: Create dedicated disposable chatbot database
         run: echo 'CREATE DATABASE qevora_chatbot_test;' | npx prisma db execute --stdin --schema prisma/schema.postgres.prisma

@@ -1,6 +1,103 @@
 # OpenCredit API authentication (not webhook authentication)
 
-## Human createClient admin command (current authoritative state)
+## createClient read context and human UI (current authoritative state)
+
+```text
+HTTP JSON RESPONSE BOUNDARY: IMPLEMENTED
+CREATE CLIENT REQUEST CONTRACT: IMPLEMENTED
+CREATE CLIENT OUTCOME POLICY: IMPLEMENTED
+CREATE CLIENT OUTCOME LEDGER SETTLEMENT: IMPLEMENTED
+TRUSTED PROVIDER SCOPE: IMPLEMENTED
+COMMERCIAL OPERATION LOCAL LEDGER: IMPLEMENTED
+CONSUMER AUTHORIZATION EVIDENCE: IMPLEMENTED
+CONSUMER AUTHORIZATION ENFORCEMENT: IMPLEMENTED
+HUMAN AUTHORIZATION ADMIN/UI FLOW: IMPLEMENTED
+CREATE CLIENT ONE-SHOT DISPATCH CORE: IMPLEMENTED
+CREATE CLIENT HUMAN ADMIN COMMAND: IMPLEMENTED
+CREATE CLIENT READ CONTEXT: IMPLEMENTED
+CREATE CLIENT HUMAN UI ACTIVATION: IMPLEMENTED
+AUTOMATIC CREATE CLIENT: FORBIDDEN
+AUTOMATIC REPLAY: FORBIDDEN
+FAILED TRANSITION: BLOCKED
+RECONCILIATION: BLOCKED
+LIVE CREATE CLIENT TEST: NOT EXERCISED
+```
+
+`POST /api/admin/integrations/opencredit/create-client/context` accepts exactly
+`{ companyId, contactId }`. It is a Node.js/force-dynamic thin admin route. Order:
+session -> Platform Admin -> same-origin -> zero query/Authorization header ->
+JSON Content-Type -> real 2048-byte body / total 1000ms deadline / fatal UTF-8 ->
+strict JSON parser and exact ASCII IDs -> shared limits -> trusted server scope ->
+read-only service. Every response is no-store; no raw body/error/provider logging.
+Context rate limits are separate from dispatch: actor 60/60s, target 30/60s. Limiter
+failure/denial returns closed 503/429, with only canonical safe decimal Retry-After,
+and prevents scope resolution/domain access.
+
+The service revalidates persisted User/Platform Admin, Company and scoped Contact
+inside a Serializable read transaction. It intentionally does NOT require an
+active Contact/CommercialAccess/RemoteIdentity/ConsumerAuthorization: stale or
+revoked eligibility must not hide a previously sent/ambiguous operation. It resolves
+RemoteIdentity by companyId + providerScope + contactId, then the latest operation
+of kind CLIENT_PROFILE_UPSERT by createdAt DESC, id DESC. Only id/intentKey/state/
+revision are selected. Missing identity/operation returns null; structurally invalid
+persisted data fails closed as CORRUPT_OPERATION, never absence.
+
+The response is exactly `{ ok: true, operation: null }` or an operation containing
+only operationId, commandId (persisted intentKey), one of the five ledger states,
+and nonnegative safe revision. No identity/scope/actor, PII/profile, authorization
+IDs, Events, timestamps or provider data are exposed. The domain service performs
+ZERO writes; only the existing shared limiter may write RateLimitBucket at the
+HTTP boundary. Material tests compare full domain snapshots before and after reads,
+including archived/disabled/revoked fixtures and corruption/negative paths.
+
+The createClient panel is nested in the existing human authorization panel; the
+shared desktop/mobile mounting in page.tsx is unchanged. Frontend ADMIN visibility
+is only an optimization; backend Platform Admin and domain authorization remain
+authoritative. 401/403 hides the panel. Context reads happen on mount/target change
+and explicit refresh; they never generate a UUID or trigger dispatch.
+
+Latest operation survives reload. PREPARED always reuses the exact server commandId
+and may continue only through another explicit human confirmation with active
+authorization. IN_FLIGHT/UNKNOWN forbid resend; SUCCEEDED blocks a new intention;
+FAILED requires manual review. No update/resync/new-registration action is offered
+after terminal or pending state. A future deliberate update/sync intention is a
+separate, out-of-scope flow.
+
+For an absent operation, sessionStorage preserves ONLY a pending UUID under
+`opencredit:create-client-command:<companyId>:<contactId>`. Reads validate UUID v4
+again. Server context is authority: PREPARED synchronizes the local UUID, and all
+other persisted states block new commands. No operation + valid pending UUID reuses
+it; no operation + no pending UUID may generate crypto.randomUUID only after the
+checkbox, click and window.confirm. Malformed pending values are never reused;
+storage exceptions block dispatch. Persistence happens before the dispatch fetch. No UUID/pending
+is cleared on 409/503, network/abort or malformed response.
+
+The exact dispatch body remains companyId/contactId/commandId only. A working ref
+and busy state stop double clicks; backend unique/CAS protection remains authority.
+After valid response, conflict, provider/local failure or network exception the
+panel reloads server context, never performs automatic dispatch/retry. Failed reload
+disables new action and asks for state confirmation, not replay. SETTLEMENT_FAILED
+may mean the POST occurred; an IN_FLIGHT snapshot is retained without resend.
+
+Target-key remount, AbortController and sequence epochs prevent stale context or
+dispatch responses from updating/reloading another contact. Browser abort is NOT
+proof that the server POST was cancelled. The pending UUID is retained for future
+state recovery. Client parsing and error messages are closed, getter-safe and
+browser-only; no server internals or duplicated commercial eligibility logic.
+
+All provider tests are fake; no live production E2E was performed. This slice makes
+the existing real administrative dispatch available through an explicit human UI
+after future authorized rollout, not a passive feature. No formal provider
+idempotency guarantee or legal/LGPD conclusion is claimed. ZERO schema/migration/
+env/dependency/Railway changes, new provider endpoints, simulation/proposal/banking,
+AI/chatbot/worker/cron dispatch, automatic preparation/retry, FAILED writer or
+reconciliation. Rollback: remove the new child panel and context route/service,
+restore their narrow guards/CI gates; no schema/data rollback is needed.
+
+## Human createClient admin command (prior slice)
+
+Historical status for this slice; the read-context/human-UI section above supersedes
+its UI-activation status. Existing command/dispatcher behavior remains unchanged.
 
 ```text
 HTTP JSON RESPONSE BOUNDARY: IMPLEMENTED
