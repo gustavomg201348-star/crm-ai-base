@@ -22,8 +22,9 @@ confirmed contract; this slice makes no provider call or legal/LGPD conclusion.
 accepts exactly companyId/contactId. The separate server-only reader revalidates
 persisted User/Platform Admin, Company and tenant-scoped Contact in a Serializable
 read transaction. It intentionally ignores later archive/disable/revoke eligibility.
-Latest operation is selected by createdAt DESC, id DESC, scoped by Company,
-trusted providerScope, RemoteIdentity and CLIENT_PROFILE_UPSERT. Only IN_FLIGHT
+The operation is read through the compound unique for Company, trusted
+providerScope, RemoteIdentity and CLIENT_PROFILE_UPSERT. At most one such operation
+can exist after the single-intent migration. Only IN_FLIGHT
 revision 1 and UNKNOWN revision 2 receive review; other known states return null.
 
 The complete ledger is read in persisted createdAt ASC, id ASC order (bounded
@@ -56,9 +57,12 @@ remain unchanged. Parent IN_FLIGHT copy now explicitly avoids a receipt claim.
 All CI gates are preserved, with new unit/guard and sequential disposable PostgreSQL
 review gates. Material tests use real local reservations/local UNKNOWN observation
 without any provider transport, and compare domain snapshots before/after reads.
-Zero schema/migration/env/dependency/Railway changes, new settlement writers or
-active reconciliation. Rollback removes this reader/route/child panel and narrow
-guards/gates; no schema or data rollback is required.
+The reconciliation reader itself requires no new storage. This PR also includes
+the single-intent unique in both schemas and its fail-closed migration, documented
+below. No env/dependency/Railway changes, new settlement writers or active
+reconciliation. Reader rollback removes this reader/route/child panel and narrow
+guards/gates; retain the associated uniqueness protection. Any schema/data rollback
+would require a separate approved plan.
 
 ## createClient read context and human UI
 
@@ -97,8 +101,9 @@ The service revalidates persisted User/Platform Admin, Company and scoped Contac
 inside a Serializable read transaction. It intentionally does NOT require an
 active Contact/CommercialAccess/RemoteIdentity/ConsumerAuthorization: stale or
 revoked eligibility must not hide a previously sent/ambiguous operation. It resolves
-RemoteIdentity by companyId + providerScope + contactId, then the latest operation
-of kind CLIENT_PROFILE_UPSERT by createdAt DESC, id DESC. Only id/intentKey/state/
+RemoteIdentity by companyId + providerScope + contactId, then the single operation
+through the compound unique (companyId, providerScope, remoteIdentityId,
+operationKind=CLIENT_PROFILE_UPSERT), without ordering Operations. Only id/intentKey/state/
 revision are selected. Missing identity/operation returns null; structurally invalid
 persisted data fails closed as CORRUPT_OPERATION, never absence.
 
@@ -116,7 +121,7 @@ is only an optimization; backend Platform Admin and domain authorization remain
 authoritative. 401/403 hides the panel. Context reads happen on mount/target change
 and explicit refresh; they never generate a UUID or trigger dispatch.
 
-Latest operation survives reload. PREPARED always reuses the exact server commandId
+The single persisted operation survives reload. PREPARED always reuses the exact server commandId
 and may continue only through another explicit human confirmation with active
 authorization. IN_FLIGHT/UNKNOWN forbid resend; SUCCEEDED blocks a new intention;
 FAILED requires manual review. No update/resync/new-registration action is offered
@@ -144,9 +149,10 @@ races even when both read operation:null. Only the same PREPARED commandId may
 continue via explicit human action. The UI is additional defense, not this guarantee.
 A future deliberate update/sync requires a separate flow, outside this slice.
 No provider idempotency guarantee is implied; remote one-shot remains mandatory.
-Historical multiple operations, if any, are not deleted or migrated: context still
-selects the latest deterministically, a new command is blocked, and existing
-same-command lookup stays idempotent. Historical reconciliation is out of scope.
+Historical duplicates prevent the single-intent migration and deployment; neither
+reader chooses a winner. No duplicate is automatically deleted, updated or cleaned
+up. Such data requires a separate approved plan before rollout. Same-command lookup
+stays idempotent; future update/sync requires an explicit new lifecycle.
 After valid response, conflict, provider/local failure or network exception the
 panel reloads server context, never performs automatic dispatch/retry. Failed reload
 disables new action and asks for state confirmation, not replay. SETTLEMENT_FAILED
@@ -161,11 +167,13 @@ browser-only; no server internals or duplicated commercial eligibility logic.
 All provider tests are fake; no live production E2E was performed. This slice makes
 the existing real administrative dispatch available through an explicit human UI
 after future authorized rollout, not a passive feature. No formal provider
-idempotency guarantee or legal/LGPD conclusion is claimed. ZERO schema/migration/
-env/dependency/Railway changes, new provider endpoints, simulation/proposal/banking,
-AI/chatbot/worker/cron dispatch, automatic preparation/retry, FAILED writer or
-reconciliation. Rollback: remove the new child panel and context route/service,
-restore their narrow guards/CI gates; no schema/data rollback is needed.
+idempotency guarantee or legal/LGPD conclusion is claimed. The read-context/human-UI
+feature requires no storage of its own; this PR includes the associated single-intent
+schema unique and migration. No env/dependency/Railway changes, new provider endpoints,
+simulation/proposal/banking, AI/chatbot/worker/cron dispatch, automatic preparation/retry,
+FAILED writer or active reconciliation. Reader/UI rollback removes the child panel
+and context route/service and restores narrow guards/CI gates, not the single-intent
+database protection. Any schema/data rollback requires a separate approved plan.
 
 ## Human createClient admin command (prior slice)
 
