@@ -249,7 +249,20 @@ for (const [label, setup, code] of [
   ["global ownership mismatch", (f: ReturnType<typeof fake>) => { f.state.globalIdentity = false; }, "IDENTITY_CONFLICT"],
   ["invalid profile", (f: ReturnType<typeof fake>) => { f.state.contact!.name = ""; }, "PROFILE_INVALID"]
 ] as const) for (const mode of ["prepare", "reserve"] as const) test(mode + " fails closed for " + label, () => configured(async () => { const f = fake(mode === "prepare" ? undefined : "PREPARED"); setup(f); await denied(() => invoke(mode, f), code); assert.equal(f.calls.some(c => ["operation.create","operation.cas","event.create"].includes(c)), false); }));
-for (const target of ["OCOperation_company_scope_intent_key", ["companyId", "providerScope", "intentKey"]]) test("prepare bounded retry of expected P2002 metadata " + typeof target, () => configured(async () => { const f = fake(); f.faults.push(prismaError("P2002", { modelName: "OpenCreditCommercialOperation", target })); assert.equal((await invoke("prepare", f)).revision, 0); assert.equal(f.attempts(), 2); assert.equal(f.state.events.length, 1); }));
+for (const target of ["OCOperation_company_scope_intent_key", ["companyId", "providerScope", "intentKey"],
+  "OCOperation_company_scope_identity_kind_key", ["companyId", "providerScope", "remoteIdentityId", "operationKind"],
+  ["operationKind", "remoteIdentityId", "providerScope", "companyId"]]) test("prepare bounded retry of expected P2002 metadata " + JSON.stringify(target), () => configured(async () => { const f = fake(); f.faults.push(prismaError("P2002", { modelName: "OpenCreditCommercialOperation", target })); assert.equal((await invoke("prepare", f)).revision, 0); assert.equal(f.attempts(), 2); assert.equal(f.state.events.length, 1); }));
+for (const target of [["companyId", "providerScope"], ["companyId", "providerScope", "intentKey", "id"],
+  ["companyId", "providerScope", "remoteIdentityId"], ["companyId", "providerScope", "remoteIdentityId", "operationKind", "id"],
+  ["companyId", "providerScope", "remoteIdentityId", "remoteIdentityId"]]) test("P2002 partial/superset/duplicate target is not retryable " + JSON.stringify(target), () => configured(async () => {
+    const f = fake(); f.faults.push(prismaError("P2002", { modelName: "OpenCreditCommercialOperation", target }));
+    await denied(() => invoke("prepare", f), "STORAGE_ERROR"); assert.equal(f.attempts(), 1);
+  }));
+test("identity-kind P2002 retry observes different winning intent and returns INTENT_CONFLICT", () => configured(async () => {
+  const f = fake(); f.faults.push(prismaError("P2002", { modelName: "OpenCreditCommercialOperation", target: "OCOperation_company_scope_identity_kind_key" }));
+  f.onAttempt(() => { if (f.attempts() === 2) f.state.otherOperations.push({ ...operation(), intentKey: "00000000-0000-4000-8000-000000000001" }); });
+  await denied(() => invoke("prepare", f), "INTENT_CONFLICT"); assert.equal(f.attempts(), 2); assert.equal(f.state.events.length, 0);
+}));
 for (const meta of [{ target: ["id"] }, { target: "OCOperation_id_company_scope_key" }, { target: "unknown" }, { modelName: "OpenCreditCommercialOperationEvent", target: "OCOperation_company_scope_intent_key" }]) test("unexpected P2002 not retried " + JSON.stringify(meta), () => configured(async () => { const f = fake(); f.faults.push(prismaError("P2002", meta)); await denied(() => invoke("prepare", f), "STORAGE_ERROR"); assert.equal(f.attempts(), 1); }));
 for (const mode of modes) test(mode + " P2034 bounded, rereads actor every attempt", () => configured(async () => { const f = fake(mode === "prepare" ? undefined : mode === "reserve" ? "PREPARED" : "IN_FLIGHT", mode === "unknown" || mode === "settle" ? 1 : 0); f.faults.push(...Array.from({ length: 3 }, () => prismaError("P2034"))); await denied(() => invoke(mode, f), "CONCURRENT_CONFLICT"); assert.equal(f.attempts(), 3); assert.equal(f.calls.filter(c => c === "actor").length, 3); assert.equal(f.state.events.length, 0); }));
 test("expected prepare P2002 exhaustion is bounded", () => configured(async () => { const f = fake(); f.faults.push(...Array.from({ length: 3 }, () => prismaError("P2002", { target: "OCOperation_company_scope_intent_key" }))); await denied(() => invoke("prepare", f), "CONCURRENT_CONFLICT"); assert.equal(f.attempts(), 3); }));

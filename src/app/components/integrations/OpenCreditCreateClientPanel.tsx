@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { OpenCreditCreateClientReconciliationPanel } from "./OpenCreditCreateClientReconciliationPanel";
 import { createClientErrorMessage, isOpenCreditCommandId, parseCreateClientContext, parseCreateClientDispatchResponse,
   resolveCreateClientCommandId, type CreateClientContext } from "@/lib/opencredit-create-client-ui";
 
@@ -69,7 +70,7 @@ function Command({ enabled, companyId, contactId, authorizationActive }: Props) 
   const canCommand = context !== null && (context.operation === null || state === "PREPARED");
   const labels = {
     PREPARED: "Existe uma solicitação preparada que ainda não iniciou o envio.",
-    IN_FLIGHT: "Envio já iniciado. Não reenvie esta operação. Se permanecer pendente, será necessária conferência manual.",
+    IN_FLIGHT: "Operação comprometida localmente para envio. Recebimento e processamento externos não confirmados. Não reenvie.",
     UNKNOWN: "O resultado do envio não foi confirmado. Não reenvie. É necessária conferência manual antes de qualquer nova ação.",
     SUCCEEDED: "Envio concluído na OpenCredit.", FAILED: "Operação bloqueada para revisão manual.",
   };
@@ -78,6 +79,7 @@ function Command({ enabled, companyId, contactId, authorizationActive }: Props) 
     {busy && <p role="status" className="mt-2 text-xs">Atualizando estado...</p>}
     {error && <p role="alert" className="mt-2 text-xs text-rose-700">{error}</p>}
     {state && <p role="status" className="mt-2 text-sm">{labels[state]}</p>}
+    {(state === "IN_FLIGHT" || state === "UNKNOWN") && <OpenCreditCreateClientReconciliationPanel companyId={companyId} contactId={contactId} />}
     {canCommand && <>
       {!authorizationActive && <p className="mt-2 text-xs">Registre uma autorização OpenCredit ativa antes do cadastro.</p>}
       <label className="mt-3 flex items-start gap-2 text-xs"><input type="checkbox" checked={confirmed} disabled={busy || !authorizationActive} onChange={e => setConfirmed(e.target.checked)} />Revisei o cadastro e confirmo o envio deste cliente à OpenCredit.</label>

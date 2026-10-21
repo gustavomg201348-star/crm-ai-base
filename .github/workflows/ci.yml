@@ -92,6 +92,12 @@ jobs:
       - name: Validate OpenCredit createClient human UI guards
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-create-client-ui.test.ts
 
+      - name: Validate OpenCredit createClient reconciliation review context
+        run: npx --yes tsx@4.20.6 --test src/lib/opencredit-create-client-reconciliation-context.service.test.ts src/lib/opencredit-create-client-reconciliation-context-admin-handler.test.ts
+
+      - name: Validate OpenCredit createClient reconciliation UI guards
+        run: npx --yes tsx@4.20.6 --test src/lib/opencredit-create-client-reconciliation-ui.test.ts
+
       - name: Validate OpenCredit commercial operation storage contract
         run: npx --yes tsx@4.20.6 src/lib/opencredit-commercial-operation-storage.test.ts
 
@@ -200,6 +206,12 @@ jobs:
       - name: Generate PostgreSQL Prisma Client
         run: npm run prisma:generate:prod
 
+      - name: Validate single operation identity-kind migration fails closed
+        run: npx --yes tsx@4.20.6 --test src/lib/opencredit-operation-single-intent-migration-postgres.integration.ts
+        env:
+          OPENCREDIT_COMMERCIAL_OPERATION_POSTGRES_TEST: "1"
+          OPENCREDIT_SINGLE_INTENT_MIGRATION_POSTGRES_TEST: "1"
+
       - name: Apply migration chain to disposable PostgreSQL
         run: npm run prisma:migrate:prod
 
@@ -284,6 +296,12 @@ jobs:
         env:
           OPENCREDIT_COMMERCIAL_OPERATION_SERVICE_POSTGRES_TEST: "1"
           OPENCREDIT_CREATE_CLIENT_CONTEXT_POSTGRES_TEST: "1"
+
+      - name: Validate OpenCredit createClient reconciliation context on disposable PostgreSQL
+        run: npx --yes tsx@4.20.6 --test src/lib/opencredit-create-client-reconciliation-context-postgres.integration.ts
+        env:
+          OPENCREDIT_COMMERCIAL_OPERATION_SERVICE_POSTGRES_TEST: "1"
+          OPENCREDIT_CREATE_CLIENT_RECONCILIATION_POSTGRES_TEST: "1"
 
       - name: Create dedicated disposable chatbot database
         run: echo 'CREATE DATABASE qevora_chatbot_test;' | npx prisma db execute --stdin --schema prisma/schema.postgres.prisma

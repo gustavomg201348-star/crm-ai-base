@@ -79,7 +79,7 @@ for (const table of [op, event]) material("exact columns/types/nullability/defau
     assert.doesNotMatch(c.name, /cpf|payload|response|credential|password|token|hash|consent|evidence/i);
   }
 });
-material("both PKs, two uniques and six exact ordered indexes are valid and unconditional", async () => {
+material("both PKs, three uniques and six exact ordered indexes are valid and unconditional", async () => {
   const rows = await db.$queryRaw<Array<{ table: string; name: string; unique: boolean; primary: boolean; valid: boolean; partial: boolean; columns: string[] }>>`
     SELECT t.relname::text AS table, x.relname::text AS name, i.indisunique AS "unique", i.indisprimary AS "primary", i.indisvalid AS valid,
       (i.indpred IS NOT NULL OR i.indexprs IS NOT NULL) AS partial,
@@ -91,6 +91,7 @@ material("both PKs, two uniques and six exact ordered indexes are valid and unco
   const expected = [
     [op, op + "_pkey", true, true, ["id"]], [event, event + "_pkey", true, true, ["id"]],
     [op, "OCOperation_company_scope_intent_key", true, false, ["companyId", "providerScope", "intentKey"]],
+    [op, "OCOperation_company_scope_identity_kind_key", true, false, ["companyId", "providerScope", "remoteIdentityId", "operationKind"]],
     [op, "OCOperation_id_company_scope_key", true, false, ["id", "companyId", "providerScope"]],
     [op, "OCOperation_identity_created_id_idx", false, false, ["remoteIdentityId", "createdAt", "id"]],
     [op, "OCOperation_scope_state_created_id_idx", false, false, ["companyId", "providerScope", "state", "createdAt", "id"]],
@@ -150,6 +151,21 @@ material("duplicate local Company/scope/intent rejects specifically the intended
   assert.equal(await db.openCreditCommercialOperation.count({ where: { companyId: f.a, providerScope: f.scope, intentKey: f.data.intentKey } }), 1);
   assert.equal((await db.openCreditCommercialOperation.findUniqueOrThrow({ where: { id: first.id } })).revision, 0);
 });
+material("distinct command is rejected by identity-kind unique without a second operation", async f => {
+  await db.openCreditCommercialOperation.create({ data: f.data });
+  await assert.rejects(db.openCreditCommercialOperation.create({ data: { ...f.data, intentKey: intent() } }), error => {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") return false;
+    const target = error.meta?.target;
+    return target === "OCOperation_company_scope_identity_kind_key" || Array.isArray(target) && target.length === 4
+      && ["companyId", "providerScope", "remoteIdentityId", "operationKind"].every(k => target.includes(k));
+  });
+  assert.equal(await db.openCreditCommercialOperation.count({ where: { companyId: f.a } }), 1);
+});
+material("another operationKind on the same identity is independent", async f => {
+  await db.openCreditCommercialOperation.create({ data: f.data });
+  await db.openCreditCommercialOperation.create({ data: { ...f.data, intentKey: intent(), operationKind: "SYNTHETIC_OTHER_KIND" } });
+  assert.equal(await db.openCreditCommercialOperation.count({ where: { companyId: f.a } }), 2);
+});
 material("same intent in another valid scope is independent", async f => {
   const first = await db.openCreditCommercialOperation.create({ data: f.data }); const other = syntheticScope(); const parent = await f.identityFor(f.a, other);
   const second = await db.openCreditCommercialOperation.create({ data: { ...f.data, providerScope: other, remoteIdentityId: parent.id } });
@@ -206,7 +222,7 @@ material("Event FK NO ACTION blocks Operation scope mutation despite a valid rep
 });
 material("synthetic states/revisions demonstrate storage ONLY, not an enforced state machine", async f => {
   for (const [i, state] of Array.from(["PREPARED", "IN_FLIGHT", "SUCCEEDED", "FAILED", "UNKNOWN", "SYNTHETIC_OTHER_STATE"].entries())) {
-    const operation = await db.openCreditCommercialOperation.create({ data: { ...f.data, intentKey: intent(), state, revision: i } });
+    const operation = await db.openCreditCommercialOperation.create({ data: { ...f.data, operationKind: "SYNTHETIC_STORAGE_KIND_" + i, intentKey: intent(), state, revision: i } });
     const row = await db.openCreditCommercialOperationEvent.create({ data: { ...f.eventData(operation.id), action: "SYNTHETIC_STORAGE_ONLY", previousState: "PREPARED", nextState: state, revision: i } });
     assert.equal(row.nextState, state); assert.equal(row.revision, i); assert.equal(operation.state, state);
   }

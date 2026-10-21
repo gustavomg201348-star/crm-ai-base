@@ -33,6 +33,7 @@ test("both logical models, exact fields and inverse relations are equivalent acr
     assert.match(history, /dispatchAuthorizationEventId String\?/);
     assert.match(history, /fields: \[dispatchAuthorizationEventId, companyId, providerScope\], references: \[id, companyId, providerScope\]/);
     assert.match(operation, /@@unique\(\[companyId, providerScope, intentKey\], map: "OCOperation_company_scope_intent_key"\)/);
+    assert.match(operation, /@@unique\(\[companyId, providerScope, remoteIdentityId, operationKind\], map: "OCOperation_company_scope_identity_kind_key"\)/);
     assert.match(operation, /@@unique\(\[id, companyId, providerScope\], map: "OCOperation_id_company_scope_key"\)/);
     assert.match(model(schema, "Company")!, /openCreditCommercialOperations OpenCreditCommercialOperation\[\]/);
     assert.match(model(schema, "User")!, /openCreditCommercialOperationsCreated OpenCreditCommercialOperation\[\] @relation\("OpenCreditCommercialOperationCreatedBy"\)/);
@@ -50,6 +51,15 @@ test("migration is structural only, additive and identifier lengths are safe", (
   assert.doesNotMatch(sql, /normalizedCpf|\bcpf\b|payload|response|credential|password|token|Hash|consent|evidence/i);
   for (const m of Array.from(sql.matchAll(/ALTER TABLE "([^"]+)"/g))) assert.ok([op, event].includes(m[1]));
   for (const m of Array.from(sql.matchAll(/(?:CONSTRAINT|INDEX) "([^"]+)"/g))) assert.ok(m[1].length <= 63);
+});
+
+test("single identity-kind migration fails closed without any data cleanup", () => {
+  const sql = read("prisma/migrations/20261020190000_enforce_opencredit_operation_single_identity_kind/migration.sql");
+  assert.match(sql, /GROUP BY "companyId", "providerScope", "remoteIdentityId", "operationKind"\s+HAVING COUNT\(\*\) > 1/);
+  assert.match(sql, /RAISE EXCEPTION 'OPENCREDIT_OPERATION_IDENTITY_KIND_DUPLICATES_EXIST'/);
+  assert.match(sql, /CREATE UNIQUE INDEX "OCOperation_company_scope_identity_kind_key"\s+ON "OpenCreditCommercialOperation"\("companyId", "providerScope", "remoteIdentityId", "operationKind"\)/);
+  assert(sql.indexOf("RAISE EXCEPTION") < sql.indexOf("CREATE UNIQUE INDEX"));
+  assert.doesNotMatch(sql, /\b(?:INSERT|UPDATE|DELETE|TRUNCATE|DROP|CASCADE)\b/i);
 });
 
 // Conservative syntax check, not whole-program taint analysis or raw SQL enforcement.

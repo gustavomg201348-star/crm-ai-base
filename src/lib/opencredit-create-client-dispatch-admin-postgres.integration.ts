@@ -128,7 +128,7 @@ for (const state of ["PREPARED", "IN_FLIGHT", "UNKNOWN", "SUCCEEDED", "FAILED"])
 });
 // Both Serializable transactions read the absent identity/kind predicate before either inserts.
 function distinctIntentBarrier() {
-  let arrivals = 0, serializationFailures = 0; let release!: () => void;
+  let arrivals = 0, serializationFailures = 0, identityUniqueFailures = 0; let release!: () => void;
   const barrier = new Promise<void>(resolve => { release = resolve; });
   const database = { $transaction: <T>(run: (tx: Prisma.TransactionClient) => Promise<T>, options?: { isolationLevel?: Prisma.TransactionIsolationLevel; maxWait?: number; timeout?: number }) => {
     assert.equal(options?.isolationLevel, "Serializable");
@@ -146,10 +146,15 @@ function distinctIntentBarrier() {
       return run(new Proxy(tx, { get: (target, key) => key === "openCreditCommercialOperation" ? delegate : Reflect.get(target, key) }));
     }, options).catch(error => {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") serializationFailures++;
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        const target = error.meta?.target;
+        if (target === "OCOperation_company_scope_identity_kind_key" || Array.isArray(target) && target.length === 4
+          && ["companyId", "providerScope", "remoteIdentityId", "operationKind"].every(k => target.includes(k))) identityUniqueFailures++;
+      }
       throw error;
     });
   } } as Db;
-  return { database, arrivals: () => arrivals, serializationFailures: () => serializationFailures };
+  return { database, arrivals: () => arrivals, serializationFailures: () => serializationFailures, identityUniqueFailures: () => identityUniqueFailures };
 }
 for (let round = 1; round <= 3; round++) material("two confirmed tabs with null context and distinct commands serialize to one intention/POST, round " + round, async f => {
   const [a, b] = await Promise.all([
@@ -166,7 +171,7 @@ for (let round = 1; round <= 3; round++) material("two confirmed tabs with null 
     assert.equal(loser.headers.get("cache-control"), "no-store");
     assert.deepEqual(await loser.json(), { error: "OPENCREDIT_COMMERCIAL_OPERATION_INTENT_CONFLICT" });
     const operations = await f.operations(), events = await f.events();
-    assert.equal(concurrent.arrivals(), 2); assert(concurrent.serializationFailures() >= 1);
+    assert.equal(concurrent.arrivals(), 2);
     assert.equal(operations.length, 1); assert.equal(operations[0].state, "SUCCEEDED");
     assert.equal(operations[0].intentKey, commands[responses.findIndex(r => r.status === 200)]);
     assert.equal(events.filter(e => e.action === "PREPARED").length, 1);

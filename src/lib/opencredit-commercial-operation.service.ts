@@ -107,8 +107,11 @@ async function authorize(tx: Prisma.TransactionClient, input: Common): Promise<s
 function expectedUnique(error: Prisma.PrismaClientKnownRequestError): boolean {
   if (error.meta?.modelName !== undefined && error.meta.modelName !== "OpenCreditCommercialOperation") return false;
   const target = error.meta?.target;
-  return target === "OCOperation_company_scope_intent_key" || Array.isArray(target) && target.length === 3
-    && ["companyId", "providerScope", "intentKey"].every(k => target.includes(k));
+  return target === "OCOperation_company_scope_intent_key" || target === "OCOperation_company_scope_identity_kind_key"
+    || Array.isArray(target) && (
+      target.length === 3 && ["companyId", "providerScope", "intentKey"].every(k => target.includes(k))
+      || target.length === 4 && ["companyId", "providerScope", "remoteIdentityId", "operationKind"].every(k => target.includes(k))
+    );
 }
 async function transaction<T>(db: Db, input: Common, preparing: boolean, run: (tx: Prisma.TransactionClient, actorId: string) => Promise<T>): Promise<T> {
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -165,7 +168,7 @@ async function fresh(tx: Prisma.TransactionClient, input: Common, contactId: str
     return { identity, profile };
   } catch { return fail("PROFILE_INVALID"); }
 }
-/** No runtime caller: preparation is not consent or permission for a provider operation. */
+/** Used by the human admin command; preparation alone is not consent or dispatch permission. */
 export async function prepareOpenCreditClientProfileOperation(db: Db, supplied: OpenCreditPrepareClientProfileInput): Promise<OpenCreditCommercialOperationResult> {
   const input = prepareInput(supplied);
   return transaction(db, input, true, async (tx, actorId) => {

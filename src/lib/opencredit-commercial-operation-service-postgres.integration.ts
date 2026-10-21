@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { before, after, test } from "node:test";
 import Module from "node:module";
 import { randomUUID, createHmac } from "node:crypto";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { Prisma, PrismaClient } from "@prisma/client";
 import type { SessionUser } from "./auth";
 import type { OpenCreditPrepareClientProfileInput, OpenCreditOperationTransitionInput, OpenCreditCommercialOperationServiceCode } from "./opencredit-commercial-operation.service";
@@ -130,15 +131,13 @@ material("unknown historical state fails closed", async f => {
   const i = await prepared(f); await db.openCreditCommercialOperation.update({ where: { id: i.operationId }, data: { state: "UNRECOGNIZED" } });
   await denied(() => service.prepareOpenCreditClientProfileOperation(db, f.input), "OPERATION_STATE_INVALID");
 });
-material("historical multiple intentions are preserved, same command is idempotent and new command is blocked", async f => {
+material("single intention is idempotent and a sequential distinct command is blocked", async f => {
   const first = await service.prepareOpenCreditClientProfileOperation(db, f.input);
-  await db.openCreditCommercialOperation.create({ data: { companyId: f.companyId, providerScope: f.input.providerScope,
-    remoteIdentityId: f.identity.id, operationKind: "CLIENT_PROFILE_UPSERT", intentKey: randomUUID(), state: "UNKNOWN", createdByUserId: f.actor.id } });
   const where = { ...f.where, remoteIdentityId: f.identity.id }, before = await db.openCreditCommercialOperation.findMany({ where, orderBy: { id: "asc" } }), events = await f.events();
   await denied(() => service.prepareOpenCreditClientProfileOperation(db, { ...f.input, intentKey: randomUUID() }), "INTENT_CONFLICT");
   assert.deepEqual(await service.prepareOpenCreditClientProfileOperation(db, f.input), { ...first, changed: false });
-  assert.equal(before.length, 2); assert.deepEqual(await db.openCreditCommercialOperation.findMany({ where, orderBy: { id: "asc" } }), before);
-  assert.deepEqual(await f.events(), events);
+  assert.equal(before.length, 1); assert.deepEqual(await db.openCreditCommercialOperation.findMany({ where, orderBy: { id: "asc" } }), before);
+  assert.deepEqual(await f.events(), events); assert.equal(events.filter(e => e.action === "PREPARED").length, 1);
 });
 material("single intention is scoped: another identity and another providerScope can prepare independently", async f => {
   const first = await service.prepareOpenCreditClientProfileOperation(db, f.input);
@@ -156,21 +155,50 @@ material("single intention is scoped: another identity and another providerScope
   assert.equal(await db.openCreditCommercialOperationEvent.count({ where: { companyId: f.companyId, action: "PREPARED" } }), 3);
 });
 // Both first attempts read the same committed snapshot before either writer proceeds.
-function barrierDb(kind: "prepare" | "reserve" | "settle"): Db {
+function barrierDb(kind: "prepare" | "distinct" | "reserve" | "settle", stats?: { p2034: number; identityP2002: number; arrivals: number }): Db {
   let arrivals = 0; let release!: () => void; const barrier = new Promise<void>(resolve => { release = resolve; });
   return { $transaction: <T>(run: (tx: Prisma.TransactionClient) => Promise<T>, options?: Options) => db.$transaction(tx => {
     const delegate = new Proxy(tx.openCreditCommercialOperation, { get(target, key) {
-      if (key === "findUnique") return async (args: Parameters<typeof target.findUnique>[0]) => {
-        const result = await target.findUnique(args);
-        const matches = kind === "prepare" ? "companyId_providerScope_intentKey" in args.where : "id_companyId_providerScope" in args.where;
-        if (matches && arrivals < 2) { arrivals++; if (arrivals === 2) release(); await barrier; }
+      if (key === (kind === "distinct" ? "findFirst" : "findUnique")) return async (args: Parameters<typeof target.findUnique>[0]) => {
+        const result = kind === "distinct" ? await target.findFirst(args) : await target.findUnique(args);
+        const matches = kind === "distinct" ? args.where.operationKind === "CLIENT_PROFILE_UPSERT"
+          : kind === "prepare" ? "companyId_providerScope_intentKey" in args.where : "id_companyId_providerScope" in args.where;
+        if (matches && arrivals < 2) {
+          if (kind === "distinct") assert.equal(result, null);
+          arrivals++; if (stats) stats.arrivals = arrivals; if (arrivals === 2) release(); await barrier;
+        }
         return result;
       };
       const value = Reflect.get(target, key); return typeof value === "function" ? value.bind(target) : value;
     } });
     return run(new Proxy(tx, { get: (target, key) => key === "openCreditCommercialOperation" ? delegate : Reflect.get(target, key) }));
-  }, options) } as Db;
+  }, options).catch(error => {
+    if (stats && error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === "P2034") stats.p2034++;
+      const target = error.meta?.target;
+      if (error.code === "P2002" && (target === "OCOperation_company_scope_identity_kind_key"
+        || Array.isArray(target) && target.length === 4 && ["companyId", "providerScope", "remoteIdentityId", "operationKind"].every(k => target.includes(k)))) stats.identityP2002++;
+    }
+    throw error;
+  }) } as Db;
 }
+material("50 forced distinct commands converge to one intention with identity-kind constraint", async initial => {
+  let identityP2002 = 0, p2034 = 0;
+  for (let round = 1; round <= 50; round++) {
+    const f = round === 1 ? initial : await fixture();
+    process.env.PLATFORM_COMPANY_ID = f.platform; process.env.PLATFORM_ADMIN_EMAILS = f.actor.email;
+    const stats = { p2034: 0, identityP2002: 0, arrivals: 0 }, concurrent = barrierDb("distinct", stats);
+    const inputs = [f.input, { ...f.input, intentKey: randomUUID() }]; assert.notEqual(inputs[0].intentKey, inputs[1].intentKey);
+    const results = await Promise.allSettled(inputs.map(input => service.prepareOpenCreditClientProfileOperation(concurrent, input)));
+    const winner = results.filter(r => r.status === "fulfilled"), loser = results.filter(r => r.status === "rejected");
+    const loserCode = loser[0]?.reason instanceof service.OpenCreditCommercialOperationServiceError ? loser[0].reason.code : "OTHER";
+    console.log("SINGLE_INTENT_ROUND", JSON.stringify({ round, ...stats, winners: winner.length, losers: loser.length, loserCode }));
+    assert.equal(winner.length, 1); assert.equal(loser.length, 1); assert.equal(loserCode, "INTENT_CONFLICT");
+    assert.equal(stats.arrivals, 2); assert.equal(await db.openCreditCommercialOperation.count({ where: f.where }), 1);
+    await event(f, 1, "PREPARED", null, "PREPARED", 0); identityP2002 += stats.identityP2002; p2034 += stats.p2034;
+  }
+  console.log("SINGLE_INTENT_DIAGNOSTICS", JSON.stringify({ p2034, identityP2002 }));
+});
 material("concurrent PREPARE converges to exactly one operation and PREPARED event", async f => {
   const concurrent = barrierDb("prepare"); const results = await Promise.all([service.prepareOpenCreditClientProfileOperation(concurrent, f.input), service.prepareOpenCreditClientProfileOperation(concurrent, f.input)]);
   assert.equal(results[0].operationId, results[1].operationId); assert.equal(results.filter(r => r.changed).length, 1);
@@ -328,9 +356,21 @@ material("material concurrent SUCCEEDED observations converge to one terminal CA
   assert.equal(events[2].previousState, "IN_FLIGHT"); assert.equal(events[2].nextState, "SUCCEEDED"); assert.equal(events[2].revision, 2);
   assert.equal((await f.current())!.state, "SUCCEEDED"); assert.equal((await f.current())!.revision, 2);
 });
-material("19 migrations applied; nullable legacy RESERVED_FOR_DISPATCH remains unbound", async f => {
-  const rows = await db.$queryRaw<{ count: number }[]>`SELECT count(*)::int AS count FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`;
-  assert.equal(rows[0].count, 19);
+material("checkout migrations applied exactly; nullable legacy RESERVED_FOR_DISPATCH remains unbound", async f => {
+  const directory = new URL("../../prisma/migrations/", import.meta.url);
+  const expectedMigrationNames = readdirSync(directory, { withFileTypes: true })
+    .filter(entry => entry.isDirectory() && existsSync(new URL(entry.name + "/migration.sql", directory))
+      && statSync(new URL(entry.name + "/migration.sql", directory)).isFile()).map(entry => entry.name).sort();
+  const rows = await db.$queryRaw<Array<{ migration_name: string; finished_at: Date | null; rolled_back_at: Date | null }>>`
+    SELECT migration_name, finished_at, rolled_back_at FROM "_prisma_migrations" ORDER BY migration_name
+  `;
+  const actualAppliedMigrationNames = rows.filter(row => row.finished_at !== null && row.rolled_back_at === null).map(row => row.migration_name).sort();
+  console.log("MIGRATION_CHECK", JSON.stringify({ expected: expectedMigrationNames.length, applied: actualAppliedMigrationNames.length,
+    missing: expectedMigrationNames.filter(name => !actualAppliedMigrationNames.includes(name)).length,
+    extra: rows.filter(row => !expectedMigrationNames.includes(row.migration_name)).length,
+    unfinished: rows.filter(row => row.finished_at === null).length, rolledBack: rows.filter(row => row.rolled_back_at !== null).length }));
+  assert(rows.every(row => row.finished_at !== null && row.rolled_back_at === null), "MIGRATION_HISTORY_UNFINISHED_OR_ROLLED_BACK");
+  assert.deepEqual(actualAppliedMigrationNames, expectedMigrationNames, "APPLIED_MIGRATION_NAMES_NOT_EXACT_CHECKOUT");
   const op = await service.prepareOpenCreditClientProfileOperation(db, f.input);
   assert.equal(await db.openCreditConsumerAuthorization.count({ where: { companyId: f.companyId } }), 0);
   // Synthetic representation of a pre-enforcement event using only historical columns.
