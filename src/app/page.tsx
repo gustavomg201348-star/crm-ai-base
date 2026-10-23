@@ -26,6 +26,7 @@ import { MotorCommercialPage } from "@/app/components/opportunities/MotorCommerc
 import { NextBestActionPage } from "@/app/components/opportunities/NextBestActionPage";
 import { TemplateLibraryPage } from "@/app/components/templates/TemplateLibraryPage";
 import { OpenCreditSettingsCard } from "@/app/components/integrations/OpenCreditSettingsCard";
+import { OpenCreditCommercialAccessPanel } from "@/app/components/integrations/OpenCreditCommercialAccessPanel";
 import { OpenCreditConsumerAuthorizationPanel } from "@/app/components/integrations/OpenCreditConsumerAuthorizationPanel";
 import { useNewMessageSound } from "@/app/hooks/use-new-message-sound";
 import { resolveConversationChannelId } from "@/lib/conversation-channel.service";
@@ -18299,6 +18300,7 @@ function EmpresasPage({
                     </p>
                   ))}
                 </div>
+                <OpenCreditCommercialAccessPanel enabled={true} companyId={company.id} />
               </div>
             ))}
           {!loading && companies.length === 0 && (

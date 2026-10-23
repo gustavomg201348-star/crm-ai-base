@@ -68,6 +68,9 @@ jobs:
       - name: Validate OpenCredit commercial access human admin boundary
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-commercial-access-admin-handler.test.ts
 
+      - name: Validate OpenCredit commercial access review context and UI
+        run: npx --yes tsx@4.20.6 --test src/lib/opencredit-commercial-access-context-admin-handler.test.ts src/lib/opencredit-commercial-access-ui.test.ts
+
       - name: Validate OpenCredit remote identity audit contract
         run: npx --yes tsx@4.20.6 src/lib/opencredit-remote-identity-audit.test.ts
 
@@ -253,6 +256,11 @@ jobs:
 
       - name: Validate OpenCredit commercial access admin boundary on disposable PostgreSQL
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-commercial-access-admin-postgres.integration.ts
+        env:
+          OPENCREDIT_COMMERCIAL_ACCESS_SERVICE_POSTGRES_TEST: "1"
+
+      - name: Validate OpenCredit commercial access read context on disposable PostgreSQL
+        run: npx --yes tsx@4.20.6 --test src/lib/opencredit-commercial-access-context-postgres.integration.ts
         env:
           OPENCREDIT_COMMERCIAL_ACCESS_SERVICE_POSTGRES_TEST: "1"
 

@@ -2585,3 +2585,36 @@ FAILED TRANSITION: BLOCKED
 RECONCILIATION: BLOCKED
 AUTOMATIC REPLAY: FORBIDDEN
 ```
+
+## CommercialAccess human review UI
+
+Platform Admins can review a Company's **Acesso comercial OpenCredit** in the
+existing Empresas administration page. The panel is not mounted in tenant-facing
+settings. ATIVO / INATIVO / NÃO CONFIGURADO reflect a server context snapshot,
+not a browser assumption or a provider permission.
+
+POST /api/admin/integrations/opencredit/commercial-access/context accepts exactly
+{companyId} and returns only {ok:true,exists,enabled}. It follows the existing
+session, Platform Admin, same-origin, no-query/no-browser-Authorization, JSON,
+512 actual bytes, one-second total deadline, fatal UTF-8 and strict JSON guards.
+The configured providerScope is server-derived only. A bounded read-only
+transaction rechecks the persisted Platform Admin, Company and scoped Access.
+It creates no domain data; only the shared limiter may perform its normal
+RateLimitBucket infrastructure writes. Responses use Cache-Control: no-store.
+Context budgets are separate from mutation budgets (60/min actor, 30/min Company).
+
+Grant and revoke use only the two existing admin mutation endpoints, each behind
+an explicit window.confirm click. No mutation occurs on mount/effect, timer or
+automation. A successful mutation reloads context; its body is not used to infer
+final state. On ambiguity, no automatic retry occurs and context must be refreshed
+before another action. Company-keyed remount, abort, epoch checks and synchronous
+busy/current-context refs reject stale responses/actions and double clicks.
+401/403 hides the panel. No internal scope, IDs, actor or raw errors are displayed.
+
+This is operational Company access, NOT consumer consent or authorization.
+The existing domain service and its exclusive admin mutation authority are
+unchanged. No RemoteIdentity, ConsumerAuthorization, commercial operation,
+provider/Meta call, schema, migration, dependency, environment or Railway change.
+Regression gates include the actual compiled UI async callbacks, closed HTTP
+boundary and read-only material PostgreSQL snapshots. Rollback removes this
+panel/context and their exact gates/allowlists; it does not delete domain history.
