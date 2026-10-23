@@ -4,7 +4,7 @@ import { SPREADSHEET_IMPORT_MAX_COLUMNS } from "@/lib/spreadsheet-import-columns
 
 export const CONTACT_IMPORT_MAX_FILE_BYTES = 5 * 1024 * 1024;
 export const CONTACT_IMPORT_MAX_REQUEST_BYTES = 6 * 1024 * 1024;
-export const CONTACT_IMPORT_MAX_DATA_ROWS = 5_000;
+export const CONTACT_IMPORT_MAX_DATA_ROWS = 250;
 export const CONTACT_IMPORT_MAX_WORKSHEETS = 4;
 export const CONTACT_IMPORT_MAX_CELLS = 200_000;
 

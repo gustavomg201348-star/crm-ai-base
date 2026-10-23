@@ -3,6 +3,8 @@ import {
   CONTACT_IMPORT_MAX_FIELD_LENGTH,
   CONTACT_IMPORT_MAX_ROWS,
   ContactImportConflictError,
+  ContactImportIdempotencyConflictError,
+  ContactImportInProgressError,
   confirmContactImport,
   type ContactImportConfirmRowInput,
   type ContactImportRetirementLeadInput
@@ -19,6 +21,8 @@ export const CONTACT_IMPORT_CONFIRM_IP_LIMIT = { limit: 10, windowMs: 60_000 } a
 
 const ROW_KEYS = new Set(["name", "cpf", "phone", "retirementLead"]);
 const RETIREMENT_LEAD_KEYS = new Set(["grantDate", "benefitType", "city", "state"]);
+const IDEMPOTENCY_KEY_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export class ContactImportConfirmRequestError extends Error {
   readonly code: "CONTACT_IMPORT_INVALID_PAYLOAD" | "CONTACT_IMPORT_PAYLOAD_TOO_LARGE";
@@ -52,7 +56,7 @@ function payloadTooLarge(): never {
   throw new ContactImportConfirmRequestError({
     code: "CONTACT_IMPORT_PAYLOAD_TOO_LARGE",
     status: 413,
-    message: "A importacao excede o limite permitido."
+    message: `A importacao excede o limite de ${CONTACT_IMPORT_MAX_ROWS} linhas.`
   });
 }
 
@@ -76,6 +80,13 @@ function parseOptionalString(value: unknown) {
   return parseRequiredString(value);
 }
 
+function parseIdempotencyKey(value: unknown) {
+  if (typeof value !== "string" || !IDEMPOTENCY_KEY_PATTERN.test(value)) {
+    invalidPayload("Chave de idempotencia da importacao invalida.");
+  }
+  return value.toLowerCase();
+}
+
 function parseRetirementLead(value: unknown): ContactImportRetirementLeadInput | undefined {
   if (value === undefined) return undefined;
   if (!isRecord(value)) invalidPayload();
@@ -90,10 +101,11 @@ function parseRetirementLead(value: unknown): ContactImportRetirementLeadInput |
 }
 
 export function parseContactImportConfirmBody(value: unknown): {
+  idempotencyKey: string;
   rows: ContactImportConfirmRowInput[];
 } {
   if (!isRecord(value)) invalidPayload();
-  assertStrictKeys(value, new Set(["rows"]));
+  assertStrictKeys(value, new Set(["idempotencyKey", "rows"]));
   if (!Array.isArray(value.rows) || value.rows.length === 0) {
     invalidPayload("Nenhuma linha valida para confirmar.");
   }
@@ -113,7 +125,10 @@ export function parseContactImportConfirmBody(value: unknown): {
     };
   });
 
-  return { rows };
+  return {
+    idempotencyKey: parseIdempotencyKey(value.idempotencyKey),
+    rows
+  };
 }
 
 function readContentLength(request: NextRequest) {
@@ -174,6 +189,27 @@ const defaultDependencies: ConfirmRouteDependencies = {
   maxRequestBytes: CONTACT_IMPORT_CONFIRM_MAX_REQUEST_BYTES
 };
 
+function classifyPrismaTransactionError(error: unknown): "timeout" | "unknown" | null {
+  if (!error || typeof error !== "object" || !("code" in error) || error.code !== "P2028") {
+    return null;
+  }
+
+  const record = error as { message?: unknown; meta?: unknown };
+  const metaMessage =
+    record.meta && typeof record.meta === "object" && "error" in record.meta
+      ? (record.meta as { error?: unknown }).error
+      : undefined;
+  const diagnostic = [record.message, metaMessage]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ");
+
+  return /(?:expired transaction|transaction[^.]*tim(?:ed out|eout)|tim(?:ed out|eout)[^.]*transaction)/i.test(
+    diagnostic
+  )
+    ? "timeout"
+    : "unknown";
+}
+
 export async function handleContactImportConfirm(
   request: NextRequest,
   dependencies: ConfirmRouteDependencies = defaultDependencies
@@ -207,6 +243,7 @@ export async function handleContactImportConfirm(
     const result = await dependencies.confirmImport({
       companyId: session.companyId,
       userId: session.id,
+      idempotencyKey: body.idempotencyKey,
       rows: body.rows
     });
 
@@ -224,6 +261,52 @@ export async function handleContactImportConfirm(
         code: "CONFLICT",
         status: 409,
         message: error.message
+      });
+    }
+    if (error instanceof ContactImportInProgressError) {
+      return publicErrorResponse({
+        code: "CONTACT_IMPORT_IN_PROGRESS",
+        status: 409,
+        message: error.message
+      });
+    }
+    if (error instanceof ContactImportIdempotencyConflictError) {
+      return publicErrorResponse({
+        code: "CONTACT_IMPORT_IDEMPOTENCY_CONFLICT",
+        status: 409,
+        message: error.message
+      });
+    }
+    const transactionError = classifyPrismaTransactionError(error);
+    if (transactionError) {
+      const sanitizedTimeoutError = Object.assign(
+        new Error(
+          transactionError === "timeout"
+            ? "Contact import transaction timed out"
+            : "Contact import transaction result is unknown"
+        ),
+        { code: "P2028" }
+      );
+      safeLogError("http-api", sanitizedTimeoutError, {
+        operation: "contact-import-confirm",
+        route: "/api/imports/contacts/confirm",
+        publicErrorCode:
+          transactionError === "timeout"
+            ? "CONTACT_IMPORT_TIMEOUT"
+            : "CONTACT_IMPORT_RESULT_UNKNOWN",
+        status: 503
+      });
+
+      return publicErrorResponse({
+        code:
+          transactionError === "timeout"
+            ? "CONTACT_IMPORT_TIMEOUT"
+            : "CONTACT_IMPORT_RESULT_UNKNOWN",
+        status: 503,
+        message:
+          transactionError === "timeout"
+            ? "A importacao levou mais tempo que o permitido e foi revertida. Nenhum contato foi importado. Tente novamente com uma planilha menor."
+            : "Nao foi possivel confirmar o resultado da importacao. Atualize a lista de contatos antes de tentar novamente."
       });
     }
 

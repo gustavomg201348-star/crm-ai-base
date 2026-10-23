@@ -2,12 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   CONTACT_IMPORT_IDENTITY_CONFLICT_MESSAGE,
+  CONTACT_IMPORT_TRANSACTION_TIMEOUT_MS,
+  confirmContactImport,
   findExistingContactIndexes,
   findFirstContactImportIdentityConflict,
   resolveContactImportIdentityForRow,
   type ExistingImportContactIndexes,
   type ImportPreviewRow
 } from "./contact-import.service";
+
+const idempotencyKey = "123e4567-e89b-42d3-a456-426614174000";
 
 function buildIndexes({
   byCpf = [],
@@ -21,7 +25,9 @@ function buildIndexes({
   return {
     byCpf: new Map(byCpf),
     byPhone: new Map(byPhone),
-    ambiguousPhones: new Set(ambiguousPhones)
+    ambiguousPhones: new Set(ambiguousPhones),
+    phoneMatchTypes: new Map(),
+    contactsById: new Map()
   };
 }
 
@@ -57,13 +63,13 @@ function buildContactLookupDb({
   byNormalizedPhone?: Array<[string, { id: string; name?: string; phone?: string }]>;
   byLegacyEquivalentPhone?: Array<[string, { id: string; name?: string; phone?: string }]>;
 }) {
-  const cpfContacts = new Map(byCpf);
+  const cpfContacts = byCpf;
   const normalizedPhoneContacts = byNormalizedPhone;
   const legacyEquivalentContacts = byLegacyEquivalentPhone;
   const contactsById = new Map<string, { id: string; name: string; phone: string }>();
 
   for (const contact of [
-    ...Array.from(cpfContacts.values()),
+    ...cpfContacts.map(([, contact]) => contact),
     ...normalizedPhoneContacts.map(([, contact]) => contact),
     ...legacyEquivalentContacts.map(([, contact]) => contact)
   ]) {
@@ -74,18 +80,30 @@ function buildContactLookupDb({
     });
   }
 
+  function collectSqlStrings(value: unknown): string[] {
+    if (typeof value === "string") return [value];
+    if (!value || typeof value !== "object" || !("values" in value)) return [];
+    const values = (value as { values?: unknown }).values;
+    return Array.isArray(values) ? values.flatMap(collectSqlStrings) : [];
+  }
+
   return {
     contact: {
-      findFirst({ where }: { where: { normalizedPhone?: string } }) {
-        if (!where.normalizedPhone) return null;
-        const contact = normalizedPhoneContacts.find(
-          ([normalizedPhone]) => normalizedPhone === where.normalizedPhone
-        )?.[1];
+      findFirst({
+        where
+      }: {
+        where: { cpf?: string; normalizedPhone?: string };
+      }) {
+        const contact = where.cpf
+          ? cpfContacts.find(([cpf]) => cpf === where.cpf)?.[1]
+          : normalizedPhoneContacts.find(
+              ([normalizedPhone]) => normalizedPhone === where.normalizedPhone
+            )?.[1];
         return contact
           ? {
               id: contact.id,
               name: contact.name ?? "Cliente Teste",
-              phone: contact.phone ?? where.normalizedPhone
+              phone: contact.phone ?? where.normalizedPhone ?? ""
             }
           : null;
       },
@@ -97,16 +115,16 @@ function buildContactLookupDb({
         select: Record<string, boolean>;
       }) {
         if (where.cpf?.in) {
-          return where.cpf.in
-            .map((cpf) => {
-              const contact = cpfContacts.get(cpf);
-              if (!contact) return null;
+          return cpfContacts
+            .filter(([cpf]) => where.cpf?.in.includes(cpf))
+            .map(([cpf, contact]) => {
               return {
                 ...(select.id ? { id: contact.id } : {}),
-                ...(select.cpf ? { cpf } : {})
+                ...(select.cpf ? { cpf } : {}),
+                ...(select.name ? { name: contact.name ?? "Cliente Teste" } : {}),
+                ...(select.phone ? { phone: contact.phone ?? "" } : {})
               };
-            })
-            .filter(Boolean);
+            });
         }
         if (!where.normalizedPhone) return [];
         return normalizedPhoneContacts
@@ -121,9 +139,9 @@ function buildContactLookupDb({
       }
     },
     $queryRaw(_strings: TemplateStringsArray, ...values: unknown[]) {
-      const phoneValues = values.filter(
-        (value): value is string => typeof value === "string" && /^\d{10,13}$/.test(value)
-      );
+      const phoneValues = values
+        .flatMap(collectSqlStrings)
+        .filter((value) => /^\d{10,13}$/.test(value));
       const contacts = legacyEquivalentContacts
         .filter(([phone]) => phoneValues.includes(phone))
         .map(([, contact]) => ({ id: contact.id }));
@@ -131,6 +149,108 @@ function buildContactLookupDb({
     }
   };
 }
+
+test("usa timeout ampliado somente na transacao de confirmacao", async () => {
+  let transactionOptions: { timeout?: number } | undefined;
+  let liveCpfLookups = 0;
+  const tx = {
+    contact: {
+      findMany: async () => [],
+      findFirst: async ({ where }: { where: { cpf?: string } }) => {
+        if (where.cpf) liveCpfLookups += 1;
+        return null;
+      },
+      findUnique: async () => null,
+      create: async () => ({ id: "contact-new" })
+    },
+    $queryRaw: async () => [],
+    contactActivity: { create: async () => ({ id: "activity-new" }) },
+    contactImportBatch: {
+      findUnique: async () => null,
+      create: async () => ({ id: "batch-new" })
+    }
+  };
+  const db = {
+    $transaction: async (
+      callback: (client: typeof tx) => Promise<unknown>,
+      options?: { timeout?: number }
+    ) => {
+      transactionOptions = options;
+      return callback(tx);
+    }
+  };
+
+  await confirmContactImport({
+    companyId: "company-1",
+    userId: "user-1",
+    idempotencyKey,
+    rows: [{ name: "Cliente Teste", cpf: "12345678900", phone: "33999999999" }],
+    db: db as never
+  });
+
+  assert.deepEqual(transactionOptions, {
+    timeout: CONTACT_IMPORT_TRANSACTION_TIMEOUT_MS
+  });
+  assert.equal(liveCpfLookups, 1);
+});
+
+test("adquire lock PostgreSQL da empresa antes de consultar identidades", async () => {
+  const calls: string[] = [];
+  const tx = {
+    contact: {
+      findMany: async () => {
+        calls.push("contact.findMany");
+        return [];
+      },
+      findFirst: async () => null,
+      findUnique: async () => null,
+      create: async () => ({ id: "contact-new" })
+    },
+    $queryRaw: async (_strings: TemplateStringsArray, ...values: unknown[]) => {
+      if (values.includes("contact-import:company-1")) {
+        calls.push("advisory-lock");
+        return [{ acquired: true }];
+      }
+      return [];
+    },
+    contactActivity: { create: async () => ({ id: "activity-new" }) },
+    contactImportBatch: {
+      findUnique: async () => null,
+      create: async () => ({ id: "batch-new" })
+    }
+  };
+  const db = {
+    $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx)
+  };
+
+  await confirmContactImport({
+    companyId: "company-1",
+    userId: "user-1",
+    idempotencyKey,
+    rows: [{ name: "Cliente Teste", cpf: "12345678900", phone: "33999999999" }],
+    db: db as never,
+    databaseUrl: "postgresql://localhost/qevora_contact_import_test"
+  });
+
+  assert.equal(calls[0], "advisory-lock");
+  assert.equal(calls[1], "contact.findMany");
+});
+
+test("CPF historicamente duplicado preserva o contato escolhido por findFirst", async () => {
+  const duplicateCpf = "11111111111";
+  const db = buildContactLookupDb({
+    byCpf: [
+      [duplicateCpf, { id: "contact-first", phone: "5511999999999" }],
+      [duplicateCpf, { id: "contact-last", phone: "5522888888888" }]
+    ]
+  });
+
+  const indexes = await findExistingContactIndexes(db as never, "company-1", [
+    buildRow({ cpf: duplicateCpf })
+  ]);
+
+  assert.equal(indexes.byCpf.get(duplicateCpf), "contact-first");
+});
 
 test("permite update quando CPF e telefone pertencem ao mesmo contato", () => {
   const indexes = buildIndexes({

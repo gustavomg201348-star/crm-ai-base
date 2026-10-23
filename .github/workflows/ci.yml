@@ -137,6 +137,9 @@ jobs:
       - name: Validate passive OpenCredit consumer authorization evidence
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-consumer-authorization.test.ts
 
+      - name: Validate contact import boundaries and campaign integration
+        run: npx --yes tsx@4.20.6 --test src/lib/contact-import.service.test.ts src/lib/contact-import-confirm-handler.test.ts src/lib/contact-import-upload.test.ts src/lib/contact-import-preview-security.test.ts src/lib/campaigns.test.ts src/lib/campaign-template-recipient-variables.test.ts
+
       - name: Validate OpenCredit human authorization admin boundary
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-consumer-authorization-admin-handler.test.ts
 
@@ -223,6 +226,20 @@ jobs:
 
       - name: Apply migration chain to disposable PostgreSQL
         run: npm run prisma:migrate:prod
+
+      - name: Create dedicated contact import template database
+        run: echo 'CREATE DATABASE qevora_contact_import_test;' | npx prisma db execute --stdin --schema prisma/schema.postgres.prisma
+
+      - name: Apply migrations to contact import template database
+        run: npm run prisma:migrate:prod
+        env:
+          DATABASE_URL: postgresql://qevora_ci:qevora_ci_password@127.0.0.1:5432/qevora_contact_import_test?schema=public
+
+      - name: Validate contact import transactions, idempotency and concurrency
+        run: npx --yes tsx@4.20.6 --test src/lib/contact-import.postgres.integration.test.ts
+        env:
+          CONTACT_IMPORT_POSTGRES_TEST: "1"
+          CONTACT_IMPORT_TEST_DATABASE_URL: postgresql://qevora_ci:qevora_ci_password@127.0.0.1:5432/qevora_contact_import_test?schema=public
 
       - name: Validate RateLimitBucket and PostgreSQL limiter
         run: npx --yes tsx@4.20.6 src/lib/rate-limit-postgres.integration.ts

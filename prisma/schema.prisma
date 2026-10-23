@@ -376,6 +376,22 @@ model Company {
   openCreditRemoteIdentities OpenCreditRemoteIdentity[]
   chatbotFlows ChatbotFlow[]
   inboundEvents ConversationInboundEvent[]
+  contactImportBatches ContactImportBatch[]
+}
+
+model ContactImportBatch {
+  id             String   @id @default(cuid())
+  companyId      String
+  idempotencyKey String
+  payloadHash    String
+  resultVersion  Int      @default(1)
+  resultJson     String
+  createdAt      DateTime @default(now())
+  completedAt    DateTime @default(now())
+  company        Company  @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([companyId, idempotencyKey])
+  @@index([companyId, completedAt])
 }
 
 model OpenCreditCommercialAccess {

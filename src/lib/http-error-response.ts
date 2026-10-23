@@ -19,6 +19,10 @@ export type PublicErrorCode =
   | "CONTACT_DUPLICATE"
   | "CONTACT_BULK_UPDATE_FAILED"
   | "CONTACT_IMPORT_FAILED"
+  | "CONTACT_IMPORT_IDEMPOTENCY_CONFLICT"
+  | "CONTACT_IMPORT_IN_PROGRESS"
+  | "CONTACT_IMPORT_TIMEOUT"
+  | "CONTACT_IMPORT_RESULT_UNKNOWN"
   | "CONTACT_IMPORT_INVALID_FILE"
   | "CONTACT_IMPORT_FILE_TOO_LARGE"
   | "CONTACT_IMPORT_INVALID_PAYLOAD"
@@ -98,6 +102,14 @@ const DEFAULT_PUBLIC_MESSAGES: Record<PublicErrorCode, string> = {
   CONTACT_DUPLICATE: "Ja existe um contato com estes dados.",
   CONTACT_BULK_UPDATE_FAILED: "Nao foi possivel aplicar acao em massa.",
   CONTACT_IMPORT_FAILED: "Nao foi possivel importar contatos.",
+  CONTACT_IMPORT_IDEMPOTENCY_CONFLICT:
+    "A chave desta importacao ja foi usada com dados diferentes.",
+  CONTACT_IMPORT_IN_PROGRESS:
+    "Ja existe uma importacao de contatos em andamento para esta empresa.",
+  CONTACT_IMPORT_TIMEOUT:
+    "A importacao levou mais tempo que o permitido. Nenhum contato foi importado.",
+  CONTACT_IMPORT_RESULT_UNKNOWN:
+    "Nao foi possivel confirmar o resultado da importacao.",
   CONTACT_IMPORT_INVALID_FILE: "Arquivo de importacao invalido.",
   CONTACT_IMPORT_FILE_TOO_LARGE: "O arquivo excede o tamanho máximo permitido.",
   CONTACT_IMPORT_INVALID_PAYLOAD: "Payload de importacao invalido.",
