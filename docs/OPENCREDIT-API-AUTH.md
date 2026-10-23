@@ -2618,3 +2618,53 @@ provider/Meta call, schema, migration, dependency, environment or Railway change
 Regression gates include the actual compiled UI async callbacks, closed HTTP
 boundary and read-only material PostgreSQL snapshots. Rollback removes this
 panel/context and their exact gates/allowlists; it does not delete domain history.
+
+## RemoteIdentity human admin boundary and review UI
+
+This slice adds the sole approved runtime consumer of the existing RemoteIdentity
+domain service: the human admin handler. Earlier foundation sections describing
+no runtime caller refer to their original slices. The domain implementation and
+its ownership, snapshot, protective disable, Serializable retries and atomic
+Identity/Event rules remain unchanged.
+
+POST /api/admin/integrations/opencredit/remote-identity/{claim,enable,disable}
+accepts exactly {companyId,contactId}, derives the actor from session and the scope
+from resolveConfiguredOpenCreditProviderScope, and calls exactly one existing
+service operation. It neither reads/canonicalizes CPF nor decides ownership.
+Only the three fixed routes compose this mutation handler. Public results contain
+only {ok:true,changed,enabled}; no identity ID, CPF, scope, actor or raw error.
+Domain errors use a closed descriptor-based, module-stable code mapping.
+
+POST /api/admin/integrations/opencredit/remote-identity/context accepts the same
+two fields and returns only {ok:true,exists,enabled}. Its separate read-only
+transaction rechecks the persisted Platform Admin, Company, scoped Contact and
+exact Company/providerScope/contact identity, without reading CPF or mutating
+domain data. Missing identity is not created. Only the existing shared limiter
+may perform normal RateLimitBucket infrastructure writes.
+
+All four boundaries require Platform Admin, same-origin, no query or browser
+Authorization, application/json, 512 actual bytes, a one-second total body
+deadline, fatal UTF-8 and strict JSON/decoded duplicate-key rejection. All replies
+use Cache-Control: no-store and fixed sanitized errors. Mutation budgets are shared
+across all three actions (10/min actor, 5/min Company+Contact); context budgets are
+separate (60/min actor, 30/min Company+Contact), before scope resolution.
+
+The contact detail panel is mounted only for Platform Admin and displays
+NÃO VINCULADO / VINCULADO — INATIVO / ATIVO. CLAIM reserves a disabled identity;
+it never automatically enables it. ENABLE and DISABLE each require a new human
+click and window.confirm. Successful commands only trigger a context reload,
+never another command, and mutation bodies never determine final UI state.
+Company+Contact-keyed remount, abort, sequence, busy/current-context refs prevent
+double clicks, stale responses/actions and ambiguous retry. Errors invalidate
+actionable state until a new context read; 401/403 hides the panel.
+
+This is a local operational identity binding, NOT consent, ConsumerAuthorization
+or permission for a financial operation. No provider HTTP/authentication, API
+client, createClient dispatch, automation, AI/chatbot/webhook/worker consumer,
+schema, migration, env, dependency or Railway change is introduced.
+Tests include real HTTP boundary composition with the existing service, local
+disposable PostgreSQL ownership/rollback/concurrency, read-only snapshots and
+compiled UI callbacks. All preexisting CI gates remain; dedicated unit/UI and
+material gates are additive. Rollback removes the new UI/boundaries and exact
+allowlists/gates, preserving identity ownership/history; there is no delete or
+automatic release of ownership.

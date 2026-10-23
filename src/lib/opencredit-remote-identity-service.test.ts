@@ -169,7 +169,7 @@ test("material guard accepts only dedicated disposable configuration", () => {
   for (const key of Object.keys(env)) for (const value of [undefined, "", "false", "unsafe"]) assert.throws(() => assertOpenCreditRemoteIdentityServiceTestDatabase({ ...env, [key]: value }));
   for (const url of [env.DATABASE_URL.replace("127.0.0.1", "production.invalid"), env.DATABASE_URL.replace(":5432", ":5433"), env.DATABASE_URL.replace("/qevora_ci?", "/other?"), env.DATABASE_URL.replace("schema=public", "schema=other"), env.DATABASE_URL + "&sslmode=disable", env.DATABASE_URL + "#fragment", env.DATABASE_URL.replace("postgresql:", "postgres:")]) assert.throws(() => assertOpenCreditRemoteIdentityServiceTestDatabase({ ...env, DATABASE_URL: url }));
 });
-test("service boundary, exact exports, CI and no runtime caller", () => {
+test("service boundary, exact exports, CI and sole human admin runtime caller", () => {
   const source = readFileSync(new URL("./opencredit-remote-identity.service.ts", import.meta.url), "utf8");
   assert.match(source, /^import "server-only";/); assert.match(source, /canonicalizeOpenCreditOwnershipCpf/);
   assert.doesNotMatch(source, /findFirst|fetch\(|console\.|\$executeRaw|\$queryRaw|setTimeout|opencredit-api-client|consent:\s*true|\.delete\(|\.upsert\(/);
@@ -177,7 +177,7 @@ test("service boundary, exact exports, CI and no runtime caller", () => {
   assert.deepEqual(Object.keys(service).sort(), ["OpenCreditRemoteIdentityServiceError", "claimOpenCreditRemoteIdentity", "disableOpenCreditRemoteIdentity", "enableOpenCreditRemoteIdentity"].sort());
   function scan(dir: URL) { for (const e of readdirSync(dir, { withFileTypes: true })) {
     const path = new URL(e.name + (e.isDirectory() ? "/" : ""), dir); if (e.isDirectory()) scan(path);
-    else if (/\.(tsx?|m?js|cjs)$/.test(e.name) && !/\.(test|integration)\./.test(e.name) && e.name !== "opencredit-remote-identity.service.ts") assert.doesNotMatch(readFileSync(path, "utf8"), /(?:import|require)[\s\S]{0,250}["'][^"']*opencredit-remote-identity\.service["']/);
+    else if (/\.(tsx?|m?js|cjs)$/.test(e.name) && !/\.(test|integration)\./.test(e.name) && e.name !== "opencredit-remote-identity.service.ts" && path.href !== new URL("./opencredit-remote-identity-admin-handler.ts", import.meta.url).href) assert.doesNotMatch(readFileSync(path, "utf8"), /(?:import|require)[\s\S]{0,250}["'][^"']*opencredit-remote-identity\.service["']/);
   } }
   scan(new URL("../", import.meta.url)); scan(new URL("../../scripts/", import.meta.url));
   const ci = readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");

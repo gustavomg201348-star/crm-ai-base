@@ -77,6 +77,9 @@ jobs:
       - name: Validate OpenCredit remote identity transactional service
         run: npx --yes tsx@4.20.6 src/lib/opencredit-remote-identity-service.test.ts
 
+      - name: Validate OpenCredit remote identity human admin boundary and UI
+        run: npx --yes tsx@4.20.6 --test src/lib/opencredit-remote-identity-admin-handler.test.ts src/lib/opencredit-remote-identity-context-admin-handler.test.ts src/lib/opencredit-remote-identity-ui.test.ts
+
       - name: Validate OpenCredit contact client profile adapter
         run: npx --yes tsx@4.20.6 src/lib/opencredit-contact-client-profile-adapter.test.ts
 
@@ -271,6 +274,11 @@ jobs:
 
       - name: Validate OpenCredit remote identity service transactions and concurrency
         run: npx --yes tsx@4.20.6 src/lib/opencredit-remote-identity-service-postgres.integration.ts
+        env:
+          OPENCREDIT_REMOTE_IDENTITY_SERVICE_POSTGRES_TEST: "1"
+
+      - name: Validate OpenCredit remote identity admin context and material PostgreSQL
+        run: npx --yes tsx@4.20.6 --test src/lib/opencredit-remote-identity-admin-postgres.integration.ts
         env:
           OPENCREDIT_REMOTE_IDENTITY_SERVICE_POSTGRES_TEST: "1"
 
