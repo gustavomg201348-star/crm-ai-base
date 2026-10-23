@@ -28,6 +28,7 @@ import { TemplateLibraryPage } from "@/app/components/templates/TemplateLibraryP
 import { OpenCreditSettingsCard } from "@/app/components/integrations/OpenCreditSettingsCard";
 import { OpenCreditCommercialAccessPanel } from "@/app/components/integrations/OpenCreditCommercialAccessPanel";
 import { OpenCreditConsumerAuthorizationPanel } from "@/app/components/integrations/OpenCreditConsumerAuthorizationPanel";
+import { OpenCreditRemoteIdentityPanel } from "@/app/components/integrations/OpenCreditRemoteIdentityPanel";
 import { useNewMessageSound } from "@/app/hooks/use-new-message-sound";
 import { resolveConversationChannelId } from "@/lib/conversation-channel.service";
 import { serializeCsvCell } from "@/lib/csv-export";
@@ -5002,6 +5003,7 @@ export default function Home() {
                 currentUserId={session.user.id}
                 companyId={session.company.id}
                 canAttemptOpenCreditAuthorization={session.user.role === "ADMIN"}
+                canManageOpenCreditIdentity={userIsPlatformAdmin(session)}
                 isAdmin={userCanManageOperation(session)}
                 loading={conversationLoading}
                 selectedConversation={selectedConversation}
@@ -7076,6 +7078,7 @@ function Atendimento({
   currentUserId,
   companyId,
   canAttemptOpenCreditAuthorization,
+  canManageOpenCreditIdentity,
   isAdmin,
   loading,
   selectedConversation,
@@ -7112,6 +7115,7 @@ function Atendimento({
   currentUserId: string;
   companyId: string;
   canAttemptOpenCreditAuthorization: boolean;
+  canManageOpenCreditIdentity: boolean;
   isAdmin: boolean;
   loading: boolean;
   selectedConversation: ConversationRow | null;
@@ -8125,6 +8129,11 @@ function Atendimento({
             />
           </dl>
         </div>
+        {selectedConversation && <OpenCreditRemoteIdentityPanel
+          enabled={canManageOpenCreditIdentity}
+          companyId={companyId}
+          contactId={selectedConversation.contact.id}
+        />}
         {selectedConversation && <OpenCreditConsumerAuthorizationPanel
           enabled={canAttemptOpenCreditAuthorization}
           companyId={companyId}
