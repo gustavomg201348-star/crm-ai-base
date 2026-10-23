@@ -1,12 +1,18 @@
+import { createHash } from "node:crypto";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { createActivity } from "@/lib/activities";
 import {
   findContactPhoneIdentityMatch,
   getAutomaticContactNameUpdate,
-  logContactNameMutationAttempt
+  logContactNameMutationAttempt,
+  type ContactPhoneIdentityMatchType
 } from "@/lib/contacts";
 import { prisma } from "@/lib/db";
-import { classifyPhoneNormalization, type PhoneNormalizationReason } from "@/lib/phone-normalization.service";
+import {
+  classifyPhoneNormalization,
+  getBrazilianWhatsappPhoneCandidates,
+  type PhoneNormalizationReason
+} from "@/lib/phone-normalization.service";
 import { upsertRetirementLeadForContact } from "@/lib/retirement-leads";
 import {
   CONTACT_IMPORT_MAX_DATA_ROWS,
@@ -59,6 +65,7 @@ export type ImportPreviewRow = {
 
 export const CONTACT_IMPORT_MAX_ROWS = CONTACT_IMPORT_MAX_DATA_ROWS;
 export const CONTACT_IMPORT_MAX_FIELD_LENGTH = SPREADSHEET_IMPORT_MAX_CELL_LENGTH;
+export const CONTACT_IMPORT_TRANSACTION_TIMEOUT_MS = 60_000;
 
 export type ContactImportRetirementLeadInput = {
   grantDate?: string | null;
@@ -105,6 +112,13 @@ export type ContactImportConfirmResult = {
   errors: Array<{ rowNumber: number; reason: string }>;
 };
 
+type PersistedContactImportResultV1 = Omit<ContactImportConfirmResult, "rows"> & {
+  rows: Array<{
+    rowNumber: number;
+    contactId: string;
+  }>;
+};
+
 export class ContactImportConflictError extends Error {
   readonly code = "CONTACT_IMPORT_IDENTITY_CONFLICT";
   readonly rowNumber: number;
@@ -116,11 +130,149 @@ export class ContactImportConflictError extends Error {
   }
 }
 
+export class ContactImportInProgressError extends Error {
+  readonly code = "CONTACT_IMPORT_IN_PROGRESS";
+
+  constructor() {
+    super("Ja existe uma importacao de contatos em andamento para esta empresa.");
+    this.name = "ContactImportInProgressError";
+  }
+}
+
+export class ContactImportIdempotencyConflictError extends Error {
+  readonly code = "CONTACT_IMPORT_IDEMPOTENCY_CONFLICT";
+
+  constructor() {
+    super("A chave desta importacao ja foi usada com dados diferentes.");
+    this.name = "ContactImportIdempotencyConflictError";
+  }
+}
+
 export type ExistingImportContactIndexes = {
   byCpf: Map<string, string>;
   byPhone: Map<string, string>;
   ambiguousPhones: Set<string>;
+  phoneMatchTypes: Map<string, ContactPhoneIdentityMatchType>;
+  contactsById: Map<string, { id: string; name: string; phone: string }>;
 };
+
+const CONTACT_IMPORT_LOCK_DOMAIN = "contact-import";
+const CONTACT_IMPORT_RESULT_VERSION = 1;
+
+function isPostgresqlDatabaseUrl(value: string | undefined) {
+  if (!value) return false;
+
+  try {
+    const protocol = new URL(value).protocol;
+    return protocol === "postgresql:" || protocol === "postgres:";
+  } catch {
+    return false;
+  }
+}
+
+async function acquireContactImportCompanyLock(
+  db: Prisma.TransactionClient,
+  companyId: string,
+  databaseUrl: string | undefined
+) {
+  if (!isPostgresqlDatabaseUrl(databaseUrl)) return;
+
+  const [lock] = await db.$queryRaw<Array<{ acquired: boolean }>>`
+    SELECT pg_try_advisory_xact_lock(
+      hashtextextended(${`${CONTACT_IMPORT_LOCK_DOMAIN}:${companyId}`}, 0)
+    ) AS "acquired"
+  `;
+  if (!lock?.acquired) throw new ContactImportInProgressError();
+}
+
+function hashContactImportPayload(rows: ImportPreviewRow[]) {
+  const payload = rows.map((row) => ({
+    rowNumber: row.rowNumber,
+    name: row.name,
+    cpf: row.cpf,
+    phone: row.whatsapp,
+    status: row.status,
+    errors: row.errors,
+    retirementLead: row.retirementLead
+      ? {
+          grantDate: row.retirementLead.grantDate ?? null,
+          benefitType: row.retirementLead.benefitType ?? null,
+          city: row.retirementLead.city ?? null,
+          state: row.retirementLead.state ?? null
+        }
+      : null
+  }));
+
+  return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+function parsePersistedContactImportResult(
+  value: string,
+  resultVersion: number,
+  canonicalRows: ImportPreviewRow[]
+): ContactImportConfirmResult {
+  if (resultVersion !== CONTACT_IMPORT_RESULT_VERSION) {
+    throw new Error("Stored contact import result version is unsupported");
+  }
+
+  const parsed = JSON.parse(value) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Stored contact import result is invalid");
+  }
+
+  const result = parsed as Partial<PersistedContactImportResultV1>;
+  const summary = result.summary;
+  const validSummary =
+    summary &&
+    [summary.totalRows, summary.imported, summary.created, summary.updated, summary.invalid].every(
+      (item) => typeof item === "number" && Number.isInteger(item) && item >= 0
+    );
+  const validContactIds =
+    Array.isArray(result.contactIds) &&
+    result.contactIds.every((contactId) => typeof contactId === "string");
+  const validRows =
+    Array.isArray(result.rows) &&
+    result.rows.every(
+      (row) =>
+        row &&
+        typeof row === "object" &&
+        Number.isInteger(row.rowNumber) &&
+        typeof row.contactId === "string"
+    );
+  const validErrors =
+    Array.isArray(result.errors) &&
+    result.errors.every(
+      (error) =>
+        error &&
+        typeof error === "object" &&
+        Number.isInteger(error.rowNumber) &&
+        typeof error.reason === "string"
+    );
+
+  if (!validSummary || !validContactIds || !validRows || !validErrors) {
+    throw new Error("Stored contact import result is invalid");
+  }
+
+  const persisted = result as PersistedContactImportResultV1;
+  const phonesByRowNumber = new Map(
+    canonicalRows.map((row) => [row.rowNumber, row.whatsapp])
+  );
+  const rows = persisted.rows.map((row) => {
+    const phone = phonesByRowNumber.get(row.rowNumber);
+    if (!phone) throw new Error("Stored contact import result row is invalid");
+    return { ...row, phone };
+  });
+
+  return { ...persisted, rows };
+}
+
+function serializeContactImportResult(result: ContactImportConfirmResult) {
+  const persisted: PersistedContactImportResultV1 = {
+    ...result,
+    rows: result.rows.map(({ rowNumber, contactId }) => ({ rowNumber, contactId }))
+  };
+  return JSON.stringify(persisted);
+}
 
 function normalizeHeader(value: string) {
   return value
@@ -233,7 +385,9 @@ export async function findExistingContactIndexes(
   const indexes: ExistingImportContactIndexes = {
     byCpf: new Map(),
     byPhone: new Map(),
-    ambiguousPhones: new Set()
+    ambiguousPhones: new Set(),
+    phoneMatchTypes: new Map(),
+    contactsById: new Map()
   };
 
   if (!cpfs.length && !phones.length) return indexes;
@@ -244,12 +398,40 @@ export async function findExistingContactIndexes(
           companyId,
           cpf: { in: cpfs }
         },
-        select: { id: true, cpf: true }
+        select: { id: true, cpf: true, name: true, phone: true }
       })
     : [];
+  const contactsGroupedByCpf = new Map<string, typeof contactsByCpf>();
   contactsByCpf.forEach((contact) => {
-    if (contact.cpf) indexes.byCpf.set(contact.cpf, contact.id);
+    if (contact.cpf) {
+      const matchingContacts = contactsGroupedByCpf.get(contact.cpf) ?? [];
+      matchingContacts.push(contact);
+      contactsGroupedByCpf.set(contact.cpf, matchingContacts);
+    }
+    indexes.contactsById.set(contact.id, {
+      id: contact.id,
+      name: contact.name,
+      phone: contact.phone
+    });
   });
+
+  for (const [cpf, matchingContacts] of Array.from(contactsGroupedByCpf)) {
+    const selectedContact =
+      matchingContacts.length === 1
+        ? matchingContacts[0]
+        : await db.contact.findFirst({
+            where: { companyId, cpf },
+            select: { id: true, name: true, phone: true }
+          });
+
+    if (!selectedContact) continue;
+    indexes.byCpf.set(cpf, selectedContact.id);
+    indexes.contactsById.set(selectedContact.id, {
+      id: selectedContact.id,
+      name: selectedContact.name,
+      phone: selectedContact.phone
+    });
+  }
 
   for (const phone of phones) {
     const phoneIdentity = await findContactPhoneIdentityMatch(db, {
@@ -261,6 +443,12 @@ export async function findExistingContactIndexes(
     });
     if (phoneIdentity.contact) {
       indexes.byPhone.set(phone, phoneIdentity.contact.id);
+      indexes.phoneMatchTypes.set(phone, phoneIdentity.matchType);
+      indexes.contactsById.set(phoneIdentity.contact.id, {
+        id: phoneIdentity.contact.id,
+        name: phoneIdentity.contact.name,
+        phone: phoneIdentity.contact.phone
+      });
     }
     if (phoneIdentity.matchType === "ambiguous") {
       indexes.ambiguousPhones.add(phone);
@@ -456,16 +644,82 @@ async function findContactForImport(
     : null;
 }
 
+function findIndexedContactForImport(
+  row: ImportPreviewRow,
+  indexes: ExistingImportContactIndexes
+) {
+  const contactId =
+    (row.cpf ? indexes.byCpf.get(row.cpf) : null) ??
+    (row.whatsapp ? indexes.byPhone.get(row.whatsapp) : null) ??
+    null;
+  if (!contactId) return null;
+
+  const contact = indexes.contactsById.get(contactId);
+  if (!contact) return null;
+
+  return {
+    ...contact,
+    phoneIdentityMatchType:
+      row.cpf && indexes.byCpf.get(row.cpf) === contactId
+        ? ("exact" as const)
+        : indexes.phoneMatchTypes.get(row.whatsapp) ?? ("exact" as const)
+  };
+}
+
+function getRowsRequiringLiveIdentityLookup(
+  rows: ImportPreviewRow[],
+  indexes: ExistingImportContactIndexes
+) {
+  const identityCounts = new Map<string, number>();
+  const rowKeys = new Map<number, Set<string>>();
+
+  for (const row of rows) {
+    const keys = new Set<string>();
+    if (row.cpf) keys.add(`cpf:${row.cpf}`);
+    if (row.whatsapp) {
+      const candidates = getBrazilianWhatsappPhoneCandidates(row.whatsapp);
+      keys.add(`phone:${candidates.exact ?? row.whatsapp}`);
+      if (candidates.alternate) keys.add(`phone:${candidates.alternate}`);
+    }
+
+    const identity = resolveContactImportIdentityForRow(row, indexes);
+    if (identity.existingContactId) {
+      keys.add(`contact:${identity.existingContactId}`);
+    }
+
+    rowKeys.set(row.rowNumber, keys);
+    for (const key of Array.from(keys)) {
+      identityCounts.set(key, (identityCounts.get(key) ?? 0) + 1);
+    }
+  }
+
+  return new Set(
+    rows
+      .filter((row) =>
+        Array.from(rowKeys.get(row.rowNumber) ?? []).some(
+          (key) => (identityCounts.get(key) ?? 0) > 1
+        )
+      )
+      .map((row) => row.rowNumber)
+  );
+}
+
 export async function confirmContactImport({
   companyId,
   userId,
+  idempotencyKey,
   rows,
-  db = prisma
+  db = prisma,
+  databaseUrl = process.env.DATABASE_URL,
+  transactionTimeoutMs = CONTACT_IMPORT_TRANSACTION_TIMEOUT_MS
 }: {
   companyId: string;
   userId: string;
+  idempotencyKey: string;
   rows: ContactImportConfirmRowInput[];
   db?: PrismaClient;
+  databaseUrl?: string;
+  transactionTimeoutMs?: number;
 }): Promise<ContactImportConfirmResult> {
   const canonicalRows = rows.map((row, index) =>
     validateAndCanonicalizeContactImportRow(row, index + 2)
@@ -477,8 +731,28 @@ export async function confirmContactImport({
       rowNumber: row.rowNumber,
       reason: row.errors.join(" ")
     }));
+  const payloadHash = hashContactImportPayload(canonicalRows);
 
-  const result = await db.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
+    await acquireContactImportCompanyLock(tx, companyId, databaseUrl);
+
+    const completedBatch = await tx.contactImportBatch.findUnique({
+      where: {
+        companyId_idempotencyKey: { companyId, idempotencyKey }
+      },
+      select: { payloadHash: true, resultVersion: true, resultJson: true }
+    });
+    if (completedBatch) {
+      if (completedBatch.payloadHash !== payloadHash) {
+        throw new ContactImportIdempotencyConflictError();
+      }
+      return parsePersistedContactImportResult(
+        completedBatch.resultJson,
+        completedBatch.resultVersion,
+        canonicalRows
+      );
+    }
+
     const contactIds: string[] = [];
     const confirmedRows: ContactImportConfirmResult["rows"] = [];
     let created = 0;
@@ -496,8 +770,17 @@ export async function confirmContactImport({
       );
     }
 
+    const rowsRequiringLiveLookup = getRowsRequiringLiveIdentityLookup(
+      validRows,
+      existingIndexes
+    );
+
     for (const row of validRows) {
-      const existing = await findContactForImport(tx, companyId, row);
+      // CPF has no database uniqueness constraint, so the initial index can become
+      // stale while another contact creator commits. Keep its lookup close to the write.
+      const existing = row.cpf || rowsRequiringLiveLookup.has(row.rowNumber)
+        ? await findContactForImport(tx, companyId, row)
+        : findIndexedContactForImport(row, existingIndexes);
       if (existing) {
         const isAlternatePhoneIdentityMatch =
           existing.phoneIdentityMatchType === "alternate";
@@ -611,24 +894,29 @@ export async function confirmContactImport({
       }
     }
 
-    return {
+    const result: ContactImportConfirmResult = {
+      summary: {
+        totalRows: canonicalRows.length,
+        imported: new Set(contactIds).size,
+        created,
+        updated,
+        invalid: errors.length
+      },
       contactIds: Array.from(new Set(contactIds)),
       rows: confirmedRows,
-      created,
-      updated
+      errors
     };
-  });
 
-  return {
-    summary: {
-      totalRows: canonicalRows.length,
-      imported: result.contactIds.length,
-      created: result.created,
-      updated: result.updated,
-      invalid: errors.length
-    },
-    contactIds: result.contactIds,
-    rows: result.rows,
-    errors
-  };
+    await tx.contactImportBatch.create({
+      data: {
+        companyId,
+        idempotencyKey,
+        payloadHash,
+        resultVersion: CONTACT_IMPORT_RESULT_VERSION,
+        resultJson: serializeContactImportResult(result)
+      }
+    });
+
+    return result;
+  }, { timeout: transactionTimeoutMs });
 }

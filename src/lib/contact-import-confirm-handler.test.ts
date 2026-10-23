@@ -10,6 +10,8 @@ import {
 import {
   CONTACT_IMPORT_MAX_FIELD_LENGTH,
   CONTACT_IMPORT_MAX_ROWS,
+  ContactImportIdempotencyConflictError,
+  ContactImportInProgressError,
   confirmContactImport,
   validateAndCanonicalizeContactImportRow
 } from "./contact-import.service";
@@ -27,6 +29,11 @@ const validRow = {
   cpf: "123.456.789-00",
   phone: "(33) 99999-9999"
 };
+const validIdempotencyKey = "123e4567-e89b-42d3-a456-426614174000";
+
+function confirmBody(rows: unknown[] = [validRow]) {
+  return { idempotencyKey: validIdempotencyKey, rows };
+}
 
 function jsonRequest(value: unknown, headers: Record<string, string> = {}) {
   return new NextRequest("http://localhost/api/imports/contacts/confirm", {
@@ -113,7 +120,7 @@ for (const role of ["AGENT", "SUPERVISOR"] as const) {
 test("ADMIN usa companyId e userId somente da sessao", async () => {
   let received: { companyId: string; userId: string } | null = null;
   const response = await handleContactImportConfirm(
-    jsonRequest({ rows: [validRow] }),
+    jsonRequest(confirmBody()),
     routeDependencies({
       confirmImport: async (input: { companyId: string; userId: string }) => {
         received = { companyId: input.companyId, userId: input.userId };
@@ -174,9 +181,28 @@ test("rate limit usa company/user e company/IP antes de ler body", async () => {
 });
 
 test("body normal e aceito sem confiar em campos derivados", async () => {
-  assert.deepEqual(parseContactImportConfirmBody({ rows: [validRow] }), {
+  assert.deepEqual(parseContactImportConfirmBody(confirmBody()), {
+    idempotencyKey: validIdempotencyKey,
     rows: [validRow]
   });
+});
+
+test("chave idempotente e obrigatoria e normalizada", () => {
+  assert.throws(
+    () => parseContactImportConfirmBody({ rows: [validRow] }),
+    ContactImportConfirmRequestError
+  );
+  assert.throws(
+    () => parseContactImportConfirmBody({ idempotencyKey: "invalid", rows: [validRow] }),
+    ContactImportConfirmRequestError
+  );
+  assert.equal(
+    parseContactImportConfirmBody({
+      idempotencyKey: validIdempotencyKey.toUpperCase(),
+      rows: [validRow]
+    }).idempotencyKey,
+    validIdempotencyKey
+  );
 });
 
 test("campos derivados e IDs client-side sao rejeitados", () => {
@@ -192,7 +218,7 @@ test("campos derivados e IDs client-side sao rejeitados", () => {
     { unexpected: true }
   ]) {
     assert.throws(
-      () => parseContactImportConfirmBody({ rows: [{ ...validRow, ...extra }] }),
+      () => parseContactImportConfirmBody(confirmBody([{ ...validRow, ...extra }])),
       ContactImportConfirmRequestError
     );
   }
@@ -206,9 +232,9 @@ test("retirementLead aceita somente allowlist do import", () => {
     state: "MG"
   };
   assert.deepEqual(
-    parseContactImportConfirmBody({
-      rows: [{ ...validRow, retirementLead: allowed }]
-    }).rows[0].retirementLead,
+    parseContactImportConfirmBody(
+      confirmBody([{ ...validRow, retirementLead: allowed }])
+    ).rows[0].retirementLead,
     allowed
   );
 
@@ -225,9 +251,11 @@ test("retirementLead aceita somente allowlist do import", () => {
   ]) {
     assert.throws(
       () =>
-        parseContactImportConfirmBody({
-          rows: [{ ...validRow, retirementLead: { ...allowed, [field]: "forged" } }]
-        }),
+        parseContactImportConfirmBody(
+          confirmBody([
+            { ...validRow, retirementLead: { ...allowed, [field]: "forged" } }
+          ])
+        ),
       ContactImportConfirmRequestError
     );
   }
@@ -264,6 +292,10 @@ test("linha invalida em direct confirm gera zero writes funcionais", async () =>
     },
     retirementLeadEvent: {
       create: async () => mutations.push("RetirementLeadEvent.create")
+    },
+    contactImportBatch: {
+      findUnique: async () => null,
+      create: async () => ({ id: "batch-invalid" })
     }
   };
   const db = {
@@ -273,6 +305,7 @@ test("linha invalida em direct confirm gera zero writes funcionais", async () =>
   const result = await confirmContactImport({
     companyId: "company-a",
     userId: "user-admin",
+    idempotencyKey: validIdempotencyKey,
     rows: [{ name: "", cpf: "invalid", phone: "1" }],
     db: db as never
   });
@@ -305,7 +338,21 @@ test("lookup e create do confirm permanecem tenant-scoped pela sessao", async ()
       assert.equal(values[0], "company-a");
       return [];
     },
-    contactActivity: { create: async () => ({ id: "activity-new" }) }
+    contactActivity: { create: async () => ({ id: "activity-new" }) },
+    contactImportBatch: {
+      findUnique: async ({
+        where
+      }: {
+        where: { companyId_idempotencyKey: { companyId: string } };
+      }) => {
+        scopedCompanyIds.push(where.companyId_idempotencyKey.companyId);
+        return null;
+      },
+      create: async ({ data }: { data: { companyId: string } }) => {
+        scopedCompanyIds.push(data.companyId);
+        return { id: "batch-new" };
+      }
+    }
   };
   const db = {
     $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx)
@@ -314,6 +361,7 @@ test("lookup e create do confirm permanecem tenant-scoped pela sessao", async ()
   await confirmContactImport({
     companyId: "company-a",
     userId: "user-admin",
+    idempotencyKey: validIdempotencyKey,
     rows: [validRow],
     db: db as never
   });
@@ -357,11 +405,11 @@ test("Content-Length falsamente baixo nao ignora bytes reais", async () => {
   });
 });
 
-test("5000 rows sao aceitas e 5001 sao rejeitadas antes da transaction", () => {
+test("limite sincronico e aceito e uma linha adicional e rejeitada antes da transaction", () => {
   const rows = Array.from({ length: CONTACT_IMPORT_MAX_ROWS }, () => validRow);
-  assert.equal(parseContactImportConfirmBody({ rows }).rows.length, CONTACT_IMPORT_MAX_ROWS);
+  assert.equal(parseContactImportConfirmBody(confirmBody(rows)).rows.length, CONTACT_IMPORT_MAX_ROWS);
   assert.throws(
-    () => parseContactImportConfirmBody({ rows: [...rows, validRow] }),
+    () => parseContactImportConfirmBody(confirmBody([...rows, validRow])),
     (error: unknown) => {
       assert.ok(error instanceof ContactImportConfirmRequestError);
       assert.equal(error.status, 413);
@@ -373,9 +421,11 @@ test("5000 rows sao aceitas e 5001 sao rejeitadas antes da transaction", () => {
 test("strings acima do limite sao rejeitadas", () => {
   assert.throws(
     () =>
-      parseContactImportConfirmBody({
-        rows: [{ ...validRow, name: "x".repeat(CONTACT_IMPORT_MAX_FIELD_LENGTH + 1) }]
-      }),
+      parseContactImportConfirmBody(
+        confirmBody([
+          { ...validRow, name: "x".repeat(CONTACT_IMPORT_MAX_FIELD_LENGTH + 1) }
+        ])
+      ),
     ContactImportConfirmRequestError
   );
 });
@@ -391,6 +441,78 @@ test("JSON malformado retorna erro 400 sanitizado", async () => {
   assert.equal(response.status, 400);
   assert.equal(body.error, "CONTACT_IMPORT_INVALID_PAYLOAD");
   assert.doesNotMatch(JSON.stringify(body), /stack|SyntaxError|not-json/i);
+});
+
+test("timeout comprovado da transacao retorna 503 sanitizado sem falso sucesso", async () => {
+  const timeoutError = Object.assign(
+    new Error(
+      "Transaction already closed: A query cannot be executed on an expired transaction. The timeout for this transaction was 60000 ms."
+    ),
+    { code: "P2028" }
+  );
+  const response = await handleContactImportConfirm(
+    jsonRequest(confirmBody()),
+    routeDependencies({
+      confirmImport: async () => {
+        throw timeoutError;
+      }
+    })
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 503);
+  assert.equal(body.error, "CONTACT_IMPORT_TIMEOUT");
+  assert.match(body.message, /Nenhum contato foi importado/);
+  assert.doesNotMatch(JSON.stringify(body), /P2028|database|Transaction already closed/i);
+});
+
+test("P2028 generico nao afirma rollback nem zero importados", async () => {
+  const response = await handleContactImportConfirm(
+    jsonRequest(confirmBody()),
+    routeDependencies({
+      confirmImport: async () => {
+        throw Object.assign(new Error("Transaction API error"), { code: "P2028" });
+      }
+    })
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 503);
+  assert.equal(body.error, "CONTACT_IMPORT_RESULT_UNKNOWN");
+  assert.match(body.message, /Atualize a lista de contatos/);
+  assert.doesNotMatch(body.message, /Nenhum contato|zero|revertid/i);
+  assert.doesNotMatch(JSON.stringify(body), /P2028|Transaction API error/i);
+});
+
+test("importacao concorrente da mesma empresa retorna conflito claro", async () => {
+  const response = await handleContactImportConfirm(
+    jsonRequest(confirmBody()),
+    routeDependencies({
+      confirmImport: async () => {
+        throw new ContactImportInProgressError();
+      }
+    })
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 409);
+  assert.equal(body.error, "CONTACT_IMPORT_IN_PROGRESS");
+  assert.match(body.message, /importacao de contatos em andamento/);
+});
+
+test("reuso da chave com payload diferente retorna conflito", async () => {
+  const response = await handleContactImportConfirm(
+    jsonRequest(confirmBody()),
+    routeDependencies({
+      confirmImport: async () => {
+        throw new ContactImportIdempotencyConflictError();
+      }
+    })
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 409);
+  assert.equal(body.error, "CONTACT_IMPORT_IDEMPOTENCY_CONFLICT");
 });
 
 test("falha em write intermediario propaga erro da transaction", async () => {
@@ -412,6 +534,10 @@ test("falha em write intermediario propaga erro da transaction", async () => {
         calls.push("ContactActivity.create");
         throw new Error("simulated write failure");
       }
+    },
+    contactImportBatch: {
+      findUnique: async () => null,
+      create: async () => ({ id: "batch-new" })
     }
   };
   const db = {
@@ -422,6 +548,7 @@ test("falha em write intermediario propaga erro da transaction", async () => {
     confirmContactImport({
       companyId: "company-a",
       userId: "user-admin",
+      idempotencyKey: validIdempotencyKey,
       rows: [validRow],
       db: db as never
     }),

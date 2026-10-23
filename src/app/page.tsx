@@ -15844,6 +15844,8 @@ function Disparos({
     useState<number | null>(null);
   const [importLoading, setImportLoading] = useState(false);
   const [importing, setImporting] = useState(false);
+  const contactImportIdempotencyKeyRef = useRef("");
+  const contactImportInFlightRef = useRef(false);
 
   useEffect(() => {
     if (!channelId && metaChannels[0]?.id) {
@@ -16154,6 +16156,7 @@ function Disparos({
     setError("");
     setImportPreview(null);
     setImportConfirm(null);
+    contactImportIdempotencyKeyRef.current = "";
     setTemplateColumnMapping({});
     setTemplatePreviewRowNumber(null);
 
@@ -16187,6 +16190,7 @@ function Disparos({
     }
 
     const preview = (await response.json()) as SpreadsheetImportPreview;
+    contactImportIdempotencyKeyRef.current = crypto.randomUUID();
     setImportPreview(preview);
     setTemplatePreviewRowNumber(
       preview.rows.find((row) => row.status === "VALID")?.rowNumber ?? null
@@ -16195,6 +16199,8 @@ function Disparos({
 
   async function handleConfirmSpreadsheetImport() {
     setError("");
+
+    if (contactImportInFlightRef.current) return;
 
     if (!importPreview) {
       setError("Valide a planilha antes de importar.");
@@ -16207,43 +16213,55 @@ function Disparos({
       return;
     }
 
+    const idempotencyKey =
+      contactImportIdempotencyKeyRef.current || crypto.randomUUID();
+    contactImportIdempotencyKeyRef.current = idempotencyKey;
+    contactImportInFlightRef.current = true;
     setImporting(true);
-    const response = await fetch("/api/imports/contacts/confirm", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        rows: importPreview.rows.map((row) => ({
-          name: row.name,
-          cpf: row.cpf,
-          phone: row.phone,
-          ...(row.retirementLead
-            ? {
-                retirementLead: {
-                  grantDate: row.retirementLead.grantDate,
-                  benefitType: row.retirementLead.benefitType,
-                  city: row.retirementLead.city,
-                  state: row.retirementLead.state
+
+    try {
+      const response = await fetch("/api/imports/contacts/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          idempotencyKey,
+          rows: importPreview.rows.map((row) => ({
+            name: row.name,
+            cpf: row.cpf,
+            phone: row.phone,
+            ...(row.retirementLead
+              ? {
+                  retirementLead: {
+                    grantDate: row.retirementLead.grantDate,
+                    benefitType: row.retirementLead.benefitType,
+                    city: row.retirementLead.city,
+                    state: row.retirementLead.state
+                  }
                 }
-              }
-            : {})
-        }))
-      })
-    });
-    setImporting(false);
+              : {})
+          }))
+        })
+      });
 
-    if (!response.ok) {
-      const data = (await response.json().catch(() => null)) as
-        | { error?: string; message?: string }
-        | null;
-      setError(
-        data?.message ?? data?.error ?? "Nao foi possivel confirmar a importacao."
-      );
-      return;
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as
+          | { error?: string; message?: string }
+          | null;
+        setError(
+          data?.message ?? data?.error ?? "Nao foi possivel confirmar a importacao."
+        );
+        return;
+      }
+
+      const data = (await response.json()) as SpreadsheetImportConfirm;
+      setImportConfirm(data);
+      setSelectedIds(data.contactIds);
+    } catch {
+      setError("Nao foi possivel confirmar a importacao. Tente novamente.");
+    } finally {
+      contactImportInFlightRef.current = false;
+      setImporting(false);
     }
-
-    const data = (await response.json()) as SpreadsheetImportConfirm;
-    setImportConfirm(data);
-    setSelectedIds(data.contactIds);
   }
 
   function downloadImportErrors() {
@@ -16528,6 +16546,7 @@ function Disparos({
       setImportFile(null);
       setImportPreview(null);
       setImportConfirm(null);
+      contactImportIdempotencyKeyRef.current = "";
       setTemplateColumnMapping({});
       setTemplatePreviewRowNumber(null);
     }
@@ -16615,6 +16634,7 @@ function Disparos({
                     setImportFile(event.target.files?.[0] ?? null);
                     setImportPreview(null);
                     setImportConfirm(null);
+                    contactImportIdempotencyKeyRef.current = "";
                     setTemplateColumnMapping({});
                     setTemplatePreviewRowNumber(null);
                   }}
@@ -16628,6 +16648,7 @@ function Disparos({
                     setImportFile(null);
                     setImportPreview(null);
                     setImportConfirm(null);
+                    contactImportIdempotencyKeyRef.current = "";
                     setTemplateColumnMapping({});
                     setTemplatePreviewRowNumber(null);
                   }}

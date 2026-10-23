@@ -11,6 +11,7 @@ import {
   parseContactImportSpreadsheet,
   validateXlsxOoxmlPackage
 } from "./contact-import-upload";
+import { SPREADSHEET_IMPORT_MAX_COLUMNS } from "./spreadsheet-import-columns";
 
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
@@ -707,15 +708,10 @@ test("rejeita excesso de colunas", async () => {
   );
 });
 
-test("rejeita excesso de celulas dentro dos limites individuais", async () => {
-  const columnCount = 80;
-  const rowCount = Math.floor(CONTACT_IMPORT_MAX_CELLS / columnCount) + 2;
-  const row = Array.from({ length: columnCount }, () => 1);
-  const rows = Array.from({ length: rowCount }, () => row);
-  await expectUploadError(
-    parseContactImportSpreadsheet(workbookFile([{ name: "Dados", rows }])),
-    { code: "WORKBOOK_LIMIT_EXCEEDED", status: 413, reason: "too_many_cells" }
-  );
+test("limite sincronico de linhas e colunas permanece abaixo do teto de celulas", () => {
+  const maximumReachableCells =
+    (CONTACT_IMPORT_MAX_DATA_ROWS + 1) * SPREADSHEET_IMPORT_MAX_COLUMNS;
+  assert.ok(maximumReachableCells <= CONTACT_IMPORT_MAX_CELLS);
 });
 
 test("desabilita formulas HTML e VBA e limita linhas no XLSX.read", async () => {
