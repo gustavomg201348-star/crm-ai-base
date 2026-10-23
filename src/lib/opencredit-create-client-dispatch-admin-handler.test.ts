@@ -225,7 +225,7 @@ test("thin route and exact human-only runtime consumers, all import syntaxes/ext
         }
       }
       if (ts.isStringLiteralLike(n) && /(?:^|\/)opencredit-provider-scope-resolver(?:\.[cm]?[jt]s)?$/.test(n.text)) {
-        assert([handler, core, "src/lib/opencredit-consumer-authorization-admin-handler.ts", "src/lib/opencredit-consumer-authorization-context-admin-handler.ts", "src/lib/opencredit-create-client-context-admin-handler.ts", "src/lib/opencredit-create-client-reconciliation-context-admin-handler.ts"].includes(path)); assert(ts.isImportDeclaration(n.parent));
+        assert([handler, core, "src/lib/opencredit-commercial-access-admin-handler.ts", "src/lib/opencredit-consumer-authorization-admin-handler.ts", "src/lib/opencredit-consumer-authorization-context-admin-handler.ts", "src/lib/opencredit-create-client-context-admin-handler.ts", "src/lib/opencredit-create-client-reconciliation-context-admin-handler.ts"].includes(path)); assert(ts.isImportDeclaration(n.parent));
       }
       if (ts.isIdentifier(n) && n.text === "prepareOpenCreditClientProfileOperation") assert([handler, "src/lib/opencredit-commercial-operation.service.ts"].includes(path));
       if (ts.isIdentifier(n) && n.text === "dispatchOpenCreditCreateClient") assert([handler, core].includes(path));

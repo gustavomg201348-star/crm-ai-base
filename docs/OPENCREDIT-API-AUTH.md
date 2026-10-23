@@ -1,5 +1,56 @@
 # OpenCredit API authentication (not webhook authentication)
 
+## Human CommercialAccess admin boundary (current)
+
+Only authenticated Platform Admin commands may mutate commercial access through
+`POST /api/admin/integrations/opencredit/commercial-access/grant` and `/revoke`.
+Both accept exactly `{companyId}`. No UI or context endpoint is introduced by this
+slice; a future UI must require explicit human confirmation and must never mutate
+on mount. These endpoints are explicit commands, not automatic onboarding.
+
+Order: session -> Platform Admin -> same-origin -> no query/Authorization header ->
+JSON Content-Type -> 512 actual bytes / one-second total body deadline / fatal UTF-8 /
+strict JSON (including duplicate-key rejection) -> closed Company input -> shared
+rate limits -> trusted configured providerScope -> existing transactional service.
+Actor is exclusively session-derived. Scope is exclusively resolved from server
+tenant/partner configuration; neither is accepted from the browser or returned.
+Budgets shared across grant/revoke: 10/minute per actor and 5/minute per target
+Company. Limiter failures fail closed; only safe integer Retry-After is forwarded.
+
+The existing service remains the authority for fresh persisted Platform Admin,
+Company existence, Serializable concurrency/retries, idempotent grant/revoke and
+atomic Access + Event. No domain rule, transaction, direct Prisma mutation or new
+retry is implemented in the HTTP handler. Grant absent creates enabled Access with
+GRANTED; grant enabled and revoke disabled are no-ops; revoke absent creates nothing.
+The response is only `{ok:true,changed,enabled}`, with Cache-Control: no-store.
+Internal access/event IDs, raw errors, provider configuration and credentials never
+escape. Closed module-stable domain error mapping uses 403/400/409/503; HTTP session,
+origin, input and limiter failures use fixed 401/403/400/429/503 codes.
+
+CommercialAccess is NOT consumer authorization, consent, legal basis, RemoteIdentity
+ownership or permission to call a financial operation. No identity, authorization,
+operation, createClient/provider HTTP, AI/chatbot/worker/webhook/campaign consumer,
+schema/migration, dependency or Railway change is introduced. Static guards allow
+only this exact handler to import the service and only these two routes to compose
+the handler. Strict JSON and resolver guards add only this exact approved consumer.
+
+Unit/guard and disposable PostgreSQL HTTP+service gates preserve all earlier gates.
+Material fixtures are synthetic, live fetch is blocked, real Event FK failures prove
+rollback, concurrent commands prove coherent no-ops/history, and unrelated domain
+table counts remain unchanged. No production grant is executed by development tests.
+Rollback (not executed): remove the two routes/handler and restore their narrow guard
+allowlists/CI steps. Existing access state/audit history is retained; no DB rollback
+or provider action is required. Deployment/merge requires independent review.
+
+Local validation of this slice: 168/168 new HTTP/guard tests; 3,878/3,878 across
+all 38 OpenCredit unit files (including the new tests); 68/68 chatbot/media regression
+tests; disposable PostgreSQL 18 material 34/34 (11 new boundary + 23 existing service).
+Both Prisma schemas, typecheck, lint, verify, Next.js 15.5.28 build (45 static pages)
+and diff-check passed. The existing 20 migrations were applied only to the disposable
+local database. The Windows checkout was normalized to LF for existing literal-source
+assertions, without changing those assertions or committing unrelated line endings.
+These local results are not a claim about remote CI or a production grant.
+
 ## Read-only createClient reconciliation review (current authoritative state)
 
 ```text
