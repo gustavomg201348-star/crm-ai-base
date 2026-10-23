@@ -70,7 +70,7 @@ test("component AST: only explicit onClick dispatch, no automation, storage befo
   assert.match(source, /^"use client"/); assert.doesNotMatch(source, /providerScope|\bcpf\b|profileJson|authorizationId|tenantId|partnerId|setInterval|setTimeout|while\s*\(|do\s*\{|\.removeItem\(|console\.|logger|dangerouslySetInnerHTML/);
   const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX), calls: ts.CallExpression[] = [];
   const visit = (n: ts.Node) => { if (ts.isCallExpression(n)) calls.push(n); ts.forEachChild(n, visit); }; visit(ast);
-  assert.deepEqual(ast.statements.filter(ts.isImportDeclaration).map(n => (n.moduleSpecifier as ts.StringLiteral).text), ["react", "@/lib/opencredit-create-client-ui"]);
+  assert.deepEqual(ast.statements.filter(ts.isImportDeclaration).map(n => (n.moduleSpecifier as ts.StringLiteral).text), ["react", "./OpenCreditCreateClientReconciliationPanel", "@/lib/opencredit-create-client-ui"]);
   const owner = (n: ts.Node) => { let p: ts.Node | undefined = n; while (p && !ts.isFunctionDeclaration(p)) p = p.parent; return p && ts.isFunctionDeclaration(p) ? p.name?.text : null; };
   const generators = calls.filter(c => c.expression.getText(ast) === "crypto.randomUUID"); assert.equal(generators.length, 1); assert.equal(owner(generators[0]), "send");
   let branch: ts.Node | undefined = generators[0]; while (branch && !ts.isIfStatement(branch)) branch = branch.parent;

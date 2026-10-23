@@ -1,6 +1,70 @@
 # OpenCredit API authentication (not webhook authentication)
 
-## createClient read context and human UI (current authoritative state)
+## Read-only createClient reconciliation review (current authoritative state)
+
+```text
+CREATE CLIENT HUMAN UI ACTIVATION: IMPLEMENTED
+CREATE CLIENT RECONCILIATION REVIEW: IMPLEMENTED
+ACTIVE PROVIDER RECONCILIATION: BLOCKED
+FAILED TRANSITION: BLOCKED
+AUTOMATIC REPLAY: FORBIDDEN
+LIVE CREATE CLIENT TEST: NOT EXERCISED
+```
+
+The review uses only persisted local facts. IN_FLIGHT proves a local reservation
+commit, NOT receipt or processing by OpenCredit: a crash before transport and an
+unconfirmed settlement after transport are both possible. UNKNOWN is an ambiguous
+remote attempt, NOT proof of failure. Neither review authorizes replay or a manual
+SUCCEEDED/FAILED transition. Future provider readback requires an officially
+confirmed contract; this slice makes no provider call or legal/LGPD conclusion.
+
+`POST /api/admin/integrations/opencredit/create-client/reconciliation/context`
+accepts exactly companyId/contactId. The separate server-only reader revalidates
+persisted User/Platform Admin, Company and tenant-scoped Contact in a Serializable
+read transaction. It intentionally ignores later archive/disable/revoke eligibility.
+The operation is read through the compound unique for Company, trusted
+providerScope, RemoteIdentity and CLIENT_PROFILE_UPSERT. At most one such operation
+can exist after the single-intent migration. Only IN_FLIGHT
+revision 1 and UNKNOWN revision 2 receive review; other known states return null.
+
+The complete ledger is read in persisted createdAt ASC, id ASC order (bounded
+four-row read detects any extra event). Exact chains are PREPARED rev0 followed by
+RESERVED_FOR_DISPATCH rev1, plus MARKED_UNKNOWN rev2 for UNKNOWN only. States,
+revisions, valid Dates, monotonic timeline, unique closed ASCII event IDs and
+reservation authorization binding are checked. All other Events must have null
+binding. Corrupt/missing/extra/incompatible chains fail as CORRUPT_LEDGER, never
+hidden as absence and never repaired. Legacy reservations with null binding cannot
+be attested by this contract and fail closed; no history is invented or migrated.
+
+The closed public response exposes only operationId/state/revision, closed reason,
+canonical ISO preparedAt/dispatchCommittedAt/settledAt and authorizationBound fact
+named dispatchAuthorizationBound=true. No Event/binding IDs, profile/PII, provider
+payload or credentials. Domain writes are ZERO; only the shared HTTP limiter can
+write RateLimitBucket. Independent actor 60/60s and target 30/60s categories prevent
+resolver/domain access on denial/unavailability. Session/admin, same-origin,
+query/Authorization rejection, closed JSON, 2048 real bytes, total 1000ms deadline,
+fatal UTF-8 and strict JSON protections match the existing read boundary; no-store
+applies to every response. Module-stable descriptor-safe errors remain closed.
+
+The child review panel mounts only for IN_FLIGHT/UNKNOWN inside the existing
+createClient panel. Local timestamps and clear unconfirmed-result copy are shown;
+operationId is not displayed. Only Atualizar revisão is offered, calling this local
+read endpoint. No UUID, storage, provider, transition or retry action. Target-key
+remount, abort and epoch checks prevent stale cross-contact updates; 401/403 hides
+details. Existing createClient send/state rules and server single-intent protection
+remain unchanged. Parent IN_FLIGHT copy now explicitly avoids a receipt claim.
+
+All CI gates are preserved, with new unit/guard and sequential disposable PostgreSQL
+review gates. Material tests use real local reservations/local UNKNOWN observation
+without any provider transport, and compare domain snapshots before/after reads.
+The reconciliation reader itself requires no new storage. This PR also includes
+the single-intent unique in both schemas and its fail-closed migration, documented
+below. No env/dependency/Railway changes, new settlement writers or active
+reconciliation. Reader rollback removes this reader/route/child panel and narrow
+guards/gates; retain the associated uniqueness protection. Any schema/data rollback
+would require a separate approved plan.
+
+## createClient read context and human UI
 
 ```text
 HTTP JSON RESPONSE BOUNDARY: IMPLEMENTED
@@ -37,8 +101,9 @@ The service revalidates persisted User/Platform Admin, Company and scoped Contac
 inside a Serializable read transaction. It intentionally does NOT require an
 active Contact/CommercialAccess/RemoteIdentity/ConsumerAuthorization: stale or
 revoked eligibility must not hide a previously sent/ambiguous operation. It resolves
-RemoteIdentity by companyId + providerScope + contactId, then the latest operation
-of kind CLIENT_PROFILE_UPSERT by createdAt DESC, id DESC. Only id/intentKey/state/
+RemoteIdentity by companyId + providerScope + contactId, then the single operation
+through the compound unique (companyId, providerScope, remoteIdentityId,
+operationKind=CLIENT_PROFILE_UPSERT), without ordering Operations. Only id/intentKey/state/
 revision are selected. Missing identity/operation returns null; structurally invalid
 persisted data fails closed as CORRUPT_OPERATION, never absence.
 
@@ -56,7 +121,7 @@ is only an optimization; backend Platform Admin and domain authorization remain
 authoritative. 401/403 hides the panel. Context reads happen on mount/target change
 and explicit refresh; they never generate a UUID or trigger dispatch.
 
-Latest operation survives reload. PREPARED always reuses the exact server commandId
+The single persisted operation survives reload. PREPARED always reuses the exact server commandId
 and may continue only through another explicit human confirmation with active
 authorization. IN_FLIGHT/UNKNOWN forbid resend; SUCCEEDED blocks a new intention;
 FAILED requires manual review. No update/resync/new-registration action is offered
@@ -84,9 +149,10 @@ races even when both read operation:null. Only the same PREPARED commandId may
 continue via explicit human action. The UI is additional defense, not this guarantee.
 A future deliberate update/sync requires a separate flow, outside this slice.
 No provider idempotency guarantee is implied; remote one-shot remains mandatory.
-Historical multiple operations, if any, are not deleted or migrated: context still
-selects the latest deterministically, a new command is blocked, and existing
-same-command lookup stays idempotent. Historical reconciliation is out of scope.
+Historical duplicates prevent the single-intent migration and deployment; neither
+reader chooses a winner. No duplicate is automatically deleted, updated or cleaned
+up. Such data requires a separate approved plan before rollout. Same-command lookup
+stays idempotent; future update/sync requires an explicit new lifecycle.
 After valid response, conflict, provider/local failure or network exception the
 panel reloads server context, never performs automatic dispatch/retry. Failed reload
 disables new action and asks for state confirmation, not replay. SETTLEMENT_FAILED
@@ -101,11 +167,13 @@ browser-only; no server internals or duplicated commercial eligibility logic.
 All provider tests are fake; no live production E2E was performed. This slice makes
 the existing real administrative dispatch available through an explicit human UI
 after future authorized rollout, not a passive feature. No formal provider
-idempotency guarantee or legal/LGPD conclusion is claimed. ZERO schema/migration/
-env/dependency/Railway changes, new provider endpoints, simulation/proposal/banking,
-AI/chatbot/worker/cron dispatch, automatic preparation/retry, FAILED writer or
-reconciliation. Rollback: remove the new child panel and context route/service,
-restore their narrow guards/CI gates; no schema/data rollback is needed.
+idempotency guarantee or legal/LGPD conclusion is claimed. The read-context/human-UI
+feature requires no storage of its own; this PR includes the associated single-intent
+schema unique and migration. No env/dependency/Railway changes, new provider endpoints,
+simulation/proposal/banking, AI/chatbot/worker/cron dispatch, automatic preparation/retry,
+FAILED writer or active reconciliation. Reader/UI rollback removes the child panel
+and context route/service and restores narrow guards/CI gates, not the single-intent
+database protection. Any schema/data rollback requires a separate approved plan.
 
 ## Human createClient admin command (prior slice)
 
@@ -2032,11 +2100,46 @@ returns to PREPARED or IN_FLIGHT; no reset/replay/resume/automatic dispatch retr
 
 Transactions use Serializable, maxWait=2000ms, timeout=5000ms and at most three total
 attempts without sleep. P2034 retries the WHOLE local transaction and authorization.
-Only PREPARE may also retry P2002 for OCOperation_company_scope_intent_key (or its
-equivalent fields for the correct model), then reread the winning intention. Unexpected
+Only PREPARE may also retry P2002 for OCOperation_company_scope_intent_key or
+OCOperation_company_scope_identity_kind_key (or their exact equivalent field sets
+for the correct model), then reread the winning intention. Unexpected
 P2002 becomes STORAGE_ERROR; exhausted eligible retries become CONCURRENT_CONFLICT.
 These are LOCAL DB retries, not HTTP replay. Error messages are fixed closed codes
 prefixed OPENCREDIT_COMMERCIAL_OPERATION_, without cause/raw Prisma metadata/PII.
+
+### Single createClient intention: database enforcement
+
+The current foundation now adds the portable unique index
+`OCOperation_company_scope_identity_kind_key` on
+`(companyId, providerScope, remoteIdentityId, operationKind)` in both Prisma schemas.
+The existing intentKey unique remains the command-idempotency key. The predicate
+read is preserved for early INTENT_CONFLICT; the database unique is the final
+authority preventing a second operation for the same identity/kind in any state.
+Serializable transactions and CAS remain defense-in-depth, with the same three
+attempts, maxWait=2000ms and timeout=5000ms; there is no sleep/backoff or raw lock.
+The human admin command is an existing caller of prepare; preparation alone is
+not consent, authorization to dispatch, or provider-side idempotency.
+
+Migration `20261020190000_enforce_opencredit_operation_single_identity_kind`
+checks historical groups before creating the index. Any duplicates fail closed
+with fixed `OPENCREDIT_OPERATION_IDENTITY_KIND_DUPLICATES_EXIST`, without IDs/PII.
+No row is deleted, selected as winner, updated, reconciled or backfilled. A future
+deliberate update/resync needs an explicit lifecycle/schema decision, not another
+intentKey bypass. Deployment with duplicates must stop for a separately approved
+data plan; do not silently clean up or roll back the uniqueness protection.
+
+The disposable migration gate tests both the previous 19-migration chain with
+duplicate Operations/Events (failed upgrade preserves all rows/states), and a
+clean full-chain deployment with a material unique violation. The commercial
+service material gate forces 50 distinct-command races and requires one winner,
+one INTENT_CONFLICT and one Operation/PREPARED Event without replay. The database
+unique is the structural authority; a direct violation proves its P2002 behavior.
+A separate unit contract proves the service handles that P2002 correctly. Under
+Serializable/SSI a race may instead be resolved by P2034 before unique checking,
+or by reading the winner after commit. Neither P2002 nor P2034 is mandatory in a
+race: their counters are diagnostic only. Results are not implied by test definitions.
+No live provider HTTP, provider idempotency claim, Railway change, active
+reconciliation or new commercial workflow is introduced by this correction.
 
 There is still no HTTP, API client, POST /clients, validate, simulation, proposal,
 polling, response classification/reconciliation, SUCCEEDED or FAILED writer, provider

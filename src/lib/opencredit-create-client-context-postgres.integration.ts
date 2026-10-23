@@ -115,12 +115,11 @@ for (const state of ["PREPARED", "IN_FLIGHT", "UNKNOWN", "SUCCEEDED", "FAILED"])
   const row = await operation(f, { state, revision: 2 });
   assert.deepEqual(await readonly(f, () => read(f)), { ok: true, operation: { operationId: row.id, commandId: f.command.commandId, state, revision: 2 } });
 });
-material("latest is deterministic createdAt DESC then id DESC", async f => {
-  const prefix = f.command.companyId, date = new Date("2026-10-20T00:00:00Z");
-  await operation(f, { id: prefix + "-z", intentKey: randomUUID(), createdAt: new Date("2026-10-19T00:00:00Z") });
-  await operation(f, { id: prefix + "-a", intentKey: randomUUID(), createdAt: date });
-  const winner = await operation(f, { id: prefix + "-b", intentKey: randomUUID(), createdAt: date, state: "UNKNOWN" });
-  const result = await readonly(f, () => read(f)); assert.equal(result.operation?.operationId, winner.id); assert.equal(result.operation?.commandId, winner.intentKey);
+material("single CLIENT_PROFILE_UPSERT is read through identity-kind invariant", async f => {
+  const row = await operation(f, { state: "UNKNOWN", revision: 2 });
+  assert.deepEqual(await readonly(f, () => read(f)), { ok: true, operation: {
+    operationId: row.id, commandId: row.intentKey, state: "UNKNOWN", revision: 2,
+  } });
 });
 material("other operationKind does not shadow client upsert", async f => {
   const winner = await operation(f, { createdAt: new Date("2026-10-19T00:00:00Z") });

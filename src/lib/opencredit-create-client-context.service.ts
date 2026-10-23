@@ -53,9 +53,9 @@ export async function getOpenCreditCreateClientContext(db: Db, value: Input): Pr
       } }, select: { id: true } });
       if (!identity) return { ok: true, operation: null };
       if (!id(identity.id)) return fail("CORRUPT_OPERATION");
-      const operation = await tx.openCreditCommercialOperation.findFirst({ where: {
+      const operation = await tx.openCreditCommercialOperation.findUnique({ where: { companyId_providerScope_remoteIdentityId_operationKind: {
         companyId: input.companyId, providerScope: input.providerScope, remoteIdentityId: identity.id, operationKind: "CLIENT_PROFILE_UPSERT",
-      }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true, intentKey: true, state: true, revision: true } });
+      } }, select: { id: true, intentKey: true, state: true, revision: true } });
       if (!operation) return { ok: true, operation: null };
       const row = closed(operation, ["id", "intentKey", "state", "revision"], "CORRUPT_OPERATION");
       const result = parseCreateClientContext({ ok: true, operation: { operationId: row.id, commandId: row.intentKey, state: row.state, revision: row.revision } });
