@@ -92,6 +92,9 @@ jobs:
       - name: Validate OpenCredit one-shot createClient dispatcher with fake provider
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-create-client-dispatcher.test.ts
 
+      - name: Validate OpenCredit safe createClient diagnostics
+        run: npx --yes tsx@4.20.6 --test src/lib/opencredit-create-client-diagnostic.test.ts
+
       - name: Validate OpenCredit human createClient admin command boundary
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-create-client-dispatch-admin-handler.test.ts
 

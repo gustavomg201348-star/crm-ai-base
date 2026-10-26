@@ -47,10 +47,12 @@ test("reconciliation is read-only in browser/server, exact runtime consumers, no
   const source = readFileSync(component, "utf8"), helper = readFileSync("src/lib/" + stem + "ui.ts", "utf8");
   assert.match(source, /^"use client"/);
   assert.doesNotMatch(source + helper, /crypto|randomUUID|sessionStorage|setInterval|setTimeout|\/dispatch|core\.api|operationId\}|console\.|logger|dangerouslySetInnerHTML|Prisma|server-only|process\.env/);
-  assert.doesNotMatch(helper, /\bimport\b|\bfetch\b/);
+  assert.doesNotMatch(helper, /\bfetch\b/);
+  const helperTree = ts.createSourceFile("ui.ts", helper, ts.ScriptTarget.Latest, true);
+  assert.deepEqual(helperTree.statements.filter(ts.isImportDeclaration).map(n => (n.moduleSpecifier as ts.StringLiteral).text), ["./opencredit-create-client-diagnostic"]);
   for (const file of [handler, service, component]) assert.doesNotMatch(readFileSync(file, "utf8"), /opencredit-api-client|opencredit-create-client-dispatcher|postJsonAfterCommit|dispatchOpenCreditCreateClient|prepareOpenCreditClientProfileOperation|reserveOpenCreditClientProfileOperationForDispatch|applyOpenCreditCreateClientObservation|markOpenCreditCommercialOperationUnknown/);
   const ast = ts.createSourceFile(component, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  assert.deepEqual(ast.statements.filter(ts.isImportDeclaration).map(n => (n.moduleSpecifier as ts.StringLiteral).text), ["react", "@/lib/" + stem + "ui"]);
+  assert.deepEqual(ast.statements.filter(ts.isImportDeclaration).map(n => (n.moduleSpecifier as ts.StringLiteral).text), ["react", "@/lib/" + stem + "ui", "@/lib/opencredit-create-client-diagnostic"]);
   const calls: ts.CallExpression[] = [], buttons: ts.JsxOpeningElement[] = [];
   const visit = (n: ts.Node) => { if (ts.isCallExpression(n)) calls.push(n); if (ts.isJsxOpeningElement(n) && n.tagName.getText(ast) === "button") buttons.push(n); ts.forEachChild(n, visit); }; visit(ast);
   const fetches = calls.filter(c => c.expression.getText(ast) === "fetch"); assert.equal(fetches.length, 1); assert.equal(fetches[0].arguments[0].getText(ast), "endpoint");
@@ -63,7 +65,7 @@ test("reconciliation is read-only in browser/server, exact runtime consumers, no
   assert.match(source, /não é possível confirmar se a OpenCredit recebeu/); assert.match(source, /Não reenvie/);
   assert.doesNotMatch(source, /Copiar ID|marcar como sucesso|marcar como falha|Tentar novamente/);
   const parent = readFileSync("src/app/components/integrations/OpenCreditCreateClientPanel.tsx", "utf8");
-  assert.match(parent, /\(state === "IN_FLIGHT" \|\| state === "UNKNOWN"\) && <OpenCreditCreateClientReconciliationPanel companyId=\{companyId\} contactId=\{contactId\}/);
+  assert.match(parent, /\(state === "IN_FLIGHT" \|\| state === "UNKNOWN" \|\| state === "SUCCEEDED" \|\| state === "PREPARED"\) && <OpenCreditCreateClientReconciliationPanel companyId=\{companyId\} contactId=\{contactId\}/);
   assert.doesNotMatch(parent, /Envio já iniciado/);
   const consumers: Record<string, string[]> = { [stem + "context.service"]: [], [stem + "context-admin-handler"]: [], OpenCreditCreateClientReconciliationPanel: [] };
   for (const root of ["src", "scripts"]) for (const file of readdirSync(root, { recursive: true, encoding: "utf8" })) {

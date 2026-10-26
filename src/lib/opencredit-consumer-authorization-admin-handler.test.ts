@@ -283,7 +283,7 @@ test("thin routes wire only existing session/admin/limiter/db and fixed command"
     assert.deepEqual(ast.statements.filter(ts.isImportDeclaration).map(n => (n.moduleSpecifier as ts.StringLiteral).text), ["@/lib/auth", "@/lib/permissions", "@/lib/rate-limit", "@/lib/db", "@/lib/opencredit-consumer-authorization-admin-handler"]);
     const calls: ts.CallExpression[] = []; const visit = (n: ts.Node) => { if (ts.isCallExpression(n)) calls.push(n); ts.forEachChild(n, visit); }; visit(ast);
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].getText(ast), `createOpenCreditConsumerAuthorizationAdminHandler("${action}", {\n  getSession: getSessionFromRequest, requirePlatformAdmin, enforceLimits: enforceRateLimits, db: prisma,\n})`);
+    assert.equal(calls[0].getText(ast).replace(/\r\n/g, "\n"), `createOpenCreditConsumerAuthorizationAdminHandler("${action}", {\n  getSession: getSessionFromRequest, requirePlatformAdmin, enforceLimits: enforceRateLimits, db: prisma,\n})`);
     assert.match(source, /runtime = "nodejs"/); assert.match(source, /dynamic = "force-dynamic"/);
   }
 });

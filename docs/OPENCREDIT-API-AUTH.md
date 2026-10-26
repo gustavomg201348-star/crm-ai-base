@@ -2668,3 +2668,66 @@ compiled UI callbacks. All preexisting CI gates remain; dedicated unit/UI and
 material gates are additive. Rollback removes the new UI/boundaries and exact
 allowlists/gates, preserving identity ownership/history; there is no delete or
 automatic release of ownership.
+# createClient technical diagnostics (2026-10-26)
+
+The nullable `OpenCreditCommercialOperation.diagnostic` column is a versioned,
+closed technical DTO serialized as text, consistently across SQLite/PostgreSQL.
+Migration `20261026130000_add_opencredit_operation_diagnostic` only adds a nullable
+column. No DML, backfill, constraint changes or reconstruction of old observations.
+Historical NULL means diagnostic unavailable, not provider failure or no attempt.
+Rollback: revert application usage and leave the additive nullable column in place;
+do not delete diagnostic evidence or reverse a production migration manually.
+
+The dispatcher persists the observation in an independent transaction BEFORE the
+existing terminal settlement. It records HTTP status when actually observed,
+restricted request/correlation IDs, boolean success/created only when parsed,
+read/parse flags, closed technical category, known provider error code,
+observation/response timestamps and commit-to-dispatch timestamp. That timestamp
+does NOT prove delivery, receipt or processing. No diagnostic is an idempotency key.
+
+Settlement diagnostic statuses are NOT_ATTEMPTED (pre-auth failure), NOT_CONFIRMED
+(observation saved before settlement), ERROR (settlement threw) and CONFIRMED.
+These are technical metadata, never CommercialOperation states. State/revision and
+ledger Events are unchanged by a diagnostic write. The first provider observation
+is protected by compare-and-swap; only its settlement flag may advance to ERROR or
+CONFIRMED. A subsequent explicitly initiated reservation can supersede a prior
+pre-auth diagnostic, which is not a provider attempt. No replay is introduced.
+
+Diagnostics are scoped to operation + Company + trusted providerScope + revision;
+the persisted actor must still satisfy the same Platform Admin guard. Diagnostic
+persistence is best effort and never authorizes dispatch or blocks the protective
+settlement. Independent storage survives terminal rollback when storage is working.
+An outage/process crash can still leave NULL or NOT_CONFIRMED; terminal state/events
+remain authoritative. A confirmation-metadata write can fail after terminal commit.
+Structured sanitized logs report the persistence result as a fallback, not an
+atomic guarantee between PostgreSQL and the external provider.
+
+Privacy: no raw request/response, free provider message, error detail, URL/query,
+CPF, phone, email, tokens, password, bearer/header collection or profile snapshot is
+stored. `failureMessageSanitized` is deliberately not a copied provider string:
+the browser uses fixed local messages for a closed category. Only VALIDATION_ERROR
+and UNAUTHORIZED provider error codes are retained; others are discarded.
+Provider IDs are taken only from observed x-request-id / x-correlation-id or the
+documented top-level body requestId. Only UUID or req_ + 12..32 hex forms survive;
+11 consecutive digits and known profile/config secret substrings are rejected.
+The official client also rejects IDs containing its cached access/refresh token,
+including opaque tokens that happen to match the UUID/req_ grammar, without
+returning the token pair or performing authentication. Alternate test transports
+without this sanitizer fail closed by discarding IDs.
+All other ID forms are intentionally lost rather than persisted unsafely. These
+are opaque diagnostic references, not proof of identity/permission or receipt.
+Request IDs returned on a POST response may be unavailable if the body is unreadable.
+
+Technical categories distinguish non-201, network, transport/body timeout, body
+size, UTF-8/JSON/contract failure, success=false and pre-reservation authentication
+failure. The existing outcome classifier is unchanged: only HTTP 201 and
+success=true can settle SUCCEEDED; every other observation remains UNKNOWN.
+No current path writes FAILED. Transport remains auth -> reserve/commit -> one
+POST, without additional diagnostic DB work between commit and transport. No
+refresh+POST replay, second POST, reset, automatic reconciliation or retry is added.
+
+The existing Platform Admin review context/UI presents only the closed diagnostic,
+including success/created/status/category/IDs and settlement metadata, also for
+SUCCEEDED/PREPARED operations. It adds no command or permission. Old operations
+remain reviewable without diagnostics. Never interpret HTTP 200 from the CRM,
+found=false, UPSERT wording or a technical diagnostic as permission to resend.

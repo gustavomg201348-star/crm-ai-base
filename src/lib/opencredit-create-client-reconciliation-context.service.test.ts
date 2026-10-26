@@ -39,6 +39,19 @@ function fixture(unknown = false) {
   return { state, calls, options, run, db };
 }
 type F = ReturnType<typeof fixture>;
+test("safe persisted diagnostic is exposed read-only; malformed/private JSON fails closed", async () => {
+  const f = fixture();
+  const diagnostic = { version: 1, category: "INVALID_JSON", stage: "RESPONSE", providerHttpStatus: 201,
+    providerRequestId: "req_abcdefabcdef", providerCorrelationId: null, providerSuccess: null, providerCreated: null,
+    providerErrorCode: null, responseReadable: false, responseParsed: false, observedAt: date(3).toISOString(),
+    dispatchCommittedAt: date(1).toISOString(), respondedAt: date(2).toISOString(), settlement: "NOT_CONFIRMED" };
+  (f.state.operation as Record<string, unknown>).diagnostic = JSON.stringify(diagnostic);
+  const before = structuredClone(f.state); assert.deepEqual((await f.run()).diagnostic, diagnostic); assert.deepEqual(f.state, before);
+  for (const bad of ["invalid json", JSON.stringify({ ...diagnostic, raw: "private" }), JSON.stringify({ ...diagnostic, providerRequestId: "00000000000" })]) {
+    (f.state.operation as Record<string, unknown>).diagnostic = bad;
+    await assert.rejects(f.run());
+  }
+});
 const op = (f: F) => f.state.operation as Record<string, unknown>;
 const es = (f: F) => f.state.events as Record<string, unknown>[];
 for (const unknown of [false, true]) test("valid sanitized review, exact scope/chronology and zero writes " + unknown, async () => {
@@ -51,7 +64,7 @@ for (const unknown of [false, true]) test("valid sanitized review, exact scope/c
   assert.deepEqual(f.calls[3].args, { where: { companyId_providerScope_contactId: { companyId: "company", providerScope: "synthetic-scope", contactId: "contact" } }, select: { id: true } });
   assert.deepEqual(f.calls[4].args, { where: { companyId_providerScope_remoteIdentityId_operationKind: {
     companyId: "company", providerScope: "synthetic-scope", remoteIdentityId: "identity", operationKind: "CLIENT_PROFILE_UPSERT",
-  } }, select: { id: true, state: true, revision: true, createdAt: true, updatedAt: true } });
+  } }, select: { id: true, state: true, revision: true, createdAt: true, updatedAt: true, diagnostic: true } });
   assert.deepEqual(f.calls[5].args, { where: { operationId: "operation", companyId: "company", providerScope: "synthetic-scope" },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 4, select: { id: true, action: true, previousState: true, nextState: true, revision: true, createdAt: true, dispatchAuthorizationEventId: true } });
   assert.deepEqual(f.options, [{ isolationLevel: "Serializable", maxWait: 2000, timeout: 5000 }]);

@@ -472,6 +472,7 @@ model OpenCreditRemoteIdentityEvent {
 }
 
 model OpenCreditCommercialOperation {
+  diagnostic       String?
   id               String   @id @default(cuid())
   companyId        String
   remoteIdentityId String

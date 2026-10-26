@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { parseOpenCreditCreateClientReconciliationContext, reconciliationErrorMessage,
   type OpenCreditCreateClientReconciliationContext } from "@/lib/opencredit-create-client-reconciliation-ui";
+import { diagnosticMessages } from "@/lib/opencredit-create-client-diagnostic";
 type Props = { companyId: string; contactId: string };
 const endpoint = "/api/admin/integrations/opencredit/create-client/reconciliation/context";
 export function OpenCreditCreateClientReconciliationPanel(props: Props) {
@@ -30,11 +31,24 @@ function Review({ companyId, contactId }: Props) {
   useEffect(() => { void load(); return invalidate; }, [load, invalidate]);
   if (hidden) return null;
   const review = context?.review;
+  const diagnostic = context?.diagnostic;
   return <section aria-label="Revisão do envio" className="mt-3 rounded border border-line p-3">
     <h5 className="font-bold">Revisão do envio</h5>
     {busy && <p role="status">Atualizando revisão...</p>}
     {error && <p role="alert">{error}</p>}
-    {context && !review && <p>Não há revisão pendente no contexto local atual.</p>}
+    {context && !review && !diagnostic && <p>Não há revisão pendente no contexto local atual.</p>}
+    {diagnostic && <dl aria-label="Diagnóstico técnico" className="mt-2 text-xs">
+      <dt>HTTP provider</dt><dd>{diagnostic.providerHttpStatus ?? "Não observado"}</dd>
+      <dt>Etapa / categoria</dt><dd>{diagnostic.stage} / {diagnostic.category}</dd>
+      <dt>Diagnóstico</dt><dd>{diagnosticMessages[diagnostic.category]}</dd>
+      <dt>Código provider</dt><dd>{diagnostic.providerErrorCode ?? "Não disponível"}</dd>
+      <dt>Request ID provider</dt><dd>{diagnostic.providerRequestId ?? "Não disponível"}</dd>
+      <dt>Correlation ID provider</dt><dd>{diagnostic.providerCorrelationId ?? "Não disponível"}</dd>
+      <dt>success / created</dt><dd>{String(diagnostic.providerSuccess ?? "Não observado")} / {String(diagnostic.providerCreated ?? "Não observado")}</dd>
+      <dt>Observado em</dt><dd>{new Date(diagnostic.observedAt).toLocaleString("pt-BR")}</dd>
+      <dt>Settlement local</dt><dd>{diagnostic.settlement}</dd>
+      <dt>Resposta legível / JSON interpretado</dt><dd>{String(diagnostic.responseReadable)} / {String(diagnostic.responseParsed)}</dd>
+    </dl>}
     {review && <>
       <p className="mt-2 font-semibold">{review.state === "IN_FLIGHT" ? "Pendente de confirmação" : "Resultado não confirmado"}</p>
       <p className="mt-2 text-sm">{review.state === "IN_FLIGHT"

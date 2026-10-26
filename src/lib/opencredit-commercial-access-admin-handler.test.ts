@@ -180,7 +180,7 @@ test("only approved handler imports service; only two fixed routes import handle
     const text = readFileSync(path, "utf8"), ast = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
     assert.deepEqual(ast.statements.filter(ts.isImportDeclaration).map(n => (n.moduleSpecifier as ts.StringLiteral).text), ["@/lib/auth", "@/lib/permissions", "@/lib/rate-limit", "@/lib/db", "@/lib/opencredit-commercial-access-admin-handler"]);
     const calls: ts.CallExpression[] = []; const visit = (n: ts.Node) => { if (ts.isCallExpression(n)) calls.push(n); ts.forEachChild(n, visit); }; visit(ast);
-    assert.equal(calls.length, 1); assert.equal(calls[0].getText(ast), `createOpenCreditCommercialAccessAdminHandler("${["grant", "revoke"][i]}", {\n  getSession: getSessionFromRequest, requirePlatformAdmin, enforceLimits: enforceRateLimits, db: prisma,\n})`);
+    assert.equal(calls.length, 1); assert.equal(calls[0].getText(ast).replace(/\r\n/g, "\n"), `createOpenCreditCommercialAccessAdminHandler("${["grant", "revoke"][i]}", {\n  getSession: getSessionFromRequest, requirePlatformAdmin, enforceLimits: enforceRateLimits, db: prisma,\n})`);
     assert.match(text, /runtime = "nodejs"/); assert.match(text, /dynamic = "force-dynamic"/);
   }
   const ci = readFileSync(".github/workflows/ci.yml", "utf8");

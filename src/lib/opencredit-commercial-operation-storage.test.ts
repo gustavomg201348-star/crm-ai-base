@@ -8,7 +8,7 @@ const read = (path: string) => readFileSync(new URL("../../" + path, import.meta
 const op = "OpenCreditCommercialOperation"; const event = op + "Event";
 const model = (source: string, name: string) => source.match(new RegExp("^model " + name + " \\{[\\s\\S]*?^\\}", "m"))?.[0];
 const fields = (source: string) => source.split(/\r?\n/).slice(1).map(l => l.trim()).filter(l => /^[a-z]/.test(l)).map(l => l.split(/\s+/)[0]);
-const operationFields = ["id", "companyId", "remoteIdentityId", "providerScope", "operationKind", "intentKey", "state", "revision", "createdByUserId", "createdAt", "updatedAt", "company", "remoteIdentity", "createdBy", "events"];
+const operationFields = ["diagnostic", "id", "companyId", "remoteIdentityId", "providerScope", "operationKind", "intentKey", "state", "revision", "createdByUserId", "createdAt", "updatedAt", "company", "remoteIdentity", "createdBy", "events"];
 const eventFields = ["dispatchAuthorizationEventId", "dispatchAuthorizationEvent", "id", "operationId", "companyId", "providerScope", "actorUserId", "action", "previousState", "nextState", "revision", "createdAt", "operation", "actor"];
 test("both logical models, exact fields and inverse relations are equivalent across providers", () => {
   const sqlite = read("prisma/schema.prisma"); const pg = read("prisma/schema.postgres.prisma");
@@ -63,7 +63,7 @@ test("single identity-kind migration fails closed without any data cleanup", () 
 });
 
 // Conservative syntax check, not whole-program taint analysis or raw SQL enforcement.
-function ledgerRuntime(source: string, allowService = false) {
+function ledgerRuntime(source: string, allowService = false, diagnosticOnly = false) {
   const file = ts.createSourceFile("runtime.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const delegates = new Set(["openCreditCommercialOperation", "openCreditCommercialOperationEvent"]);
   const reads = new Set(["findUnique", "findUniqueOrThrow", "findFirst", "findFirstOrThrow", "findMany", "count", "aggregate", "groupBy"]);
@@ -79,9 +79,16 @@ function ledgerRuntime(source: string, allowService = false) {
     if (key && delegates.has(key)) {
       references++; const member = node.parent;
       const method = ts.isPropertyAccessExpression(member) ? member.name.text : ts.isElementAccessExpression(member) ? name(member.argumentExpression) : undefined;
-      const allowedWriter = allowService && (key === "openCreditCommercialOperation" ? method === "create" || method === "updateMany" : method === "create");
+      const diagnosticWriter = diagnosticOnly && key === "openCreditCommercialOperation" && method === "updateMany";
+      const allowedWriter = diagnosticWriter || allowService && (key === "openCreditCommercialOperation" ? method === "create" || method === "updateMany" : method === "create");
       if (!method || !reads.has(method) && !allowedWriter || !ts.isCallExpression(member.parent) || member.parent.expression !== member) errors.push("LEDGER_WRITER_OR_DELEGATE_ESCAPE");
       else if (allowedWriter) writers.push(key + "." + method);
+      if (diagnosticWriter && ts.isCallExpression(member.parent)) {
+        const arg = member.parent.arguments[0];
+        const data = arg && ts.isObjectLiteralExpression(arg) ? arg.properties.find(p => ts.isPropertyAssignment(p) && p.name.getText(file) === "data") : undefined;
+        if (!data || !ts.isPropertyAssignment(data) || !ts.isObjectLiteralExpression(data.initializer)
+          || data.initializer.properties.length !== 1 || data.initializer.properties[0].name?.getText(file) !== "diagnostic") errors.push("DIAGNOSTIC_MAY_ONLY_WRITE_DIAGNOSTIC");
+      }
     }
     if (ts.isBindingElement(node)) {
       const key = node.propertyName;
@@ -120,7 +127,8 @@ test("only the approved service has the exact ledger writers; all other producti
       if (entry.isDirectory()) scan(path);
       else if (/\.(?:tsx?|m?js|cjs)$/.test(entry.name) && !/\.(?:test|integration)\.(?:tsx?|m?js|cjs)$/.test(entry.name)) {
         const expected = path.pathname.endsWith("/src/lib/opencredit-commercial-operation.service.ts");
-        const result = ledgerRuntime(readFileSync(path, "utf8"), expected);
+        const diagnosticOnly = path.pathname.endsWith("/src/lib/opencredit-create-client-diagnostic.service.ts");
+        const result = ledgerRuntime(readFileSync(path, "utf8"), expected, diagnosticOnly);
         assert.deepEqual(result.errors, [], path.pathname);
         writers.push(...result.writers);
       }
@@ -128,10 +136,13 @@ test("only the approved service has the exact ledger writers; all other producti
   }
   scan(new URL("../", import.meta.url)); scan(new URL("../../scripts/", import.meta.url));
   assert.deepEqual(writers.sort(), ["openCreditCommercialOperation.create",
-    "openCreditCommercialOperation.updateMany", "openCreditCommercialOperation.updateMany",
+    "openCreditCommercialOperation.updateMany", "openCreditCommercialOperation.updateMany", "openCreditCommercialOperation.updateMany",
     "openCreditCommercialOperationEvent.create", "openCreditCommercialOperationEvent.create", "openCreditCommercialOperationEvent.create"].sort());
 });
 test("service exception permits only operation create/updateMany and Event create; no aliases or dynamic mutations", () => {
+  assert.deepEqual(ledgerRuntime('tx.openCreditCommercialOperation.updateMany({data:{diagnostic:"safe"}})', false, true).errors, []);
+  assert(ledgerRuntime('tx.openCreditCommercialOperation.updateMany({data:{state:"SUCCEEDED"}})', false, true).errors.length > 0);
+  assert(ledgerRuntime('tx.openCreditCommercialOperationEvent.create({data:{}})', false, true).errors.length > 0);
   for (const delegate of ["openCreditCommercialOperation", "openCreditCommercialOperationEvent"]) {
     for (const method of ["create", "createMany", "update", "updateMany", "delete", "deleteMany", "upsert"]) {
       const permitted = method === "create" || delegate === "openCreditCommercialOperation" && method === "updateMany";

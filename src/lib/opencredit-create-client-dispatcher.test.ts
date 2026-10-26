@@ -5,17 +5,22 @@ import { readFileSync, readdirSync } from "node:fs";
 import * as ts from "typescript";
 import type { SessionUser } from "./auth";
 import type { OpenCreditCreateClientObservation } from "./opencredit-create-client-outcome";
+import type { OpenCreditCreateClientDiagnostic } from "./opencredit-create-client-diagnostic";
 
 let dispatcher: typeof import("./opencredit-create-client-dispatcher");
 let api: typeof import("./opencredit-api-client");
 let scope: typeof import("./opencredit-provider-scope-resolver");
 let operationService: typeof import("./opencredit-commercial-operation.service");
 const observations: OpenCreditCreateClientObservation[] = [];
+const diagnostics: OpenCreditCreateClientDiagnostic[] = [];
 before(async () => {
   const loader = Module as typeof Module & { _load(s: string, ...a: unknown[]): unknown }; const original = loader._load;
   loader._load = (s, ...a) => {
     if (s === "server-only") return {};
     const value = original.call(loader, s, ...a);
+    if (s === "./opencredit-create-client-diagnostic.service") return { ...(value as Record<string, unknown>),
+      persistCreateClientDiagnostic: async (_db: unknown, _input: unknown, diagnostic: OpenCreditCreateClientDiagnostic) => { diagnostics.push({ ...diagnostic }); return true; },
+      logCreateClientDiagnostic: () => {} };
     if (s === "./opencredit-commercial-operation.service") {
       const domain = value as typeof import("./opencredit-commercial-operation.service");
       return { ...domain, applyOpenCreditCreateClientObservation: (...args: Parameters<typeof domain.applyOpenCreditCreateClientObservation>) => {
@@ -60,6 +65,7 @@ function database() {
 }
 async function configured(run: (f: ReturnType<typeof database>) => Promise<void>) {
   observations.length = 0;
+  diagnostics.length = 0;
   const keys = ["OPENCREDIT_TENANT_ID", "OPENCREDIT_PARTNER_ID", "PLATFORM_COMPANY_ID", "PLATFORM_ADMIN_EMAILS"];
   const old = keys.map(k => process.env[k]);
   ["Synthetic-Tenant", "Synthetic-Partner", actor.companyId, actor.email].forEach((v, i) => { process.env[keys[i]] = v; });
@@ -80,6 +86,10 @@ for (const [success, created] of [[true, true], [true, false], [false, false], [
   try {
     const result = await dispatcher.dispatchOpenCreditCreateClient(f.db, command(), { client: c.instance });
     assert.deepEqual(result, success ? { operationId: "synthetic-operation", state: "SUCCEEDED", revision: 2, created } : { operationId: "synthetic-operation", state: "UNKNOWN", revision: 2 });
+    assert.equal(diagnostics[0].providerHttpStatus, 201);
+    assert.equal(diagnostics[0].providerSuccess, success); assert.equal(diagnostics[0].providerCreated, created);
+    assert.equal(diagnostics[0].category, success ? "NONE" : "PROVIDER_SUCCESS_FALSE");
+    assert.equal(diagnostics.at(-1)!.settlement, "CONFIRMED");
     assert.deepEqual(f.order, ["auth", "transaction", "commit", "post", "transaction", "commit"]);
     assert.equal(c.posts(), 1); assert.equal(c.sent()!.body, '{"cpf":"00000000000","nome":"Synthetic","celular":"0007A"}');
     assert.equal(f.state.events.length, 2); assert.equal(f.state.events[0].dispatchAuthorizationEventId, "synthetic-grant");
@@ -245,6 +255,69 @@ test("runtime import guard covers extension variants", () => {
   const pattern = /(?:^|\/)opencredit-create-client-dispatcher(?:\.[cm]?[jt]s)?$/;
   for (const extension of ["", ".ts", ".js", ".cts", ".mts", ".cjs", ".mjs"]) assert(pattern.test("./opencredit-create-client-dispatcher" + extension));
 });
+
+for (const status of [400, 401, 500]) test("safe diagnostic non-201 JSON " + status, () => configured(async f => {
+  const privateText = "00000000000 +55 (00) 90000-0000 private@example.invalid Bearer synthetic-access password synthetic-only";
+  const c = client(f, () => Response.json({ requestId: "req_abcdefabcdef", error: { code: "VALIDATION_ERROR", message: privateText },
+    accessToken: "synthetic-access", refreshToken: "synthetic-refresh", customer: privateText },
+  { status, headers: { "x-correlation-id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" } }));
+  try {
+    await dispatcher.dispatchOpenCreditCreateClient(f.db, command(), { client: c.instance });
+    const d = diagnostics[0]; assert.equal(d.category, "HTTP_NON_201"); assert.equal(d.providerHttpStatus, status);
+    assert.equal(d.providerRequestId, "req_abcdefabcdef"); assert.equal(d.providerErrorCode, "VALIDATION_ERROR");
+    assert.equal(d.providerCorrelationId, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+    assert.equal(d.responseParsed, true); assert.equal(c.posts(), 1);
+    assert.doesNotMatch(JSON.stringify(diagnostics), /00000000000|90000|private@|Bearer|synthetic-access|synthetic-refresh|synthetic-only|customer/);
+  } finally { c.instance.dispose(); }
+}));
+test("diagnostics discard arbitrary error messages and unsafe/missing IDs", () => configured(async f => {
+  const c = client(f, () => Response.json({ requestId: "00000000000", error: { code: "SECRET_PRIVATE", message: "anything" } },
+    { status: 400, headers: { "x-request-id": "Bearer secret", "x-correlation-id": "email@example.invalid" } }));
+  try { await dispatcher.dispatchOpenCreditCreateClient(f.db, command(), { client: c.instance });
+    assert.equal(diagnostics[0].providerRequestId, null); assert.equal(diagnostics[0].providerCorrelationId, null);
+    assert.equal(diagnostics[0].providerErrorCode, null); assert.doesNotMatch(JSON.stringify(diagnostics), /secret|anything|example.invalid|00000000000/i);
+  } finally { c.instance.dispose(); }
+}));
+for (const [label, response] of invalidResponses) test("diagnostic body failure " + label, () => configured(async f => {
+  const c = client(f, response);
+  try { await dispatcher.dispatchOpenCreditCreateClient(f.db, command(), { client: c.instance });
+    assert.equal(c.posts(), 1); assert.equal(diagnostics[0].providerHttpStatus, label === "NETWORK" ? null : 201);
+    if (label === "INVALID_JSON") { assert.equal(diagnostics[0].responseReadable, true); assert.equal(diagnostics[0].responseParsed, false); }
+    assert.notEqual(diagnostics[0].category, "NONE"); assert.equal(diagnostics.at(-1)!.settlement, "CONFIRMED");
+  } finally { c.instance.dispose(); }
+}));
+test("settlement failure retains independent observation and records ERROR without second POST", () => configured(async f => {
+  f.state.failTerminalEvent = true; const c = client(f);
+  try { await assert.rejects(dispatcher.dispatchOpenCreditCreateClient(f.db, command(), { client: c.instance }), { code: "SETTLEMENT_FAILED" });
+    assert.equal(c.posts(), 1); assert.equal(f.state.operation.state, "IN_FLIGHT");
+    assert.equal(diagnostics[0].providerSuccess, true); assert.equal(diagnostics[0].settlement, "NOT_CONFIRMED");
+    assert.equal(diagnostics.at(-1)!.settlement, "ERROR");
+  } finally { c.instance.dispose(); }
+}));
+test("authentication rejection is diagnosed before reservation with zero business POST", () => configured(async f => {
+  let calls = 0;
+  const c = api.createOpenCreditApiClient({ credentials: () => ({ email: "synthetic", password: "synthetic" }), fetch: (async () => {
+    calls++; return Response.json({ error: { message: "PRIVATE" } }, { status: 401 });
+  }) as typeof fetch });
+  try {
+    await assert.rejects(dispatcher.dispatchOpenCreditCreateClient(f.db, command(), { client: c }), { code: "AUTHENTICATION" });
+    assert.equal(calls, 1); assert.equal(f.state.operation.state, "PREPARED"); assert.equal(f.state.events.length, 0);
+    assert.equal(diagnostics[0].category, "AUTH_ERROR"); assert.equal(diagnostics[0].providerHttpStatus, 401);
+    assert.equal(diagnostics[0].dispatchCommittedAt, null); assert.equal(diagnostics[0].settlement, "NOT_ATTEMPTED");
+  } finally { c.dispose(); }
+}));
+test("opaque tokens shaped like valid provider IDs are never persisted as correlation metadata", () => configured(async f => {
+  const access = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", refresh = "req_abcdefabcdef"; let posts = 0;
+  const c = api.createOpenCreditApiClient({ credentials: () => ({ email: "synthetic", password: "synthetic" }), fetch: (async url => {
+    if (String(url).endsWith("/api/auth/login")) return Response.json({ data: { accessToken: access, refreshToken: refresh, expiresIn: 28800 } });
+    posts++; return Response.json({ data: { success: true, created: true }, requestId: refresh },
+      { status: 201, headers: { "x-correlation-id": access } });
+  }) as typeof fetch });
+  try { await dispatcher.dispatchOpenCreditCreateClient(f.db, command(), { client: c });
+    assert.equal(posts, 1); assert.equal(diagnostics[0].providerRequestId, null); assert.equal(diagnostics[0].providerCorrelationId, null);
+    assert(!JSON.stringify(diagnostics).includes(access)); assert(!JSON.stringify(diagnostics).includes(refresh));
+  } finally { c.dispose(); }
+}));
 
 test("AST guards: exact dispatcher core, one-shot caller only; single human command consumer", () => {
   const filename = "src/lib/opencredit-create-client-dispatcher.ts";
