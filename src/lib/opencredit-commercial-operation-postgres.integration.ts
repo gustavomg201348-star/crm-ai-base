@@ -67,11 +67,11 @@ for (const table of [op, event]) material("exact columns/types/nullability/defau
     SELECT column_name AS name, data_type AS type, is_nullable AS nullable, column_default AS default
     FROM information_schema.columns WHERE table_schema='public' AND table_name=${table} ORDER BY ordinal_position
   `;
-  const expected = table === op ? ["id", "companyId", "remoteIdentityId", "providerScope", "operationKind", "intentKey", "state", "revision", "createdByUserId", "createdAt", "updatedAt"] : ["id", "operationId", "companyId", "providerScope", "actorUserId", "action", "previousState", "nextState", "revision", "createdAt", "dispatchAuthorizationEventId"];
+  const expected = table === op ? ["id", "companyId", "remoteIdentityId", "providerScope", "operationKind", "intentKey", "state", "revision", "createdByUserId", "createdAt", "updatedAt", "diagnostic"] : ["id", "operationId", "companyId", "providerScope", "actorUserId", "action", "previousState", "nextState", "revision", "createdAt", "dispatchAuthorizationEventId"];
   assert.deepEqual(columns.map(c => c.name), expected);
   for (const c of columns) {
     assert.equal(c.type, c.name.endsWith("At") ? "timestamp without time zone" : c.name === "revision" ? "integer" : "text");
-    assert.equal(c.nullable, ["previousState", "dispatchAuthorizationEventId"].includes(c.name) ? "YES" : "NO");
+    assert.equal(c.nullable, ["previousState", "dispatchAuthorizationEventId", "diagnostic"].includes(c.name) ? "YES" : "NO");
     if (c.name === "createdAt") assert.match(c.default ?? "", /CURRENT_TIMESTAMP/);
     else if (table === op && c.name === "state") assert.equal(c.default, "'PREPARED'::text");
     else if (table === op && c.name === "revision") assert.equal(c.default, "0");

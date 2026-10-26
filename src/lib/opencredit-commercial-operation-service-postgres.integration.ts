@@ -16,6 +16,7 @@ const db = new PrismaClient({ log: [] });
 let service: typeof import("./opencredit-commercial-operation.service");
 let authorizationService: typeof import("./opencredit-consumer-authorization.service");
 let provenance: typeof import("./meta-inbound-provenance");
+let diagnosticStorage: typeof import("./opencredit-create-client-diagnostic.service");
 const originalFetch = globalThis.fetch;
 before(async () => {
   globalThis.fetch = async () => { throw new Error("EXTERNAL_HTTP_FORBIDDEN_IN_RESERVATION_TEST"); };
@@ -26,6 +27,7 @@ before(async () => {
     service = await import("./opencredit-commercial-operation.service");
     authorizationService = await import("./opencredit-consumer-authorization.service");
     provenance = await import("./meta-inbound-provenance");
+    diagnosticStorage = await import("./opencredit-create-client-diagnostic.service");
   } finally { loader._load = original; }
 });
 after(async () => { globalThis.fetch = originalFetch; await db.$disconnect(); });
@@ -101,8 +103,48 @@ async function event(f: Fixture, count: number, action: string, previous: string
     assert.equal(grant.companyId, f.companyId); assert.equal(grant.providerScope, f.input.providerScope);
     assert.equal(grant.action, "GRANTED"); assert.equal(grant.nextActive, true);
   } else assert.equal(e.dispatchAuthorizationEventId, null);
-  assert.deepEqual(Object.keys((await f.current())!).sort(), ["id", "companyId", "remoteIdentityId", "providerScope", "operationKind", "intentKey", "state", "revision", "createdByUserId", "createdAt", "updatedAt"].sort());
+  assert.deepEqual(Object.keys((await f.current())!).sort(), ["id", "companyId", "remoteIdentityId", "providerScope", "operationKind", "intentKey", "state", "revision", "createdByUserId", "createdAt", "updatedAt", "diagnostic"].sort());
 }
+material("diagnostic independent commit survives terminal rollback without ledger mutation or replay", async f => {
+  const i = await prepared(f); await service.reserveOpenCreditClientProfileOperationForDispatch(db, i);
+  const transition = { ...i, expectedRevision: 1 };
+  const diagnostic = { version: 1 as const, category: "INVALID_JSON" as const, stage: "RESPONSE" as const,
+    providerHttpStatus: 201, providerRequestId: "req_abcdefabcdef", providerCorrelationId: null, providerSuccess: null,
+    providerCreated: null, providerErrorCode: null, responseReadable: false, responseParsed: false,
+    observedAt: "2026-10-26T00:00:02.000Z", dispatchCommittedAt: "2026-10-26T00:00:00.000Z",
+    respondedAt: "2026-10-26T00:00:01.000Z", settlement: "NOT_CONFIRMED" as const };
+  const results = await Promise.all([diagnosticStorage.persistCreateClientDiagnostic(db, transition, diagnostic),
+    diagnosticStorage.persistCreateClientDiagnostic(db, transition, diagnostic)]);
+  assert.equal(results.filter(Boolean).length, 1);
+  const before = (await f.current())!, events = await f.events();
+  assert.equal(before.state, "IN_FLIGHT"); assert.equal(before.revision, 1);
+  const rollbackDb = { $transaction: (run: (tx: Prisma.TransactionClient) => Promise<unknown>) => db.$transaction(async tx => {
+    await run(tx); throw Error("SYNTHETIC_TERMINAL_ROLLBACK");
+  }) } as unknown as Db;
+  await denied(() => service.applyOpenCreditCreateClientObservation(rollbackDb, transition,
+    { kind: "NO_RESPONSE", reason: "NETWORK" }), "STORAGE_ERROR");
+  assert.deepEqual(await f.current(), before); assert.deepEqual(await f.events(), events);
+  assert.equal(await diagnosticStorage.persistCreateClientDiagnostic(db, { ...transition, companyId: f.otherCompany },
+    { ...diagnostic, settlement: "ERROR" }, diagnostic), false);
+  assert.equal(await diagnosticStorage.persistCreateClientDiagnostic(db, transition, { ...diagnostic, settlement: "ERROR" }, diagnostic), true);
+  assert.equal(JSON.parse((await f.current())!.diagnostic!).settlement, "ERROR");
+  assert.equal((await f.current())!.state, "IN_FLIGHT"); assert.equal((await f.events()).length, 2);
+});
+material("historical diagnostic is null; confirmed diagnostic update leaves terminal state and events intact", async f => {
+  const i = await prepared(f); assert.equal((await f.current())!.diagnostic, null);
+  await service.reserveOpenCreditClientProfileOperationForDispatch(db, i);
+  const d = { version: 1 as const, category: "NONE" as const, stage: "RESPONSE" as const, providerHttpStatus: 201,
+    providerRequestId: null, providerCorrelationId: null, providerSuccess: true, providerCreated: false, providerErrorCode: null,
+    responseReadable: true, responseParsed: true, observedAt: "2026-10-26T00:00:02.000Z", dispatchCommittedAt: "2026-10-26T00:00:00.000Z",
+    respondedAt: "2026-10-26T00:00:01.000Z", settlement: "NOT_CONFIRMED" as const };
+  assert.equal(await diagnosticStorage.persistCreateClientDiagnostic(db, { ...i, expectedRevision: 1 }, d), true);
+  await service.applyOpenCreditCreateClientObservation(db, { ...i, expectedRevision: 1 },
+    { kind: "PARSED_RESPONSE", status: 201, result: { success: true, created: false } });
+  const events = await f.events();
+  assert.equal(await diagnosticStorage.persistCreateClientDiagnostic(db, { ...i, expectedRevision: 2 }, { ...d, settlement: "CONFIRMED" }, d), true);
+  assert.equal((await f.current())!.state, "SUCCEEDED"); assert.equal((await f.current())!.revision, 2);
+  assert.deepEqual(await f.events(), events);
+});
 material("PREPARE creates only PREPARED revision zero and one atomic event without PII", async f => {
   const r = await service.prepareOpenCreditClientProfileOperation(db, f.input);
   assert.deepEqual(r, { changed: true, operationId: (await f.current())!.id, state: "PREPARED", revision: 0 });

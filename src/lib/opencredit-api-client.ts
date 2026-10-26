@@ -2,6 +2,7 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import { configuredOpenCreditId, openCreditCorrelationIds, summarizeOpenCreditAccessToken } from "./opencredit-access-summary";
+import { safeDiagnosticId } from "./opencredit-create-client-diagnostic";
 
 const ORIGIN = "https://core.api.opencredit.tech";
 const IDLE_MS = 10 * 60 * 1000;
@@ -188,7 +189,9 @@ export function createOpenCreditApiClient(options: Options = {}) {
   return {
     /** Auth and headers are ready before the callback. Resolving it is a committed
      * one-shot barrier: no auth, serialization, retry or response-body read follows. */
-    async postJsonAfterCommit<T>(path: string, commit: () => Promise<{ body: string; committed: T }>): Promise<{ response: Response; committed: T }> {
+    async postJsonAfterCommit<T>(path: string, commit: () => Promise<{ body: string; committed: T }>): Promise<{
+      response: Response; committed: T; sanitizeDiagnosticIdentifier?: (value: unknown) => string | null;
+    }> {
       validatedPath(path);
       const pair = await authenticate();
       if (disposed) throw new OpenCreditApiError("DISPOSED");
@@ -196,7 +199,11 @@ export function createOpenCreditApiClient(options: Options = {}) {
       const execution = await commit();
       const response = await call(path, { method: "POST", headers, body: execution.body }) as Response;
       if (response.status === 401 && tokens === pair) tokens.expiresAt = 0;
-      return { response, committed: execution.committed };
+      return { response, committed: execution.committed, sanitizeDiagnosticIdentifier(value) {
+        const id = safeDiagnosticId(value);
+        // Bound to THIS request's pair, even if a concurrent request rotates the shared cache.
+        return id && ![pair.access, pair.refresh].some(secret => id.includes(secret)) ? id : null;
+      } };
     },
     async diagnoseAccess(tenant: string, partner: string) {
       assertServer();

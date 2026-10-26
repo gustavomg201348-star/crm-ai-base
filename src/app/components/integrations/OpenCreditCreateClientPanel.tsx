@@ -79,7 +79,7 @@ function Command({ enabled, companyId, contactId, authorizationActive }: Props) 
     {busy && <p role="status" className="mt-2 text-xs">Atualizando estado...</p>}
     {error && <p role="alert" className="mt-2 text-xs text-rose-700">{error}</p>}
     {state && <p role="status" className="mt-2 text-sm">{labels[state]}</p>}
-    {(state === "IN_FLIGHT" || state === "UNKNOWN") && <OpenCreditCreateClientReconciliationPanel companyId={companyId} contactId={contactId} />}
+    {(state === "IN_FLIGHT" || state === "UNKNOWN" || state === "SUCCEEDED" || state === "PREPARED") && <OpenCreditCreateClientReconciliationPanel companyId={companyId} contactId={contactId} />}
     {canCommand && <>
       {!authorizationActive && <p className="mt-2 text-xs">Registre uma autorização OpenCredit ativa antes do cadastro.</p>}
       <label className="mt-3 flex items-start gap-2 text-xs"><input type="checkbox" checked={confirmed} disabled={busy || !authorizationActive} onChange={e => setConfirmed(e.target.checked)} />Revisei o cadastro e confirmo o envio deste cliente à OpenCredit.</label>

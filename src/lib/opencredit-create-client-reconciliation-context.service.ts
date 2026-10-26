@@ -4,6 +4,7 @@ import type { SessionUser } from "./auth";
 import { isPlatformAdmin } from "./permissions";
 import { parseOpenCreditProviderScope, type OpenCreditProviderScope } from "./opencredit-commercial-identity-policy";
 import { parseOpenCreditCreateClientReconciliationContext, type OpenCreditCreateClientReconciliationContext } from "./opencredit-create-client-reconciliation-ui";
+import { parseCreateClientDiagnostic } from "./opencredit-create-client-diagnostic";
 
 const CODES = ["NOT_AUTHORIZED", "INVALID_COMPANY", "INVALID_CONTACT", "INVALID_PROVIDER_SCOPE", "COMPANY_NOT_FOUND", "CONTACT_NOT_FOUND", "CORRUPT_LEDGER", "STORAGE_ERROR"] as const;
 type Code = typeof CODES[number];
@@ -59,13 +60,18 @@ export async function getOpenCreditCreateClientReconciliationContext(db: Db, val
       if (!id(identity.id)) return fail("CORRUPT_LEDGER");
       const operation = await tx.openCreditCommercialOperation.findUnique({ where: { companyId_providerScope_remoteIdentityId_operationKind: {
         companyId: input.companyId, providerScope: input.providerScope, remoteIdentityId: identity.id, operationKind: "CLIENT_PROFILE_UPSERT",
-      } }, select: { id: true, state: true, revision: true, createdAt: true, updatedAt: true } });
+      } }, select: { id: true, state: true, revision: true, createdAt: true, updatedAt: true, diagnostic: true } });
       if (!operation) return { ok: true, review: null };
-      const op = closed(operation, ["id", "state", "revision", "createdAt", "updatedAt"], "CORRUPT_LEDGER");
+      const hasDiagnostic = Object.hasOwn(operation, "diagnostic");
+      const op = closed(operation, ["id", "state", "revision", "createdAt", "updatedAt", ...(hasDiagnostic ? ["diagnostic"] : [])], "CORRUPT_LEDGER");
+      const diagnostic = op.diagnostic === null || op.diagnostic === undefined ? null
+        : typeof op.diagnostic === "string" && op.diagnostic.length <= 2048 ? parseCreateClientDiagnostic(JSON.parse(op.diagnostic)) : null;
+      if (op.diagnostic !== null && op.diagnostic !== undefined && !diagnostic) return fail("CORRUPT_LEDGER");
+      const extra = diagnostic ? { diagnostic } : {};
       if (!id(op.id) || !["PREPARED", "IN_FLIGHT", "UNKNOWN", "SUCCEEDED", "FAILED"].some(state => state === op.state)
         || typeof op.revision !== "number" || !Number.isSafeInteger(op.revision) || op.revision < 0
         || time(op.createdAt) > time(op.updatedAt)) return fail("CORRUPT_LEDGER");
-      if (op.state !== "IN_FLIGHT" && op.state !== "UNKNOWN") return { ok: true, review: null };
+      if (op.state !== "IN_FLIGHT" && op.state !== "UNKNOWN") return { ok: true, review: null, ...extra };
       const count = op.state === "IN_FLIGHT" ? 2 : 3;
       if (op.revision !== count - 1) return fail("CORRUPT_LEDGER");
       const events = await tx.openCreditCommercialOperationEvent.findMany({ where: {
@@ -87,7 +93,7 @@ export async function getOpenCreditCreateClientReconciliationContext(db: Db, val
         ids.add(e.id); timestamps.push(time(e.createdAt));
         if (i > 0 && timestamps[i] < timestamps[i - 1]) return fail("CORRUPT_LEDGER");
       }
-      const result = parseOpenCreditCreateClientReconciliationContext({ ok: true, review: {
+      const result = parseOpenCreditCreateClientReconciliationContext({ ok: true, ...extra, review: {
         operationId: op.id, state: op.state, revision: op.revision,
         reason: op.state === "IN_FLIGHT" ? "DISPATCH_COMMITTED_RESULT_UNCONFIRMED" : "REMOTE_RESULT_AMBIGUOUS",
         preparedAt: new Date(timestamps[0]).toISOString(), dispatchCommittedAt: new Date(timestamps[1]).toISOString(),
