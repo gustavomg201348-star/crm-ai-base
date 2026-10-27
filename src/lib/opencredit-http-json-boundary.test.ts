@@ -228,9 +228,9 @@ test("passive boundary AST guard: strict parser dependency, exact dispatcher con
       if (!/\.[cm]?[jt]sx?$/.test(file) || /\.(test|integration)\./.test(file) || path.resolve(file) === filename) continue;
       const tree = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
       const visit = (node: ts.Node): void => {
-        // Only the explicit dispatcher core may compose this passive reader.
+        // Exact approved dispatcher and read-only validation service compositions only.
         if (ts.isStringLiteralLike(node) && /(?:^|\/)opencredit-http-json-boundary(?:\.[cm]?[jt]s)?$/.test(node.text)) {
-          assert.equal(path.resolve(file), path.resolve("src/lib/opencredit-create-client-dispatcher.ts"));
+          assert(["src/lib/opencredit-create-client-dispatcher.ts", "src/lib/opencredit-client-validation.service.ts"].some(p => path.resolve(p) === path.resolve(file)));
           assert(ts.isImportDeclaration(node.parent));
         }
         ts.forEachChild(node, visit);

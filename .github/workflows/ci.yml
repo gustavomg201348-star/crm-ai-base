@@ -101,6 +101,9 @@ jobs:
       - name: Validate OpenCredit createClient read context
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-create-client-context.service.test.ts src/lib/opencredit-create-client-context-admin-handler.test.ts
 
+      - name: Validate OpenCredit read-only pre-simulation client validation
+        run: npx --yes tsx@4.20.6 --test src/lib/opencredit-client-validation.test.ts
+
       - name: Validate OpenCredit createClient human UI guards
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-create-client-ui.test.ts
 

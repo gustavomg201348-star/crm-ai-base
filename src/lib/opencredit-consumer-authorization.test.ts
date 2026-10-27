@@ -317,7 +317,7 @@ test("only approved human admin mutation boundary; reservation only reads author
             ts.forEachChild(node, visit);
           };
           visit(ast);
-        } else if (path === "src/lib/opencredit-consumer-authorization-context.service.ts") {
+        } else if (["src/lib/opencredit-consumer-authorization-context.service.ts", "src/lib/opencredit-client-validation.service.ts"].includes(path)) {
           const source = readFileSync(path, "utf8");
           assert.doesNotMatch(source, /grantOpenCreditConsumerAuthorization|revokeOpenCreditConsumerAuthorization|consumer-authorization\.service/);
           const ast = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true);
@@ -341,6 +341,7 @@ test("only approved human admin mutation boundary; reservation only reads author
           "src/lib/opencredit-create-client-context-postgres.integration.ts",
           "src/lib/opencredit-create-client-reconciliation-context-postgres.integration.ts",
           "src/lib/opencredit-create-client-ui.test.ts",
+          "src/lib/opencredit-client-validation.test.ts",
           "src/lib/opencredit-consumer-authorization-context-admin-handler.ts",
           "src/lib/opencredit-consumer-authorization-context-admin-handler.test.ts",
           "src/lib/opencredit-consumer-authorization-ui.ts", "src/lib/opencredit-consumer-authorization-ui.test.ts",
