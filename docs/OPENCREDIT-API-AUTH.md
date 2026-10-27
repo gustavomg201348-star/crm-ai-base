@@ -184,11 +184,13 @@ For an absent operation, sessionStorage preserves ONLY a pending UUID under
 again. Server context is authority: PREPARED synchronizes the local UUID, and all
 other persisted states block new commands. No operation + valid pending UUID reuses
 it; no operation + no pending UUID may generate crypto.randomUUID only after the
-checkbox, click and window.confirm. Malformed pending values are never reused;
+two visible confirmations and an explicit click. The createClient panel no longer
+depends on a native browser confirmation dialog. Malformed pending values are never reused;
 storage exceptions block dispatch. Persistence happens before the dispatch fetch. No UUID/pending
 is cleared on 409/503, network/abort or malformed response.
 
-The exact dispatch body remains companyId/contactId/commandId only. A working ref
+The dispatch body contains companyId/contactId/commandId and the optional, closed
+phonePolicy documented below. A working ref
 and busy state stop double clicks; backend unique/CAS protection remains authority.
 The backend also enforces a single CLIENT_PROFILE_UPSERT intention per Company +
 providerScope + RemoteIdentity, independently of commandId and in every state.
@@ -204,10 +206,33 @@ Historical duplicates prevent the single-intent migration and deployment; neithe
 reader chooses a winner. No duplicate is automatically deleted, updated or cleaned
 up. Such data requires a separate approved plan before rollout. Same-command lookup
 stays idempotent; future update/sync requires an explicit new lifecycle.
-After valid response, conflict, provider/local failure or network exception the
+After valid response, conflict, provider failure or network exception the
 panel reloads server context, never performs automatic dispatch/retry. Failed reload
 disables new action and asks for state confirmation, not replay. SETTLEMENT_FAILED
 may mean the POST occurred; an IN_FLIGHT snapshot is retained without resend.
+
+The createClient command requires two visible checkboxes: review of the customer
+registration and acknowledgement that external creation/update must not be repeated
+after a pending or ambiguous result. Both reset on phone-policy changes, context
+reload (including operational-state changes), Company/Contact-keyed remount and
+authorization changes. The UI button and local send callback require both, valid context, active
+authorization and an allowed state; busy/working still prevent duplicate actions.
+
+Local preparation (storage read, UUID resolution/validation, body serialization,
+storage write) is caught separately before the dispatch fetch. A non-aborted failure
+shows the fixed LOCAL_COMMAND_PREPARATION_FAILED human-readable message, clears
+both confirmations and releases busy, without dispatch or automatic context reload.
+No exception message, stack or storage content is displayed. Abort/stale epochs
+remain silent and cannot start the dispatch fetch. Once transport starts, existing
+ambiguous-result/reconciliation behavior and saved commandId protection remain
+unchanged: no automatic resend, replacement command or replay.
+
+This UI-only correction changes no server guard, endpoint, dispatcher, diagnostic,
+provider client, schema or migration. Tests execute the actual TSX callbacks using
+fake hooks/storage/crypto/fetch and cover pre-fetch failures and cancellation.
+No PostgreSQL material rerun is needed for this correction because persistence,
+transactions and all server-side files are unchanged. Existing material CI gates
+remain intact. No real provider or production operation is used for validation.
 
 Target-key remount, AbortController and sequence epochs prevent stale context or
 dispatch responses from updating/reloading another contact. Browser abort is NOT
@@ -1910,7 +1935,7 @@ scope, current authorization binding, single intent and one-shot transport stay
 unchanged. No new endpoint or provider client is introduced.
 
 The human UI defaults to INCLUDE, presents an explicit selector and policy preview,
-and clears its confirmation when the policy changes. The preview states that the
+and clears both visible confirmations when the policy changes. The preview states that the
 Contact phone remains preserved. Changing policy does not create another intent,
 unlock a terminal operation or authorize replay. After uncertainty, do not resend.
 The policy is chosen for each explicit command; it is not an immutable PREPARED

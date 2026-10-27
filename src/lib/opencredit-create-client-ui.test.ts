@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync, readdirSync } from "node:fs";
+import { runInThisContext } from "node:vm";
 import * as ts from "typescript";
+import { parseOpenCreditCreateClientPhonePolicy } from "./opencredit-create-client-phone-policy";
 import { createClientErrorMessage, isOpenCreditCommandId, parseCreateClientContext, parseCreateClientDispatchResponse, resolveCreateClientCommandId,
   type CreateClientOperation } from "./opencredit-create-client-ui";
 const uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", other = "bbbbbbbb-bbbb-4bbb-9bbb-bbbbbbbbbbbb";
@@ -51,7 +53,7 @@ test("pending is reused, generation only when no operation/pending", () => {
   assert.equal(resolveCreateClientCommandId({ operation: null, pendingCommandId: null }), null);
   assert.equal(resolveCreateClientCommandId({ operation: { ...op(), commandId: "bad" }, pendingCommandId: other, generatedCommandId: other }), null);
 });
-for (const code of ["RATE_LIMITED", "OPENCREDIT_CREATE_CLIENT_DISPATCH_AUTHENTICATION", "OPENCREDIT_CREATE_CLIENT_DISPATCH_PRE_DISPATCH_UNAVAILABLE", "OPENCREDIT_CREATE_CLIENT_DISPATCH_SETTLEMENT_FAILED",
+for (const code of ["LOCAL_COMMAND_PREPARATION_FAILED", "RATE_LIMITED", "OPENCREDIT_CREATE_CLIENT_DISPATCH_AUTHENTICATION", "OPENCREDIT_CREATE_CLIENT_DISPATCH_PRE_DISPATCH_UNAVAILABLE", "OPENCREDIT_CREATE_CLIENT_DISPATCH_SETTLEMENT_FAILED",
   "OPENCREDIT_COMMERCIAL_OPERATION_CONSUMER_AUTHORIZATION_MISSING", "OPENCREDIT_COMMERCIAL_OPERATION_CONSUMER_AUTHORIZATION_INACTIVE", "OPENCREDIT_COMMERCIAL_OPERATION_OPERATION_STATE_CONFLICT", "OPENCREDIT_COMMERCIAL_OPERATION_OPERATION_REVISION_CONFLICT", "OPENCREDIT_COMMERCIAL_OPERATION_CONCURRENT_CONFLICT"]) test("humanized closed error " + code, () => {
   const message = createClientErrorMessage({ error: code }); assert.notEqual(message, createClientErrorMessage(null)); assert(!message.includes(code)); assert.doesNotMatch(message, /tente novamente/i);
 });
@@ -77,7 +79,7 @@ test("component AST: only explicit onClick dispatch, no automation, storage befo
   assert(branch); // The generator is additionally nested under no recovered pending command.
   const send = source.slice(source.indexOf("async function send()"), source.indexOf("  if (hidden) return null;"));
   assert.match(send, /if \(context.operation !== null\)[\s\S]*context.operation.commandId[\s\S]*} else \{[\s\S]*crypto.randomUUID\(\)/);
-  assert(send.indexOf("window.confirm(") < send.indexOf("crypto.randomUUID("));
+  assert.doesNotMatch(source, /window\.confirm|\bconfirm\(/);
   assert(send.indexOf("sessionStorage.setItem(storageKey, commandId)") < send.indexOf("fetch(dispatchEndpoint"));
   const storageCalls = calls.filter(c => /^sessionStorage\.(?:getItem|setItem)$/.test(c.expression.getText(ast)));
   assert.equal(storageCalls.length, 3);
@@ -88,7 +90,7 @@ test("component AST: only explicit onClick dispatch, no automation, storage befo
     if (call.arguments.length === 2) assert(["commandId", "parsed.operation.commandId"].includes(call.arguments[1].getText(ast)));
   }
   assert(send.indexOf("working.current = true") < send.indexOf("fetch(dispatchEndpoint"));
-  assert.match(send, /working.current \|\| busy/); assert.match(send, /!authorizationActive \|\| !confirmed/);
+  assert.match(send, /working.current \|\| busy/); assert.match(send, /!authorizationActive \|\| !confirmed \|\| !riskConfirmed/);
   assert.match(send, /JSON.stringify\(\{ companyId, contactId, commandId, phonePolicy \}\)/);
   for (const c of calls.filter(c => c.expression.getText(ast) === "useEffect")) assert.doesNotMatch(c.getText(ast), /send\(|dispatchEndpoint|randomUUID|setItem/);
   for (const c of calls.filter(c => c.expression.getText(ast) === "fetch" && c.arguments[0].getText(ast) === "dispatchEndpoint")) assert.equal(owner(c), "send");
@@ -98,7 +100,7 @@ test("component AST: only explicit onClick dispatch, no automation, storage befo
   assert(conditions.every(s => !/send|fetch|randomUUID/.test(s)));
   assert.match(source, /context.operation === null \|\| state === "PREPARED"/); assert.match(source, /\{canCommand &&/);
   assert.match(source, /key=\{JSON.stringify\(\[props.companyId, props.contactId\]\)\}/);
-  assert.equal((source.match(/abort.signal.aborted \|\| sequence.current !== epoch/g) ?? []).length, 5);
+  assert.equal((source.match(/abort.signal.aborted \|\| sequence.current !== epoch/g) ?? []).length, 7);
   assert.match(source, /sequence.current\+\+; controller.current\?\.abort\(\)/);
   assert.match(source, /await load\(message\)/); assert.match(source, /response.status === 401 \|\| response.status === 403/);
   assert.match(source, /if \(parsed.operation\?\.state === "PREPARED"\) sessionStorage.setItem\(storageKey, parsed.operation.commandId\)/);
@@ -109,9 +111,180 @@ test("explicit phone selector defaults INCLUDE, previews OMIT, and invalidates c
   const source = readFileSync("src/app/components/integrations/OpenCreditCreateClientPanel.tsx", "utf8");
   assert.match(source, /useState<OpenCreditCreateClientPhonePolicy>\("include"\)/);
   assert.match(source, /<option value="include">/); assert.match(source, /<option value="omit">/);
-  assert.match(source, /setPhonePolicy\(parseOpenCreditCreateClientPhonePolicy\(e.target.value\)\); setConfirmed\(false\)/);
+  assert.match(source, /setPhonePolicy\(parseOpenCreditCreateClientPhonePolicy\(e.target.value\)\); setConfirmed\(false\); setRiskConfirmed\(false\)/);
   assert.match(source, /Phone policy:/); assert.match(source, /telefone no cadastro permanece preservado/);
   assert.match(source, /JSON.stringify\(\{ companyId, contactId, commandId, phonePolicy \}\)/);
+});
+
+// Execute the actual TSX handlers with a small hook renderer and fake browser ports.
+// No DOM package, real HTTP, provider, database or production session is used.
+type PanelProps = { enabled: boolean; companyId: string; contactId: string; authorizationActive: boolean };
+type View = { type: unknown; props: Record<string, unknown>; key?: string };
+function panelHarness(options: {
+  fail?: "get" | "set" | "uuid" | "serialize"; operation?: CreateClientOperation | null;
+  pending?: string; networkFailure?: boolean; pendingDispatch?: boolean; onStore?: () => void;
+} = {}) {
+  let cells: unknown[] = [], cursor = 0, key: string | undefined, root: View | null = null;
+  const effects: (() => void)[] = [];
+  type Effect = { deps: unknown[]; cleanup?: () => void };
+  const same = (a: unknown[], b: unknown[]) => a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
+  const hooks = {
+    useState(initial: unknown) {
+      const i = cursor++; if (!(i in cells)) cells[i] = initial;
+      return [cells[i], (value: unknown) => { cells[i] = value; }];
+    },
+    useRef(initial: unknown) { const i = cursor++; if (!(i in cells)) cells[i] = { current: initial }; return cells[i]; },
+    useCallback(fn: unknown, deps: unknown[]) {
+      const i = cursor++, previous = cells[i] as { fn: unknown; deps: unknown[] } | undefined;
+      if (!previous || !same(previous.deps, deps)) cells[i] = { fn, deps };
+      return (cells[i] as { fn: unknown }).fn;
+    },
+    useEffect(effect: () => void | (() => void), deps: unknown[]) {
+      const i = cursor++, previous = cells[i] as Effect | undefined;
+      if (previous && same(previous.deps, deps)) return;
+      const cell: Effect = { deps, cleanup: previous?.cleanup }; cells[i] = cell;
+      effects.push(() => { cell.cleanup?.(); const cleanup = effect(); cell.cleanup = typeof cleanup === "function" ? cleanup : undefined; });
+    },
+  };
+  let props: PanelProps = { enabled: true, companyId: "synthetic-company", contactId: "synthetic-contact", authorizationActive: true };
+  let operation = options.operation ?? null, generations = 0, finishDispatch: ((response: Response) => void) | undefined;
+  const stored = new Map<string, string>(), dispatches: RequestInit[] = [], contextRequests: RequestInit[] = [];
+  if (options.pending) stored.set("opencredit:create-client-command:synthetic-company:synthetic-contact", options.pending);
+  const browserFetch = async (url: string, init: RequestInit) => {
+    if (url === "/api/admin/integrations/opencredit/create-client/context") {
+      contextRequests.push(init); return Response.json({ ok: true, operation });
+    }
+    assert.equal(url, "/api/admin/integrations/opencredit/create-client/dispatch"); dispatches.push(init);
+    if (options.networkFailure) throw Error("PRIVATE_NETWORK_DETAIL");
+    if (options.pendingDispatch) return new Promise<Response>(resolve => { finishDispatch = resolve; });
+    operation = { ...op("SUCCEEDED"), revision: 2 }; return Response.json(dispatch());
+  };
+  const testModule = { exports: {} as { OpenCreditCreateClientPanel: (p: PanelProps) => View | null } };
+  const jsx = (type: unknown, viewProps: Record<string, unknown>, viewKey?: string): View => ({ type, props: viewProps, key: viewKey });
+  const source = readFileSync("src/app/components/integrations/OpenCreditCreateClientPanel.tsx", "utf8");
+  const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText;
+  // Same realm preserves the real helper's strict Object.prototype checks.
+  const execute = runInThisContext('(function(ports) { "use strict"; const { exports, require, AbortController, fetch, sessionStorage, crypto, JSON } = ports;\n' + compiled + '\n})') as (ports: Record<string, unknown>) => void;
+  execute({
+    exports: testModule.exports,
+    require(specifier: string) {
+      if (specifier === "react") return hooks;
+      if (specifier === "react/jsx-runtime") return { jsx, jsxs: jsx, Fragment: Symbol("fragment") };
+      if (specifier === "./OpenCreditCreateClientReconciliationPanel") return { OpenCreditCreateClientReconciliationPanel: () => null };
+      if (specifier === "@/lib/opencredit-create-client-phone-policy") return { parseOpenCreditCreateClientPhonePolicy };
+      assert.equal(specifier, "@/lib/opencredit-create-client-ui");
+      return { createClientErrorMessage, isOpenCreditCommandId, parseCreateClientContext, parseCreateClientDispatchResponse, resolveCreateClientCommandId };
+    },
+    AbortController, fetch: browserFetch,
+    crypto: { randomUUID() { generations++; if (options.fail === "uuid") throw Error("PRIVATE_CRYPTO_DETAIL"); return uuid; } },
+    sessionStorage: {
+      getItem(k: string) { if (options.fail === "get") throw Error("PRIVATE_STORAGE_DETAIL"); return stored.get(k) ?? null; },
+      setItem(k: string, value: string) { if (options.fail === "set") throw Error("PRIVATE_STORAGE_DETAIL"); stored.set(k, value); options.onStore?.(); },
+    },
+    JSON: { parse: JSON.parse, stringify(value: unknown) {
+      if (options.fail === "serialize" && value && typeof value === "object" && "commandId" in value) throw Error("PRIVATE_SERIALIZATION_DETAIL");
+      return JSON.stringify(value);
+    } },
+  });
+  function unmount() { for (const cell of cells) (cell as Effect | undefined)?.cleanup?.(); cells = []; key = undefined; root = null; effects.length = 0; }
+  function render() {
+    const child = testModule.exports.OpenCreditCreateClientPanel(props);
+    if (!child) { unmount(); return; }
+    if (key !== child.key) { unmount(); key = child.key; }
+    cursor = 0; root = (child.type as (p: PanelProps) => View)(child.props as PanelProps);
+    for (const effect of effects.splice(0)) effect();
+  }
+  function nodes(): View[] {
+    const result: View[] = [];
+    const visit = (v: unknown) => { if (Array.isArray(v)) v.forEach(visit); else if (v && typeof v === "object" && "props" in v) { const n = v as View; result.push(n); visit(n.props.children); } };
+    visit(root); return result;
+  }
+  const text = (v: unknown): string => Array.isArray(v) ? v.map(text).join("") : v && typeof v === "object" && "props" in v ? text((v as View).props.children) : typeof v === "string" || typeof v === "number" ? String(v) : "";
+  const boxes = () => nodes().filter(n => n.type === "input" && n.props.type === "checkbox");
+  const button = () => nodes().find(n => n.type === "button" && /^(Cadastrar|Continuar cadastro) na OpenCredit$/.test(text(n.props.children)));
+  render();
+  return {
+    dispatches, contextRequests, stored, generations: () => generations, unmount,
+    async flush() { for (let i = 0; i < 16; i++) await Promise.resolve(); render(); },
+    button, confirmations: () => boxes().map(n => n.props.checked),
+    confirm(index: number, checked = true) { (boxes()[index].props.onChange as (e: unknown) => void)({ target: { checked } }); render(); },
+    policy(value: "include" | "omit") { const select = nodes().find(n => n.type === "select")!; (select.props.onChange as (e: unknown) => void)({ target: { value } }); render(); },
+    click() { const b = button(); assert(b); (b.props.onClick as () => void)(); render(); },
+    reload() { const b = nodes().find(n => n.type === "button" && text(n.props.children) === "Atualizar painel")!; (b.props.onClick as () => void)(); render(); },
+    setProps(next: Partial<PanelProps>) { props = { ...props, ...next }; render(); },
+    setOperation(next: CreateClientOperation | null) { operation = next; },
+    completeDispatch() { assert(finishDispatch); finishDispatch(Response.json(dispatch())); },
+    alerts: () => nodes().filter(n => n.props.role === "alert").map(n => text(n.props.children)),
+  };
+}
+
+for (const first of [false, true]) for (const second of [false, true]) test(`actual panel: two visible confirmations required ${first}/${second}`, async () => {
+  const h = panelHarness(); await h.flush(); assert.deepEqual(h.confirmations(), [false, false]);
+  h.confirm(0, first); h.confirm(1, second); assert.equal(h.button()!.props.disabled, !(first && second));
+  if (!first || !second) { h.click(); await h.flush(); assert.equal(h.dispatches.length, 0); }
+  h.unmount();
+});
+test("actual panel: policy, reload, authority and target changes reset BOTH confirmations", async () => {
+  const h = panelHarness(); await h.flush();
+  for (const policy of ["omit", "include"] as const) { h.confirm(0); h.confirm(1); h.policy(policy); assert.deepEqual(h.confirmations(), [false, false]); }
+  h.confirm(0); h.confirm(1); h.reload(); await h.flush(); assert.deepEqual(h.confirmations(), [false, false]);
+  h.confirm(0); h.confirm(1); h.setProps({ authorizationActive: false }); h.setProps({ authorizationActive: true });
+  assert.deepEqual(h.confirmations(), [false, false]);
+  h.confirm(0); h.confirm(1); h.setProps({ contactId: "synthetic-other" }); await h.flush(); assert.deepEqual(h.confirmations(), [false, false]);
+  h.confirm(0); h.confirm(1); h.setProps({ companyId: "synthetic-other-company" }); await h.flush(); assert.deepEqual(h.confirmations(), [false, false]);
+  assert.equal(h.dispatches.length, 0); h.unmount();
+});
+test("actual panel: operational-state reload clears confirmations and blocks terminal dispatch", async () => {
+  const h = panelHarness(); await h.flush(); h.confirm(0); h.confirm(1);
+  h.setOperation(op()); h.reload(); await h.flush(); assert.deepEqual(h.confirmations(), [false, false]);
+  h.confirm(0); h.confirm(1); h.setOperation(op("UNKNOWN")); h.reload(); await h.flush();
+  assert.equal(h.button(), undefined); assert.equal(h.dispatches.length, 0); assert.equal(h.generations(), 0); h.unmount();
+});
+for (const fail of ["get", "set", "uuid", "serialize"] as const) test("actual panel: local " + fail + " failure is visible, sanitized, zero dispatch and no reload", async () => {
+  const h = panelHarness({ fail }); await h.flush(); h.confirm(0); h.confirm(1); h.click(); await h.flush();
+  assert.equal(h.dispatches.length, 0); assert.equal(h.contextRequests.length, 1);
+  assert.deepEqual(h.alerts(), [createClientErrorMessage({ error: "LOCAL_COMMAND_PREPARATION_FAILED" })]);
+  assert.doesNotMatch(h.alerts().join(""), /PRIVATE|stack|token|synthetic/);
+  assert.deepEqual(h.confirmations(), [false, false]); assert.equal(h.button()!.props.disabled, true); h.unmount();
+});
+for (const state of ["IN_FLIGHT", "UNKNOWN", "SUCCEEDED", "FAILED"] as const) test("actual panel: persisted " + state + " offers no dispatch button or generation", async () => {
+  const h = panelHarness({ operation: op(state) }); await h.flush(); assert.equal(h.button(), undefined);
+  assert.equal(h.generations(), 0); assert.equal(h.dispatches.length, 0); h.unmount();
+});
+test("actual panel: authorization and loading remain fail-closed", async () => {
+  const h = panelHarness(); assert.equal(h.button(), undefined); await h.flush(); h.confirm(0); h.confirm(1);
+  h.setProps({ authorizationActive: false }); assert.equal(h.button()!.props.disabled, true); h.click(); await h.flush();
+  assert.equal(h.dispatches.length, 0); h.unmount();
+});
+test("actual panel: OMIT dispatches exactly once, duplicate click is blocked and pending command stays stable", async () => {
+  const h = panelHarness({ pending: other, pendingDispatch: true }); await h.flush(); h.policy("omit"); h.confirm(0); h.confirm(1);
+  h.click(); assert.equal(h.button()!.props.disabled, true); h.click(); await h.flush();
+  assert.equal(h.dispatches.length, 1); assert.equal(h.generations(), 0);
+  assert.deepEqual(JSON.parse(h.dispatches[0].body as string), { companyId: "synthetic-company", contactId: "synthetic-contact", commandId: other, phonePolicy: "omit" });
+  assert.equal(h.dispatches[0].credentials, "same-origin"); assert.equal(h.dispatches[0].cache, "no-store");
+  h.completeDispatch(); await h.flush(); assert.equal(h.dispatches.length, 1); assert.equal(h.stored.values().next().value, other); h.unmount();
+});
+test("actual panel: default INCLUDE generates once; PREPARED uses server command without UUID generation", async () => {
+  for (const operation of [null, op()]) {
+    const h = panelHarness({ operation, fail: operation ? "uuid" : undefined }); await h.flush(); h.confirm(0); h.confirm(1); h.click(); await h.flush();
+    assert.equal(h.dispatches.length, 1); assert.equal(h.generations(), operation ? 0 : 1);
+    const body = JSON.parse(h.dispatches[0].body as string); assert.equal(body.commandId, uuid); assert.equal(body.phonePolicy, "include"); h.unmount();
+  }
+});
+test("actual panel: network ambiguity never retries or replaces the saved command", async () => {
+  const h = panelHarness({ networkFailure: true }); await h.flush(); h.confirm(0); h.confirm(1); h.click(); await h.flush(); await h.flush();
+  assert.equal(h.dispatches.length, 1); assert.equal(h.generations(), 1); assert.equal(h.stored.values().next().value, uuid);
+  assert.deepEqual(h.confirmations(), [false, false]); assert.equal(h.alerts().length, 1); assert.doesNotMatch(h.alerts()[0], /PRIVATE/); h.unmount();
+});
+for (const throwAfterAbort of [false, true]) test("actual panel: aborted local preparation is silent and never fetches " + throwAfterAbort, async () => {
+  let abort = () => {};
+  const h = panelHarness({ onStore: () => { abort(); if (throwAfterAbort) throw Error("PRIVATE_ABORT_DETAIL"); } }); abort = () => h.unmount();
+  await h.flush(); h.confirm(0); h.confirm(1); h.click(); assert.equal(h.dispatches.length, 0); assert.deepEqual(h.alerts(), []); h.unmount();
+});
+test("actual panel: target epoch abort after dispatch suppresses stale errors and never retries", async () => {
+  const h = panelHarness({ pendingDispatch: true }); await h.flush(); h.confirm(0); h.confirm(1); h.click();
+  h.setProps({ contactId: "synthetic-other" }); await h.flush(); h.completeDispatch(); await h.flush();
+  assert.equal(h.dispatches.length, 1); assert.equal(h.generations(), 1); assert.deepEqual(h.alerts(), []); assert.deepEqual(h.confirmations(), [false, false]); h.unmount();
 });
 test("runtime consumers and endpoint are exact, including extension and indirect import forms", () => {
   const component = "src/app/components/integrations/OpenCreditCreateClientPanel.tsx", handler = "src/lib/opencredit-create-client-context-admin-handler.ts", service = "src/lib/opencredit-create-client-context.service.ts";

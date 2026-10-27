@@ -16,13 +16,14 @@ export function OpenCreditCreateClientPanel(props: Props) {
 function Command({ enabled, companyId, contactId, authorizationActive }: Props) {
   const [context, setContext] = useState<CreateClientContext | null>(null);
   const [confirmed, setConfirmed] = useState(false), [hidden, setHidden] = useState(false), [busy, setBusy] = useState(true);
+  const [riskConfirmed, setRiskConfirmed] = useState(false);
   const [phonePolicy, setPhonePolicy] = useState<OpenCreditCreateClientPhonePolicy>("include");
   const [error, setError] = useState("");
   const working = useRef(false), sequence = useRef(0), controller = useRef<AbortController | null>(null);
   const storageKey = "opencredit:create-client-command:" + companyId + ":" + contactId;
   const load = useCallback(async (message = "") => {
     controller.current?.abort(); const abort = new AbortController(); controller.current = abort;
-    const epoch = ++sequence.current; working.current = true; setBusy(true); setContext(null); setConfirmed(false); setError(message);
+    const epoch = ++sequence.current; working.current = true; setBusy(true); setContext(null); setConfirmed(false); setRiskConfirmed(false); setError(message);
     try {
       const response = await fetch(contextEndpoint, { method: "POST", credentials: "same-origin", cache: "no-store", signal: abort.signal,
         headers: { "Content-Type": "application/json" }, body: JSON.stringify({ companyId, contactId }) });
@@ -39,13 +40,14 @@ function Command({ enabled, companyId, contactId, authorizationActive }: Props) 
   }, [companyId, contactId, storageKey]);
   const invalidate = useCallback(() => { sequence.current++; controller.current?.abort(); }, []);
   useEffect(() => { void load(); return invalidate; }, [load, invalidate]);
+  useEffect(() => { setConfirmed(false); setRiskConfirmed(false); }, [authorizationActive]);
   async function send() {
-    if (working.current || busy || hidden || !enabled || !authorizationActive || !confirmed || !context
+    if (working.current || busy || hidden || !enabled || !authorizationActive || !confirmed || !riskConfirmed || !context
       || context.operation !== null && context.operation.state !== "PREPARED") return;
-    if (!window.confirm("Confirma o envio deste cliente à OpenCredit? Esta ação pode realizar um cadastro ou atualização externa e não deve ser repetida se o resultado ficar pendente.")) return;
-    working.current = true; setBusy(true); setConfirmed(false); setError("");
+    working.current = true; setBusy(true); setConfirmed(false); setRiskConfirmed(false); setError("");
     controller.current?.abort(); const abort = new AbortController(); controller.current = abort; const epoch = ++sequence.current;
-    let message = createClientErrorMessage(null);
+    // Local preparation must complete before the one-shot network boundary starts.
+    let body: string;
     try {
       const pending = sessionStorage.getItem(storageKey);
       let commandId: string | null;
@@ -56,9 +58,19 @@ function Command({ enabled, companyId, contactId, authorizationActive }: Props) 
         if (!commandId) commandId = resolveCreateClientCommandId({ operation: null, pendingCommandId: null, generatedCommandId: crypto.randomUUID() });
       }
       if (!isOpenCreditCommandId(commandId)) throw Error("INVALID_COMMAND");
+      body = JSON.stringify({ companyId, contactId, commandId, phonePolicy });
       sessionStorage.setItem(storageKey, commandId);
+    } catch {
+      if (abort.signal.aborted || sequence.current !== epoch) return;
+      setError(createClientErrorMessage({ error: "LOCAL_COMMAND_PREPARATION_FAILED" }));
+      working.current = false; setBusy(false);
+      return;
+    }
+    if (abort.signal.aborted || sequence.current !== epoch) return;
+    let message = createClientErrorMessage(null);
+    try {
       const response = await fetch(dispatchEndpoint, { method: "POST", credentials: "same-origin", cache: "no-store", signal: abort.signal,
-        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ companyId, contactId, commandId, phonePolicy }) });
+        headers: { "Content-Type": "application/json" }, body });
       if (abort.signal.aborted || sequence.current !== epoch) return;
       if (response.status === 401 || response.status === 403) { setHidden(true); setContext(null); return; }
       const raw: unknown = await response.json(); if (abort.signal.aborted || sequence.current !== epoch) return;
@@ -86,7 +98,7 @@ function Command({ enabled, companyId, contactId, authorizationActive }: Props) 
       {!authorizationActive && <p className="mt-2 text-xs">Registre uma autorização OpenCredit ativa antes do cadastro.</p>}
       <label className="mt-3 block text-xs">Celular no payload OpenCredit
         <select aria-label="Política do celular OpenCredit" value={phonePolicy} disabled={busy || !authorizationActive}
-          onChange={e => { setPhonePolicy(parseOpenCreditCreateClientPhonePolicy(e.target.value)); setConfirmed(false); }}
+          onChange={e => { setPhonePolicy(parseOpenCreditCreateClientPhonePolicy(e.target.value)); setConfirmed(false); setRiskConfirmed(false); }}
           className="mt-1 block w-full rounded border border-line p-2">
           <option value="include">INCLUDE — enviar como cadastrado (padrão)</option>
           <option value="omit">OMIT — não enviar celular</option>
@@ -96,7 +108,8 @@ function Command({ enabled, companyId, contactId, authorizationActive }: Props) 
         ? "A propriedade celular será omitida do payload. O telefone no cadastro permanece preservado."
         : "O telefone será enviado exatamente como cadastrado, sem normalização."}</p>
       <label className="mt-3 flex items-start gap-2 text-xs"><input type="checkbox" checked={confirmed} disabled={busy || !authorizationActive} onChange={e => setConfirmed(e.target.checked)} />Revisei o cadastro e confirmo o envio deste cliente à OpenCredit.</label>
-      <button type="button" disabled={busy || !authorizationActive || !confirmed} onClick={() => void send()} className="mt-3 w-full rounded bg-brand px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{state === "PREPARED" ? "Continuar cadastro na OpenCredit" : "Cadastrar na OpenCredit"}</button>
+      <label className="mt-3 flex items-start gap-2 text-xs"><input type="checkbox" checked={riskConfirmed} disabled={busy || !authorizationActive} onChange={e => setRiskConfirmed(e.target.checked)} />Entendo que esta ação pode realizar cadastro ou atualização externa e não deve ser repetida se o resultado ficar pendente ou ambíguo.</label>
+      <button type="button" disabled={busy || !authorizationActive || !canCommand || !confirmed || !riskConfirmed} onClick={() => void send()} className="mt-3 w-full rounded bg-brand px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{state === "PREPARED" ? "Continuar cadastro na OpenCredit" : "Cadastrar na OpenCredit"}</button>
     </>}
     <button type="button" disabled={busy} onClick={() => void load()} className="mt-2 text-xs underline disabled:opacity-50">Atualizar painel</button>
   </section>;
