@@ -125,13 +125,20 @@ function panelHarness(options: {
   pending?: string; networkFailure?: boolean; pendingDispatch?: boolean; onStore?: () => void;
 } = {}) {
   let cells: unknown[] = [], cursor = 0, key: string | undefined, root: View | null = null;
+  const stageChanges: string[][] = [], portStages: { port: string; stages: string[] }[] = [];
+  const timeline: string[] = [];
+  const currentStages = () => [...(cells.find(Array.isArray) as string[] | undefined ?? [])];
+  const recordPort = (port: string) => { portStages.push({ port, stages: currentStages() }); timeline.push("port:" + port); };
   const effects: (() => void)[] = [];
   type Effect = { deps: unknown[]; cleanup?: () => void };
   const same = (a: unknown[], b: unknown[]) => a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
   const hooks = {
     useState(initial: unknown) {
       const i = cursor++; if (!(i in cells)) cells[i] = initial;
-      return [cells[i], (value: unknown) => { cells[i] = value; }];
+      return [cells[i], (value: unknown) => {
+        cells[i] = typeof value === "function" ? (value as (previous: unknown) => unknown)(cells[i]) : value;
+        if (Array.isArray(cells[i])) { const stages = currentStages(); stageChanges.push(stages); timeline.push("stage:" + stages[stages.length - 1]); }
+      }];
     },
     useRef(initial: unknown) { const i = cursor++; if (!(i in cells)) cells[i] = { current: initial }; return cells[i]; },
     useCallback(fn: unknown, deps: unknown[]) {
@@ -154,7 +161,7 @@ function panelHarness(options: {
     if (url === "/api/admin/integrations/opencredit/create-client/context") {
       contextRequests.push(init); return Response.json({ ok: true, operation });
     }
-    assert.equal(url, "/api/admin/integrations/opencredit/create-client/dispatch"); dispatches.push(init);
+    assert.equal(url, "/api/admin/integrations/opencredit/create-client/dispatch"); recordPort("dispatch"); dispatches.push(init);
     if (options.networkFailure) throw Error("PRIVATE_NETWORK_DETAIL");
     if (options.pendingDispatch) return new Promise<Response>(resolve => { finishDispatch = resolve; });
     operation = { ...op("SUCCEEDED"), revision: 2 }; return Response.json(dispatch());
@@ -176,12 +183,13 @@ function panelHarness(options: {
       return { createClientErrorMessage, isOpenCreditCommandId, parseCreateClientContext, parseCreateClientDispatchResponse, resolveCreateClientCommandId };
     },
     AbortController, fetch: browserFetch,
-    crypto: { randomUUID() { generations++; if (options.fail === "uuid") throw Error("PRIVATE_CRYPTO_DETAIL"); return uuid; } },
+    crypto: { randomUUID() { recordPort("uuid"); generations++; if (options.fail === "uuid") throw Error("PRIVATE_CRYPTO_DETAIL"); return uuid; } },
     sessionStorage: {
-      getItem(k: string) { if (options.fail === "get") throw Error("PRIVATE_STORAGE_DETAIL"); return stored.get(k) ?? null; },
-      setItem(k: string, value: string) { if (options.fail === "set") throw Error("PRIVATE_STORAGE_DETAIL"); stored.set(k, value); options.onStore?.(); },
+      getItem(k: string) { recordPort("get"); if (options.fail === "get") throw Error("PRIVATE_STORAGE_DETAIL"); return stored.get(k) ?? null; },
+      setItem(k: string, value: string) { recordPort("set"); if (options.fail === "set") throw Error("PRIVATE_STORAGE_DETAIL"); stored.set(k, value); options.onStore?.(); },
     },
     JSON: { parse: JSON.parse, stringify(value: unknown) {
+      if (value && typeof value === "object" && "commandId" in value) recordPort("serialize");
       if (options.fail === "serialize" && value && typeof value === "object" && "commandId" in value) throw Error("PRIVATE_SERIALIZATION_DETAIL");
       return JSON.stringify(value);
     } },
@@ -204,7 +212,9 @@ function panelHarness(options: {
   const button = () => nodes().find(n => n.type === "button" && /^(Cadastrar|Continuar cadastro) na OpenCredit$/.test(text(n.props.children)));
   render();
   return {
-    dispatches, contextRequests, stored, generations: () => generations, unmount,
+    dispatches, contextRequests, stored, stageChanges, portStages, timeline, generations: () => generations, unmount,
+    stage: () => nodes().filter(n => n.type === "p").map(n => text(n.props.children)).find(t => t.startsWith("Etapa local: "))?.slice("Etapa local: ".length),
+    trace: () => nodes().filter(n => n.type === "p").map(n => text(n.props.children)).find(t => t.startsWith("Histórico local: "))?.slice("Histórico local: ".length).split(" → "),
     async flush() { for (let i = 0; i < 16; i++) await Promise.resolve(); render(); },
     button, confirmations: () => boxes().map(n => n.props.checked),
     confirm(index: number, checked = true) { (boxes()[index].props.onChange as (e: unknown) => void)({ target: { checked } }); render(); },
@@ -220,8 +230,9 @@ function panelHarness(options: {
 
 for (const first of [false, true]) for (const second of [false, true]) test(`actual panel: two visible confirmations required ${first}/${second}`, async () => {
   const h = panelHarness(); await h.flush(); assert.deepEqual(h.confirmations(), [false, false]);
+  assert.equal(h.stage(), "IDLE");
   h.confirm(0, first); h.confirm(1, second); assert.equal(h.button()!.props.disabled, !(first && second));
-  if (!first || !second) { h.click(); await h.flush(); assert.equal(h.dispatches.length, 0); }
+  if (!first || !second) { h.click(); await h.flush(); assert.equal(h.dispatches.length, 0); assert.deepEqual(h.trace(), ["IDLE"]); }
   h.unmount();
 });
 test("actual panel: policy, reload, authority and target changes reset BOTH confirmations", async () => {
@@ -245,6 +256,10 @@ for (const fail of ["get", "set", "uuid", "serialize"] as const) test("actual pa
   assert.equal(h.dispatches.length, 0); assert.equal(h.contextRequests.length, 1);
   assert.deepEqual(h.alerts(), [createClientErrorMessage({ error: "LOCAL_COMMAND_PREPARATION_FAILED" })]);
   assert.doesNotMatch(h.alerts().join(""), /PRIVATE|stack|token|synthetic/);
+  assert.equal(h.stage(), "PREPARATION_FAILED");
+  assert.deepEqual(h.trace(), ["CLICK_RECEIVED", "PREPARING_COMMAND", "PREPARATION_FAILED"]);
+  assert(h.portStages.every(p => p.stages[p.stages.length - 1] === "PREPARING_COMMAND"));
+  await h.flush(); assert.equal(h.stage(), "PREPARATION_FAILED"); // No immediate diagnostic erasure.
   assert.deepEqual(h.confirmations(), [false, false]); assert.equal(h.button()!.props.disabled, true); h.unmount();
 });
 for (const state of ["IN_FLIGHT", "UNKNOWN", "SUCCEEDED", "FAILED"] as const) test("actual panel: persisted " + state + " offers no dispatch button or generation", async () => {
@@ -254,11 +269,13 @@ for (const state of ["IN_FLIGHT", "UNKNOWN", "SUCCEEDED", "FAILED"] as const) te
 test("actual panel: authorization and loading remain fail-closed", async () => {
   const h = panelHarness(); assert.equal(h.button(), undefined); await h.flush(); h.confirm(0); h.confirm(1);
   h.setProps({ authorizationActive: false }); assert.equal(h.button()!.props.disabled, true); h.click(); await h.flush();
-  assert.equal(h.dispatches.length, 0); h.unmount();
+  assert.equal(h.dispatches.length, 0); assert.equal(h.stage(), "IDLE"); h.unmount();
 });
 test("actual panel: OMIT dispatches exactly once, duplicate click is blocked and pending command stays stable", async () => {
   const h = panelHarness({ pending: other, pendingDispatch: true }); await h.flush(); h.policy("omit"); h.confirm(0); h.confirm(1);
-  h.click(); assert.equal(h.button()!.props.disabled, true); h.click(); await h.flush();
+  h.click(); assert.equal(h.button()!.props.disabled, true);
+  const stages = h.stageChanges.length; h.click(); await h.flush(); assert.equal(h.stageChanges.length, stages);
+  assert.equal(h.stage(), "DISPATCH_STARTING");
   assert.equal(h.dispatches.length, 1); assert.equal(h.generations(), 0);
   assert.deepEqual(JSON.parse(h.dispatches[0].body as string), { companyId: "synthetic-company", contactId: "synthetic-contact", commandId: other, phonePolicy: "omit" });
   assert.equal(h.dispatches[0].credentials, "same-origin"); assert.equal(h.dispatches[0].cache, "no-store");
@@ -284,7 +301,47 @@ for (const throwAfterAbort of [false, true]) test("actual panel: aborted local p
 test("actual panel: target epoch abort after dispatch suppresses stale errors and never retries", async () => {
   const h = panelHarness({ pendingDispatch: true }); await h.flush(); h.confirm(0); h.confirm(1); h.click();
   h.setProps({ contactId: "synthetic-other" }); await h.flush(); h.completeDispatch(); await h.flush();
-  assert.equal(h.dispatches.length, 1); assert.equal(h.generations(), 1); assert.deepEqual(h.alerts(), []); assert.deepEqual(h.confirmations(), [false, false]); h.unmount();
+  assert.equal(h.dispatches.length, 1); assert.equal(h.generations(), 1); assert.deepEqual(h.alerts(), []); assert.deepEqual(h.confirmations(), [false, false]); assert.deepEqual(h.trace(), ["IDLE"]); h.unmount();
+});
+
+test("actual panel: exact local port ordering and visible trace after one batched render", async () => {
+  const h = panelHarness({ pendingDispatch: true }); assert.equal(h.stage(), "IDLE"); await h.flush();
+  h.confirm(0); h.confirm(1); h.timeline.length = 0; h.click();
+  assert.deepEqual(h.timeline, ["stage:CLICK_RECEIVED", "stage:PREPARING_COMMAND", "port:get", "port:uuid", "port:serialize", "port:set",
+    "stage:COMMAND_READY", "stage:DISPATCH_STARTING", "port:dispatch"]);
+  assert.deepEqual(h.trace(), ["CLICK_RECEIVED", "PREPARING_COMMAND", "COMMAND_READY", "DISPATCH_STARTING"]);
+  for (const port of h.portStages) assert.equal(port.stages[port.stages.length - 1], port.port === "dispatch" ? "DISPATCH_STARTING" : "PREPARING_COMMAND");
+  assert.equal(h.dispatches.length, 1); h.completeDispatch(); await h.flush();
+  assert.equal(h.stage(), "DISPATCH_STARTING"); // Automatic context reconciliation preserves the trace.
+  assert.equal(h.contextRequests.length, 2); h.unmount();
+});
+
+test("actual panel: stage trace survives ambiguity, resets only on explicit refresh, policy, authority or target", async () => {
+  const h = panelHarness({ networkFailure: true }); await h.flush(); h.confirm(0); h.confirm(1); h.click(); await h.flush();
+  assert.equal(h.stage(), "DISPATCH_STARTING"); assert.equal(h.dispatches.length, 1);
+  h.reload(); await h.flush(); assert.deepEqual(h.trace(), ["IDLE"]);
+  h.confirm(0); h.confirm(1); h.click(); await h.flush(); h.policy("omit"); assert.deepEqual(h.trace(), ["IDLE"]);
+  h.confirm(0); h.confirm(1); h.click(); await h.flush(); h.setProps({ authorizationActive: false }); await h.flush(); assert.deepEqual(h.trace(), ["IDLE"]);
+  h.setProps({ authorizationActive: true }); await h.flush(); h.confirm(0); h.confirm(1); h.click(); await h.flush();
+  h.setProps({ companyId: "synthetic-other-company" }); await h.flush(); assert.deepEqual(h.trace(), ["IDLE"]); h.unmount();
+});
+
+test("local stage vocabulary is closed, browser-only, non-sensitive and never claims server receipt", () => {
+  const source = readFileSync("src/app/components/integrations/OpenCreditCreateClientPanel.tsx", "utf8");
+  const ast = ts.createSourceFile("panel.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const stageType = ast.statements.find(n => ts.isTypeAliasDeclaration(n) && n.name.text === "LocalStage");
+  assert(stageType && ts.isTypeAliasDeclaration(stageType) && ts.isUnionTypeNode(stageType.type));
+  assert.deepEqual(stageType.type.types.map(t => {
+    assert(ts.isLiteralTypeNode(t) && ts.isStringLiteral(t.literal)); return t.literal.text;
+  }), ["IDLE", "CLICK_RECEIVED", "PREPARING_COMMAND", "COMMAND_READY", "DISPATCH_STARTING", "PREPARATION_FAILED"]);
+  const send = source.slice(source.indexOf("async function send()"), source.indexOf("  if (hidden) return null;"));
+  const guard = /if \(([\s\S]*?)\) return;/.exec(send);
+  assert.equal(guard?.[1].replace(/\s+/g, " "), 'working.current || busy || hidden || !enabled || !authorizationActive || !confirmed || !riskConfirmed || !context || context.operation !== null && context.operation.state !== "PREPARED"');
+  assert(send.indexOf('setLocalStages(["CLICK_RECEIVED"])') > send.indexOf('context.operation.state !== "PREPARED") return;'));
+  assert.match(source, /não o recebimento pelo servidor/); assert.match(source, /Etapas locais não autorizam repetição/);
+  assert.match(source, /Histórico local: \{localStages.join\(" → "\)\}/);
+  assert.doesNotMatch(source, /console\.|window\.confirm|flushSync|setTimeout|setInterval/);
+  assert.equal((source.match(/fetch\(dispatchEndpoint/g) ?? []).length, 1);
 });
 test("runtime consumers and endpoint are exact, including extension and indirect import forms", () => {
   const component = "src/app/components/integrations/OpenCreditCreateClientPanel.tsx", handler = "src/lib/opencredit-create-client-context-admin-handler.ts", service = "src/lib/opencredit-create-client-context.service.ts";

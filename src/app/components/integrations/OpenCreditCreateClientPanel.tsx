@@ -7,6 +7,7 @@ import { createClientErrorMessage, isOpenCreditCommandId, parseCreateClientConte
   resolveCreateClientCommandId, type CreateClientContext } from "@/lib/opencredit-create-client-ui";
 
 type Props = { enabled: boolean; companyId: string; contactId: string; authorizationActive: boolean };
+type LocalStage = "IDLE" | "CLICK_RECEIVED" | "PREPARING_COMMAND" | "COMMAND_READY" | "DISPATCH_STARTING" | "PREPARATION_FAILED";
 const contextEndpoint = "/api/admin/integrations/opencredit/create-client/context";
 const dispatchEndpoint = "/api/admin/integrations/opencredit/create-client/dispatch";
 export function OpenCreditCreateClientPanel(props: Props) {
@@ -19,6 +20,10 @@ function Command({ enabled, companyId, contactId, authorizationActive }: Props) 
   const [riskConfirmed, setRiskConfirmed] = useState(false);
   const [phonePolicy, setPhonePolicy] = useState<OpenCreditCreateClientPhonePolicy>("include");
   const [error, setError] = useState("");
+  // Preserve the trace across automatic context reconciliation, including failures.
+  // Reset on target mount, authority/policy changes or explicit panel refresh.
+  // Keeping the short trace visible also preserves stages batched in one React render.
+  const [localStages, setLocalStages] = useState<readonly LocalStage[]>(["IDLE"]);
   const working = useRef(false), sequence = useRef(0), controller = useRef<AbortController | null>(null);
   const storageKey = "opencredit:create-client-command:" + companyId + ":" + contactId;
   const load = useCallback(async (message = "") => {
@@ -40,15 +45,17 @@ function Command({ enabled, companyId, contactId, authorizationActive }: Props) 
   }, [companyId, contactId, storageKey]);
   const invalidate = useCallback(() => { sequence.current++; controller.current?.abort(); }, []);
   useEffect(() => { void load(); return invalidate; }, [load, invalidate]);
-  useEffect(() => { setConfirmed(false); setRiskConfirmed(false); }, [authorizationActive]);
+  useEffect(() => { setConfirmed(false); setRiskConfirmed(false); setLocalStages(["IDLE"]); }, [authorizationActive]);
   async function send() {
     if (working.current || busy || hidden || !enabled || !authorizationActive || !confirmed || !riskConfirmed || !context
       || context.operation !== null && context.operation.state !== "PREPARED") return;
+    setLocalStages(["CLICK_RECEIVED"]);
     working.current = true; setBusy(true); setConfirmed(false); setRiskConfirmed(false); setError("");
     controller.current?.abort(); const abort = new AbortController(); controller.current = abort; const epoch = ++sequence.current;
     // Local preparation must complete before the one-shot network boundary starts.
     let body: string;
     try {
+      setLocalStages(stages => [...stages, "PREPARING_COMMAND"]);
       const pending = sessionStorage.getItem(storageKey);
       let commandId: string | null;
       if (context.operation !== null) {
@@ -60,8 +67,10 @@ function Command({ enabled, companyId, contactId, authorizationActive }: Props) 
       if (!isOpenCreditCommandId(commandId)) throw Error("INVALID_COMMAND");
       body = JSON.stringify({ companyId, contactId, commandId, phonePolicy });
       sessionStorage.setItem(storageKey, commandId);
+      if (!abort.signal.aborted && sequence.current === epoch) setLocalStages(stages => [...stages, "COMMAND_READY"]);
     } catch {
       if (abort.signal.aborted || sequence.current !== epoch) return;
+      setLocalStages(stages => [...stages, "PREPARATION_FAILED"]);
       setError(createClientErrorMessage({ error: "LOCAL_COMMAND_PREPARATION_FAILED" }));
       working.current = false; setBusy(false);
       return;
@@ -69,6 +78,7 @@ function Command({ enabled, companyId, contactId, authorizationActive }: Props) 
     if (abort.signal.aborted || sequence.current !== epoch) return;
     let message = createClientErrorMessage(null);
     try {
+      setLocalStages(stages => [...stages, "DISPATCH_STARTING"]);
       const response = await fetch(dispatchEndpoint, { method: "POST", credentials: "same-origin", cache: "no-store", signal: abort.signal,
         headers: { "Content-Type": "application/json" }, body });
       if (abort.signal.aborted || sequence.current !== epoch) return;
@@ -90,6 +100,9 @@ function Command({ enabled, companyId, contactId, authorizationActive }: Props) 
   };
   return <section aria-label="Cadastro OpenCredit" className="mt-4 rounded border border-line p-3">
     <h4 className="font-bold">Cadastro OpenCredit</h4>
+    <p role="status" className="mt-2 text-xs">Etapa local: {localStages[localStages.length - 1]}</p>
+    <p className="mt-1 text-xs">Histórico local: {localStages.join(" → ")}</p>
+    <p className="mt-1 text-xs">DISPATCH_STARTING indica somente o início do fetch no navegador, não o recebimento pelo servidor. Etapas locais não autorizam repetição.</p>
     {busy && <p role="status" className="mt-2 text-xs">Atualizando estado...</p>}
     {error && <p role="alert" className="mt-2 text-xs text-rose-700">{error}</p>}
     {state && <p role="status" className="mt-2 text-sm">{labels[state]}</p>}
@@ -98,7 +111,7 @@ function Command({ enabled, companyId, contactId, authorizationActive }: Props) 
       {!authorizationActive && <p className="mt-2 text-xs">Registre uma autorização OpenCredit ativa antes do cadastro.</p>}
       <label className="mt-3 block text-xs">Celular no payload OpenCredit
         <select aria-label="Política do celular OpenCredit" value={phonePolicy} disabled={busy || !authorizationActive}
-          onChange={e => { setPhonePolicy(parseOpenCreditCreateClientPhonePolicy(e.target.value)); setConfirmed(false); setRiskConfirmed(false); }}
+          onChange={e => { setPhonePolicy(parseOpenCreditCreateClientPhonePolicy(e.target.value)); setConfirmed(false); setRiskConfirmed(false); setLocalStages(["IDLE"]); }}
           className="mt-1 block w-full rounded border border-line p-2">
           <option value="include">INCLUDE — enviar como cadastrado (padrão)</option>
           <option value="omit">OMIT — não enviar celular</option>
@@ -111,6 +124,6 @@ function Command({ enabled, companyId, contactId, authorizationActive }: Props) 
       <label className="mt-3 flex items-start gap-2 text-xs"><input type="checkbox" checked={riskConfirmed} disabled={busy || !authorizationActive} onChange={e => setRiskConfirmed(e.target.checked)} />Entendo que esta ação pode realizar cadastro ou atualização externa e não deve ser repetida se o resultado ficar pendente ou ambíguo.</label>
       <button type="button" disabled={busy || !authorizationActive || !canCommand || !confirmed || !riskConfirmed} onClick={() => void send()} className="mt-3 w-full rounded bg-brand px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{state === "PREPARED" ? "Continuar cadastro na OpenCredit" : "Cadastrar na OpenCredit"}</button>
     </>}
-    <button type="button" disabled={busy} onClick={() => void load()} className="mt-2 text-xs underline disabled:opacity-50">Atualizar painel</button>
+    <button type="button" disabled={busy} onClick={() => { setLocalStages(["IDLE"]); void load(); }} className="mt-2 text-xs underline disabled:opacity-50">Atualizar painel</button>
   </section>;
 }
