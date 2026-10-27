@@ -44,6 +44,7 @@ export function createClientErrorMessage(value: unknown): string {
   try {
     const r = closed(value, ["error"]); if (!r || typeof r.error !== "string") return generic;
     const messages: Record<string, string> = {
+      LOCAL_COMMAND_PREPARATION_FAILED: "Não foi possível preparar o comando neste navegador. Nenhuma solicitação de envio foi iniciada.",
       RATE_LIMITED: "Muitas solicitações. Aguarde antes de atualizar o painel.",
       OPENCREDIT_CREATE_CLIENT_DISPATCH_AUTHENTICATION: "A integração OpenCredit não conseguiu autenticar antes do envio. A solicitação permaneceu preparada.",
       OPENCREDIT_CREATE_CLIENT_DISPATCH_PRE_DISPATCH_UNAVAILABLE: "O envio não pôde ser iniciado. A solicitação permaneceu preparada.",
