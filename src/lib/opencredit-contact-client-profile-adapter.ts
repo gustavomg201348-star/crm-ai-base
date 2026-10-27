@@ -1,4 +1,5 @@
 import "server-only";
+import { parseOpenCreditCreateClientPhonePolicy, type OpenCreditCreateClientPhonePolicy } from "./opencredit-create-client-phone-policy";
 import { buildOpenCreditClientProfilePayload, type OpenCreditClientProfilePayload } from "./opencredit-client-profile-contract";
 import { canonicalizeOpenCreditOwnershipCpf, parseOpenCreditProviderScope, type OpenCreditProviderScope } from "./opencredit-commercial-identity-policy";
 
@@ -47,8 +48,9 @@ function snapshot(value: unknown, keys: readonly string[], code: OpenCreditConta
  * "mappable" != "authorized to dispatch": no consent or operation permission.
  * A future caller still needs final freshness and authorization/evidence checks.
  */
-export function buildOpenCreditClientProfileFromContact(input: unknown): OpenCreditClientProfilePayload {
+export function buildOpenCreditClientProfileFromContact(input: unknown, phonePolicy: OpenCreditCreateClientPhonePolicy = "include"): OpenCreditClientProfilePayload {
   try {
+    const policy = parseOpenCreditCreateClientPhonePolicy(phonePolicy);
     const root = snapshot(input, ["contact", "identity"], "INVALID_INPUT");
     const contact = snapshot(root.contact, ["id", "companyId", "name", "phone", "email", "cpf", "archivedAt"], "INVALID_CONTACT");
     const identity = snapshot(root.identity, ["companyId", "contactId", "providerScope", "normalizedCpf", "enabled"], "INVALID_IDENTITY");
@@ -69,7 +71,8 @@ export function buildOpenCreditClientProfileFromContact(input: unknown): OpenCre
     if (typeof identity.normalizedCpf !== "string" || !/^\d{11}(?![\s\S])/.test(identity.normalizedCpf)) return fail("INVALID_IDENTITY");
     if (cpf !== identity.normalizedCpf) return fail("IDENTITY_SNAPSHOT_MISMATCH");
     try {
-      return buildOpenCreditClientProfilePayload({ cpf: identity.normalizedCpf, nome: contact.name, celular: contact.phone,
+      return buildOpenCreditClientProfilePayload({ cpf: identity.normalizedCpf, nome: contact.name,
+        ...(policy === "include" ? { celular: contact.phone } : {}),
         ...(contact.email === null ? {} : { email: contact.email }) });
     } catch { return fail("PROFILE_INVALID"); }
   } catch (error) {

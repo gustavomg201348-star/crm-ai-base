@@ -1,4 +1,5 @@
 import "server-only";
+import { parseOpenCreditCreateClientPhonePolicy, type OpenCreditCreateClientPhonePolicy } from "./opencredit-create-client-phone-policy";
 import type { SessionUser } from "./auth";
 import { isPlatformAdmin } from "./permissions";
 import { openCreditApiClient, readOpenCreditApiErrorCode } from "./opencredit-api-client";
@@ -14,7 +15,7 @@ import { persistCreateClientDiagnostic, logCreateClientDiagnostic } from "./open
 
 type Input = Readonly<{ actor: SessionUser; companyId: string; operationId: string; expectedRevision: number }>;
 type Db = Parameters<typeof reserveOpenCreditClientProfileOperationForDispatch>[0] & Parameters<typeof persistCreateClientDiagnostic>[0];
-type Options = Readonly<{ client?: Pick<typeof openCreditApiClient, "postJsonAfterCommit"> }>;
+type Options = Readonly<{ client?: Pick<typeof openCreditApiClient, "postJsonAfterCommit">; phonePolicy?: OpenCreditCreateClientPhonePolicy }>;
 export type OpenCreditCreateClientDispatchResult =
   | Readonly<{ operationId: string; state: "SUCCEEDED"; revision: number; created: boolean }>
   | Readonly<{ operationId: string; state: "UNKNOWN"; revision: number }>;
@@ -126,6 +127,14 @@ async function observe(response: Response, diagnostic: Diagnostic, sensitive: re
  * Auth completes before reservation; only the API client transports the one-shot POST. */
 export async function dispatchOpenCreditCreateClient(db: Db, supplied: Input, options: Options = {}): Promise<OpenCreditCreateClientDispatchResult> {
   const command = input(supplied);
+  let phonePolicy: OpenCreditCreateClientPhonePolicy = "include";
+  try {
+    if (Object.hasOwn(options, "phonePolicy")) {
+      const d = Object.getOwnPropertyDescriptor(options, "phonePolicy");
+      if (!d || !d.enumerable || !("value" in d)) throw Error();
+      phonePolicy = parseOpenCreditCreateClientPhonePolicy(d.value);
+    }
+  } catch { return fail("INVALID_INPUT"); }
   let context: ReturnType<typeof resolveConfiguredOpenCreditProviderContext>;
   try { context = resolveConfiguredOpenCreditProviderContext(); } catch { return fail("CONFIGURATION"); }
   const path = `/api/tenants/${encodeURIComponent(context.tenantId)}/integration/clients`;
@@ -136,7 +145,7 @@ export async function dispatchOpenCreditCreateClient(db: Db, supplied: Input, op
   let observation: OpenCreditCreateClientObservation;
   try {
     const execution = await client.postJsonAfterCommit(path, async () => {
-      reservation = await reserveOpenCreditClientProfileOperationForDispatch(db, { ...command, providerScope: context.providerScope });
+      reservation = await reserveOpenCreditClientProfileOperationForDispatch(db, { ...command, providerScope: context.providerScope }, phonePolicy);
       // Commit-to-dispatch timestamp, NOT proof of provider receipt. No additional DB work before transport.
       diagnostic.dispatchCommittedAt = new Date().toISOString(); diagnostic.stage = "TRANSPORT";
       diagnostic.settlement = "NOT_CONFIRMED";

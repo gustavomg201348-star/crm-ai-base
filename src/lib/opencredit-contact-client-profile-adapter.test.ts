@@ -4,6 +4,7 @@ import Module from "node:module";
 import { readFileSync, readdirSync } from "node:fs";
 import * as ts from "typescript";
 import type { OpenCreditContactClientProfileInput, OpenCreditContactClientProfileAdapterCode } from "./opencredit-contact-client-profile-adapter";
+import { parseOpenCreditCreateClientPhonePolicy } from "./opencredit-create-client-phone-policy";
 
 let adapter: typeof import("./opencredit-contact-client-profile-adapter");
 before(async () => {
@@ -38,6 +39,28 @@ test("exact four-field payload from valid enabled snapshots, preserving text/pho
 test("null email is truly omitted, never empty string", () => {
   const f = fixture(); const out = build({ ...f, contact: { ...f.contact, email: null } });
   assert.deepEqual(out, { cpf: f.identity.normalizedCpf, nome: f.contact.name, celular: f.contact.phone }); assert.equal(Object.hasOwn(out, "email"), false);
+});
+test("explicit include preserves the default; omit removes the own serialized property without changing Contact", () => {
+  const f = fixture(); const before = structuredClone(f);
+  Object.freeze(f.contact); Object.freeze(f.identity); Object.freeze(f);
+  const included = adapter.buildOpenCreditClientProfileFromContact(f, "include");
+  assert.deepEqual(included, build(f));
+  const omitted = adapter.buildOpenCreditClientProfileFromContact(f, "omit");
+  assert.equal(Object.prototype.hasOwnProperty.call(omitted, "celular"), false);
+  assert.equal(Object.hasOwn(JSON.parse(JSON.stringify(omitted)), "celular"), false);
+  const otherFields = { ...included }; delete otherFields.celular;
+  assert.deepEqual(omitted, otherFields); assert.deepEqual(f, before);
+});
+test("empty phone retains legacy default rejection; only explicit OMIT can omit it", () => {
+  const original = fixture(); const f = { ...original, contact: { ...original.contact, phone: "" } };
+  denied(f, "PROFILE_INVALID");
+  const out = adapter.buildOpenCreditClientProfileFromContact(f, "omit");
+  assert.equal(Object.hasOwn(out, "celular"), false); assert.equal(f.contact.phone, "");
+});
+for (const value of [undefined, null, "", "OMIT", "auto", true, 1, {}, []]) test("phone policy is an exact enum: " + String(value), () => {
+  assert.throws(() => parseOpenCreditCreateClientPhonePolicy(value), /INVALID_PHONE_POLICY/);
+  if (value !== undefined) assert.throws(() => adapter.buildOpenCreditClientProfileFromContact(fixture(), value as "omit"),
+    error => error instanceof adapter.OpenCreditContactClientProfileAdapterError && error.code === "INVALID_INPUT");
 });
 for (const cpf of ["00000000000", "000.000.000-00"]) test("strict supported CPF shape " + cpf.length + " maps canonical snapshot", () => {
   const f = fixture(); assert.equal(build({ ...f, contact: { ...f.contact, cpf } }).cpf, f.identity.normalizedCpf);
@@ -119,7 +142,7 @@ test("public server-only marker, exact exports, pure imports and only the local 
     if (ts.isCallExpression(node)) { assert.notEqual(node.expression.kind, ts.SyntaxKind.ImportKeyword); assert.notEqual(node.expression.getText(ast), "require"); }
     ts.forEachChild(node, visit);
   }
-  visit(ast); assert.deepEqual(imports, ["server-only", "./opencredit-client-profile-contract", "./opencredit-commercial-identity-policy"]);
+  visit(ast); assert.deepEqual(imports, ["server-only", "./opencredit-create-client-phone-policy", "./opencredit-client-profile-contract", "./opencredit-commercial-identity-policy"]);
   assert.doesNotMatch(source, /\b(?:Prisma|prisma|fetch|process|console|logger|XMLHttpRequest|localStorage|sessionStorage|setTimeout|setInterval|async|await)\b|node:|opencredit-api-client|https?:\/\//);
   assert.deepEqual(Object.keys(adapter).sort(), ["OpenCreditContactClientProfileAdapterError", "buildOpenCreditClientProfileFromContact"].sort());
   const consumers: string[] = [];
