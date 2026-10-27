@@ -63,6 +63,32 @@ test("API error reader ignores raw properties and rejects inherited status witho
 const pair = (suffix = "1", expiresIn = 28800) => Response.json({ data: {
   accessToken: `test-access-${suffix}`, refreshToken: `test-refresh-${suffix}`, expiresIn
 } });
+
+for (const status of [200, 401, 403, 429, 500]) test("getOnce authenticates then executes exactly one GET without 401 replay " + status, async () => {
+  const f = fixture(c => c.path === "/api/auth/login" ? pair() : new Response("unread", { status }));
+  const r = await f.client.getOnce("/api/tenants/synthetic/integration/clients/validate?cpf=synthetic&stage=simulate&product=clt");
+  assert.equal(r.response.status, status); assert.equal(r.response.bodyUsed, false);
+  assert.deepEqual(f.calls.map(c => c.init.method), ["POST", "GET"]);
+  assert.equal(f.calls.length, 2); assert.equal(f.calls[1].init.redirect, "error");
+  assert.equal(f.calls[1].init.credentials, "omit"); assert.equal(f.calls[1].init.body, undefined); f.client.dispose();
+});
+test("getOnce shares the existing refresh cache BEFORE its sole GET", async () => {
+  const f = fixture(c => c.path.startsWith("/api/auth/") ? pair() : Response.json({}));
+  await f.client.getOnce("/api/test"); f.advance(8 * 60 * 60 * 1000); await f.client.getOnce("/api/test");
+  assert.deepEqual(f.calls.map(c => c.path), ["/api/auth/login", "/api/test", "/api/auth/refresh", "/api/test"]); f.client.dispose();
+});
+test("getOnce network failure never retries and diagnostic identifiers exclude credentials", async () => {
+  const secret = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const f = fixture(c => c.path.startsWith("/api/auth/") ? pair() : Response.json({}));
+  f.change({ ...creds, password: secret }); const r = await f.client.getOnce("/api/test");
+  assert.equal(r.sanitizeDiagnosticIdentifier(secret), null); assert.equal(r.sanitizeDiagnosticIdentifier("12345678909"), null);
+  assert.equal(r.sanitizeDiagnosticIdentifier("req_abcdefabcdef"), "req_abcdefabcdef"); f.client.dispose();
+  const failed = fixture(c => { if (c.path.startsWith("/api/auth/")) return pair(); throw Error("private"); });
+  await assert.rejects(failed.client.getOnce("/api/test"), { code: "NETWORK" }); assert.equal(failed.calls.length, 2); failed.client.dispose();
+});
+for (const path of ["https://example.invalid/api/test", "/api/auth/login", "/api/%2e%2e/test", "/api/a\\b", "/api/test\n"]) test("getOnce rejects unsafe path before auth " + path, async () => {
+  const f = fixture(() => { throw Error(); }); await assert.rejects(f.client.getOnce(path), { code: "INVALID_PATH" }); assert.equal(f.calls.length, 0); f.client.dispose();
+});
 type Call = { path: string; init: RequestInit };
 function fixture(reply: (call: Call, index: number) => Response | Promise<Response>) {
   const calls: Call[] = [];

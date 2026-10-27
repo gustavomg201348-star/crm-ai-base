@@ -187,6 +187,19 @@ export function createOpenCreditApiClient(options: Options = {}) {
   }
 
   return {
+    /** Explicit one-shot read: reuse auth/refresh before GET, never replay GET after 401. */
+    async getOnce(path: string): Promise<{ response: Response; sanitizeDiagnosticIdentifier(value: unknown): string | null }> {
+      validatedPath(path);
+      const creds = configuration();
+      const pair = await authenticate();
+      if (disposed) throw new OpenCreditApiError("DISPOSED");
+      const response = await call(path, { method: "GET", headers: { Authorization: `Bearer ${pair.access}` } }) as Response;
+      if (response.status === 401 && tokens === pair) tokens.expiresAt = 0;
+      return { response, sanitizeDiagnosticIdentifier(value) {
+        const id = safeDiagnosticId(value);
+        return id && ![pair.access, pair.refresh, creds.email, creds.password].some(secret => secret && id.includes(secret)) ? id : null;
+      } };
+    },
     /** Auth and headers are ready before the callback. Resolving it is a committed
      * one-shot barrier: no auth, serialization, retry or response-body read follows. */
     async postJsonAfterCommit<T>(path: string, commit: () => Promise<{ body: string; committed: T }>): Promise<{

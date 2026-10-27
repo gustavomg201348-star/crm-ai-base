@@ -1,5 +1,61 @@
 # OpenCredit API authentication (not webhook authentication)
 
+## Read-only pre-simulation client validation (current)
+
+Official source rechecked on 2026-10-27: [partner OpenAPI](https://core.api.opencredit.tech/api/partner-openapi.json),
+version 2.8.0, operation `IntegrationApiController_validateClient`:
+`GET /api/tenants/{tenantId}/integration/clients/validate` with server-resolved
+`cpf`, fixed `stage=simulate` and `product=clt`. The current formal query marks
+only CPF required; stage, simulationId, bankId and product are optional. This
+supersedes the earlier 2026-10-16 required-parameter discrepancy recorded below.
+The 200 response remains an example, NOT a complete formal schema.
+
+`POST /api/admin/integrations/opencredit/client-validation/context` accepts only
+`{companyId, contactId}`. Session, Platform Admin, same-origin, strict bounded JSON
+(2 KiB, one-second deadline), no query/Authorization header and actor/target rate
+limits precede the service. Actor permissions are rechecked against persisted User.
+Tenant/scope come exclusively from trusted server configuration. CPF comes from
+the Contact using the existing canonicalizer, with uniqueness including archived
+Contacts and matching global RemoteIdentity owner. CommercialAccess and identity
+must be enabled. The current active CLIENT_PROFILE_UPSERT authorization must bind
+the same identity and its current GRANTED revision/evidence (verified provenance v1).
+This is a conservative technical-read gate, NOT new consent or permission for a
+paid credit inquiry, simulation or proposal. No Message body is read/interpreted.
+
+The snapshot is resolved in a short read transaction. No transaction is held over
+HTTP. Access/identity/authorization and CPF are rechecked before returning a successful
+read, discarding stale results after revocation, regrant or target changes.
+The additive API-client `getOnce` method reuses existing in-memory auth/refresh
+BEFORE one GET, retaining the ten-second transport deadline and redirect rejection.
+It never retries GET or refreshes after its 401. Existing `request`, createClient,
+webhook, banks, capabilities and write/replay behavior are unchanged. The existing
+strict response reader supplies a 64 KiB body cap, fatal UTF-8, duplicate-key rejection
+and a twenty-second body deadline. These are local limits, not provider guarantees.
+
+The local parser accepts optional real booleans found/valid and optional pending
+arrays (maximum 50 entries). Present invalid types/null, malformed structures or
+contradictory positive flags fail closed. Missing flags remain absent, not false.
+Unknown properties are discarded. Only a closed field vocabulary plus optional
+client/bank scope reaches the UI; unknown field names become OTHER. All labels are
+local constants. Provider label, regex, resolveWith, paths, values and raw text are
+never copied, rendered, followed or executed. Even VALID is only technical validation,
+never credit eligibility or authorization to simulate; missing facts mean INCOMPLETE.
+
+Sanitized diagnostics exist only in the administrative response: known GET HTTP
+status, safe request/correlation IDs, readable/parsed flags, nullable found/valid,
+nullable pendingPresent (unknown until data can be inspected) and closed category. No raw body, CPF, contact details, credentials,
+tokens or secret headers are logged/persisted/returned. Auth failures have no invented
+GET HTTP status. No durable diagnostic table or CommercialOperation writer is added.
+
+The new panel performs no request on mount. Its sole button explicitly requests
+the read and shows fixed pending labels; it never adds a simulation action. Scope
+changes/unmount abort and invalidate stale responses; duplicate clicks are blocked.
+Normal technical rate-limit counters are writes, not commercial mutations. There
+are no schema/migration/env/dependency changes. Tests use fake DB/HTTP/browser ports;
+no production, provider call, paid query or commercial mutation is needed to validate
+this slice. PostgreSQL material execution is not required for this read-only patch;
+existing persistence gates remain unchanged. Rollback is a code revert only.
+
 ## Human CommercialAccess admin boundary (current)
 
 Only authenticated Platform Admin commands may mutate commercial access through
