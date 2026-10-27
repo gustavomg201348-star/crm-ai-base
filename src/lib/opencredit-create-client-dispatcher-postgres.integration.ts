@@ -61,7 +61,7 @@ async function fixture() {
     db.openCreditCommercialAccess.findUniqueOrThrow({ where: { id: access.id } }), db.openCreditConsumerAuthorization.findUniqueOrThrow({ where: { id: authorizationId } })
   ]);
   let posts = 0;
-  const client = (reply: () => Response | Promise<Response>, authFailure = false) => api.createOpenCreditApiClient({ credentials: () => ({ email: "synthetic@example.invalid", password: "synthetic" }), fetch: (async (url, init) => {
+  const client = (reply: () => Response | Promise<Response>, authFailure = false, phonePolicy: "include" | "omit" = "include") => api.createOpenCreditApiClient({ credentials: () => ({ email: "synthetic@example.invalid", password: "synthetic" }), fetch: (async (url, init) => {
     if (String(url).endsWith("/api/auth/login")) {
       assert.equal((await current()).state, "PREPARED");
       return authFailure ? new Response(null, { status: 401 }) : Response.json({ data: { accessToken: "synthetic-access", refreshToken: "synthetic-refresh", expiresIn: 28800 } });
@@ -69,7 +69,11 @@ async function fixture() {
     assert.equal(String(url), `https://core.api.opencredit.tech/api/tenants/${tenantId}/integration/clients`);
     assert.equal(init?.method, "POST"); assert.equal((await current()).state, "IN_FLIGHT");
     assert.equal((await events()).filter(e => e.action === "RESERVED_FOR_DISPATCH").length, 1);
-    assert.equal(JSON.parse(String(init?.body)).cpf, "00000000000"); posts++; return reply();
+    const payload = JSON.parse(String(init?.body));
+    assert.equal(payload.cpf, "00000000000");
+    assert.equal(Object.hasOwn(payload, "celular"), phonePolicy !== "omit");
+    if (phonePolicy === "include") assert.equal(payload.celular, contact.phone);
+    posts++; return reply();
   }) as typeof fetch });
   return { command, authInput, authorizationId, current, events, protectedRows, client, posts: () => posts };
 }
@@ -82,6 +86,16 @@ function material(name: string, run: (f: Fixture) => Promise<void>) {
     // Immutable audit fixtures are destroyed only with the disposable container.
   });
 }
+material("explicit OMIT reaches fake transport after real PostgreSQL reservation and preserves Contact", async f => {
+  const before = await f.protectedRows();
+  const client = f.client(() => Response.json({ data: { success: true, created: true } }, { status: 201 }), false, "omit");
+  try {
+    const result = await dispatcher.dispatchOpenCreditCreateClient(db, f.command, { client, phonePolicy: "omit" });
+    assert.equal(result.state, "SUCCEEDED"); assert.equal(f.posts(), 1);
+    assert.deepEqual(await f.protectedRows(), before);
+    assert.deepEqual((await f.events()).map(e => e.action), ["PREPARED", "RESERVED_FOR_DISPATCH", "MARKED_SUCCEEDED_CREATED"]);
+  } finally { client.dispose(); }
+});
 for (const created of [true, false]) material("real commit precedes one fake POST then SUCCEEDED " + created, async f => {
   const before = await f.protectedRows(); const client = f.client(() => Response.json({ data: { success: true, created } }, { status: 201 }));
   try {

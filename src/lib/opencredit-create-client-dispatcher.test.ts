@@ -81,6 +81,26 @@ function client(f: ReturnType<typeof database>, response: () => Response | Promi
   }) as typeof fetch });
   return { instance, posts: () => posts, auth: () => auth, sent: () => sent };
 }
+for (const policy of [undefined, "include", "omit"] as const) test("fake transport receives exact phone policy payload: " + policy, () => configured(async f => {
+  const c = client(f);
+  await dispatcher.dispatchOpenCreditCreateClient(f.db, command(), { client: c.instance, ...(policy === undefined ? {} : { phonePolicy: policy }) });
+  const payload = JSON.parse(c.sent()!.body as string);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, "celular"), policy !== "omit");
+  if (policy !== "omit") assert.equal(payload.celular, "0007A");
+  assert.equal(payload.cpf, "00000000000"); assert.equal(payload.nome, "Synthetic");
+  assert.equal(c.posts(), 1); assert.equal(c.auth(), 1);
+}));
+test("invalid or getter phone policy is rejected before fake authentication", () => configured(async f => {
+  for (const value of [undefined, null, "auto", "OMIT", 1, false, {}, []]) {
+    const c = client(f);
+    await assert.rejects(() => dispatcher.dispatchOpenCreditCreateClient(f.db, command(), { client: c.instance, phonePolicy: value as "omit" }),
+      error => error instanceof dispatcher.OpenCreditCreateClientDispatchError && error.code === "INVALID_INPUT");
+    assert.equal(c.auth(), 0); assert.equal(c.posts(), 0);
+  }
+  let reads = 0; const options = { get phonePolicy(): "omit" { reads++; throw Error("private"); } };
+  await assert.rejects(() => dispatcher.dispatchOpenCreditCreateClient(f.db, command(), options)); assert.equal(reads, 0);
+  assert.equal(f.transactions(), 0);
+}));
 for (const [success, created] of [[true, true], [true, false], [false, false], [false, true]]) test(`dispatch 201 ${success}/${created}`, () => configured(async f => {
   const c = client(f, () => positive(success, created));
   try {

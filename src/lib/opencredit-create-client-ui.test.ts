@@ -70,7 +70,7 @@ test("component AST: only explicit onClick dispatch, no automation, storage befo
   assert.match(source, /^"use client"/); assert.doesNotMatch(source, /providerScope|\bcpf\b|profileJson|authorizationId|tenantId|partnerId|setInterval|setTimeout|while\s*\(|do\s*\{|\.removeItem\(|console\.|logger|dangerouslySetInnerHTML/);
   const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX), calls: ts.CallExpression[] = [];
   const visit = (n: ts.Node) => { if (ts.isCallExpression(n)) calls.push(n); ts.forEachChild(n, visit); }; visit(ast);
-  assert.deepEqual(ast.statements.filter(ts.isImportDeclaration).map(n => (n.moduleSpecifier as ts.StringLiteral).text), ["react", "./OpenCreditCreateClientReconciliationPanel", "@/lib/opencredit-create-client-ui"]);
+  assert.deepEqual(ast.statements.filter(ts.isImportDeclaration).map(n => (n.moduleSpecifier as ts.StringLiteral).text), ["react", "./OpenCreditCreateClientReconciliationPanel", "@/lib/opencredit-create-client-phone-policy", "@/lib/opencredit-create-client-ui"]);
   const owner = (n: ts.Node) => { let p: ts.Node | undefined = n; while (p && !ts.isFunctionDeclaration(p)) p = p.parent; return p && ts.isFunctionDeclaration(p) ? p.name?.text : null; };
   const generators = calls.filter(c => c.expression.getText(ast) === "crypto.randomUUID"); assert.equal(generators.length, 1); assert.equal(owner(generators[0]), "send");
   let branch: ts.Node | undefined = generators[0]; while (branch && !ts.isIfStatement(branch)) branch = branch.parent;
@@ -89,7 +89,7 @@ test("component AST: only explicit onClick dispatch, no automation, storage befo
   }
   assert(send.indexOf("working.current = true") < send.indexOf("fetch(dispatchEndpoint"));
   assert.match(send, /working.current \|\| busy/); assert.match(send, /!authorizationActive \|\| !confirmed/);
-  assert.match(send, /JSON.stringify\(\{ companyId, contactId, commandId \}\)/);
+  assert.match(send, /JSON.stringify\(\{ companyId, contactId, commandId, phonePolicy \}\)/);
   for (const c of calls.filter(c => c.expression.getText(ast) === "useEffect")) assert.doesNotMatch(c.getText(ast), /send\(|dispatchEndpoint|randomUUID|setItem/);
   for (const c of calls.filter(c => c.expression.getText(ast) === "fetch" && c.arguments[0].getText(ast) === "dispatchEndpoint")) assert.equal(owner(c), "send");
   const sends = calls.filter(c => c.expression.getText(ast) === "send"); assert.equal(sends.length, 1);
@@ -104,6 +104,14 @@ test("component AST: only explicit onClick dispatch, no automation, storage befo
   assert.match(source, /if \(parsed.operation\?\.state === "PREPARED"\) sessionStorage.setItem\(storageKey, parsed.operation.commandId\)/);
   for (const tag of Array.from(source.matchAll(/<button\b([^>]+)>/g))) assert.match(tag[1], /type="button"/);
   assert.doesNotMatch(source, /Tentar novamente|Atualizar novamente|Sincronizar novamente|Novo cadastro|Reenviar/);
+});
+test("explicit phone selector defaults INCLUDE, previews OMIT, and invalidates confirmation", () => {
+  const source = readFileSync("src/app/components/integrations/OpenCreditCreateClientPanel.tsx", "utf8");
+  assert.match(source, /useState<OpenCreditCreateClientPhonePolicy>\("include"\)/);
+  assert.match(source, /<option value="include">/); assert.match(source, /<option value="omit">/);
+  assert.match(source, /setPhonePolicy\(parseOpenCreditCreateClientPhonePolicy\(e.target.value\)\); setConfirmed\(false\)/);
+  assert.match(source, /Phone policy:/); assert.match(source, /telefone no cadastro permanece preservado/);
+  assert.match(source, /JSON.stringify\(\{ companyId, contactId, commandId, phonePolicy \}\)/);
 });
 test("runtime consumers and endpoint are exact, including extension and indirect import forms", () => {
   const component = "src/app/components/integrations/OpenCreditCreateClientPanel.tsx", handler = "src/lib/opencredit-create-client-context-admin-handler.ts", service = "src/lib/opencredit-create-client-context.service.ts";

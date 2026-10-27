@@ -1,4 +1,5 @@
 import "server-only";
+import { parseOpenCreditCreateClientPhonePolicy } from "./opencredit-create-client-phone-policy";
 import { NextResponse, type NextRequest } from "next/server";
 import type { SessionUser } from "./auth";
 import type { RateLimitRule } from "./rate-limit";
@@ -68,11 +69,14 @@ async function readCommand(request: NextRequest) {
     }
     finished = true;
     const parsed = parseOpenCreditStrictJson(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Buffer.concat(chunks)));
-    const result = data(parsed, ["companyId", "contactId", "commandId"]);
-    if (Reflect.ownKeys(parsed as object).length !== 3 || !validId(result.companyId) || !validId(result.contactId)
+    const hasPolicy = !!parsed && typeof parsed === "object" && Object.hasOwn(parsed, "phonePolicy");
+    const keys = ["companyId", "contactId", "commandId", ...(hasPolicy ? ["phonePolicy"] : [])];
+    const result = data(parsed, keys);
+    const phonePolicy = hasPolicy ? parseOpenCreditCreateClientPhonePolicy(result.phonePolicy) : "include";
+    if (Reflect.ownKeys(parsed as object).length !== keys.length || !validId(result.companyId) || !validId(result.contactId)
       || typeof result.commandId !== "string"
       || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\s\S])/.test(result.commandId)) return null;
-    return { companyId: result.companyId, contactId: result.contactId, commandId: result.commandId };
+    return { companyId: result.companyId, contactId: result.contactId, commandId: result.commandId, phonePolicy };
   } catch { return null; }
   finally {
     if (timer !== undefined) clearTimeout(timer);
@@ -118,12 +122,12 @@ export function createOpenCreditCreateClientDispatchAdminHandler(deps: Dependenc
       catch { return reply({ error: "OPENCREDIT_PROVIDER_SCOPE_CONFIGURATION" }, 503); }
       const prepared = snapshot(await (deps.prepare ?? prepareOpenCreditClientProfileOperation)(deps.db, {
         actor: session, companyId: command.companyId, contactId: command.contactId, providerScope, intentKey: command.commandId,
-      }));
+      }, command.phonePolicy));
       if (["IN_FLIGHT", "SUCCEEDED", "UNKNOWN"].includes(prepared.state)) return reply({ ok: true, ...prepared, dispatched: false });
       if (prepared.state !== "PREPARED") return reply({ error: "OPENCREDIT_COMMERCIAL_OPERATION_OPERATION_STATE_INVALID" }, 409);
       const result = snapshot(await (deps.dispatch ?? dispatchOpenCreditCreateClient)(deps.db, {
         actor: session, companyId: command.companyId, operationId: prepared.operationId, expectedRevision: prepared.revision,
-      }));
+      }, { phonePolicy: command.phonePolicy }));
       if (result.operationId !== prepared.operationId || !["SUCCEEDED", "UNKNOWN"].includes(result.state)) throw Error("INVALID_RESULT");
       return reply({ ok: true, ...result, dispatched: true });
     } catch (error) {

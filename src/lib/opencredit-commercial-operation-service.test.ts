@@ -160,6 +160,25 @@ async function invoke(mode: typeof modes[number], f: ReturnType<typeof fake>, su
     : mode === "unknown" ? service.markOpenCreditCommercialOperationUnknown(f.db, (supplied ?? transition(1)) as OpenCreditOperationTransitionInput)
     : service.applyOpenCreditCreateClientObservation(f.db, (supplied ?? transition(1)) as OpenCreditOperationTransitionInput, observed());
 }
+test("explicit OMIT survives preparation and reservation without mutating Contact", () => configured(async () => {
+  const f = fake(); const before = structuredClone(f.state.contact);
+  await service.prepareOpenCreditClientProfileOperation(f.db, prepare(), "omit");
+  const r = await service.reserveOpenCreditClientProfileOperationForDispatch(f.db, transition(), "omit");
+  assert.equal(Object.hasOwn(r.profile, "celular"), false);
+  assert.equal(Object.hasOwn(JSON.parse(r.profileJson), "celular"), false);
+  assert.equal(r.profile.cpf, f.state.identity!.normalizedCpf);
+  assert.equal(r.profile.nome, before!.name); assert.equal(r.profile.email, before!.email);
+  assert.deepEqual(f.state.contact, before);
+  assert.deepEqual(f.state.events.map(e => e.action), ["PREPARED", "RESERVED_FOR_DISPATCH"]);
+}));
+test("invalid policy fails before transactional writes; OMIT does not bypass authorization", () => configured(async () => {
+  const f = fake();
+  await denied(() => service.prepareOpenCreditClientProfileOperation(f.db, prepare(), "auto" as "omit"), "PROFILE_INVALID");
+  assert.equal(f.attempts(), 0);
+  const r = fake("PREPARED"); r.state.authorization!.active = false;
+  await denied(() => service.reserveOpenCreditClientProfileOperationForDispatch(r.db, transition(), "omit"), "CONSUMER_AUTHORIZATION_INACTIVE");
+  assert.equal(r.calls.includes("operation.cas"), false); assert.deepEqual(r.state.events, []);
+}));
 test("prepare creates exactly one PREPARED event atomically, returning no profile/PII", () => configured(async () => {
   const f = fake(); assert.deepEqual(await invoke("prepare", f), { changed: true, operationId: "synthetic-operation", state: "PREPARED", revision: 0 });
   assert.deepEqual(f.state.events, [{ operationId: "synthetic-operation", companyId: "synthetic-company", providerScope: scope, actorUserId: actor.id, action: "PREPARED", previousState: null, nextState: "PREPARED", revision: 0 }]);
@@ -507,7 +526,7 @@ test("AST: no FAILED writer and only outcome-derived SUCCEEDED reaches private t
   const source = readFileSync(new URL("./opencredit-commercial-operation.service.ts", import.meta.url), "utf8");
   const ast = ts.createSourceFile("service.ts", source, ts.ScriptTarget.Latest, true);
   assert.deepEqual(ast.statements.filter(ts.isImportDeclaration).map(n => (n.moduleSpecifier as ts.StringLiteral).text),
-    ["server-only", "@prisma/client", "./auth", "./permissions", "./opencredit-commercial-identity-policy",
+    ["server-only", "./opencredit-create-client-phone-policy", "@prisma/client", "./auth", "./permissions", "./opencredit-commercial-identity-policy",
       "./opencredit-contact-client-profile-adapter", "./opencredit-client-profile-contract", "./opencredit-create-client-outcome"]);
   const settle = ast.statements.find((n): n is ts.FunctionDeclaration => ts.isFunctionDeclaration(n) && n.name?.text === "settle")!;
   assert.equal(settle.typeParameters?.[0].constraint?.getText(ast), '"SUCCEEDED" | "UNKNOWN"');

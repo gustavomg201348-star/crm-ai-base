@@ -1887,7 +1887,45 @@ mutation. The DTO uses the reserved identity.normalizedCpf, not the original Con
 string. Identity enablement here proves local coherence, NOT consent or permission
 to execute client POST, validation, simulation, proposal or any financial operation.
 
-Only identity.normalizedCpf -> cpf, Contact.name -> nome, Contact.phone -> celular
+### Explicit optional phone policy for controlled createClient
+
+The published createClient request requires only `cpf`; `celular` is optional.
+The known provider description is DDD followed by the number, with a national
+eleven-digit example. Acceptance of a leading country code is not established.
+This change does not normalize phones or infer a missing ninth digit/DDD.
+
+`OpenCreditCreateClientPhonePolicy` is exactly `"include" | "omit"`. Existing
+callers and requests without the option retain `include`. Only an explicit `omit`
+excludes the own `celular` property from both the DTO and serialized JSON; no
+`undefined`, `null` or empty-string replacement is sent. Contact.phone is neither
+modified nor persisted differently. An empty phone still has its previous default
+rejection; deliberate OMIT can exclude it. Invalid options fail closed, never
+fall back to omission.
+
+The official human dispatch boundary accepts an optional `phonePolicy` in its
+otherwise closed `{companyId, contactId, commandId}` JSON. It propagates the same
+policy through preparation, dispatcher and transactional reservation into the
+adapter. Authenticated session, Platform Admin, same-origin, rate limits, trusted
+scope, current authorization binding, single intent and one-shot transport stay
+unchanged. No new endpoint or provider client is introduced.
+
+The human UI defaults to INCLUDE, presents an explicit selector and policy preview,
+and clears its confirmation when the policy changes. The preview states that the
+Contact phone remains preserved. Changing policy does not create another intent,
+unlock a terminal operation or authorize replay. After uncertainty, do not resend.
+The policy is chosen for each explicit command; it is not an immutable PREPARED
+snapshot and is not reconstructed from historical operations. Resuming PREPARED
+requires reviewing the policy again (the UI defaults to INCLUDE after remount).
+
+Auditability here is the explicit administrative request and its pre-dispatch UI
+preview, not a new durable policy field. Existing operations store neither profile
+nor phone snapshots; diagnostic/schema/migrations remain unchanged. Historical
+UNKNOWN stays unchanged. Tests use synthetic fixtures and fake HTTP; the material
+gate uses only disposable local PostgreSQL. No real provider execution is part of
+implementing or testing this option. Rollback is reverting this patch; no data
+backfill or database rollback is needed.
+
+By default only identity.normalizedCpf -> cpf, Contact.name -> nome, Contact.phone -> celular
 and non-null Contact.email -> email are passed to buildOpenCreditClientProfilePayload.
 Null email is omitted; strings are preserved exactly. There is no trim, lowercasing,
 phone formatting, +55 insertion, DDD inference or independent email validator.

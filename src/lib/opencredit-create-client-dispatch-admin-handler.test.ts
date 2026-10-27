@@ -23,7 +23,7 @@ const dispatched = { operationId: "operation", state: "SUCCEEDED" as const, revi
 const scope = "synthetic-scope" as ReturnType<typeof import("./opencredit-provider-scope-resolver").resolveConfiguredOpenCreditProviderScope>;
 function fixture(options: { session?: SessionUser | null; limited?: Response; limitThrows?: boolean; scopeThrows?: boolean;
   failure?: unknown; prepared?: unknown; result?: unknown; limit?: (rules: readonly RateLimitRule[]) => Promise<Response | null> } = {}) {
-  const order: string[] = [], calls: unknown[] = [], rules: RateLimitRule[][] = [];
+  const order: string[] = [], calls: unknown[] = [], rules: RateLimitRule[][] = [], policies: unknown[] = [];
   const db = { $transaction: () => { throw Error("HANDLER_CANNOT_QUERY_DB"); } } as unknown as Parameters<typeof domain.prepareOpenCreditClientProfileOperation>[0];
   const handler = boundary.createOpenCreditCreateClientDispatchAdminHandler({
     db, getSession: async () => { order.push("session"); return options.session === undefined ? actor : options.session; },
@@ -33,10 +33,10 @@ function fixture(options: { session?: SessionUser | null; limited?: Response; li
     },
     enforceLimits: async r => { order.push("limit"); rules.push([...r]); if (options.limitThrows) throw Error("private"); return options.limit ? options.limit(r) : options.limited ?? null; },
     resolveScope: () => { order.push("scope"); if (options.scopeThrows) throw Error("private"); return scope; },
-    prepare: async (database, input) => { order.push("prepare"); assert.equal(database, db); calls.push(input); if (options.failure !== undefined) throw options.failure; return (options.prepared ?? prepared) as typeof prepared; },
-    dispatch: async (database, input) => { order.push("dispatch"); assert.equal(database, db); calls.push(input); return (options.result ?? dispatched) as typeof dispatched; },
+    prepare: async (database, input, policy) => { order.push("prepare"); assert.equal(database, db); calls.push(input); policies.push(policy); if (options.failure !== undefined) throw options.failure; return (options.prepared ?? prepared) as typeof prepared; },
+    dispatch: async (database, input, dispatchOptions) => { order.push("dispatch"); assert.equal(database, db); calls.push(input); policies.push(dispatchOptions?.phonePolicy); return (options.result ?? dispatched) as typeof dispatched; },
   });
-  return { handler, order, calls, rules };
+  return { handler, order, calls, rules, policies };
 }
 function request(options: { body?: string | Uint8Array | ReadableStream<Uint8Array> | null; query?: string; headers?: Record<string, string | null | undefined> } = {}) {
   const headers = new Headers({ origin: "https://crm.example.invalid", "content-type": "application/json" });
@@ -49,6 +49,16 @@ function request(options: { body?: string | Uint8Array | ReadableStream<Uint8Arr
 async function error(response: Response, status: number, code: string) {
   assert.equal(response.status, status); assert.equal(response.headers.get("cache-control"), "no-store"); assert.deepEqual(await response.json(), { error: code });
 }
+for (const policy of [undefined, "include", "omit"] as const) test("explicit phone policy propagated to prepare and dispatch: " + policy, async () => {
+  const f = fixture(); const value = { ...body, ...(policy === undefined ? {} : { phonePolicy: policy }) };
+  const response = await f.handler(request({ body: JSON.stringify(value) }));
+  assert.equal(response.status, 200); assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.deepEqual(f.policies, [policy ?? "include", policy ?? "include"]);
+});
+for (const policy of [null, "", "OMIT", "auto", 0, 1, true, {}, []]) test("invalid phone policy rejected before rate limits or writes: " + JSON.stringify(policy), async () => {
+  const f = fixture(); await error(await f.handler(request({ body: JSON.stringify({ ...body, phonePolicy: policy }) })), 400, "INVALID_REQUEST");
+  assert.equal(f.calls.length, 0); assert(!f.order.includes("limit"));
+});
 test("session and platform admin precede body reads", async () => {
   for (const session of [null, { ...actor, role: "OPERATOR" }, { ...actor, companyId: "other" }] as (SessionUser | null)[]) {
     const req = request(); let reads = 0; Object.defineProperty(req, "body", { get() { reads++; throw Error("private"); } });

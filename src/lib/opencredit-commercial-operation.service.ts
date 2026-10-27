@@ -1,4 +1,5 @@
 import "server-only";
+import { parseOpenCreditCreateClientPhonePolicy, type OpenCreditCreateClientPhonePolicy } from "./opencredit-create-client-phone-policy";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import type { SessionUser } from "./auth";
 import { isPlatformAdmin } from "./permissions";
@@ -139,7 +140,7 @@ function operationFacts(operation: Operation, input: Common, preparing = false):
   if (operation.companyId !== input.companyId || operation.providerScope !== input.providerScope || operation.operationKind !== KIND) return fail(preparing ? "INTENT_CONFLICT" : "OPERATION_KIND_MISMATCH");
   if (!Number.isSafeInteger(operation.revision) || operation.revision < 0 || operation.revision > MAX_REVISION) return fail("OPERATION_REVISION_CONFLICT");
 }
-async function fresh(tx: Prisma.TransactionClient, input: Common, contactId: string, linked?: Identity) {
+async function fresh(tx: Prisma.TransactionClient, input: Common, contactId: string, linked?: Identity, phonePolicy: OpenCreditCreateClientPhonePolicy = "include") {
   const contact = await tx.contact.findUnique({ where: { companyId_id: { companyId: input.companyId, id: contactId } },
     select: { id: true, companyId: true, name: true, phone: true, email: true, cpf: true, archivedAt: true } });
   if (!contact) return fail("CONTACT_NOT_FOUND");
@@ -164,13 +165,15 @@ async function fresh(tx: Prisma.TransactionClient, input: Common, contactId: str
     const profile = buildOpenCreditClientProfileFromContact({ contact, identity: {
       companyId: identity.companyId, contactId: identity.contactId, providerScope: input.providerScope,
       normalizedCpf: identity.normalizedCpf, enabled: identity.enabled
-    } });
+    } }, phonePolicy);
     return { identity, profile };
   } catch { return fail("PROFILE_INVALID"); }
 }
 /** Used by the human admin command; preparation alone is not consent or dispatch permission. */
-export async function prepareOpenCreditClientProfileOperation(db: Db, supplied: OpenCreditPrepareClientProfileInput): Promise<OpenCreditCommercialOperationResult> {
+export async function prepareOpenCreditClientProfileOperation(db: Db, supplied: OpenCreditPrepareClientProfileInput,
+  phonePolicy: OpenCreditCreateClientPhonePolicy = "include"): Promise<OpenCreditCommercialOperationResult> {
   const input = prepareInput(supplied);
+  try { parseOpenCreditCreateClientPhonePolicy(phonePolicy); } catch { return fail("PROFILE_INVALID"); }
   return transaction(db, input, true, async (tx, actorId) => {
     const current = await tx.openCreditCommercialOperation.findUnique({ where: { companyId_providerScope_intentKey: { companyId: input.companyId, providerScope: input.providerScope, intentKey: input.intentKey } }, select: operationSelect });
     if (current) {
@@ -180,7 +183,7 @@ export async function prepareOpenCreditClientProfileOperation(db: Db, supplied: 
       if (!identity || identity.contactId !== input.contactId || identity.companyId !== input.companyId || identity.providerScope !== input.providerScope) return fail("INTENT_CONFLICT");
       return { changed: false, operationId: current.id, state: current.state as OpenCreditCommercialOperationState, revision: current.revision };
     }
-    const { identity } = await fresh(tx, input, input.contactId);
+    const { identity } = await fresh(tx, input, input.contactId, undefined, phonePolicy);
     // Single client-profile intention per identity until an explicit future update/sync flow exists.
     // Keep this predicate read and the insert in the same Serializable transaction.
     const existing = await tx.openCreditCommercialOperation.findFirst({ where: {
@@ -219,15 +222,17 @@ async function dispatchAuthorization(tx: Prisma.TransactionClient, input: Common
   return { authorizationId: a.id, authorizationRevision: a.revision, authorizationEventId: e.id };
 }
 /** Successful IN_FLIGHT commit is the local commit-to-dispatch point, NOT an HTTP call or replay permission. */
-export async function reserveOpenCreditClientProfileOperationForDispatch(db: Db, supplied: OpenCreditOperationTransitionInput): Promise<OpenCreditClientProfileReservation> {
+export async function reserveOpenCreditClientProfileOperationForDispatch(db: Db, supplied: OpenCreditOperationTransitionInput,
+  phonePolicy: OpenCreditCreateClientPhonePolicy = "include"): Promise<OpenCreditClientProfileReservation> {
   const input = transitionInput(supplied);
+  try { parseOpenCreditCreateClientPhonePolicy(phonePolicy); } catch { return fail("PROFILE_INVALID"); }
   return transaction(db, input, false, async (tx, actorId) => {
     const operation = await loadOperation(tx, input);
     if (operation.state !== "PREPARED") return fail("OPERATION_STATE_CONFLICT");
     if (operation.revision !== input.expectedRevision) return fail("OPERATION_REVISION_CONFLICT");
     const identity = await tx.openCreditRemoteIdentity.findUnique({ where: { id_companyId_providerScope: { id: operation.remoteIdentityId, companyId: input.companyId, providerScope: input.providerScope } }, select: identitySelect });
     if (!identity) return fail("IDENTITY_NOT_FOUND");
-    const { profile } = await fresh(tx, input, identity.contactId, identity);
+    const { profile } = await fresh(tx, input, identity.contactId, identity, phonePolicy);
     const authorization = await dispatchAuthorization(tx, input, identity);
     let profileJson: string;
     try { profileJson = serializeOpenCreditClientProfilePayload(profile); }
