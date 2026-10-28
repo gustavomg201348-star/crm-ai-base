@@ -36,7 +36,7 @@ function bound(e: Evidence, i: Input) {
     && e.conversation?.id === e.conversationId && e.conversation.contactId === i.contactId && e.conversation.contact?.companyId === i.companyId
     && e.message?.id === e.messageId && e.message.conversationId === e.conversationId;
 }
-export async function getOpenCreditConsumerAuthorizationContext(db: Db, value: Input) {
+async function context(db: Db, value: Input, purpose: "CLIENT_PROFILE_UPSERT" | "CLIENT_PROFILE_CORRECTION") {
   try {
     const r = closed(value, ["actor", "companyId", "contactId", "conversationId", "providerScope"], "STORAGE_ERROR");
     if (![r.companyId, r.contactId, r.conversationId].every(validId)) return fail("STORAGE_ERROR");
@@ -57,13 +57,13 @@ export async function getOpenCreditConsumerAuthorizationContext(db: Db, value: I
       if (!conversation || conversation.id !== input.conversationId || conversation.contactId !== input.contactId
         || conversation.contact.companyId !== input.companyId) return fail("CONVERSATION_NOT_FOUND");
       const auth = await tx.openCreditConsumerAuthorization.findUnique({ where: { companyId_providerScope_contactId_purpose: {
-        companyId: input.companyId, providerScope: input.providerScope, contactId: input.contactId, purpose: "CLIENT_PROFILE_UPSERT",
+        companyId: input.companyId, providerScope: input.providerScope, contactId: input.contactId, purpose,
       } }, select: { id: true, companyId: true, contactId: true, providerScope: true, purpose: true, active: true, revision: true, evidenceInboundEventId: true } });
       let authorization: { exists: boolean; active: boolean; revision: number | null; evidenceInboundEventId: string | null; evidenceMessageId: string | null }
         = { exists: false, active: false, revision: null, evidenceInboundEventId: null, evidenceMessageId: null };
       if (auth) {
         if (!validId(auth.id) || auth.companyId !== input.companyId || auth.contactId !== input.contactId || auth.providerScope !== input.providerScope
-          || auth.purpose !== "CLIENT_PROFILE_UPSERT" || typeof auth.active !== "boolean" || !Number.isSafeInteger(auth.revision) || auth.revision < 0 || !validId(auth.evidenceInboundEventId)) return fail("STORAGE_ERROR");
+          || auth.purpose !== purpose || typeof auth.active !== "boolean" || !Number.isSafeInteger(auth.revision) || auth.revision < 0 || !validId(auth.evidenceInboundEventId)) return fail("STORAGE_ERROR");
         // Resolve current evidence separately, even if it is older than the UI window.
         const evidence = await tx.conversationInboundEvent.findUnique({ where: { id: auth.evidenceInboundEventId }, select: currentSelect });
         if (!evidence || evidence.id !== auth.evidenceInboundEventId || !bound(evidence, input)) return fail("STORAGE_ERROR");
@@ -96,3 +96,6 @@ export async function getOpenCreditConsumerAuthorizationContext(db: Db, value: I
     return fail(semantic);
   }
 }
+
+export const getOpenCreditConsumerAuthorizationContext = (db: Db, value: Input) => context(db, value, "CLIENT_PROFILE_UPSERT");
+export const getOpenCreditCorrectionAuthorizationContext = (db: Db, value: Input) => context(db, value, "CLIENT_PROFILE_CORRECTION");

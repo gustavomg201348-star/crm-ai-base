@@ -33,7 +33,7 @@ test("both logical models, exact fields and inverse relations are equivalent acr
     assert.match(history, /dispatchAuthorizationEventId String\?/);
     assert.match(history, /fields: \[dispatchAuthorizationEventId, companyId, providerScope\], references: \[id, companyId, providerScope\]/);
     assert.match(operation, /@@unique\(\[companyId, providerScope, intentKey\], map: "OCOperation_company_scope_intent_key"\)/);
-    assert.match(operation, /@@unique\(\[companyId, providerScope, remoteIdentityId, operationKind\], map: "OCOperation_company_scope_identity_kind_key"\)/);
+    assert.match(operation, /@@index\(\[companyId, providerScope, remoteIdentityId, operationKind\], map: "OCOperation_identity_kind_lookup_idx"\)/);
     assert.match(operation, /@@unique\(\[id, companyId, providerScope\], map: "OCOperation_id_company_scope_key"\)/);
     assert.match(model(schema, "Company")!, /openCreditCommercialOperations OpenCreditCommercialOperation\[\]/);
     assert.match(model(schema, "User")!, /openCreditCommercialOperationsCreated OpenCreditCommercialOperation\[\] @relation\("OpenCreditCommercialOperationCreatedBy"\)/);
@@ -126,7 +126,7 @@ test("only the approved service has the exact ledger writers; all other producti
       const path = new URL(entry.name + (entry.isDirectory() ? "/" : ""), dir);
       if (entry.isDirectory()) scan(path);
       else if (/\.(?:tsx?|m?js|cjs)$/.test(entry.name) && !/\.(?:test|integration)\.(?:tsx?|m?js|cjs)$/.test(entry.name)) {
-        const expected = path.pathname.endsWith("/src/lib/opencredit-commercial-operation.service.ts");
+        const expected = ["/src/lib/opencredit-commercial-operation.service.ts", "/src/lib/opencredit-client-correction.service.ts"].some(p => path.pathname.endsWith(p));
         const diagnosticOnly = path.pathname.endsWith("/src/lib/opencredit-create-client-diagnostic.service.ts");
         const result = ledgerRuntime(readFileSync(path, "utf8"), expected, diagnosticOnly);
         assert.deepEqual(result.errors, [], path.pathname);
@@ -137,6 +137,8 @@ test("only the approved service has the exact ledger writers; all other producti
   scan(new URL("../", import.meta.url)); scan(new URL("../../scripts/", import.meta.url));
   assert.deepEqual(writers.sort(), ["openCreditCommercialOperation.create",
     "openCreditCommercialOperation.updateMany", "openCreditCommercialOperation.updateMany", "openCreditCommercialOperation.updateMany",
+    "openCreditCommercialOperationEvent.create", "openCreditCommercialOperationEvent.create", "openCreditCommercialOperationEvent.create",
+    "openCreditCommercialOperation.create", "openCreditCommercialOperation.updateMany", "openCreditCommercialOperation.updateMany", "openCreditCommercialOperation.updateMany", "openCreditCommercialOperation.updateMany",
     "openCreditCommercialOperationEvent.create", "openCreditCommercialOperationEvent.create", "openCreditCommercialOperationEvent.create"].sort());
 });
 test("service exception permits only operation create/updateMany and Event create; no aliases or dynamic mutations", () => {

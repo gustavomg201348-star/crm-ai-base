@@ -153,7 +153,7 @@ test("only approved human admin boundaries, dispatcher and read-only validation 
   for (const file of readdirSync("src", { recursive: true, encoding: "utf8" })) {
     if (!/\.tsx?$/.test(file) || /\.(test|integration)\.ts$/.test(file) || file.endsWith("opencredit-provider-scope-resolver.ts")) continue;
     let source = readFileSync("src/" + file, "utf8");
-    const dispatcher = ["lib/opencredit-create-client-dispatcher.ts", "lib/opencredit-client-validation.service.ts"].includes(file.replace(/\\/g, "/"));
+    const dispatcher = ["lib/opencredit-create-client-dispatcher.ts", "lib/opencredit-client-validation.service.ts", "lib/opencredit-client-correction.service.ts"].includes(file.replace(/\\/g, "/"));
     if (dispatcher || ["lib/opencredit-commercial-access-admin-handler.ts", "lib/opencredit-remote-identity-admin-handler.ts", "lib/opencredit-remote-identity-context-admin-handler.ts", "lib/opencredit-commercial-access-context-admin-handler.ts", "lib/opencredit-consumer-authorization-admin-handler.ts", "lib/opencredit-consumer-authorization-context-admin-handler.ts", "lib/opencredit-create-client-dispatch-admin-handler.ts", "lib/opencredit-create-client-context-admin-handler.ts", "lib/opencredit-create-client-reconciliation-context-admin-handler.ts"].includes(file.replace(/\\/g, "/"))) {
       const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
       const imports = ast.statements.filter(ts.isImportDeclaration).filter(node => (node.moduleSpecifier as ts.StringLiteral).text === "./opencredit-provider-scope-resolver");

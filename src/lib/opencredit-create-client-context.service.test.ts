@@ -21,7 +21,7 @@ function fixture() {
     return async (args: unknown) => { calls.push({ name, args }); return state[name]; };
   } });
   const tx = { user: delegate("user", "findUnique"), company: delegate("company", "findUnique"), contact: delegate("contact", "findUnique"),
-    openCreditRemoteIdentity: delegate("identity", "findUnique"), openCreditCommercialOperation: delegate("operation", "findUnique") };
+    openCreditRemoteIdentity: delegate("identity", "findUnique"), openCreditCommercialOperation: delegate("operation", "findFirst") };
   const guarded = new Proxy(tx, { get(target, key) { assert(Object.prototype.hasOwnProperty.call(target, key), "unexpected domain read/write"); return Reflect.get(target, key); } });
   const db = { $transaction: async (run: (tx: unknown) => Promise<unknown>, option: unknown) => { options.push(option); return run(guarded); } } as unknown as Parameters<typeof service.getOpenCreditCreateClientContext>[0];
   const run = async (value = input()) => {
@@ -37,9 +37,9 @@ test("scoped single-intent unique lookup and closed operation, only read delegat
   assert.deepEqual(f.calls.map(c => c.name), ["user", "company", "contact", "identity", "operation"]);
   assert.deepEqual(f.calls[2].args, { where: { companyId_id: { companyId: "company", id: "contact" } }, select: { id: true, companyId: true } });
   assert.deepEqual(f.calls[3].args, { where: { companyId_providerScope_contactId: { companyId: "company", providerScope: "synthetic-scope", contactId: "contact" } }, select: { id: true } });
-  assert.deepEqual(f.calls[4].args, { where: { companyId_providerScope_remoteIdentityId_operationKind: {
+  assert.deepEqual(f.calls[4].args, { where: {
     companyId: "company", providerScope: "synthetic-scope", remoteIdentityId: "identity", operationKind: "CLIENT_PROFILE_UPSERT",
-  } }, select: { id: true, intentKey: true, state: true, revision: true } });
+  }, select: { id: true, intentKey: true, state: true, revision: true } });
   assert.deepEqual(f.options, [{ isolationLevel: "Serializable", maxWait: 2000, timeout: 5000 }]);
 });
 for (const state of ["PREPARED", "IN_FLIGHT", "UNKNOWN", "SUCCEEDED", "FAILED"]) test("all states readable despite stale unrelated eligibility " + state, async () => {

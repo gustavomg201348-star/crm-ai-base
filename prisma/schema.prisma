@@ -490,7 +490,8 @@ model OpenCreditCommercialOperation {
   events           OpenCreditCommercialOperationEvent[]
 
   @@unique([companyId, providerScope, intentKey], map: "OCOperation_company_scope_intent_key")
-  @@unique([companyId, providerScope, remoteIdentityId, operationKind], map: "OCOperation_company_scope_identity_kind_key")
+  // Production partial unique is maintained explicitly by the correction migration.
+  @@index([companyId, providerScope, remoteIdentityId, operationKind], map: "OCOperation_identity_kind_lookup_idx")
   @@unique([id, companyId, providerScope], map: "OCOperation_id_company_scope_key")
   @@index([remoteIdentityId, createdAt, id], map: "OCOperation_identity_created_id_idx")
   @@index([companyId, providerScope, state, createdAt, id], map: "OCOperation_scope_state_created_id_idx")

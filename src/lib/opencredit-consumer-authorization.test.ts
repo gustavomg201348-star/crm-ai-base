@@ -293,7 +293,7 @@ test("server-only, closed runtime exports and passive AST", () => {
   }
   visit(ast);
   assert.match(source, /^import "server-only";/);
-  assert.deepEqual(exports.sort(), ["OpenCreditConsumerAuthorizationServiceError", "grantOpenCreditConsumerAuthorizationFromInboundEvidence", "revokeOpenCreditConsumerAuthorization"].sort());
+  assert.deepEqual(exports.sort(), ["OpenCreditConsumerAuthorizationServiceError", "grantOpenCreditConsumerAuthorizationFromInboundEvidence", "revokeOpenCreditConsumerAuthorization", "grantOpenCreditCorrectionAuthorization", "revokeOpenCreditCorrectionAuthorization"].sort());
   assert.doesNotMatch(source, /\bfetch\s*\(|new PrismaClient|console\.|grantConsent|setConsent|legalBasis|https?:|opencredit-api-client|POST|strict-http/);
   assert.doesNotMatch(source, /\.body\.(?:match|includes|search|toLowerCase)|RegExp/);
 });
@@ -317,6 +317,14 @@ test("only approved human admin mutation boundary; reservation only reads author
             ts.forEachChild(node, visit);
           };
           visit(ast);
+        } else if (path === "src/lib/opencredit-client-correction.service.ts") {
+          const ast = ts.createSourceFile(path, readFileSync(path, "utf8"), ts.ScriptTarget.Latest, true);
+          const visit = (n: ts.Node): void => {
+            if (ts.isPropertyAccessExpression(n) && ["openCreditConsumerAuthorization", "openCreditConsumerAuthorizationEvent"].includes(n.name.text)) {
+              assert(ts.isPropertyAccessExpression(n.parent)); assert.equal(n.parent.name.text, "findUnique");
+            }
+            ts.forEachChild(n, visit);
+          }; visit(ast);
         } else if (["src/lib/opencredit-consumer-authorization-context.service.ts", "src/lib/opencredit-client-validation.service.ts"].includes(path)) {
           const source = readFileSync(path, "utf8");
           assert.doesNotMatch(source, /grantOpenCreditConsumerAuthorization|revokeOpenCreditConsumerAuthorization|consumer-authorization\.service/);
@@ -342,10 +350,15 @@ test("only approved human admin mutation boundary; reservation only reads author
           "src/lib/opencredit-create-client-reconciliation-context-postgres.integration.ts",
           "src/lib/opencredit-create-client-ui.test.ts",
           "src/lib/opencredit-client-validation.test.ts",
+          "src/lib/opencredit-client-correction-postgres.integration.ts",
           "src/lib/opencredit-consumer-authorization-context-admin-handler.ts",
           "src/lib/opencredit-consumer-authorization-context-admin-handler.test.ts",
           "src/lib/opencredit-consumer-authorization-ui.ts", "src/lib/opencredit-consumer-authorization-ui.test.ts",
           "src/app/components/integrations/OpenCreditConsumerAuthorizationPanel.tsx",
+          "src/app/components/integrations/OpenCreditCorrectionAuthorizationPanel.tsx",
+          "src/app/api/admin/integrations/opencredit/client-correction/authorization/context/route.ts",
+          "src/app/api/admin/integrations/opencredit/client-correction/authorization/grant/route.ts",
+          "src/app/api/admin/integrations/opencredit/client-correction/authorization/revoke/route.ts",
           "src/app/api/admin/integrations/opencredit/consumer-authorization/context/route.ts",
           "src/lib/opencredit-provider-scope-resolver.test.ts", "src/lib/opencredit-strict-json.test.ts",
           "src/app/api/admin/integrations/opencredit/consumer-authorization/grant/route.ts",
