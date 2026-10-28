@@ -24,7 +24,7 @@ export type OpenCreditConsumerAuthorizationGrantInput = OpenCreditConsumerAuthor
 export type OpenCreditConsumerAuthorizationResult = Readonly<{
   changed: boolean; authorizationId: string | null; active: boolean; revision: number | null;
 }>;
-const PURPOSE = "CLIENT_PROFILE_UPSERT";
+type Purpose = "CLIENT_PROFILE_UPSERT" | "CLIENT_PROFILE_CORRECTION";
 const fail = (code: OpenCreditConsumerAuthorizationCode): never => { throw new OpenCreditConsumerAuthorizationServiceError(code); };
 const validId = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?![\s\S])/.test(v);
 const email = (v: string) => v.trim().toLowerCase();
@@ -142,11 +142,11 @@ async function evidence(tx: Prisma.TransactionClient, i: OpenCreditConsumerAutho
 }
 const select = { id: true, companyId: true, contactId: true, providerScope: true, remoteIdentityId: true, purpose: true, active: true, revision: true, evidenceInboundEventId: true } as const;
 type Authorization = Prisma.OpenCreditConsumerAuthorizationGetPayload<{ select: typeof select }>;
-function key(i: OpenCreditConsumerAuthorizationInput) {
-  return { companyId_providerScope_contactId_purpose: { companyId: i.companyId, providerScope: i.providerScope, contactId: i.contactId, purpose: PURPOSE } };
+function key(i: OpenCreditConsumerAuthorizationInput, purpose: Purpose) {
+  return { companyId_providerScope_contactId_purpose: { companyId: i.companyId, providerScope: i.providerScope, contactId: i.contactId, purpose } };
 }
-function facts(a: Authorization, i: OpenCreditConsumerAuthorizationInput) {
-  if (a.companyId !== i.companyId || a.contactId !== i.contactId || a.providerScope !== i.providerScope || a.purpose !== PURPOSE
+function facts(a: Authorization, i: OpenCreditConsumerAuthorizationInput, purpose: Purpose) {
+  if (a.companyId !== i.companyId || a.contactId !== i.contactId || a.providerScope !== i.providerScope || a.purpose !== purpose
     || typeof a.active !== "boolean" || !Number.isSafeInteger(a.revision) || a.revision < 0 || a.revision > 2147483647) return fail("STORAGE_ERROR");
 }
 async function transition(tx: Prisma.TransactionClient, i: OpenCreditConsumerAuthorizationInput, a: Authorization,
@@ -163,14 +163,14 @@ async function transition(tx: Prisma.TransactionClient, i: OpenCreditConsumerAut
   return { changed: true, authorizationId: a.id, active, revision };
 }
 /** A human administrator attests review; inbound ingestion never calls this service. */
-export async function grantOpenCreditConsumerAuthorizationFromInboundEvidence(db: Db, supplied: OpenCreditConsumerAuthorizationGrantInput): Promise<OpenCreditConsumerAuthorizationResult> {
+async function grant(db: Db, supplied: OpenCreditConsumerAuthorizationGrantInput, purpose: Purpose): Promise<OpenCreditConsumerAuthorizationResult> {
   const i = input(supplied, true);
   return transaction(db, i, async (tx, actorId, creating) => {
     const identityId = await freshIdentity(tx, i);
     await evidence(tx, i);
-    const a = await tx.openCreditConsumerAuthorization.findUnique({ where: key(i), select });
+    const a = await tx.openCreditConsumerAuthorization.findUnique({ where: key(i, purpose), select });
     if (a) {
-      facts(a, i);
+      facts(a, i, purpose);
       if (a.remoteIdentityId !== identityId) return fail("IDENTITY_CONFLICT");
       if (a.active) {
         if (a.evidenceInboundEventId !== i.inboundEventId) return fail("AUTHORIZATION_CONFLICT");
@@ -180,7 +180,7 @@ export async function grantOpenCreditConsumerAuthorizationFromInboundEvidence(db
     }
     creating();
     const created = await tx.openCreditConsumerAuthorization.create({ data: { companyId: i.companyId, contactId: i.contactId,
-      providerScope: i.providerScope, remoteIdentityId: identityId, purpose: PURPOSE, active: true, revision: 0,
+      providerScope: i.providerScope, remoteIdentityId: identityId, purpose, active: true, revision: 0,
       evidenceInboundEventId: i.inboundEventId, changedByUserId: actorId }, select: { id: true } });
     await tx.openCreditConsumerAuthorizationEvent.create({ data: { authorizationId: created.id, companyId: i.companyId,
       providerScope: i.providerScope, actorUserId: actorId, action: "GRANTED", previousActive: null, nextActive: true,
@@ -189,13 +189,19 @@ export async function grantOpenCreditConsumerAuthorizationFromInboundEvidence(db
   });
 }
 /** Revocation deliberately does not reread Contact, identity, access or evidence. */
-export async function revokeOpenCreditConsumerAuthorization(db: Db, supplied: OpenCreditConsumerAuthorizationInput): Promise<OpenCreditConsumerAuthorizationResult> {
+async function revoke(db: Db, supplied: OpenCreditConsumerAuthorizationInput, purpose: Purpose): Promise<OpenCreditConsumerAuthorizationResult> {
   const i = input(supplied, false);
   return transaction(db, i, async (tx, actorId) => {
-    const a = await tx.openCreditConsumerAuthorization.findUnique({ where: key(i), select });
+    const a = await tx.openCreditConsumerAuthorization.findUnique({ where: key(i, purpose), select });
     if (!a) return { changed: false, authorizationId: null, active: false, revision: null };
-    facts(a, i);
+    facts(a, i, purpose);
     if (!a.active) return { changed: false, authorizationId: a.id, active: false, revision: a.revision };
     return transition(tx, i, a, actorId, false, a.evidenceInboundEventId);
   });
 }
+
+/** Fixed server-side wrappers: callers never supply a purpose. */
+export function grantOpenCreditConsumerAuthorizationFromInboundEvidence(db: Db, input: OpenCreditConsumerAuthorizationGrantInput) { return grant(db, input, "CLIENT_PROFILE_UPSERT"); }
+export function revokeOpenCreditConsumerAuthorization(db: Db, input: OpenCreditConsumerAuthorizationInput) { return revoke(db, input, "CLIENT_PROFILE_UPSERT"); }
+export function grantOpenCreditCorrectionAuthorization(db: Db, input: OpenCreditConsumerAuthorizationGrantInput) { return grant(db, input, "CLIENT_PROFILE_CORRECTION"); }
+export function revokeOpenCreditCorrectionAuthorization(db: Db, input: OpenCreditConsumerAuthorizationInput) { return revoke(db, input, "CLIENT_PROFILE_CORRECTION"); }

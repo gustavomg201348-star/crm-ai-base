@@ -2850,3 +2850,123 @@ including success/created/status/category/IDs and settlement metadata, also for
 SUCCEEDED/PREPARED operations. It adds no command or permission. Old operations
 remain reviewable without diagnostics. Never interpret HTTP 200 from the CRM,
 found=false, UPSERT wording or a technical diagnostic as permission to resend.
+
+## Explicit client profile correction (separate purpose and ledger)
+
+`CLIENT_PROFILE_CORRECTION` is a distinct operational human attestation and
+operation kind, never an alias for `CLIENT_PROFILE_UPSERT`. Neither grant
+authorizes the other kind. The operator must review an appropriate authenticated
+Meta inbound text and explicitly attest **atualização cadastral na OpenCredit**.
+No content heuristic, automatic consent, or legal-basis determination is made.
+An existing UPSERT grant is never silently copied or reinterpreted.
+
+### Intention and reservation
+
+One CORRECTION GRANTED event defines exactly one intention. Its server-derived
+`intentKey` is `correction-` plus the exact event ID; no client commandId, payload
+hash, credential fingerprint or PII identifies an intention. A repeated request
+under the same current grant reads the existing operation; it cannot reserve or
+PATCH again, even when the submitted fields differ. A deliberate future correction
+requires explicit revoke/regrant and a distinct GRANTED event/revision. An
+IN_FLIGHT or UNKNOWN correction for that identity blocks any new grant's dispatch.
+UNKNOWN always means **DO NOT RETRY**. Terminal rows are never reused or reset.
+
+Authentication precedes the reservation callback. Target, phone, CPF, owner,
+Company/scope, persisted Platform Admin, enabled CommercialAccess/RemoteIdentity,
+active CORRECTION authorization and its exact current GRANTED are validated again
+inside a Serializable PostgreSQL transaction. Parameterized SELECT FOR SHARE
+locks serialize mutable gates with concurrent edits/revocation; no gate row is
+mutated merely to acquire a lock. PREPARED/rev0 + Event and
+IN_FLIGHT/rev1 + RESERVED_FOR_DISPATCH are committed atomically, with the exact
+`dispatchAuthorizationEventId`. A losing concurrency attempt may reconcile but
+does not retry its transaction or transport. Configuration/credentials are checked
+again before commit. Revocation after this local commit-to-dispatch point cannot
+undo settlement. No freshness reread is used to reinterpret a committed response.
+
+### Human boundary and payload
+
+Fixed administrative POST routes under
+`/api/admin/integrations/opencredit/client-correction/`:
+`authorization/context`, `authorization/grant`, `authorization/revoke`, `context`,
+and `dispatch`. Existing session revalidation, requirePlatformAdmin, same-origin,
+closed bounded strict-JSON body, fail-closed shared rate limits and no-store apply.
+The correction dispatch accepts **only** companyId, contactId, dataNascimento,
+nomeMae, email. Browser-provided phone/CPF/tenant/scope/commandId/path/method/headers
+are rejected. Grant selects an inboundEventId using the existing evidence binding
+and HMAC provenance v1; meaning remains the explicit human review.
+
+The server freezes and serializes exactly four provider fields before reservation:
+
+| Field | Local rule |
+| --- | --- |
+| data_nascimento | Exact DD/MM/YYYY, real calendar date, year at least 1900 |
+| nome_mae | Required, trimmed, at most 160 characters, no control characters |
+| email | Required, trimmed, at most 254 characters, conservative ASCII syntax |
+| celular | Contact.phone must be exactly 13 digits beginning 55; remove exactly those first two digits |
+
+No normalization or write to Contact.phone/normalizedPhone occurs. CPF and tenant
+are resolved server-side; the target path is fixed:
+`PATCH /api/tenants/{tenantId}/integration/clients/{cpf}`.
+The four-field PATCH and birth-date format are based on the operational provider
+confirmation supplied by the human, **not** a claim that the published OpenAPI
+formally defines nome_mae/data_nascimento. The previously audited published PATCH
+schema and operational confirmation remain distinct sources of evidence.
+
+The separate **Corrigir cadastro OpenCredit** panel previews the four fields
+(phone masked) and requires both review and no-repetition-risk confirmations.
+Editing a field or changing target/authorization resets confirmations. A ref lock
+and attempted flag suppress duplicate local clicks; only explicit onClick dispatches.
+Ambiguity never clears the attempted flag or offers automatic replay. The read-only
+context can be refreshed without sending a correction. No automatic validate,
+simulation, proposal, or createClient call follows success.
+
+### Outcome and diagnostics
+
+Exactly one PATCH follows a successful commit barrier; no reauthentication/replay
+after 401, timeout, network error, invalid JSON or ambiguous provider result.
+Only **HTTP 200 + data.success === true** settles SUCCEEDED/rev2 with
+MARKED_SUCCEEDED_CORRECTED. Everything else settles UNKNOWN/rev2/MARKED_UNKNOWN.
+No current correction path emits FAILED. The first persisted terminal remains
+authoritative; a settlement failure retains IN_FLIGHT and technical diagnostics,
+blocks another intention, and requires read-only human reconciliation.
+
+Diagnostic persistence is restricted to httpStatus, requestId, correlationId,
+responseReadable, responseParsed, providerSuccess, dispatchCommittedAt,
+respondedAt, settlement, stage and category. IDs must satisfy the existing strict
+safe-ID rule and exclude request-bound credentials/tokens and correction PII.
+No CPF, birth date, mother name, email, phone, raw body, header set or token is
+persisted, logged or returned as a provider response. A commit timestamp is not
+proof that the provider received the request.
+
+### Migrations, compatibility and rollback
+
+Two structural-only PostgreSQL migrations, no DML/backfill/history rewrite:
+Each runs in an explicit transaction; replacing constraints/indexes cannot leave
+an intermediate committed window without the UPSERT uniqueness protection.
+
+- `20261028120000_add_opencredit_correction_authorization`: purpose CHECK permits
+  exactly UPSERT and CORRECTION; old rows/events/revisions unchanged.
+- `20261028120100_scope_opencredit_correction_intents`: replaces the identity/kind
+  unique with a partial unique preserving **all non-CORRECTION singleton kinds**;
+  adds an unresolved-correction partial unique and a lookup index. Existing
+  Company/scope/intentKey and composite scope/FK constraints remain unchanged.
+
+Prisma 5 cannot declare partial unique indexes. Both logical schemas therefore
+declare the lookup index; the production uniqueness is owned by migration SQL
+and PostgreSQL material tests, not by prisma db push. The two UPSERT review readers
+use an equally scoped findFirst under the database-enforced singleton. Their
+payload/state semantics and all existing UPSERT writers/transport remain intact.
+Correction reservation is PostgreSQL-specific (row locks); SQLite schema validation
+does not prove production constraint/concurrency behavior or enable this writer.
+
+Rollback must first disable human correction commands. Never drop data to restore
+the previous constraint. Reintroducing the old CHECK/full unique requires verifying
+that no CORRECTION authorization or multiple identity/kind rows make it invalid;
+otherwise use a reviewed forward fix. No automatic reverse migration or cleanup
+is provided. Upgrade tests compare historical UPSERT rows/events byte-for-value
+before/after the two migrations in an isolated local test schema.
+
+All provider transports in tests are mocks. Material PostgreSQL is disposable,
+local-only and guarded before client construction. This slice performs no real
+PATCH, provider login, lookup, createClient, simulation, production business write,
+Railway mutation, merge, or deploy during implementation.

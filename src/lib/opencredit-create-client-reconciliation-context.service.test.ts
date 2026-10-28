@@ -28,7 +28,7 @@ function fixture(unknown = false) {
     return async (args: unknown) => { calls.push({ name, args }); return state[name]; };
   } });
   const tx = { user: delegate("user", "findUnique"), company: delegate("company", "findUnique"), contact: delegate("contact", "findUnique"),
-    openCreditRemoteIdentity: delegate("identity", "findUnique"), openCreditCommercialOperation: delegate("operation", "findUnique"), openCreditCommercialOperationEvent: delegate("events", "findMany") };
+    openCreditRemoteIdentity: delegate("identity", "findUnique"), openCreditCommercialOperation: delegate("operation", "findFirst"), openCreditCommercialOperationEvent: delegate("events", "findMany") };
   const guarded = new Proxy(tx, { get(target, key) { assert(Object.prototype.hasOwnProperty.call(target, key), "unexpected delegate"); return Reflect.get(target, key); } });
   const db = { $transaction: async (run: (tx: unknown) => Promise<unknown>, option: unknown) => { options.push(option); return run(guarded); } } as unknown as Parameters<typeof service.getOpenCreditCreateClientReconciliationContext>[0];
   const run = async (value = input()) => {
@@ -62,9 +62,9 @@ for (const unknown of [false, true]) test("valid sanitized review, exact scope/c
     dispatchCommittedAt: date(1).toISOString(), settledAt: unknown ? date(2).toISOString() : null, dispatchAuthorizationBound: true } });
   assert.deepEqual(f.calls[2].args, { where: { companyId_id: { companyId: "company", id: "contact" } }, select: { id: true, companyId: true } });
   assert.deepEqual(f.calls[3].args, { where: { companyId_providerScope_contactId: { companyId: "company", providerScope: "synthetic-scope", contactId: "contact" } }, select: { id: true } });
-  assert.deepEqual(f.calls[4].args, { where: { companyId_providerScope_remoteIdentityId_operationKind: {
+  assert.deepEqual(f.calls[4].args, { where: {
     companyId: "company", providerScope: "synthetic-scope", remoteIdentityId: "identity", operationKind: "CLIENT_PROFILE_UPSERT",
-  } }, select: { id: true, state: true, revision: true, createdAt: true, updatedAt: true, diagnostic: true } });
+  }, select: { id: true, state: true, revision: true, createdAt: true, updatedAt: true, diagnostic: true } });
   assert.deepEqual(f.calls[5].args, { where: { operationId: "operation", companyId: "company", providerScope: "synthetic-scope" },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 4, select: { id: true, action: true, previousState: true, nextState: true, revision: true, createdAt: true, dispatchAuthorizationEventId: true } });
   assert.deepEqual(f.options, [{ isolationLevel: "Serializable", maxWait: 2000, timeout: 5000 }]);

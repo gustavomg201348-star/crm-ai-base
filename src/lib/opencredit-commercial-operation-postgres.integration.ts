@@ -79,10 +79,11 @@ for (const table of [op, event]) material("exact columns/types/nullability/defau
     assert.doesNotMatch(c.name, /cpf|payload|response|credential|password|token|hash|consent|evidence/i);
   }
 });
-material("both PKs, three uniques and six exact ordered indexes are valid and unconditional", async () => {
-  const rows = await db.$queryRaw<Array<{ table: string; name: string; unique: boolean; primary: boolean; valid: boolean; partial: boolean; columns: string[] }>>`
+material("both PKs, exact uniques/indexes and correction-only partial predicates are valid", async () => {
+  const rows = await db.$queryRaw<Array<{ table: string; name: string; unique: boolean; primary: boolean; valid: boolean; partial: boolean; predicate: string | null; columns: string[] }>>`
     SELECT t.relname::text AS table, x.relname::text AS name, i.indisunique AS "unique", i.indisprimary AS "primary", i.indisvalid AS valid,
       (i.indpred IS NOT NULL OR i.indexprs IS NOT NULL) AS partial,
+      pg_get_expr(i.indpred, i.indrelid) AS predicate,
       ARRAY(SELECT a.attname::text FROM unnest(i.indkey) WITH ORDINALITY k(n,pos)
         JOIN pg_attribute a ON a.attrelid=t.oid AND a.attnum=k.n ORDER BY k.pos) AS columns
     FROM pg_index i JOIN pg_class t ON t.oid=i.indrelid JOIN pg_class x ON x.oid=i.indexrelid JOIN pg_namespace ns ON ns.oid=t.relnamespace
@@ -92,6 +93,8 @@ material("both PKs, three uniques and six exact ordered indexes are valid and un
     [op, op + "_pkey", true, true, ["id"]], [event, event + "_pkey", true, true, ["id"]],
     [op, "OCOperation_company_scope_intent_key", true, false, ["companyId", "providerScope", "intentKey"]],
     [op, "OCOperation_company_scope_identity_kind_key", true, false, ["companyId", "providerScope", "remoteIdentityId", "operationKind"]],
+    [op, "OCOperation_identity_kind_lookup_idx", false, false, ["companyId", "providerScope", "remoteIdentityId", "operationKind"]],
+    [op, "OCOperation_correction_unresolved_key", true, false, ["companyId", "providerScope", "remoteIdentityId"]],
     [op, "OCOperation_id_company_scope_key", true, false, ["id", "companyId", "providerScope"]],
     [op, "OCOperation_identity_created_id_idx", false, false, ["remoteIdentityId", "createdAt", "id"]],
     [op, "OCOperation_scope_state_created_id_idx", false, false, ["companyId", "providerScope", "state", "createdAt", "id"]],
@@ -101,7 +104,12 @@ material("both PKs, three uniques and six exact ordered indexes are valid and un
     [event, "OCOperationEvent_dispatch_auth_idx", false, false, ["dispatchAuthorizationEventId"]]
   ] as const;
   assert.equal(rows.length, expected.length);
-  for (const [table, name, unique, primary, columns] of expected) assert.ok(rows.some(r => r.table === table && r.name === name && r.unique === unique && r.primary === primary && r.valid && !r.partial && JSON.stringify(r.columns) === JSON.stringify(columns)));
+  for (const [table, name, unique, primary, columns] of expected) assert.ok(rows.some(r => r.table === table && r.name === name && r.unique === unique && r.primary === primary && r.valid
+    && r.partial === ["OCOperation_company_scope_identity_kind_key", "OCOperation_correction_unresolved_key"].includes(name) && JSON.stringify(r.columns) === JSON.stringify(columns)));
+  const singleton = rows.find(r => r.name === "OCOperation_company_scope_identity_kind_key")!;
+  assert.equal(singleton.predicate, '("operationKind" <> \'CLIENT_PROFILE_CORRECTION\'::text)');
+  const unresolved = rows.find(r => r.name === "OCOperation_correction_unresolved_key")!;
+  assert.equal(unresolved.predicate, '(("operationKind" = \'CLIENT_PROFILE_CORRECTION\'::text) AND (state = ANY (ARRAY[\'IN_FLIGHT\'::text, \'UNKNOWN\'::text])))');
 });
 material("six actual FKs have exact names/columns/references with RESTRICT and NO ACTION", async () => {
   const rows = await db.$queryRaw<Array<{ table: string; name: string; reference: string; columns: string[]; refs: string[]; del: string; upd: string; valid: boolean }>>`

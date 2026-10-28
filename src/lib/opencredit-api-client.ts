@@ -187,6 +187,24 @@ export function createOpenCreditApiClient(options: Options = {}) {
   }
 
   return {
+    /** Fixed one-shot PATCH: all authentication precedes the commit barrier. */
+    async patchJsonAfterCommit<T>(path: string, commit: () => Promise<{ body: string; committed: T }>): Promise<{
+      response: Response; committed: T; sanitizeDiagnosticIdentifier(value: unknown): string | null;
+    }> {
+      validatedPath(path);
+      if (!/^\/api\/tenants\/[A-Za-z0-9_-]+\/integration\/clients\/[0-9]{11}$/.test(path)) throw new OpenCreditApiError("INVALID_PATH");
+      const creds = configuration();
+      const pair = await authenticate();
+      if (disposed) throw new OpenCreditApiError("DISPOSED");
+      const headers = new Headers({ "Content-Type": "application/json", Authorization: `Bearer ${pair.access}` });
+      const execution = await commit();
+      const response = await call(path, { method: "PATCH", headers, body: execution.body }) as Response;
+      if (response.status === 401 && tokens === pair) tokens.expiresAt = 0;
+      return { response, committed: execution.committed, sanitizeDiagnosticIdentifier(value) {
+        const id = safeDiagnosticId(value);
+        return id && ![pair.access, pair.refresh, creds.email, creds.password].some(secret => secret && id.includes(secret)) ? id : null;
+      } };
+    },
     /** Explicit one-shot read: reuse auth/refresh before GET, never replay GET after 401. */
     async getOnce(path: string): Promise<{ response: Response; sanitizeDiagnosticIdentifier(value: unknown): string | null }> {
       validatedPath(path);

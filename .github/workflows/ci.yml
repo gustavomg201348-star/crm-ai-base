@@ -104,6 +104,9 @@ jobs:
       - name: Validate OpenCredit read-only pre-simulation client validation
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-client-validation.test.ts
 
+      - name: Validate OpenCredit correction contract, one-shot dispatch and human UI
+        run: npx --yes tsx@4.20.6 --test src/lib/opencredit-client-correction.test.ts src/lib/opencredit-client-correction-ui.test.ts
+
       - name: Validate OpenCredit createClient human UI guards
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-create-client-ui.test.ts
 
@@ -317,6 +320,11 @@ jobs:
 
       - name: Validate OpenCredit consumer authorization evidence transactions and concurrency
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-consumer-authorization-postgres.integration.ts
+        env:
+          OPENCREDIT_CONSUMER_AUTHORIZATION_POSTGRES_TEST: "1"
+
+      - name: Validate OpenCredit correction migration, purpose isolation and concurrent intents
+        run: npx --yes tsx@4.20.6 --test src/lib/opencredit-client-correction-postgres.integration.ts
         env:
           OPENCREDIT_CONSUMER_AUTHORIZATION_POSTGRES_TEST: "1"
 

@@ -58,9 +58,9 @@ export async function getOpenCreditCreateClientReconciliationContext(db: Db, val
       } }, select: { id: true } });
       if (!identity) return { ok: true, review: null };
       if (!id(identity.id)) return fail("CORRUPT_LEDGER");
-      const operation = await tx.openCreditCommercialOperation.findUnique({ where: { companyId_providerScope_remoteIdentityId_operationKind: {
+      const operation = await tx.openCreditCommercialOperation.findFirst({ where: {
         companyId: input.companyId, providerScope: input.providerScope, remoteIdentityId: identity.id, operationKind: "CLIENT_PROFILE_UPSERT",
-      } }, select: { id: true, state: true, revision: true, createdAt: true, updatedAt: true, diagnostic: true } });
+      }, select: { id: true, state: true, revision: true, createdAt: true, updatedAt: true, diagnostic: true } });
       if (!operation) return { ok: true, review: null };
       const hasDiagnostic = Object.hasOwn(operation, "diagnostic");
       const op = closed(operation, ["id", "state", "revision", "createdAt", "updatedAt", ...(hasDiagnostic ? ["diagnostic"] : [])], "CORRUPT_LEDGER");
