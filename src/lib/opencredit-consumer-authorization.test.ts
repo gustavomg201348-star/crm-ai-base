@@ -293,7 +293,7 @@ test("server-only, closed runtime exports and passive AST", () => {
   }
   visit(ast);
   assert.match(source, /^import "server-only";/);
-  assert.deepEqual(exports.sort(), ["OpenCreditConsumerAuthorizationServiceError", "grantOpenCreditConsumerAuthorizationFromInboundEvidence", "revokeOpenCreditConsumerAuthorization", "grantOpenCreditCorrectionAuthorization", "revokeOpenCreditCorrectionAuthorization"].sort());
+  assert.deepEqual(exports.sort(), ["OpenCreditConsumerAuthorizationServiceError", "grantOpenCreditConsumerAuthorizationFromInboundEvidence", "revokeOpenCreditConsumerAuthorization", "grantOpenCreditCorrectionAuthorization", "revokeOpenCreditCorrectionAuthorization", "grantOpenCreditSimulationAuthorization", "revokeOpenCreditSimulationAuthorization"].sort());
   assert.doesNotMatch(source, /\bfetch\s*\(|new PrismaClient|console\.|grantConsent|setConsent|legalBasis|https?:|opencredit-api-client|POST|strict-http/);
   assert.doesNotMatch(source, /\.body\.(?:match|includes|search|toLowerCase)|RegExp/);
 });
@@ -317,7 +317,7 @@ test("only approved human admin mutation boundary; reservation only reads author
             ts.forEachChild(node, visit);
           };
           visit(ast);
-        } else if (path === "src/lib/opencredit-client-correction.service.ts") {
+        } else if (["src/lib/opencredit-client-correction.service.ts", "src/lib/opencredit-clt-simulation.service.ts"].includes(path)) {
           const ast = ts.createSourceFile(path, readFileSync(path, "utf8"), ts.ScriptTarget.Latest, true);
           const visit = (n: ts.Node): void => {
             if (ts.isPropertyAccessExpression(n) && ["openCreditConsumerAuthorization", "openCreditConsumerAuthorizationEvent"].includes(n.name.text)) {
@@ -351,6 +351,11 @@ test("only approved human admin mutation boundary; reservation only reads author
           "src/lib/opencredit-create-client-ui.test.ts",
           "src/lib/opencredit-client-validation.test.ts",
           "src/lib/opencredit-client-correction-postgres.integration.ts",
+          "src/lib/opencredit-clt-simulation.test.ts", "src/lib/opencredit-clt-simulation-postgres.integration.ts",
+          "src/app/components/integrations/OpenCreditSimulationAuthorizationPanel.tsx",
+          "src/app/api/admin/integrations/opencredit/clt-simulation/authorization/context/route.ts",
+          "src/app/api/admin/integrations/opencredit/clt-simulation/authorization/grant/route.ts",
+          "src/app/api/admin/integrations/opencredit/clt-simulation/authorization/revoke/route.ts",
           "src/lib/opencredit-consumer-authorization-context-admin-handler.ts",
           "src/lib/opencredit-consumer-authorization-context-admin-handler.test.ts",
           "src/lib/opencredit-consumer-authorization-ui.ts", "src/lib/opencredit-consumer-authorization-ui.test.ts",

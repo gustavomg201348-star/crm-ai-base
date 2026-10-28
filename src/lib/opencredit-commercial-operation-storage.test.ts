@@ -126,7 +126,7 @@ test("only the approved service has the exact ledger writers; all other producti
       const path = new URL(entry.name + (entry.isDirectory() ? "/" : ""), dir);
       if (entry.isDirectory()) scan(path);
       else if (/\.(?:tsx?|m?js|cjs)$/.test(entry.name) && !/\.(?:test|integration)\.(?:tsx?|m?js|cjs)$/.test(entry.name)) {
-        const expected = ["/src/lib/opencredit-commercial-operation.service.ts", "/src/lib/opencredit-client-correction.service.ts"].some(p => path.pathname.endsWith(p));
+        const expected = ["/src/lib/opencredit-commercial-operation.service.ts", "/src/lib/opencredit-client-correction.service.ts", "/src/lib/opencredit-clt-simulation.service.ts"].some(p => path.pathname.endsWith(p));
         const diagnosticOnly = path.pathname.endsWith("/src/lib/opencredit-create-client-diagnostic.service.ts");
         const result = ledgerRuntime(readFileSync(path, "utf8"), expected, diagnosticOnly);
         assert.deepEqual(result.errors, [], path.pathname);
@@ -139,6 +139,8 @@ test("only the approved service has the exact ledger writers; all other producti
     "openCreditCommercialOperation.updateMany", "openCreditCommercialOperation.updateMany", "openCreditCommercialOperation.updateMany",
     "openCreditCommercialOperationEvent.create", "openCreditCommercialOperationEvent.create", "openCreditCommercialOperationEvent.create",
     "openCreditCommercialOperation.create", "openCreditCommercialOperation.updateMany", "openCreditCommercialOperation.updateMany", "openCreditCommercialOperation.updateMany", "openCreditCommercialOperation.updateMany",
+    "openCreditCommercialOperationEvent.create", "openCreditCommercialOperationEvent.create", "openCreditCommercialOperationEvent.create",
+    "openCreditCommercialOperation.create", "openCreditCommercialOperation.updateMany", "openCreditCommercialOperation.updateMany", "openCreditCommercialOperation.updateMany",
     "openCreditCommercialOperationEvent.create", "openCreditCommercialOperationEvent.create", "openCreditCommercialOperationEvent.create"].sort());
 });
 test("service exception permits only operation create/updateMany and Event create; no aliases or dynamic mutations", () => {

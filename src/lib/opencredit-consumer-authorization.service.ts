@@ -24,7 +24,7 @@ export type OpenCreditConsumerAuthorizationGrantInput = OpenCreditConsumerAuthor
 export type OpenCreditConsumerAuthorizationResult = Readonly<{
   changed: boolean; authorizationId: string | null; active: boolean; revision: number | null;
 }>;
-type Purpose = "CLIENT_PROFILE_UPSERT" | "CLIENT_PROFILE_CORRECTION";
+type Purpose = "CLIENT_PROFILE_UPSERT" | "CLIENT_PROFILE_CORRECTION" | "CREDIT_SIMULATION";
 const fail = (code: OpenCreditConsumerAuthorizationCode): never => { throw new OpenCreditConsumerAuthorizationServiceError(code); };
 const validId = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?![\s\S])/.test(v);
 const email = (v: string) => v.trim().toLowerCase();
@@ -205,3 +205,6 @@ export function grantOpenCreditConsumerAuthorizationFromInboundEvidence(db: Db, 
 export function revokeOpenCreditConsumerAuthorization(db: Db, input: OpenCreditConsumerAuthorizationInput) { return revoke(db, input, "CLIENT_PROFILE_UPSERT"); }
 export function grantOpenCreditCorrectionAuthorization(db: Db, input: OpenCreditConsumerAuthorizationGrantInput) { return grant(db, input, "CLIENT_PROFILE_CORRECTION"); }
 export function revokeOpenCreditCorrectionAuthorization(db: Db, input: OpenCreditConsumerAuthorizationInput) { return revoke(db, input, "CLIENT_PROFILE_CORRECTION"); }
+
+export function grantOpenCreditSimulationAuthorization(db: Db, input: OpenCreditConsumerAuthorizationGrantInput) { return grant(db, input, "CREDIT_SIMULATION"); }
+export function revokeOpenCreditSimulationAuthorization(db: Db, input: OpenCreditConsumerAuthorizationInput) { return revoke(db, input, "CREDIT_SIMULATION"); }

@@ -107,6 +107,9 @@ jobs:
       - name: Validate OpenCredit correction contract, one-shot dispatch and human UI
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-client-correction.test.ts src/lib/opencredit-client-correction-ui.test.ts
 
+      - name: Validate OpenCredit authorized CLT simulation contract and manual UI
+        run: npx --yes tsx@4.20.6 --test src/lib/opencredit-clt-simulation.test.ts src/lib/opencredit-clt-simulation-ui.test.ts
+
       - name: Validate OpenCredit createClient human UI guards
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-create-client-ui.test.ts
 
@@ -327,6 +330,12 @@ jobs:
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-client-correction-postgres.integration.ts
         env:
           OPENCREDIT_CONSUMER_AUTHORIZATION_POSTGRES_TEST: "1"
+
+      - name: Validate OpenCredit one-shot CLT simulation and read-only provider polling
+        run: npx --yes tsx@4.20.6 --test src/lib/opencredit-clt-simulation-postgres.integration.ts
+        env:
+          OPENCREDIT_CONSUMER_AUTHORIZATION_POSTGRES_TEST: "1"
+          OPENCREDIT_SIMULATION_POSTGRES_TEST: "1"
 
       - name: Validate OpenCredit one-shot dispatcher on disposable PostgreSQL with fake provider
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-create-client-dispatcher-postgres.integration.ts
