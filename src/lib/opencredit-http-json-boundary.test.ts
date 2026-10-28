@@ -230,7 +230,7 @@ test("passive boundary AST guard: strict parser dependency, exact dispatcher con
       const visit = (node: ts.Node): void => {
         // Exact approved dispatcher and read-only validation service compositions only.
         if (ts.isStringLiteralLike(node) && /(?:^|\/)opencredit-http-json-boundary(?:\.[cm]?[jt]s)?$/.test(node.text)) {
-          assert(["src/lib/opencredit-create-client-dispatcher.ts", "src/lib/opencredit-client-validation.service.ts", "src/lib/opencredit-client-correction.service.ts"].some(p => path.resolve(p) === path.resolve(file)));
+          assert(["src/lib/opencredit-create-client-dispatcher.ts", "src/lib/opencredit-client-validation.service.ts", "src/lib/opencredit-client-correction.service.ts", "src/lib/opencredit-clt-simulation.service.ts"].some(p => path.resolve(p) === path.resolve(file)));
           assert(ts.isImportDeclaration(node.parent));
         }
         ts.forEachChild(node, visit);

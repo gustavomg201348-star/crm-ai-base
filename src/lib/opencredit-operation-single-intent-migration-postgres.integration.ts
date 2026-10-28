@@ -180,7 +180,7 @@ test("valid post-single-intent upgrade preserves UPSERT and scopes correction pa
       AND c.relname IN ('OCOperation_company_scope_identity_kind_key', 'OCOperation_correction_unresolved_key')
     `;
     assert.equal(indexes.length, 2); assert(indexes.every(index => index.valid && index.unique));
-    assert.equal(indexes.find(index => index.name === "OCOperation_company_scope_identity_kind_key")?.predicate, '("operationKind" <> \'CLIENT_PROFILE_CORRECTION\'::text)');
+    assert.equal(indexes.find(index => index.name === "OCOperation_company_scope_identity_kind_key")?.predicate, '("operationKind" <> ALL (ARRAY[\'CLIENT_PROFILE_CORRECTION\'::text, \'CREDIT_SIMULATION\'::text]))');
     assert.equal(indexes.find(index => index.name === "OCOperation_correction_unresolved_key")?.predicate, '(("operationKind" = \'CLIENT_PROFILE_CORRECTION\'::text) AND (state = ANY (ARRAY[\'IN_FLIGHT\'::text, \'UNKNOWN\'::text])))');
   } finally { removeCheckout(checkout.temp); }
 }));

@@ -105,9 +105,9 @@ export function createOpenCreditApiClient(options: Options = {}) {
     return value;
   }
 
-  async function call(path: string, init: RequestInit, readAuth = false): Promise<Response | unknown> {
+  async function call(path: string, init: RequestInit, readAuth = false, timeoutMs = 10_000): Promise<Response | unknown> {
     const abort = new AbortController();
-    const timeout = setTimeout(() => abort.abort(), 10_000);
+    const timeout = setTimeout(() => abort.abort(), timeoutMs);
     const cancel = () => abort.abort();
     if (init.signal?.aborted) abort.abort();
     init.signal?.addEventListener("abort", cancel, { once: true });
@@ -187,6 +187,21 @@ export function createOpenCreditApiClient(options: Options = {}) {
   }
 
   return {
+    /** Paid CLT simulation: explicit fixed path, 120s provider budget + 10s network margin; never replay. */
+    async simulateJsonAfterCommit<T>(path: string, commit: () => Promise<{ body: string; committed: T }>) {
+      validatedPath(path);
+      if (!/^\/api\/tenants\/[A-Za-z0-9_-]+\/integration\/simulate$/.test(path)) throw new OpenCreditApiError("INVALID_PATH");
+      const creds = configuration(); const pair = await authenticate();
+      if (disposed) throw new OpenCreditApiError("DISPOSED");
+      const headers = new Headers({ "Content-Type": "application/json", Authorization: `Bearer ${pair.access}` });
+      const execution = await commit();
+      const response = await call(path, { method: "POST", headers, body: execution.body }, false, 130_000) as Response;
+      if (response.status === 401 && tokens === pair) tokens.expiresAt = 0;
+      return { response, committed: execution.committed, sanitizeDiagnosticIdentifier(value: unknown) {
+        const id = safeDiagnosticId(value);
+        return id && ![pair.access, pair.refresh, creds.email, creds.password].some(secret => secret && id.includes(secret)) ? id : null;
+      } };
+    },
     /** Fixed one-shot PATCH: all authentication precedes the commit barrier. */
     async patchJsonAfterCommit<T>(path: string, commit: () => Promise<{ body: string; committed: T }>): Promise<{
       response: Response; committed: T; sanitizeDiagnosticIdentifier(value: unknown): string | null;

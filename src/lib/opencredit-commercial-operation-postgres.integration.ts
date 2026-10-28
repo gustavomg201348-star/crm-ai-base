@@ -95,6 +95,7 @@ material("both PKs, exact uniques/indexes and correction-only partial predicates
     [op, "OCOperation_company_scope_identity_kind_key", true, false, ["companyId", "providerScope", "remoteIdentityId", "operationKind"]],
     [op, "OCOperation_identity_kind_lookup_idx", false, false, ["companyId", "providerScope", "remoteIdentityId", "operationKind"]],
     [op, "OCOperation_correction_unresolved_key", true, false, ["companyId", "providerScope", "remoteIdentityId"]],
+    [op, "OCOperation_simulation_unresolved_key", true, false, ["companyId", "providerScope", "remoteIdentityId"]],
     [op, "OCOperation_id_company_scope_key", true, false, ["id", "companyId", "providerScope"]],
     [op, "OCOperation_identity_created_id_idx", false, false, ["remoteIdentityId", "createdAt", "id"]],
     [op, "OCOperation_scope_state_created_id_idx", false, false, ["companyId", "providerScope", "state", "createdAt", "id"]],
@@ -105,9 +106,9 @@ material("both PKs, exact uniques/indexes and correction-only partial predicates
   ] as const;
   assert.equal(rows.length, expected.length);
   for (const [table, name, unique, primary, columns] of expected) assert.ok(rows.some(r => r.table === table && r.name === name && r.unique === unique && r.primary === primary && r.valid
-    && r.partial === ["OCOperation_company_scope_identity_kind_key", "OCOperation_correction_unresolved_key"].includes(name) && JSON.stringify(r.columns) === JSON.stringify(columns)));
+    && r.partial === ["OCOperation_company_scope_identity_kind_key", "OCOperation_correction_unresolved_key", "OCOperation_simulation_unresolved_key"].includes(name) && JSON.stringify(r.columns) === JSON.stringify(columns)));
   const singleton = rows.find(r => r.name === "OCOperation_company_scope_identity_kind_key")!;
-  assert.equal(singleton.predicate, '("operationKind" <> \'CLIENT_PROFILE_CORRECTION\'::text)');
+  assert.equal(singleton.predicate, '("operationKind" <> ALL (ARRAY[\'CLIENT_PROFILE_CORRECTION\'::text, \'CREDIT_SIMULATION\'::text]))');
   const unresolved = rows.find(r => r.name === "OCOperation_correction_unresolved_key")!;
   assert.equal(unresolved.predicate, '(("operationKind" = \'CLIENT_PROFILE_CORRECTION\'::text) AND (state = ANY (ARRAY[\'IN_FLIGHT\'::text, \'UNKNOWN\'::text])))');
 });

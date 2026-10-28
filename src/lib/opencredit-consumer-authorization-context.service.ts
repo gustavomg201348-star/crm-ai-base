@@ -36,7 +36,7 @@ function bound(e: Evidence, i: Input) {
     && e.conversation?.id === e.conversationId && e.conversation.contactId === i.contactId && e.conversation.contact?.companyId === i.companyId
     && e.message?.id === e.messageId && e.message.conversationId === e.conversationId;
 }
-async function context(db: Db, value: Input, purpose: "CLIENT_PROFILE_UPSERT" | "CLIENT_PROFILE_CORRECTION") {
+async function context(db: Db, value: Input, purpose: "CLIENT_PROFILE_UPSERT" | "CLIENT_PROFILE_CORRECTION" | "CREDIT_SIMULATION") {
   try {
     const r = closed(value, ["actor", "companyId", "contactId", "conversationId", "providerScope"], "STORAGE_ERROR");
     if (![r.companyId, r.contactId, r.conversationId].every(validId)) return fail("STORAGE_ERROR");
@@ -99,3 +99,5 @@ async function context(db: Db, value: Input, purpose: "CLIENT_PROFILE_UPSERT" | 
 
 export const getOpenCreditConsumerAuthorizationContext = (db: Db, value: Input) => context(db, value, "CLIENT_PROFILE_UPSERT");
 export const getOpenCreditCorrectionAuthorizationContext = (db: Db, value: Input) => context(db, value, "CLIENT_PROFILE_CORRECTION");
+
+export const getOpenCreditSimulationAuthorizationContext = (db: Db, value: Input) => context(db, value, "CREDIT_SIMULATION");

@@ -72,13 +72,13 @@ async function fixture(client: PrismaClient = mainDb) {
 
 type F = Awaited<ReturnType<typeof fixture>>;
 const fields = { dataNascimento: "29/02/2000", nomeMae: "Synthetic Mother", email: "synthetic@example.invalid" };
-test("upgrade 22 to 24 migrations preserves historical UPSERT state, events and revision", async () => {
+test("upgrade pre-correction prefix to current chain preserves historical UPSERT state, events and revision", async () => {
   const temporary = mkdtempSync(join(tmpdir(), "qevora-correction-upgrade-"));
   const schema = "correction_upgrade_" + randomUUID().replace(/-/g, "");
   const url = new URL(process.env.DATABASE_URL!); url.searchParams.set("schema", schema);
   const client = new PrismaClient({ datasources: { db: { url: url.href } }, log: [] });
   const oldCompany = process.env.PLATFORM_COMPANY_ID, oldEmails = process.env.PLATFORM_ADMIN_EMAILS;
-  const added = ["20261028120000_add_opencredit_correction_authorization", "20261028120100_scope_opencredit_correction_intents"];
+  const added = readdirSync("prisma/migrations", { withFileTypes: true }).filter(entry => entry.isDirectory() && entry.name >= "20261028120000_add_opencredit_correction_authorization").map(entry => entry.name).sort();
   try {
     copyFileSync("prisma/schema.postgres.prisma", join(temporary, "schema.prisma"));
     mkdirSync(join(temporary, "migrations"));

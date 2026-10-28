@@ -2970,3 +2970,163 @@ All provider transports in tests are mocks. Material PostgreSQL is disposable,
 local-only and guarded before client construction. This slice performs no real
 PATCH, provider login, lookup, createClient, simulation, production business write,
 Railway mutation, merge, or deploy during implementation.
+
+## Authorized one-shot CLT simulation (post-PR #149)
+
+### Official contract audit — 2026-10-28
+
+Source: [official OpenAPI](https://core.api.opencredit.tech/api/partner-openapi.json),
+OpenAPI 3.1.0 / contract 2.9.0, and the
+[partner documentation](https://core.api.opencredit.tech/api/partner-docs).
+Only public documentation was read during implementation; there is no provider
+homologation environment and no real authentication or business request is a test.
+
+`GET /api/tenants/{tenantId}/banks?product=clt` is a catalog read. Product is fixed
+CLT and the trusted tenant/scope come from server configuration. The existing
+seven-property optional boolean capability model is reused. Present null/string/
+number/array/object capabilities reject the response; absent stays absent, and
+false stays false. Public fields are bankId, bankName, these capabilities and an
+optional top-level enabled boolean for this new catalog. Explicit enabled=false
+blocks selection; absence remains unknown, not permission or false.
+The provider still describes banks with an example, not formal required/nullable
+properties. The optional enabled field also follows a local conservative example-
+based boolean contract; the legacy seven-property capability contracts are not
+changed. Aliases such as suportaValorSolicitado, financial limits, documents and
+other unknown fields are not promoted into this whitelist. Present product must
+be clt; an absent product is not fabricated into a response property.
+The UI prints unknown, never false, for an absent flag.
+
+`POST /api/tenants/{tenantId}/integration/simulate` requires cpf formally. Other
+published body properties are banks, partnerId, valorSolicitado,
+tipoValorSolicitado. There is **no published product body property**: CLT is the
+scope of this operation/API, reinforced by the fixed CLT bank catalog. Local code
+always supplies exactly one explicitly chosen bank; omitting banks would simulate
+all enabled banks and is forbidden locally. Before reservation the server performs
+a fresh catalog GET and requires simulacaoAtiva===true. Parcela/liberado also
+require suportaParcela/suportaLiquido===true; absence is not permission.
+
+The published description requires partnerId UUID for provider ADMIN, while
+OPERATOR derives it from its token and ignores the field. This slice always uses
+the existing configured partner UUID server-side (never claims or browser input).
+A non-UUID configuration blocks simulation before dispatch, without changing env.
+
+The request's valorSolicitado is a **positive integer in cents**, exceptionally;
+tipoValorSolicitado is parcela or liberado. Both must be supplied together, or
+both omitted for maximum margin. The operator explicitly reviews that mode in
+the preview. Monetary input is a restricted reais string (e.g. 1050,00), parsed
+by integer arithmetic to 105000, not floating-point currency parsing. Thousands,
+dot decimals, signs, exponents and ambiguous masks are rejected. The local safe
+input cap is twelve whole-real digits, not a claimed provider maximum. No formal
+provider numeric minimum/maximum is published beyond positive integer. Catalog
+limit examples have no formal complete schema/unit contract and are not silently
+used as financial validation rules.
+
+HTTP 200 POST has formal SimulacaoRespostaDto/SimulacaoDto/BancoDaSimulacaoDto/
+OfertaDaSimulacaoDto components. A simulationId belongs to **each bank**, not the
+whole response. Bank statuses are aprovado, recusado, pendente. The local parser
+requires the expected CPF, exactly the selected bank, nonblocked response,
+empty barriers and a bounded safe offer whitelist. It drops client name/CPF,
+free-form reasons/warnings, URLs and all unknown fields before returning results.
+Request/status metadata is sanitized independently. An unreadable/non-200 or
+unrecognized result is UNKNOWN, never permission to resend.
+
+Offer installmentAmount/liquidAmount/totalAmount and bankCap are in reais; the
+interestRate is monthly percent. Nullable financial facts remain null, not zero.
+The local UI exposes only returned safe offer ID, installments and numeric
+amount/rate/insurance facts. No offer selection, bank account, proposal or other
+financial operation is added. Actual simulationType is shown: margem_maxima,
+valor_parcela, valor_liberado or unknown. The official description says a bank can
+ignore a requested value and return maximum margin; the UI does not claim the
+requested amount was honored merely because the request completed.
+
+POST's pendente means the provider's synchronous budget (up to two minutes)
+expired while the bank keeps working. `reasonType=waiting_authorization` is not
+an ordinary refusal and does not trigger a resend. The provider describes cache/
+repeat behavior and instructs another simulation after some bank authorizations;
+that does **not** authorize automatic replay in QEVORA. Authorization URLs are
+not exposed/followed, and no customer message is sent by this slice.
+
+`GET /api/tenants/{tenantId}/simulations/{id}` is the exact published detail path
+(the parameter is named id). Its schema remains example/description, so polling
+uses a documented local conservative contract. It requires matching persisted ID,
+trusted tenant, fixed clt, server CPF and selected bank. GET uses pending/approved/
+refused/waiting_authorization, not POST's Portuguese status names. Other published
+list statuses (authorized/selected/converted/cancelled) are not inferred into this
+slice's outcome. Unsupported/invalid GET results leave the recorded intention
+unchanged and unavailable, not resubmitted. Errors 400 VALIDATION_ERROR and 401
+UNAUTHORIZED are published; raw error/pending labels and suggested resolveWith
+actions are never executed or forwarded.
+
+### Purpose, intent and ledger
+
+Purpose and operationKind are exactly CREDIT_SIMULATION. Explicit fixed grant/
+revoke wrappers reuse verified Meta HMAC v1 inbound evidence and human attestation
+for consultation/simulation of CLT credit. There is no keyword consent detection,
+automatic grant or reinterpretation of UPSERT/CORRECTION grants. Their purposes,
+transitions and singletons remain unchanged.
+
+One exact simulation GRANTED event defines one intention: server intentKey is
+simulation- plus its event ID. The browser supplies only companyId, contactId,
+bankId, mode and amountBRL, never commandId, CPF, tenant, product, scope, provider
+method/path/headers, partnerId or a bank array. Parameters are copied/frozen and
+the body serialized before reservation. Repeated requests, including changed
+parameters, reconcile the existing intention without authenticating or posting
+again. New deliberate intentions require revoke/regrant. IN_FLIGHT/UNKNOWN block
+another intention for the identity; UNKNOWN is terminal and DO NOT RETRY.
+
+Migration `20261028140000_add_opencredit_credit_simulation` transactionally widens
+the purpose CHECK to exactly the three purposes, retains the correction partial
+unique unchanged, preserves UPSERT/unrelated-kind singleton uniqueness and adds
+an IN_FLIGHT/UNKNOWN simulation partial unique. No rows/events/revisions are
+rewritten or backfilled; no schema column/table, env or dependency is added.
+Prisma 5's partial-index limitations remain migration-owned. Historical test
+fixtures use ordered cutoffs, never missing-middle migration exceptions.
+
+Auth is ready before the callback. A fresh catalog read, immutable payload and
+target/config checks precede a Serializable PostgreSQL transaction with mutable
+gate SELECT FOR SHARE locks. PREPARED/rev0 + Event and IN_FLIGHT/rev1 + the exact
+GRANTED-bound RESERVED_FOR_DISPATCH are atomic. Bank ID and mode are technical
+reservation metadata; no requested amount or request body is persisted. The
+one-shot client allows only the fixed simulate path, 130 seconds transport budget
+(provider's two minutes plus ten-second network margin), redirects:error,
+no-store, and exactly one POST after the commit barrier. Existing auth, GET,
+createClient and correction transport timeout/retry semantics are unchanged.
+
+A valid completed approved/refused bank result settles SUCCEEDED technically,
+not a promise of credit approval. Pending/waiting stays IN_FLIGHT with a PENDING
+display and simulationId; no new ledger state is fabricated. Invalid/non-200,
+timeout/network after dispatch settles UNKNOWN. No simulation path writes FAILED.
+Post-commit revocation does not undo the operation, and no terminal is reused.
+
+### Manual UI, polling and diagnostics
+
+Catalog loading, intention reads, dispatch and polling are explicit clicks; bank
+loading never runs on mount. No bank is selected automatically. Preview includes
+the single bank, CLT, mode and unambiguous reais/cents conversion. Both review and
+paid/ambiguous-no-repetition confirmations are required. Field/target/authority
+changes reset confirmations. A synchronous ref and attempted flag prevent duplicate
+clicks; a browser abort/timeout is never evidence that dispatch did not happen.
+
+Manual polling performs one bounded **provider GET** per action, rate-limited to
+three per minute per target. There is no interval/background loop or POST replay.
+The admin boundary uses authenticated same-origin POST commands, as other CRM
+read contexts do; pending GET observations can update the **local** ledger through
+revision CAS + audit Event, never through a provider write. Terminal success can
+be read again to recover offers without rewriting the terminal. Polling requires
+a previously persisted provider ID and exact binding; UNKNOWN or no ID cannot
+trigger polling. GET errors retain the authoritative recorded operation. A lost
+terminal CAS never authorizes another provider POST. No automatic validate follows.
+
+Technical diagnostics whitelist bank ID/requested mode, safe simulation ID,
+httpStatus, safe request/correlation IDs, responseReadable/Parsed, commit/response
+timestamps, settlement, stage, category and closed provider status. The reservation
+snapshot has a null commit timestamp until it is known; IN_FLIGHT itself still
+means the local barrier was committed, not proof of provider receipt. No CPF,
+name, email, phone, raw request/response, requested amount, offers, credentials or
+tokens are persisted/logged as diagnostics. Financial results exist only in the
+authenticated response/UI and can be reread manually by the bound provider ID.
+
+Rollback is not data deletion: stop new simulation commands first. Restoring an
+old CHECK/index requires proving the existing new-purpose rows/intentions permit
+it; otherwise use a reviewed forward fix. No rollback, migration, provider call,
+business mutation or Railway change is performed in production by implementation.

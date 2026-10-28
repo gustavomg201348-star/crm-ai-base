@@ -6,6 +6,7 @@ import { authorizationErrorMessage, authorizationEvidenceView, isAuthorizationMu
 import { OpenCreditCreateClientPanel } from "./OpenCreditCreateClientPanel";
 import { OpenCreditClientValidationPanel } from "./OpenCreditClientValidationPanel";
 import { OpenCreditCorrectionAuthorizationPanel } from "./OpenCreditCorrectionAuthorizationPanel";
+import { OpenCreditSimulationAuthorizationPanel } from "./OpenCreditSimulationAuthorizationPanel";
 
 type Props = { enabled: boolean; companyId: string; contactId: string; conversationId: string; messages: readonly AuthorizationReviewMessage[] };
 const base = "/api/admin/integrations/opencredit/consumer-authorization";
@@ -94,5 +95,6 @@ function Review({ companyId, contactId, conversationId, messages }: Props) {
     <OpenCreditCreateClientPanel enabled={!hidden} companyId={companyId} contactId={contactId} authorizationActive={!busy && context?.authorization.active === true} />
     <OpenCreditClientValidationPanel enabled={!hidden} companyId={companyId} contactId={contactId} authorizationActive={!busy && context?.authorization.active === true} />
     <OpenCreditCorrectionAuthorizationPanel enabled={!hidden} companyId={companyId} contactId={contactId} conversationId={conversationId} messages={messages} />
+    <OpenCreditSimulationAuthorizationPanel enabled={!hidden} companyId={companyId} contactId={contactId} conversationId={conversationId} messages={messages} />
   </section>;
 }

@@ -38,7 +38,7 @@ test("UI guard: exactly three local endpoints, human-only actions, no automatic 
   const source = readFileSync("src/app/components/integrations/OpenCreditConsumerAuthorizationPanel.tsx", "utf8");
   assert.match(source, /^"use client"/); assert.doesNotMatch(source, /opencredit-api-client|CommercialOperation|prepareOpenCredit|reserveOpenCredit|OpenAI|chatbot|providerScope|providerMessageId|cpf|dangerouslySetInnerHTML|setInterval|setTimeout/);
   const ast = ts.createSourceFile("panel.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  assert.deepEqual(ast.statements.filter(ts.isImportDeclaration).map(n => (n.moduleSpecifier as ts.StringLiteral).text), ["react", "@/lib/opencredit-consumer-authorization-ui", "./OpenCreditCreateClientPanel", "./OpenCreditClientValidationPanel", "./OpenCreditCorrectionAuthorizationPanel"]);
+  assert.deepEqual(ast.statements.filter(ts.isImportDeclaration).map(n => (n.moduleSpecifier as ts.StringLiteral).text), ["react", "@/lib/opencredit-consumer-authorization-ui", "./OpenCreditCreateClientPanel", "./OpenCreditClientValidationPanel", "./OpenCreditCorrectionAuthorizationPanel", "./OpenCreditSimulationAuthorizationPanel"]);
   const calls: ts.CallExpression[] = []; const visit = (n: ts.Node) => { if (ts.isCallExpression(n)) calls.push(n); ts.forEachChild(n, visit); }; visit(ast);
   for (const c of calls.filter(c => c.expression.getText(ast) === "useEffect")) assert.doesNotMatch(c.getText(ast), /mutate|grant|revoke/);
   const mutations = calls.filter(c => c.expression.getText(ast) === "mutate"); assert.equal(mutations.length, 2);

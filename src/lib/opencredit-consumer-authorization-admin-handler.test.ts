@@ -299,7 +299,7 @@ test("server-only minimal HTTP boundary cannot perform domain queries, HTTP, aut
 });
 test("only exact grant/revoke routes consume admin handler; no implicit inbound/AI/worker consumers", () => {
   const own = "src/lib/opencredit-consumer-authorization-admin-handler.ts";
-  const allowed = ["consumer-authorization", "client-correction/authorization"].flatMap(base => ["grant", "revoke"].map(action => `src/app/api/admin/integrations/opencredit/${base}/${action}/route.ts`));
+  const allowed = ["consumer-authorization", "client-correction/authorization", "clt-simulation/authorization"].flatMap(base => ["grant", "revoke"].map(action => `src/app/api/admin/integrations/opencredit/${base}/${action}/route.ts`));
   for (const dir of ["src", "scripts"]) for (const file of readdirSync(dir, { recursive: true, encoding: "utf8" })) {
     const path = dir + "/" + file.replace(/\\/g, "/");
     if (!/\.[cm]?[jt]sx?$/.test(path) || /\.(?:test|integration)\./.test(path) || path === own || allowed.includes(path)) continue;
