@@ -79,7 +79,7 @@ function material(name: string, run: (f: F) => Promise<void>) {
     const previous = keys.map(k => process.env[k]);
     try {
       const f = await fixture(); process.env.PLATFORM_COMPANY_ID = f.platform.id; process.env.PLATFORM_ADMIN_EMAILS = f.actor.email;
-      process.env.OPENCREDIT_PARTNER_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"; await run(f);
+      process.env.OPENCREDIT_PARTNER_ID = "12345"; await run(f);
     } finally { keys.forEach((k, i) => { if (previous[i] === undefined) delete process.env[k]; else process.env[k] = previous[i]; }); }
   });
 }
@@ -97,7 +97,7 @@ function transport(f: F, http = 200, status: "aprovado" | "pendente" = "aprovado
       const execution = await commit();
       const persisted = await db.openCreditCommercialOperation.findFirstOrThrow({ where: { ...where(f), state: "IN_FLIGHT" } });
       assert.equal(persisted.revision, 1);
-      assert.deepEqual(JSON.parse(execution.body), { cpf: "00000000000", banks: ["synthetic-bank"], tipoValorSolicitado: "parcela", valorSolicitado: 105000, partnerId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" });
+      assert.deepEqual(JSON.parse(execution.body), { cpf: "00000000000", banks: ["synthetic-bank"], tipoValorSolicitado: "parcela", valorSolicitado: 105000 });
       posts++;
       return { response: Response.json({ data: { fromCache: false, blocked: false, barriers: [], client: { cpf: "00000000000", nome: "PRIVATE_SENTINEL" },
         banks: [{ bankId: parameters.bankId, bankName: "Synthetic", simulationId: "synthetic-simulation", status, reasonType: null, simulationType: "valor_parcela", offers: status === "aprovado" ? [offer] : [] }] } }, { status: http }),

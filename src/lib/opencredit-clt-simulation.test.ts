@@ -7,12 +7,13 @@ import { reaisToCents, simulationParameters, simulationPayload, parseSimulationP
 let service: typeof import("./opencredit-clt-simulation.service");
 let api: typeof import("./opencredit-api-client");
 let handler: typeof import("./opencredit-clt-simulation-admin-handler");
+let resolver: typeof import("./opencredit-provider-scope-resolver");
 const originalFetch = globalThis.fetch;
 before(async () => {
   globalThis.fetch = async () => { throw Error("REAL_HTTP_FORBIDDEN"); };
   const loader = Module as typeof Module & { _load(s: string, ...args: unknown[]): unknown }; const original = loader._load;
   loader._load = (s, ...args) => s === "server-only" ? {} : original.call(loader, s, ...args);
-  try { service = await import("./opencredit-clt-simulation.service"); api = await import("./opencredit-api-client"); handler = await import("./opencredit-clt-simulation-admin-handler"); }
+  try { service = await import("./opencredit-clt-simulation.service"); api = await import("./opencredit-api-client"); handler = await import("./opencredit-clt-simulation-admin-handler"); resolver = await import("./opencredit-provider-scope-resolver"); }
   finally { loader._load = original; }
 });
 after(() => { globalThis.fetch = originalFetch; });
@@ -44,10 +45,9 @@ test("one-shot path is fixed and commit failure never calls paid transport", asy
 });
 const actor = { id: "synthetic-admin", companyId: "synthetic-platform", role: "ADMIN" as const, email: "synthetic@example.invalid", name: "Synthetic" };
 const scope = "synthetic-scope" as never;
-function fixture() {
+function fixture(scope = "synthetic-scope" as never) {
   let operation: Record<string, unknown> | null = null;
   const events: Record<string, unknown>[] = [];
-  process.env.OPENCREDIT_PARTNER_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
   const state = { cpf: "00000000000", phone: "5511999999999", active: true, access: true, grantId: "synthetic-grant", revision: 0, identityEnabled: true, owner: "synthetic-identity", purpose: "CREDIT_SIMULATION" };
   const auth = () => ({ id: "synthetic-auth", purpose: state.purpose, active: state.active, revision: state.revision, companyId: "synthetic-company", contactId: "synthetic-contact", providerScope: scope, remoteIdentityId: "synthetic-identity", evidenceInboundEventId: "synthetic-evidence" });
   const tx = {
@@ -78,12 +78,54 @@ function fixture() {
 }
 
 const catalog = () => [{ bankId: parameters.bankId, bankName: "Synthetic bank", capabilities: { simulacaoAtiva: true, suportaParcela: true, suportaLiquido: true } }];
+for (const localId of [undefined, "12345", "local_partner"] as const) for (const mode of ["maximum", "parcela", "liberado"] as const) test("token-bound payload: " + mode + ", local namespace " + (localId ?? "already resolved"), async () => {
+  const keys = ["OPENCREDIT_PARTNER_ID", "OPENCREDIT_TENANT_ID", "OPENCREDIT_API_EMAIL", "OPENCREDIT_API_PASSWORD", "PLATFORM_COMPANY_ID", "PLATFORM_ADMIN_EMAILS"] as const;
+  const previous = keys.map(k => process.env[k]);
+  try {
+    if (localId === undefined) delete process.env.OPENCREDIT_PARTNER_ID; else process.env.OPENCREDIT_PARTNER_ID = localId;
+    process.env.OPENCREDIT_TENANT_ID = "synthetic";
+    process.env.OPENCREDIT_API_EMAIL = "synthetic-secret@example.invalid"; process.env.OPENCREDIT_API_PASSWORD = "synthetic-secret-password";
+    const f = fixture(localId === undefined ? undefined : resolver.resolveConfiguredOpenCreditProviderContext().providerScope as never);
+    const input = { ...f.input, mode, amountBRL: mode === "maximum" ? "" : "1050,00" };
+    let posts = 0;
+    const client = { ...transport().client, async simulateJsonAfterCommit<T>(path: string, commit: () => Promise<{ body: string; committed: T }>) {
+      assert.equal(path, "/api/tenants/synthetic/integration/simulate"); const execution = await commit(); posts++;
+      const payload = JSON.parse(execution.body);
+      assert.deepEqual(payload, { cpf: "00000000000", banks: ["synthetic-bank"], ...(mode === "maximum" ? {} : { tipoValorSolicitado: mode, valorSolicitado: 105000 }) });
+      assert.equal(Object.hasOwn(payload, "partnerId"), false);
+      for (const secret of [process.env.OPENCREDIT_API_EMAIL!, process.env.OPENCREDIT_API_PASSWORD!]) assert.equal(execution.body.includes(secret), false);
+      return { response: Response.json(response()), committed: execution.committed, sanitizeDiagnosticIdentifier: () => null };
+    } };
+    // Missing env is tested only with an already trusted namespace. The default resolver still requires its local ID.
+    const options = { client, banks: async () => catalog(), ...(localId === undefined ? { resolve: f.resolve } : {}) };
+    const first = await service.dispatchCltSimulation(f.db, input, options);
+    const second = await service.dispatchCltSimulation(f.db, input, options);
+    assert.equal(first.operation.state, "SUCCEEDED"); assert.equal(second.operation.operationId, first.operation.operationId); assert.equal(posts, 1);
+    assert.deepEqual(f.events.map(e => e.action), ["PREPARED", "RESERVED_FOR_DISPATCH", "SIMULATION_COMPLETED"]);
+  } finally { keys.forEach((k, index) => { if (previous[index] === undefined) delete process.env[k]; else process.env[k] = previous[index]; }); }
+});
+
+test("default local resolver still fails closed without namespace configuration, before any intent or transport", async () => {
+  const previous = process.env.OPENCREDIT_PARTNER_ID;
+  try {
+    delete process.env.OPENCREDIT_PARTNER_ID; const f = fixture(), t = transport();
+    await assert.rejects(() => service.dispatchCltSimulation(f.db, f.input, { client: t.client, banks: async () => catalog() }));
+    assert.equal(t.posts(), 0); assert.equal(f.current(), null); assert.equal(f.events.length, 0);
+  } finally { if (previous === undefined) delete process.env.OPENCREDIT_PARTNER_ID; else process.env.OPENCREDIT_PARTNER_ID = previous; }
+});
+
+test("simulation service does not read or serialize a remote partner from environment", () => {
+  const source = readFileSync("src/lib/opencredit-clt-simulation.service.ts", "utf8");
+  assert.doesNotMatch(source, /OPENCREDIT_PARTNER_ID|partnerId|UUID/);
+  assert.match(source, /JSON.stringify\(simulationPayload\(parameters, initial.cpf\)\)/);
+});
+
 function transport(status = 200, bankStatus: "aprovado" | "recusado" | "pendente" = "aprovado", reasonType: string | null = null) {
   let posts = 0, gets = 0;
   const client: Pick<ReturnType<typeof api.createOpenCreditApiClient>, "simulateJsonAfterCommit" | "getOnce"> = {
     async simulateJsonAfterCommit(path, commit) {
       assert.equal(path, "/api/tenants/synthetic/integration/simulate"); const execution = await commit(); posts++;
-      assert.deepEqual(JSON.parse(execution.body), { ...simulationPayload(parameters, "00000000000"), partnerId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" });
+      assert.deepEqual(JSON.parse(execution.body), simulationPayload(parameters, "00000000000"));
       return { response: Response.json(response(bankStatus, reasonType), { status }), committed: execution.committed, sanitizeDiagnosticIdentifier: () => null };
     },
     async getOnce(path) { assert.equal(path, "/api/tenants/synthetic/simulations/synthetic-simulation"); gets++;

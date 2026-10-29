@@ -3005,10 +3005,21 @@ all enabled banks and is forbidden locally. Before reservation the server perfor
 a fresh catalog GET and requires simulacaoAtiva===true. Parcela/liberado also
 require suportaParcela/suportaLiquido===true; absence is not permission.
 
-The published description requires partnerId UUID for provider ADMIN, while
-OPERATOR derives it from its token and ignores the field. This slice always uses
-the existing configured partner UUID server-side (never claims or browser input).
-A non-UUID configuration blocks simulation before dispatch, without changing env.
+The current 2.10.0 description requires partnerId for provider ADMIN, while
+OPERATOR derives it from its token and ignores the field. The simulate schema
+declares only string, not format:uuid. Prospecta operationally confirmed that this
+environment's remote partner binding comes from the token. CLT simulation therefore
+omits partnerId entirely: no UUID validation, remote partner snapshot or remote
+partner comparison is performed. CPF/banks and the optional paired financial fields
+are the only outgoing body properties. Other provider flows are unchanged.
+
+OPENCREDIT_PARTNER_ID remains required by the UNCHANGED trusted resolver solely
+for the existing local tenant/partner-derived providerScope. A short valid local
+ID is accepted; removing or changing it can still block local gates/change the
+namespace. No token claims are used to derive that local namespace and no records
+are migrated. The provider's REMOTE partner scope comes from authentication;
+QEVORA's LOCAL providerScope retains its existing configuration-derived identity.
+This is an environment-specific token-bound flow, not generic ADMIN support.
 
 The request's valorSolicitado is a **positive integer in cents**, exceptionally;
 tipoValorSolicitado is parcela or liberado. Both must be supplied together, or
