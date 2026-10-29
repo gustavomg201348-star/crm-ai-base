@@ -155,16 +155,14 @@ export async function dispatchCltSimulation(db: Db, i: Input & SimulationParamet
   if (initial.existing) return { ok: true as const, operation: operationView(initial.existing), result: null };
   let parameters: SimulationParameters;
   try { parameters = Object.freeze(simulationParameters(i)); } catch { throw new CltSimulationError("INVALID_FIELDS"); }
-  // Public request says ADMIN requires UUID; OPERATOR ignores it. Always server-derived, never token claims/browser.
-  const partner = process.env.OPENCREDIT_PARTNER_ID;
-  if (!partner || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(partner)) throw new CltSimulationError("CONFIGURATION");
+  // This credential's remote partner binding comes from its token, not the local namespace.
   const credentials = [process.env.OPENCREDIT_API_EMAIL, process.env.OPENCREDIT_API_PASSWORD];
-  const body = JSON.stringify({ ...simulationPayload(parameters, initial.cpf), partnerId: partner });
+  const body = JSON.stringify(simulationPayload(parameters, initial.cpf));
   let reserved: Operation | undefined;
   let result: SimulationResult | null = null;
   const diagnostic: Diagnostic = { bankId: parameters.bankId, requestedMode: parameters.mode, simulationId: null, httpStatus: null, requestId: null, correlationId: null, responseReadable: false, responseParsed: false,
     dispatchCommittedAt: null, respondedAt: null, settlement: "NOT_CONFIRMED", stage: "TRANSPORT", category: "NETWORK", providerStatus: null };
-  const unchanged = () => { const now = config(resolve); if (now.tenantId !== c.tenantId || now.providerScope !== c.providerScope || partner !== process.env.OPENCREDIT_PARTNER_ID
+  const unchanged = () => { const now = config(resolve); if (now.tenantId !== c.tenantId || now.providerScope !== c.providerScope
     || credentials[0] !== process.env.OPENCREDIT_API_EMAIL || credentials[1] !== process.env.OPENCREDIT_API_PASSWORD) return deny(); };
   try {
     const execution = await (options.client ?? openCreditApiClient).simulateJsonAfterCommit(`/api/tenants/${c.tenantId}/integration/simulate`, async () => {
@@ -189,7 +187,7 @@ export async function dispatchCltSimulation(db: Db, i: Input & SimulationParamet
       diagnostic.dispatchCommittedAt = new Date().toISOString(); return { body, committed: reserved };
     });
     diagnostic.stage = "RESPONSE"; diagnostic.respondedAt = new Date().toISOString(); diagnostic.httpStatus = execution.response.status;
-    const safe = (v: unknown) => { const value = safeDiagnosticId(execution.sanitizeDiagnosticIdentifier(v)); return value && ![initial.cpf, partner, ...credentials].some(secret => secret && value.includes(secret)) ? value : null; };
+    const safe = (v: unknown) => { const value = safeDiagnosticId(execution.sanitizeDiagnosticIdentifier(v)); return value && ![initial.cpf, ...credentials].some(secret => secret && value.includes(secret)) ? value : null; };
     diagnostic.requestId = safe(execution.response.headers.get("x-request-id")); diagnostic.correlationId = safe(execution.response.headers.get("x-correlation-id"));
     const payload = await readOpenCreditStrictJsonResponse(execution.response); diagnostic.responseReadable = true; diagnostic.responseParsed = true;
     if (payload && typeof payload === "object" && !Array.isArray(payload)) diagnostic.requestId ??= safe(payload.requestId);
