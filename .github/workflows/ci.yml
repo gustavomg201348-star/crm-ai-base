@@ -50,6 +50,12 @@ jobs:
       - name: Validate template media association contract
         run: npx --yes tsx@4.20.6 --test src/lib/meta-template-media-association.test.ts
 
+      - name: Validate recorded WhatsApp audio with FFmpeg and FFprobe
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          npx --yes tsx@4.20.6 --test src/lib/recorded-audio.test.ts src/lib/media-conversion.test.ts src/lib/media-conversion-resources.test.ts src/lib/whatsapp-media-audio.test.ts
+
       - name: Validate OpenCredit Foundation B onboarding tests
         run: npx --yes tsx@4.20.6 src/lib/opencredit-onboarding.test.ts
 

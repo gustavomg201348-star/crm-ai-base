@@ -8,8 +8,9 @@ import {
   getConversationIntegration,
   saveOutboundMessage
 } from "@/lib/conversation-message.service";
-import { convertWebmAudioToOgg } from "@/lib/media-conversion";
+import { prepareRecordedAudioForWhatsApp } from "@/lib/media-conversion";
 import { digitsOnlyPhone } from "@/lib/phone-normalization.service";
+import { supportedAudioMime } from "@/lib/recorded-audio";
 
 export const allowedMediaTypes = new Set([
   "image/jpeg",
@@ -35,16 +36,23 @@ export function normalizeMimeType(mimeType: string) {
 async function prepareMediaForMeta({
   fileName,
   mimeType,
-  bytes
+  bytes,
+  recordedAudio
 }: {
   fileName: string;
   mimeType: string;
   bytes: Buffer;
+  recordedAudio: boolean;
 }) {
   const normalizedMimeType = normalizeMimeType(mimeType);
 
-  if (normalizedMimeType === "audio/webm") {
-    return convertWebmAudioToOgg({ bytes, fileName });
+  const audioMime = supportedAudioMime(normalizedMimeType);
+  if (audioMime) {
+    return prepareRecordedAudioForWhatsApp({ bytes, fileName, mimeType: audioMime, recordedAudio,
+      normalize: recordedAudio || audioMime === "audio/webm" || audioMime === "audio/ogg" });
+  }
+  if (recordedAudio || normalizedMimeType.startsWith("audio/")) {
+    throw new Error("Formato de audio nao aceito.");
   }
 
   return {
@@ -69,7 +77,8 @@ export async function sendConversationMedia({
   fileName,
   mimeType,
   bytes,
-  caption
+  caption,
+  recordedAudio = false
 }: {
   conversationId: string;
   companyId: string;
@@ -78,8 +87,9 @@ export async function sendConversationMedia({
   mimeType: string;
   bytes: Buffer;
   caption?: string;
+  recordedAudio?: boolean;
 }) {
-  const preparedMedia = await prepareMediaForMeta({ fileName, mimeType, bytes });
+  const preparedMedia = await prepareMediaForMeta({ fileName, mimeType, bytes, recordedAudio });
 
   if (!allowedMediaTypes.has(preparedMedia.mimeType)) {
     throw new Error("Tipo de arquivo nao aceito para envio pelo WhatsApp.");
@@ -111,6 +121,10 @@ export async function sendConversationMedia({
     caption,
     fileName
   });
+  const providerMessageId = readMetaMessageId(metaResponse);
+  if (mediaType === "audio" && !providerMessageId) {
+    throw new Error("A Meta nao confirmou o envio do audio.");
+  }
   const label = mediaType === "audio" ? "Audio" : mediaType === "image" ? "Imagem" : mediaType === "video" ? "Video" : "Arquivo";
   const body = caption?.trim() || `[${label}: ${preparedMedia.fileName}]`;
 
@@ -122,6 +136,6 @@ export async function sendConversationMedia({
     mediaId: uploaded.id,
     fileName: preparedMedia.fileName,
     mimeType: preparedMedia.mimeType,
-    providerMessageId: readMetaMessageId(metaResponse)
+    providerMessageId
   });
 }

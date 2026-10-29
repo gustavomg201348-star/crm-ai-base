@@ -69,6 +69,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       fileName: file.name || "arquivo",
       mimeType: file.type || "application/octet-stream",
       bytes,
+      recordedAudio: formData.get("recordedAudio") === "true",
       caption: typeof caption === "string" ? caption : undefined
     });
 
