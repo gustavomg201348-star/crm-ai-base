@@ -30,6 +30,7 @@ import { OpenCreditCommercialAccessPanel } from "@/app/components/integrations/O
 import { OpenCreditConsumerAuthorizationPanel } from "@/app/components/integrations/OpenCreditConsumerAuthorizationPanel";
 import { OpenCreditRemoteIdentityPanel } from "@/app/components/integrations/OpenCreditRemoteIdentityPanel";
 import { useNewMessageSound } from "@/app/hooks/use-new-message-sound";
+import { createRecordedAudioFile, preferredRecordingMimeTypes } from "@/lib/recorded-audio";
 import { resolveConversationChannelId } from "@/lib/conversation-channel.service";
 import { serializeCsvCell } from "@/lib/csv-export";
 import type { OpportunitySummary } from "@/lib/opportunity-summary-types";
@@ -3653,10 +3654,11 @@ export default function Home() {
     }
   }
 
-  async function handleSendMedia(conversationId: string, file: File, caption?: string) {
+  async function handleSendMedia(conversationId: string, file: File, caption?: string, recordedAudio = false) {
     const formData = new FormData();
     formData.set("file", file);
     if (caption?.trim()) formData.set("caption", caption.trim());
+    if (recordedAudio) formData.set("recordedAudio", "true");
 
     const response = await fetch(`/api/conversations/${conversationId}/messages/media`, {
       method: "POST",
@@ -7131,7 +7133,7 @@ function Atendimento({
     body: string,
     replyToMessageId?: string
   ) => Promise<boolean>;
-  onSendMedia: (conversationId: string, file: File, caption?: string) => Promise<void>;
+  onSendMedia: (conversationId: string, file: File, caption?: string, recordedAudio?: boolean) => Promise<void>;
   onLoadTemplates: (conversationId: string) => Promise<WhatsAppTemplateRow[]>;
   onSendTemplate: (
     conversationId: string,
@@ -7606,11 +7608,7 @@ function Atendimento({
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const preferredMimeType = [
-        "audio/ogg;codecs=opus",
-        "audio/webm;codecs=opus",
-        "audio/webm"
-      ].find((mimeType) => MediaRecorder.isTypeSupported(mimeType));
+      const preferredMimeType = preferredRecordingMimeTypes.find((mimeType) => MediaRecorder.isTypeSupported(mimeType));
       const recorder = new MediaRecorder(
         stream,
         preferredMimeType ? { mimeType: preferredMimeType } : undefined
@@ -7622,19 +7620,22 @@ function Atendimento({
         if (event.data.size > 0) audioChunksRef.current.push(event.data);
       };
       recorder.onstop = () => {
+        if (mediaRecorderRef.current !== recorder) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
         clearRecordingTimer();
         stream.getTracks().forEach((track) => track.stop());
-        const blob = new Blob(audioChunksRef.current, {
-          type: recorder.mimeType || "audio/webm"
-        });
-        const baseMimeType = (blob.type || "audio/webm").split(";")[0];
-        const extension = baseMimeType.includes("ogg") ? "ogg" : "webm";
-        const file = new File([blob], `audio-${Date.now()}.${extension}`, {
-          type: blob.type || "audio/webm"
-        });
-        if (audioPreview?.url) URL.revokeObjectURL(audioPreview.url);
-        setAudioPreview({ file, url: URL.createObjectURL(blob) });
-        setRecording(false);
+        try {
+          const file = createRecordedAudioFile(audioChunksRef.current, recorder.mimeType, `audio-${Date.now()}`);
+          if (audioPreview?.url) URL.revokeObjectURL(audioPreview.url);
+          setAudioPreview({ file, url: URL.createObjectURL(file) });
+        } catch (error) {
+          setAudioPreview(null);
+          setComposerError(error instanceof Error ? error.message : "Falha ao preparar gravacao.");
+        } finally {
+          setRecording(false);
+        }
       };
 
       setAudioPreview(null);
@@ -7684,12 +7685,12 @@ function Atendimento({
     });
   }
 
-  async function sendMediaPreview(preview: { file: File }, caption?: string) {
+  async function sendMediaPreview(preview: { file: File }, caption?: string, recordedAudio = false) {
     if (!selectedConversation || sendingAttachment) return;
     setSendingAttachment(true);
     setComposerError("");
     try {
-      await onSendMedia(selectedConversation.id, preview.file, caption);
+      await onSendMedia(selectedConversation.id, preview.file, caption, recordedAudio);
       if (filePreview?.url) URL.revokeObjectURL(filePreview.url);
       if (audioPreview?.url) URL.revokeObjectURL(audioPreview.url);
       setFilePreview(null);
@@ -8826,7 +8827,7 @@ function Atendimento({
                   <button type="button" className="rounded-full px-3 py-1 text-sm text-slate-500 hover:bg-white" onClick={() => setAudioPreview(null)}>
                     Descartar
                   </button>
-                  <button type="button" className="inline-flex items-center gap-1.5 rounded-full bg-brand px-3 py-1 text-sm font-semibold text-white disabled:opacity-50" disabled={sendingAttachment} onClick={() => void sendMediaPreview(audioPreview)}>
+                  <button type="button" className="inline-flex items-center gap-1.5 rounded-full bg-brand px-3 py-1 text-sm font-semibold text-white disabled:opacity-50" disabled={sendingAttachment} onClick={() => void sendMediaPreview(audioPreview, undefined, true)}>
                     {sendingAttachment ? (
                       <>
                         <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
