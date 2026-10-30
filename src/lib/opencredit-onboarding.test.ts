@@ -216,7 +216,7 @@ test("rotation changes encrypted secret and disables atomically; old signature f
 test("missing encryption fails create and rotation closed without writes", async () => {
   const f = fixture(null);
   await assert.rejects(() => f.service.create(admin.companyId)); assert.equal(f.calls.length, 0);
-  f.rows.push({ id: "existing", companyId: admin.companyId, publicWebhookId: "a".repeat(48), enabled: true, paused: false,
+  f.rows.push({ id: "existing", companyId: admin.companyId, providerScope: null, publicWebhookId: "a".repeat(48), enabled: true, paused: false,
     webhookSecret: prepareOpenCreditWebhookSecret("synthetic", encryption), createdAt: new Date(), updatedAt: new Date() });
   await assert.rejects(() => f.service.rotate(admin.companyId, "existing"));
   assert.equal(f.rows[0].enabled, true); assert.equal(f.calls.filter(call => call.method === "update").length, 0);

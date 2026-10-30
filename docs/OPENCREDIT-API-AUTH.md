@@ -3141,3 +3141,105 @@ Rollback is not data deletion: stop new simulation commands first. Restoring an
 old CHECK/index requires proving the existing new-purpose rows/intentions permit
 it; otherwise use a reviewed forward fix. No rollback, migration, provider call,
 business mutation or Railway change is performed in production by implementation.
+
+## Passive lead.assigned inbox — local foundation, 2026-10-29
+
+The official partner OpenAPI 2.10.0 publishes only the webhook `lead.assigned`.
+It does NOT publish simulation-completed or proposal/status callbacks, nor a
+public webhook URL registration endpoint. This inbox never substitutes simulation/
+proposal GET polling. No provider URL, secret or production integration is
+configured by this implementation.
+
+The EXISTING `POST /api/integrations/opencredit/webhooks/[publicWebhookId]`,
+its parser, 8-second budget, integration management and lead ingestion remain
+unchanged. That older path can create Contact/OpenCreditLead; the NEW
+`POST /api/integrations/opencredit/inbound/[publicWebhookId]` never calls it.
+ConversationInboundEvent/Meta models are not reused for a different domain fact.
+
+Migration `20261029190000_add_opencredit_passive_inbound` adds nullable
+OpenCreditIntegration.providerScope and a metadata-only OpenCreditInboundEvent.
+There is NO backfill or inferred binding, DML, automatic integration creation,
+activation, UI, provisioning endpoint or processor. Historical rows remain NULL.
+The new route requires an explicitly persisted valid local scope, an enabled
+integration and a decryptable nonempty secret. Existing AES-256-GCM secret
+storage/key infrastructure is reused; there is no plaintext/unsigned fallback.
+Local provisioning/rotation must be separately reviewed before any production
+setup; changing env alone does not bind an integration.
+
+Routing is publicWebhookId -> persisted integration/company/providerScope.
+No payload companyId, tenantId, partnerId or environment fallback selects a
+recipient. A composite integration/company/scope FK with RESTRICT/NO ACTION
+preserves that binding; a referenced scope cannot be silently reassigned.
+The URI's random public identifier is not authentication: HMAC is mandatory.
+
+X-CreditCore-Sig must match exactly sha256=<64 hex>. HMAC-SHA256 is calculated
+over the original RAW bytes, with constant-time comparison, BEFORE strict UTF-8/
+JSON parsing. Reserializing JSON changes authentication. Duplicate JSON keys,
+invalid UTF-8 and malformed JSON reject; payload size is capped at 64 KiB by
+both declared and streamed length. Only uncompressed application/json is accepted
+(optional charset=utf-8). No cookies/bearer or browser session replaces HMAC.
+
+The local conservative metadata contract requires event=lead.assigned, lead.id
+and eventId=`<lead.id>:<partner-id>`. Components are bounded ASCII opaque IDs
+(letters/digits/underscore/hyphen, not purely numeric); other formats are rejected,
+not normalized. These are technical provider identifiers, not CPF/phone fields.
+contractVersion is NULL if absent; when present only integer 2 is supported.
+Other fields, including client and creditProfile, are discarded, not logged,
+hashed or stored. No business interpretation of an incoming lead occurs.
+
+Only id, companyId, providerScope, integrationId, eventId, eventType, externalLeadId,
+contractVersion, provenanceKind=OPENCREDIT_HMAC_SHA256_VERIFIED,
+provenanceVersion=1, receivedAt and processingState=RECEIVED are persisted.
+No raw body, signature/header, ciphertext, secret, CPF, phone, email, name or
+financial data is placed in the inbox. A request-local unforgeable receipt binds
+authenticated metadata to the exact integration snapshot; the transaction locks
+and rechecks the binding, enabled state and ciphertext before inserting.
+
+The PostgreSQL unique (companyId,providerScope,eventId) is the deduplication
+authority, including concurrent INSERT races. Transactions use Serializable;
+a targeted unique or serialization conflict is reconciled by a READ only after
+verifying the binding again; no blind INSERT retry occurs. Same event across two integrations
+in the same company/scope deduplicates to the first binding; different company or
+scope remains isolated. Inconsistent metadata returns 409, never overwrites.
+Existing receivedAt and provenance do not change on a retry.
+
+New/replayed valid deliveries return HTTP 200 {ok:true}, only AFTER a committed
+inbox transaction. Invalid signature/unbound integration -> 403; JSON -> 400;
+unknown/unsupported metadata -> 422; media -> 415; size -> 413; throttling -> 429;
+storage/limiter/deadline failures -> 503. All responses are no-store and contain
+no PII/internal exceptions. The official provider accepts any 2xx and ignores body.
+
+The new boundary has a 3-second monotonic budget (provider timeout: 5 seconds).
+Transaction maxWait is capped at 150 ms and timeout at 1 second, also capped by
+remaining request budget. Waiting timeout cannot cancel an already running DB
+transaction; it may still commit after a 503. The durable unique makes that
+ambiguous delivery safely reconcilable by the provider retry, not a second row.
+This is bounded cooperative handling, not a hard real-time latency guarantee.
+No processing queue/worker/automatic retry is started here.
+
+Explicit public rate limits reuse the existing hashed-key PostgreSQL limiter:
+600/min global ingress, 120/min per IP; after authentication 120/min per
+company/scope/integration. Invalid public IDs never create per-integration
+arbitrary-key buckets. IP attribution follows the existing proxy-header helper;
+IP throttling is not proof of origin. Limiter unavailable fails closed.
+RateLimitBucket writes are technical rate counters, not commercial effects.
+
+Official delivery retries: three attempts total; second about 30 seconds after
+the first, third about 90 seconds after the second. eventId stays stable.
+Failure of three consecutive leads after exhausting attempts can disable the
+provider distribution rule. No dedup retention cleanup is introduced: deleting
+receipts would remove replay protection. Retention/archival needs a reviewed
+policy before operational rollout.
+
+There is no consumer. Metadata permits audit/dedup/correlation, NOT recovery of
+the discarded lead data. Future enrichment or Contact creation needs a separate
+contract, authority and explicit implementation; no unlisted provider lookup is
+assumed. Rollback first disables/unpublishes only the new receiver, preserving
+inbox records and the legacy path; removal of columns/constraints with retained
+data requires a reviewed forward plan, not destructive cleanup.
+
+Tests use synthetic signatures, integrations and disposable local PostgreSQL,
+including real pre-migration upgrade with no backfill, material uniques/FKs,
+forced concurrent insertion, rollback and unchanged legacy ingestion. No real
+OpenCredit/Meta/AI/financial request, production write, Railway change, deployment,
+push or PR is performed.

@@ -521,6 +521,7 @@ model OpenCreditCommercialOperationEvent {
 
 model OpenCreditIntegration {
   id              String @id @default(cuid())
+  providerScope   String?
   companyId       String
   publicWebhookId String @unique
   webhookSecret   String
@@ -531,8 +532,29 @@ model OpenCreditIntegration {
   company         Company @relation(fields: [companyId], references: [id])
   leads           OpenCreditLead[]
   events          OpenCreditEvent[]
+  inboundEvents   OpenCreditInboundEvent[]
 
   @@unique([companyId, id])
+  @@unique([id, companyId, providerScope], map: "OCIntegration_id_company_scope_key")
+}
+
+model OpenCreditInboundEvent {
+  id                String @id @default(cuid())
+  companyId         String
+  providerScope     String
+  integrationId     String
+  eventId           String
+  eventType         String
+  externalLeadId    String
+  contractVersion   Int?
+  provenanceKind    String
+  provenanceVersion Int
+  receivedAt        DateTime @default(now())
+  processingState   String @default("RECEIVED")
+  integration       OpenCreditIntegration @relation(fields: [integrationId, companyId, providerScope], references: [id, companyId, providerScope], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([companyId, providerScope, eventId], map: "OCInbound_company_scope_event_key")
+  @@index([companyId, providerScope, receivedAt], map: "OCInbound_company_scope_received_idx")
 }
 
 model OpenCreditLead {
