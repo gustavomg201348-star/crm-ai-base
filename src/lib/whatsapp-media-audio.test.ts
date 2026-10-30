@@ -8,6 +8,7 @@ import path from "node:path";
 import test from "node:test";
 import ts from "typescript";
 import { audioFormats, createRecordedAudioFile, supportedAudioMime } from "./recorded-audio";
+import { mappedOpusHeaders, oggPage, opusHeaders, opusSilence, patchOggPage, rawOggPage, syntheticOgg, versionedOpusHeaders } from "./ogg-opus-test-fixtures";
 
 function fixture(options: { preparationFails?: boolean; uploadFails?: boolean; sendFails?: boolean; missingMessageId?: boolean; realPreparation?: boolean } = {}) {
   const calls: Array<{ operation: string; data: Record<string, unknown> }> = [];
@@ -132,4 +133,52 @@ test("independent MP4 counterexamples: legacy mislabeled file and empty MP4 neve
     assert.equal(info.streams[0].channels, 1);
     assert.deepEqual(f.calls.map(call => call.operation), ["prepare", "scope", "upload", "send", "save"]);
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("structurally invalid Ogg/Opus never uploads, sends or persists successful audio", async () => {
+  const valid = syntheticOgg();
+  for (const bytes of [syntheticOgg(312, 47976), patchOggPage(valid, 3, p => p.writeBigUInt64LE(BigInt(49000), 6)), valid.subarray(0, valid.length - 1)]) {
+    const f = fixture({ realPreparation: true });
+    await assert.rejects(f.send("audio/ogg", bytes, true, "recording.ogg"));
+    assert.deepEqual(f.calls.map(call => call.operation), ["prepare"]);
+  }
+});
+
+test("family 1 mono is normalized before upload; invalid mapping never reaches Meta or success persistence", async () => {
+  const bytes = Buffer.concat([...mappedOpusHeaders(), oggPage([opusSilence], 960, 2, 4)]);
+  const valid = fixture({ realPreparation: true });
+  await valid.send("audio/ogg", bytes, true, "mapped.ogg");
+  assert.deepEqual(valid.calls.map(call => call.operation), ["prepare", "scope", "upload", "send", "save"]);
+  const uploaded = valid.calls.find(call => call.operation === "upload")!.data.bytes as Buffer;
+  assert.equal(uploaded[28 + 18], 0); assert.equal(uploaded[28 + 9], 1);
+  for (const invalid of [patchOggPage(bytes, 0, p => { p[28 + 21] = 1; }),
+    patchOggPage(bytes, 0, p => { p[28 + 19] = 0; }), bytes.subarray(0, bytes.length - 1)]) {
+    const f = fixture({ realPreparation: true });
+    await assert.rejects(f.send("audio/ogg", invalid, true, "invalid.ogg"));
+    assert.deepEqual(f.calls.map(call => call.operation), ["prepare"]);
+  }
+});
+
+test("empty pages and compatible headers reach mocked Meta only after normalization; malformed variants never do", async () => {
+  const empty = rawOggPage([], Buffer.alloc(0), BigInt("18446744073709551615"), 2);
+  const withEmpty = Buffer.concat([...opusHeaders(), empty, oggPage([opusSilence], 960, 3, 4)]);
+  const v2 = Buffer.concat([...versionedOpusHeaders(2, 1, Buffer.from([9, 8])), oggPage([opusSilence], 960, 2, 4)]);
+  for (const bytes of [withEmpty, v2]) {
+    const f = fixture({ realPreparation: true });
+    await f.send("audio/ogg", bytes, true, "input.ogg");
+    assert.deepEqual(f.calls.map(call => call.operation), ["prepare", "scope", "upload", "send", "save"]);
+    const output = f.calls.find(call => call.operation === "upload")!.data.bytes as Buffer;
+    assert.equal(output[28 + 8], 1); assert.equal(output[28 + 9], 1); assert.equal(output[28 + 18], 0);
+  }
+  for (const bytes of [
+    patchOggPage(withEmpty, 2, p => p.writeBigUInt64LE(BigInt(0), 6)),
+    patchOggPage(withEmpty, 2, p => { p[5] = 1; }),
+    patchOggPage(v2, 0, p => { p[28 + 8] = 16; }),
+    patchOggPage(v2, 0, p => { p[28 + 19] = 0; }),
+    Buffer.concat([...opusHeaders(), empty, oggPage([Buffer.alloc(0)], 960, 3, 4)])
+  ]) {
+    const f = fixture({ realPreparation: true });
+    await assert.rejects(f.send("audio/ogg", bytes, true, "invalid.ogg"));
+    assert.deepEqual(f.calls.map(call => call.operation), ["prepare"]);
+  }
 });

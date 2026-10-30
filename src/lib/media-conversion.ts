@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { audioFormats, supportedAudioMime, type SupportedAudioMime } from "./recorded-audio";
+import { inspectOggOpus } from "./ogg-opus-integrity";
 
 const execFileAsync = promisify(execFile);
 export const maxAudioBytes = 16 * 1024 * 1024;
@@ -112,6 +113,7 @@ export async function prepareRecordedAudioForWhatsApp({
     const input = await probeAudio(inputPath, deadline, expected.format);
     const formats = input.format.format_name!.split(",");
     const inputDuration = Number(input.format.duration);
+    if (expected.format === "ogg" && input.streams[0].codec_name === "opus") inspectOggOpus(bytes);
     if (!formats.includes(expected.format) || !(expected.codecs as readonly string[]).includes(input.streams[0].codec_name!) ||
         (recordedAudio && Number.isFinite(inputDuration) && inputDuration > maxRecordedAudioSeconds)) {
       throw new AudioPreparationError();
@@ -134,6 +136,7 @@ export async function prepareRecordedAudioForWhatsApp({
         "-v", "error", "-nostdin", "-y", "-max_alloc", "67108864", "-threads", "1", "-filter_threads", "1",
         "-xerror", "-err_detect", "explode", "-protocol_whitelist", "file,pipe", "-f", expected.format, "-i", inputPath,
         "-map", "0:a:0", "-vn", "-map_metadata", "-1",
+        "-af", "aresample=48000,asettb=1/48000,asetpts=N/SR/TB",
         "-acodec", "libopus", "-ac", "1", "-ar", "48000", "-b:a", "32k", "-threads", "1",
         // Stop disk growth above the accepted ceiling; never accept this truncated output.
         "-fs", String(maxAudioBytes + 1024 * 1024),
@@ -160,6 +163,7 @@ export async function prepareRecordedAudioForWhatsApp({
     ], deadline);
     if (decoded.stderr.trim()) throw new AudioPreparationError();
     const converted = await readBoundedAudio(outputPath);
+    inspectOggOpus(converted, { normalized: true });
     if (performance.now() > deadline) throw new AudioPreparationError();
     return {
       bytes: converted,

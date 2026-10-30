@@ -8,6 +8,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 import ts from "typescript";
+import { syntheticOgg } from "./ogg-opus-test-fixtures";
 
 const nativeExec = promisify(execFile);
 type ToolResult = { stdout: string; stderr: string };
@@ -76,7 +77,7 @@ test("remaining 60-second budget kills an actually pending child and cleans/reli
         try { await nativeExec(process.execPath, ["-e", "setInterval(() => {}, 1000)"], options); }
         catch (error) { timedOut = Boolean((error as { killed?: boolean }).killed); throw error; }
       }
-      if (args.includes("libopus")) await fs.writeFile(args[args.length - 1], "controlled output");
+      if (args.includes("libopus")) await fs.writeFile(args[args.length - 1], syntheticOgg());
       return progress;
     }, () => clock);
     await assert.rejects(converter.prepareRecordedAudioForWhatsApp(input), converter.AudioPreparationError);
@@ -105,7 +106,7 @@ test("at most two preparations run per runtime, without queue, with recovery aft
         });
         return result;
       }
-      if (args.includes("libopus")) await fs.writeFile(args[args.length - 1], "controlled output");
+      if (args.includes("libopus")) await fs.writeFile(args[args.length - 1], syntheticOgg());
       return progress;
     });
     const first = converter.prepareRecordedAudioForWhatsApp(input);
