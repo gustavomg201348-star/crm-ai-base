@@ -79,7 +79,7 @@ test("create encrypts at rest, returns secret once, uses session tenant and star
   assert.equal(response.status, 201); assertNoStore(response);
   const data = await response.json();
   assert.equal(f.rows.length, 1); assert.equal(f.rows[0].companyId, admin.companyId);
-  assert.equal(f.rows[0].enabled, false); assert.equal(f.rows[0].paused, false);
+  assert.equal(f.rows[0].enabled, false); assert.equal(f.rows[0].paused, false); assert.equal(f.rows[0].passiveInboundEnabled, false);
   assert.equal(data.integration.enabled, false); assert.equal(data.integration.status, "DISABLED");
   assert.ok(f.rows[0].webhookSecret.startsWith("enc:v1:"));
   assert.ok(f.rows[0].webhookSecret !== data.setupSecret);
@@ -98,10 +98,12 @@ test("GET is tenant scoped/read only and never returns plaintext or ciphertext",
 test("mapper uses an exact whitelist, including legacy dates and secret-presence boolean", async () => {
   const f = fixture(); await f.service.create(admin.companyId);
   assert.deepEqual(Object.keys(mapOpenCreditIntegration(f.rows[0])).sort(),
-    ["id", "publicWebhookId", "enabled", "status", "createdAt", "updatedAt", "hasWebhookSecret", "webhookPath"].sort());
+    ["id", "publicWebhookId", "enabled", "status", "createdAt", "updatedAt", "hasWebhookSecret", "webhookPath", "passiveInboundEnabled", "passiveInboundPath"].sort());
   const mapped = mapOpenCreditIntegration({ ...f.rows[0], webhookSecret: "" });
   assert.equal(mapped.hasWebhookSecret, false);
   assert.equal(mapped.webhookPath, `/api/integrations/opencredit/webhooks/${mapped.publicWebhookId}`);
+  assert.equal(mapped.passiveInboundPath, `/api/integrations/opencredit/inbound/${mapped.publicWebhookId}`);
+  assert.equal(mapped.passiveInboundEnabled, false);
 });
 test("multiple integrations per company remain independent", async () => {
   const f = fixture(); const a = await f.service.create(admin.companyId); const b = await f.service.create(admin.companyId);
@@ -143,7 +145,7 @@ test("tenant A cannot rotate tenant B secret", async () => {
 });
 for (const body of [{}, { enabled: "true" }, { status: "UNKNOWN" }, { paused: true }, { enabled: true, companyId: "other" },
   { enabled: true, webhookSecret: "synthetic-secret" }, { enabled: true, publicWebhookId: "other" },
-  { enabled: true, createdAt: "other" }, { status: "PAUSED", enabled: true }, [], null]) {
+  { enabled: true, createdAt: "other" }, { status: "PAUSED", enabled: true }, { passiveInboundEnabled: true }, [], null]) {
   test(`PATCH rejects non-whitelisted body ${JSON.stringify(Object.keys(body ?? {}))}`, async () => {
     const f = fixture(); const response = await f.handlers.PATCH(request("PATCH", body), context("integration-a"));
     assert.equal(response.status, 400); assert.equal(f.calls.length, 0);
@@ -195,12 +197,14 @@ test("ACTIVE, PAUSED and DISABLED retain and release only local leads", async ()
 test("rotation changes encrypted secret and disables atomically; old signature fails and public ID is stable", async () => {
   const f = fixture(); const created = await f.service.create(admin.companyId);
   await f.service.setEnabled(admin.companyId, created.integration.id, true);
+  f.rows[0].passiveInboundEnabled = true; // Explicit synthetic provisioning, never inferred from legacy status.
   const oldCiphertext = f.rows[0].webhookSecret;
   const response = await f.handlers.ROTATE(request("POST", {}), context(created.integration.id));
   assert.equal(response.status, 200); assertNoStore(response);
   const data = await response.json();
   assert.ok(data.setupSecret !== created.setupSecret && f.rows[0].webhookSecret !== oldCiphertext);
   assert.equal(data.integration.enabled, false); assert.equal(f.rows[0].enabled, false);
+  assert.equal(data.integration.passiveInboundEnabled, false); assert.equal(f.rows[0].passiveInboundEnabled, false);
   assert.equal(data.integration.publicWebhookId, created.integration.publicWebhookId);
   const resolved = resolveOpenCreditWebhookSecret(f.rows[0].webhookSecret, encryption);
   assert.ok(resolved === data.setupSecret && resolved !== created.setupSecret);
@@ -210,13 +214,13 @@ test("rotation changes encrypted secret and disables atomically; old signature f
   assert.equal(verifyOpenCreditSignature(raw, signature(data.setupSecret), resolved), true);
   const write = f.calls.filter(call => call.method === "update").at(-1)!.args as { where: { companyId: string }; data: Record<string, unknown> };
   assert.equal(write.where.companyId, admin.companyId);
-  assert.deepEqual(Object.keys(write.data).sort(), ["enabled", "paused", "webhookSecret"]);
+  assert.deepEqual(Object.keys(write.data).sort(), ["enabled", "passiveInboundEnabled", "paused", "webhookSecret"]);
   assert.equal(write.data.enabled, false); assert.equal(write.data.paused, false);
 });
 test("missing encryption fails create and rotation closed without writes", async () => {
   const f = fixture(null);
   await assert.rejects(() => f.service.create(admin.companyId)); assert.equal(f.calls.length, 0);
-  f.rows.push({ id: "existing", companyId: admin.companyId, providerScope: null, publicWebhookId: "a".repeat(48), enabled: true, paused: false,
+  f.rows.push({ id: "existing", companyId: admin.companyId, providerScope: null, publicWebhookId: "a".repeat(48), enabled: true, paused: false, passiveInboundEnabled: false,
     webhookSecret: prepareOpenCreditWebhookSecret("synthetic", encryption), createdAt: new Date(), updatedAt: new Date() });
   await assert.rejects(() => f.service.rotate(admin.companyId, "existing"));
   assert.equal(f.rows[0].enabled, true); assert.equal(f.calls.filter(call => call.method === "update").length, 0);
@@ -248,9 +252,24 @@ test("routes use the official session resolver and UI keeps one-time secret only
   assert.ok(wiring.includes("getSession: getSessionFromRequest"));
   const ui = readFileSync("src/app/components/integrations/OpenCreditSettingsCard.tsx", "utf8");
   assert.ok(ui.includes("setSetup(null)") && ui.includes("window.location.origin"));
+  assert.ok(ui.includes("Webhook legado:") && ui.includes("Inbox passiva:") && ui.includes("row.passiveInboundEnabled"));
+  assert.ok(ui.includes("row.passiveInboundPath") && ui.includes("Copiar URL legada") && ui.includes("Copiar URL passiva"));
+  assert.doesNotMatch(ui, /\{\s*passiveInboundEnabled\s*:/);
   assert.ok(!/localStorage|sessionStorage|document\.cookie|console\./.test(ui));
   for (const path of ["src/app/api/integrations/opencredit/route.ts", "src/app/api/integrations/opencredit/[id]/route.ts",
     "src/app/api/integrations/opencredit/[id]/rotate-secret/route.ts"]) {
     assert.ok(!readFileSync(path, "utf8").includes("export const DELETE"));
+  }
+});
+
+test("legacy status changes preserve passive enablement in both directions", async () => {
+  for (const passiveInboundEnabled of [false, true]) {
+    const f = fixture(); const created = await f.service.create(admin.companyId);
+    f.rows[0].passiveInboundEnabled = passiveInboundEnabled;
+    for (const status of ["ACTIVE", "PAUSED", "DISABLED"] as const) {
+      const result = await f.service.setStatus(admin.companyId, created.integration.id, status);
+      assert.equal(result.integration.passiveInboundEnabled, passiveInboundEnabled);
+      assert.equal(f.rows[0].passiveInboundEnabled, passiveInboundEnabled);
+    }
   }
 });

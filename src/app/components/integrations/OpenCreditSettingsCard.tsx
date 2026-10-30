@@ -9,12 +9,12 @@ type Setup = { integration: SafeOpenCreditIntegration; setupSecret: string };
 const statusLabel: Record<OpenCreditStatus, string> = {
   ACTIVE: "Recebendo leads",
   PAUSED: "Recebimento pausado",
-  DISABLED: "Integração desativada"
+  DISABLED: "Legado desativado"
 };
 const statusHelp: Record<OpenCreditStatus, string> = {
   ACTIVE: "Novos leads recebidos ficam disponíveis normalmente.",
   PAUSED: "A Prospecta continua entregando normalmente, mas os novos leads ficam retidos no QEVORA até você retomar.",
-  DISABLED: "Bloqueio total: o webhook é recusado."
+  DISABLED: "O webhook legado é recusado. A inbox passiva tem controle independente."
 };
 
 export function OpenCreditSettingsCard() {
@@ -67,7 +67,7 @@ export function OpenCreditSettingsCard() {
     if (status === "PAUSED" &&
         !window.confirm("Durante a pausa, os novos leads continuarão sendo recebidos, mas ficarão retidos até você retomar. Deseja pausar?")) return;
     if (status === "DISABLED" &&
-        !window.confirm("Isso fará o QEVORA recusar o webhook. Use apenas quando quiser bloquear totalmente a integração. Deseja desativar?")) return;
+        !window.confirm("Isso bloqueará somente o webhook legado, sem alterar a inbox passiva. Deseja desativar o legado?")) return;
     void mutate(`/api/integrations/opencredit/${encodeURIComponent(row.id)}`, "PATCH", { status });
   }
 
@@ -76,7 +76,7 @@ export function OpenCreditSettingsCard() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 id="opencredit-title" className="text-lg font-bold">OpenCredit / Prospecta</h2>
-          <p className="text-sm text-slate-500">Controle do recebimento de leads. O modo pausado retém novos leads sem provocar falha no webhook.</p>
+          <p className="text-sm text-slate-500">Webhook legado e inbox passiva têm habilitações independentes. A pausa controla somente a retenção de leads legados.</p>
         </div>
         <button type="button" className={button} disabled={busy || Boolean(setup)}
           onClick={() => void mutate("/api/integrations/opencredit", "POST")}>Criar integração</button>
@@ -89,14 +89,18 @@ export function OpenCreditSettingsCard() {
       {integrations.map(row => (
         <div key={row.id} className="space-y-3 rounded-2xl border border-line p-4">
           <div className="flex flex-wrap justify-between gap-2 text-sm">
-            <strong>{statusLabel[row.status]}</strong>
+            <strong>Webhook legado: {statusLabel[row.status]}</strong>
             <span>Criada em {new Date(row.createdAt).toLocaleString("pt-BR")}</span>
           </div>
           <p className="text-sm text-slate-500">{statusHelp[row.status]}</p>
-          <p className="break-all text-sm">{origin + row.webhookPath}</p>
+          <p className="break-all text-sm">URL legada: {origin + row.webhookPath}</p>
+          <p className="text-sm">Inbox passiva: {row.passiveInboundEnabled ? "Habilitada" : "Desabilitada"}</p>
+          <p className="break-all text-sm">URL passiva: {origin + row.passiveInboundPath}</p>
+          <p className="text-sm text-slate-500">Habilitação passiva requer provisionamento explícito; os controles abaixo alteram somente o legado, exceto a rotação do segredo, que desabilita ambas as rotas.</p>
 
           <div className="flex flex-wrap gap-2">
-            <button type="button" className={button} onClick={() => void copy(origin + row.webhookPath)}>Copiar URL</button>
+            <button type="button" className={button} onClick={() => void copy(origin + row.webhookPath)}>Copiar URL legada</button>
+            <button type="button" className={button} onClick={() => void copy(origin + row.passiveInboundPath)}>Copiar URL passiva</button>
             {row.status === "ACTIVE" && (
               <button type="button" className={button} disabled={busy || Boolean(setup)}
                 onClick={() => changeStatus(row, "PAUSED")}>Pausar recebimento</button>
@@ -107,14 +111,14 @@ export function OpenCreditSettingsCard() {
             )}
             {row.status === "DISABLED" && (
               <button type="button" className={button} disabled={busy || Boolean(setup)}
-                onClick={() => changeStatus(row, "ACTIVE")}>Ativar</button>
+                onClick={() => changeStatus(row, "ACTIVE")}>Ativar legado</button>
             )}
             {row.status !== "DISABLED" && (
               <button type="button" className={button} disabled={busy || Boolean(setup)}
-                onClick={() => changeStatus(row, "DISABLED")}>Desativar</button>
+                onClick={() => changeStatus(row, "DISABLED")}>Desativar legado</button>
             )}
             <button type="button" className={button} disabled={busy || Boolean(setup)} onClick={() => {
-              if (!window.confirm("O segredo atual deixará de funcionar e a integração será automaticamente desativada. Atualize o segredo no fornecedor antes de reativar. Deseja continuar?")) return;
+              if (!window.confirm("O segredo atual deixará de funcionar e ambas as rotas serão desativadas. Atualize o segredo no fornecedor antes de reativar. Deseja continuar?")) return;
               void mutate(`/api/integrations/opencredit/${encodeURIComponent(row.id)}/rotate-secret`, "POST");
             }}>Rotacionar segredo</button>
           </div>
@@ -126,11 +130,15 @@ export function OpenCreditSettingsCard() {
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-xl space-y-4 rounded-2xl bg-white p-6 shadow-xl">
             <h3 className="font-bold">Copie este segredo agora. Ele não será exibido novamente.</h3>
-            <p className="text-sm text-slate-600">A integração está desativada. Configure os dados no fornecedor antes de ativar.</p>
-            <label className="block text-sm font-semibold">Webhook URL
+            <p className="text-sm text-slate-600">Ambas as rotas estão desativadas. Configure somente a rota pretendida no fornecedor antes da habilitação explícita.</p>
+            <label className="block text-sm font-semibold">Webhook URL legada
               <input className="mt-1 w-full rounded-lg border p-2 font-normal" readOnly value={origin + setup.integration.webhookPath} />
             </label>
             <button type="button" className={button} onClick={() => void copy(origin + setup.integration.webhookPath)}>Copiar URL</button>
+            <label className="block text-sm font-semibold">Inbox passiva URL
+              <input className="mt-1 w-full rounded-lg border p-2 font-normal" readOnly value={origin + setup.integration.passiveInboundPath} />
+            </label>
+            <button type="button" className={button} onClick={() => void copy(origin + setup.integration.passiveInboundPath)}>Copiar URL passiva</button>
             <label className="block text-sm font-semibold">HMAC Secret
               <input className="mt-1 w-full rounded-lg border p-2 font-mono font-normal" readOnly autoComplete="off" value={setup.setupSecret} />
             </label>
