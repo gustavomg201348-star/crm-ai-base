@@ -116,6 +116,9 @@ jobs:
       - name: Validate OpenCredit authorized CLT simulation contract and manual UI
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-clt-simulation.test.ts src/lib/opencredit-clt-simulation-ui.test.ts
 
+      - name: Validate OpenCredit passive inbound RAW signature and fail-closed boundary
+        run: npx --yes tsx@4.20.6 --test src/lib/opencredit-passive-inbound.test.ts
+
       - name: Validate OpenCredit createClient human UI guards
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-create-client-ui.test.ts
 
@@ -342,6 +345,12 @@ jobs:
         env:
           OPENCREDIT_CONSUMER_AUTHORIZATION_POSTGRES_TEST: "1"
           OPENCREDIT_SIMULATION_POSTGRES_TEST: "1"
+
+      - name: Validate OpenCredit passive inbox upgrade, uniqueness and concurrency
+        run: npx --yes tsx@4.20.6 --test src/lib/opencredit-passive-inbound-postgres.integration.ts
+        env:
+          OPENCREDIT_COMMERCIAL_OPERATION_POSTGRES_TEST: "1"
+          OPENCREDIT_PASSIVE_INBOUND_POSTGRES_TEST: "1"
 
       - name: Validate OpenCredit one-shot dispatcher on disposable PostgreSQL with fake provider
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-create-client-dispatcher-postgres.integration.ts
