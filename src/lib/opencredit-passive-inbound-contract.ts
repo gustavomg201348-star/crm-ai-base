@@ -3,7 +3,7 @@ import { verifyOpenCreditSignature } from "./opencredit-webhook-contract";
 import { parseOpenCreditStrictJson } from "./opencredit-strict-json";
 import { parseOpenCreditProviderScope } from "./opencredit-commercial-identity-policy";
 
-export type PassiveBinding = Readonly<{ id: string; companyId: string; providerScope: string; webhookSecret: string; enabled: boolean }>;
+export type PassiveBinding = Readonly<{ id: string; companyId: string; providerScope: string; webhookSecret: string; passiveInboundEnabled: boolean }>;
 export type PassiveMetadata = Readonly<{ eventId: string; eventType: "lead.assigned"; externalLeadId: string; contractVersion: 2 | null }>;
 declare const brand: unique symbol;
 export type PassiveReceipt = Readonly<{ [brand]: never }>;
@@ -15,7 +15,7 @@ export class PassiveInboundError extends Error {
 }
 export const opaqueInboundId = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?![\s\S])/.test(v) && !/^\d+$/.test(v);
 export function validatePassiveBinding(b: PassiveBinding): void {
-  if (!b || !opaqueInboundId(b.id) || !opaqueInboundId(b.companyId) || b.enabled !== true || typeof b.webhookSecret !== "string" || !b.webhookSecret) throw new PassiveInboundError("UNAVAILABLE", 403);
+  if (!b || !opaqueInboundId(b.id) || !opaqueInboundId(b.companyId) || b.passiveInboundEnabled !== true || typeof b.webhookSecret !== "string" || !b.webhookSecret) throw new PassiveInboundError("UNAVAILABLE", 403);
   try { parseOpenCreditProviderScope(b.providerScope); } catch { throw new PassiveInboundError("UNAVAILABLE", 403); }
 }
 /** Issued only after authenticating original HTTP bytes; no PII/payload retained. */

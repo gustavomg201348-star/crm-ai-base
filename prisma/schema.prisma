@@ -520,6 +520,7 @@ model OpenCreditCommercialOperationEvent {
 }
 
 model OpenCreditIntegration {
+  passiveInboundEnabled Boolean @default(false)
   id              String @id @default(cuid())
   providerScope   String?
   companyId       String
