@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test, before, after } from "node:test";
 import { createHmac } from "node:crypto";
-import Module from "node:module";
+import Module, { createRequire } from "node:module";
 import { readFileSync, readdirSync } from "node:fs";
 let handler: typeof import("./opencredit-passive-inbound-handler");
 let contract: typeof import("./opencredit-passive-inbound-contract");
@@ -11,7 +11,10 @@ before(async () => {
   globalThis.fetch = async () => { throw Error("REAL_HTTP_FORBIDDEN"); };
   const loader = Module as typeof Module & { _load(s: string, ...a: unknown[]): unknown }, original = loader._load;
   loader._load = (s, ...a) => s === "server-only" ? {} : original.call(loader, s, ...a);
-  try { handler = await import("./opencredit-passive-inbound-handler"); contract = await import("./opencredit-passive-inbound-contract"); service = await import("./opencredit-passive-inbound.service"); } finally { loader._load = original; }
+  // Node 20/tsx can evaluate a direct dynamic import separately from a transitive
+  // CJS dependency. Keep this stateful receipt boundary in one loader/cache graph.
+  const require = createRequire(import.meta.url);
+  try { handler = require("./opencredit-passive-inbound-handler"); contract = require("./opencredit-passive-inbound-contract"); service = require("./opencredit-passive-inbound.service"); } finally { loader._load = original; }
 });
 after(() => { globalThis.fetch = originalFetch; });
 const secret = "synthetic-passive-inbound-secret";
@@ -73,6 +76,23 @@ test("receipt snapshot cannot be changed through input bytes, binding or a retur
   const unchanged = contract.readPassiveReceipt(receipt); assert.equal(unchanged.binding.companyId,binding.companyId); assert.equal(unchanged.metadata.eventId,payload().eventId);
 });
 test("caller cannot fabricate authenticated provenance", async () => { const db = { $transaction: async () => { throw Error("MUST_NOT_QUERY"); } }; await assert.rejects(() => service.persistPassiveInbound(db as never, {} as never, {} as never), /OPENCREDIT_INBOUND_INVALID_SIGNATURE/); });
+test("handler receipt is accepted by the real persistence boundary in the same module graph; 200 follows commit", async () => {
+  let entered!: () => void, release!: () => void;
+  const started = new Promise<void>(r => { entered = r; }), gate = new Promise<void>(r => { release = r; });
+  let committed = false, returned = false;
+  const rows: Record<string, unknown>[] = [];
+  const tx = { $queryRaw: async () => [{providerScope:binding.providerScope,webhookSecret:binding.webhookSecret,enabled:true}], openCreditInboundEvent: {
+    findUnique: async () => null,
+    create: async ({data}: {data: Record<string, unknown>}) => { rows.push(data); return data; },
+  } };
+  const db = { $transaction: async (run: (t: typeof tx) => Promise<unknown>) => { const result = await run(tx); entered(); await gate; committed = true; return result; } };
+  const h = handler.createPassiveInboundHandler({lookup:async () => binding,secret:() => secret,limit:async () => null,persist:(receipt,deadline) => service.persistPassiveInbound(db as never,receipt,deadline)});
+  const raw = Buffer.from(JSON.stringify(payload()));
+  const response = h(new Request("https://crm.example.invalid",{method:"POST",headers:{"content-type":"application/json","x-creditcore-sig":sign(raw)},body:raw}),{params:Promise.resolve({publicWebhookId:publicId})}).then(r => { returned = true; assert.equal(committed,true); return r; });
+  // Do not wait for started forever if an identity failure causes an early response.
+  await Promise.race([started,response]); assert.equal(rows.length,1); assert.equal(returned,false); assert.equal(committed,false);
+  assert.equal(rows[0].provenanceKind,"OPENCREDIT_HMAC_SHA256_VERIFIED"); release(); assert.equal((await response).status,200);
+});
 test("public boundary deadline is below provider 5s; pending body cancels and returns 503", async () => {
   const { OpenCreditDeadline } = await import("./opencredit-webhook-contract");
   const h = handler.createPassiveInboundHandler({ lookup: async () => binding, secret: () => secret, limit: async () => null, persist: async () => { throw Error(); }, deadline: () => new OpenCreditDeadline(25) });
