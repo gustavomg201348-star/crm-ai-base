@@ -96,6 +96,24 @@ test("generic primitive rejects nested provenance before any database call", asy
     } as never));
   }
 });
+function assertNoSecondMetaIssuer(text: string) {
+  // A private registry for an unrelated capability is not a Meta issuer.
+  // Check Meta's branded type, including a copied issuer with a renamed registry.
+  if (/\bMetaInboundCapability\b/.test(text)) {
+    assert.doesNotMatch(text, /\btype\s+MetaInboundCapability\b/);
+    assert.doesNotMatch(text, /\.set\s*\(/);
+    assert.doesNotMatch(text, /\bas\s+MetaInboundCapability\b/);
+  }
+}
+test("issuer guard accepts unrelated registries but rejects second Meta issuers", () => {
+  assert.doesNotThrow(() => assertNoSecondMetaIssuer("const issued = new WeakMap<object, PassiveReceipt>(); issued.set(receipt, metadata);"));
+  for (const source of [
+    "type MetaInboundCapability = { readonly [capabilityBrand]: never };",
+    "import type { MetaInboundCapability } from './meta-inbound-provenance'; issued.set(capability, input);",
+    "import type { MetaInboundCapability } from './meta-inbound-provenance'; anotherRegistry.set(capability, input);",
+    "const forged = {} as MetaInboundCapability;",
+  ]) assert.throws(() => assertNoSecondMetaIssuer(source));
+});
 test("static guard: sole issuer, sole Event writer, no consumer/transport or extra persistent fields", () => {
   const source = readFileSync("src/lib/meta-inbound-provenance.ts", "utf8");
   assert.match(source, /^import "server-only";/); assert.equal((source.match(/issued\.set\(/g) ?? []).length, 1);
@@ -106,7 +124,7 @@ test("static guard: sole issuer, sole Event writer, no consumer/transport or ext
     assert.doesNotMatch(text, /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+["`]?ConversationInboundEvent\b/i);
     assert.doesNotMatch(text, /messages\s*:\s*\{\s*(?:create|createMany|connectOrCreate|upsert)\s*:/);
     if (name !== "lib/conversation-inbound-event.ts") assert.doesNotMatch(text, /\.conversationInboundEvent\.(create|update|updateMany|upsert|delete|deleteMany|createMany)\(/);
-    if (name !== "lib/meta-inbound-provenance.ts") assert.doesNotMatch(text, /issued\.set\(/);
+    if (name !== "lib/meta-inbound-provenance.ts") assertNoSecondMetaIssuer(text);
     if (!["lib/meta-inbound-provenance.ts", "app/api/webhooks/whatsapp/route.ts"].includes(name))
       assert.doesNotMatch(text, /\bauthenticateMetaInboundBatch\b/);
   }
