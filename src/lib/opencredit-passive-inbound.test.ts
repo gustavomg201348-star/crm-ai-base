@@ -19,7 +19,7 @@ before(async () => {
 after(() => { globalThis.fetch = originalFetch; });
 const secret = "synthetic-passive-inbound-secret";
 const publicId = "a".repeat(48);
-const binding = { id: "synthetic-integration", companyId: "synthetic-company", providerScope: "synthetic-scope", webhookSecret: "synthetic-ciphertext", enabled: true };
+const binding = { id: "synthetic-integration", companyId: "synthetic-company", providerScope: "synthetic-scope", webhookSecret: "synthetic-ciphertext", passiveInboundEnabled: true };
 const payload = () => ({ event: "lead.assigned", eventId: "synthetic-lead:synthetic-partner", lead: { id: "synthetic-lead" }, contractVersion: 2, client: { cpf: "00000000000", phone: "5511999999999", name: "PRIVATE_SENTINEL", email: "private@example.invalid" }, companyId: "attacker", providerScope: "attacker" });
 const sign = (raw: Uint8Array) => "sha256=" + createHmac("sha256", secret).update(raw).digest("hex");
 function setup(options: { binding?: unknown; secret?: string; fail?: boolean; limited?: boolean; unavailable?: boolean; hold?: () => Promise<void> } = {}) {
@@ -46,7 +46,12 @@ test("one changed byte and reserialized JSON reject original signature", async (
   for (const body of [changed, Buffer.from(JSON.stringify(JSON.parse(raw.toString())))]) { const f = setup(); assert.equal((await f.send(body, signature)).status, 403); assert.equal(f.writes(), 0); }
 });
 for (const header of [null, "", "sha256=x", "sha1=" + "a".repeat(64), "SHA256=" + "a".repeat(64), "sha256=" + "0".repeat(64), "sha256=" + "a".repeat(65)]) test("malformed/missing/wrong signature rejects: " + header, async () => { const f = setup(); assert.equal((await f.send(undefined, header)).status, 403); assert.equal(f.writes(), 0); });
-for (const b of [null, { ...binding, providerScope: null }, { ...binding, providerScope: "" }, { ...binding, providerScope: "bad scope" }, { ...binding, webhookSecret: "" }, { ...binding, enabled: false }]) test("unbound/disabled/secretless integration fails closed: " + JSON.stringify(b), async () => { const f = setup({ binding: b }); assert.equal((await f.send()).status, 403); assert.equal(f.writes(), 0); });
+for (const b of [null, { ...binding, providerScope: null }, { ...binding, providerScope: "" }, { ...binding, providerScope: "bad scope" }, { ...binding, webhookSecret: "" }, { ...binding, passiveInboundEnabled: false }, { ...binding, passiveInboundEnabled: undefined, enabled: true }, { ...binding, passiveInboundEnabled: "true" }]) test("unbound/disabled/secretless integration fails closed: " + JSON.stringify(b), async () => { const f = setup({ binding: b }); assert.equal((await f.send()).status, 403); assert.equal(f.writes(), 0); });
+
+for (const enabled of [false, true]) test("legacy enabled=" + enabled + " does not gate explicitly enabled passive inbound", async () => {
+  const f = setup({ binding: { ...binding, enabled } });
+  assert.equal((await f.send()).status, 200); assert.equal(f.writes(), 1);
+});
 test("empty resolved secret and decryption errors fail closed", async () => { const f = setup({ secret: "" }); assert.equal((await f.send()).status, 403); assert.equal(f.writes(), 0); const h = handler.createPassiveInboundHandler({ lookup: async () => binding, secret: () => { throw Error(secret); }, limit: async () => null, persist: async () => { throw Error(); } }); const r = await h(new Request("https://crm.example.invalid", { method: "POST" }), { params: Promise.resolve({ publicWebhookId: publicId }) }); assert.equal(r.status, 403); assert(!(await r.text()).includes(secret)); });
 for (const raw of ["{", '{"event":"lead.assigned","event":"other"}', '{"x":"\\ud800"}']) test("strict JSON rejects signed malformed/duplicate/unicode: " + raw, async () => { const f = setup(); assert.equal((await f.send(Buffer.from(raw))).status, 400); assert.equal(f.writes(), 0); });
 test("signature is checked before parsing invalid JSON", async () => { const f = setup(); assert.equal((await f.send(Buffer.from("{"), "sha256=" + "0".repeat(64))).status, 403); });
@@ -81,7 +86,7 @@ test("handler receipt is accepted by the real persistence boundary in the same m
   const started = new Promise<void>(r => { entered = r; }), gate = new Promise<void>(r => { release = r; });
   let committed = false, returned = false;
   const rows: Record<string, unknown>[] = [];
-  const tx = { $queryRaw: async () => [{providerScope:binding.providerScope,webhookSecret:binding.webhookSecret,enabled:true}], openCreditInboundEvent: {
+  const tx = { $queryRaw: async () => [{providerScope:binding.providerScope,webhookSecret:binding.webhookSecret,passiveInboundEnabled:true}], openCreditInboundEvent: {
     findUnique: async () => null,
     create: async ({data}: {data: Record<string, unknown>}) => { rows.push(data); return data; },
   } };
@@ -104,7 +109,22 @@ test("source boundaries have no commercial/domain consumers; legacy handler/rout
   const files = ["contract", "handler", "service"].map(s => "src/lib/opencredit-passive-inbound" + (s === "service" ? ".service" : "-" + s) + ".ts");
   for (const file of files) { const source = readFileSync(file, "utf8"); assert.match(source, /^import "server-only";/); assert.doesNotMatch(source, /console\.|\bfetch\(|opencredit-api-client|opencredit-lead.service|inbound-message|openai|\.contact\.|\.conversation\.|\.opportunity\.|\.openCreditLead\./); }
   const route = readFileSync("src/app/api/integrations/opencredit/inbound/[publicWebhookId]/route.ts", "utf8"); assert.match(route, /enforceRateLimits/); assert.match(route, /getRequestIpKey/); assert.doesNotMatch(route, /resolveConfiguredOpenCreditProviderScope|payload|ingestOpenCreditLead/);
+  assert.match(route, /passiveInboundEnabled: true/); assert.doesNotMatch(route, /\benabled\s*:|\bpaused\b/);
+  const storage = readFileSync("src/lib/opencredit-passive-inbound.service.ts", "utf8"); assert.match(storage, /row\.passiveInboundEnabled !== true/); assert.doesNotMatch(storage, /\brow\.enabled\b|"enabled"|\bpaused\b/);
+  for (const file of ["src/app/api/integrations/opencredit/webhooks/[publicWebhookId]/route.ts", "src/lib/opencredit-webhook-handler.ts", "src/lib/opencredit-lead.service.ts"])
+    assert.doesNotMatch(readFileSync(file, "utf8"), /passiveInboundEnabled/);
   const consumers: string[] = [];
   for (const path of readdirSync("src", { recursive: true, encoding: "utf8" })) { if (!/\.[cm]?[jt]sx?$/.test(path) || /\.(test|integration)\./.test(path)) continue; const source = readFileSync("src/" + path, "utf8"); if (/import.*persistPassiveInbound.*from/.test(source)) consumers.push(path.replace(/\\/g, "/")); }
   assert.deepEqual(consumers, ["app/api/integrations/opencredit/inbound/[publicWebhookId]/route.ts"]);
+});
+
+test("passive opt-in migration is additive/default false in both schemas, never an activation backfill", () => {
+  for (const path of ["prisma/schema.prisma", "prisma/schema.postgres.prisma"]) {
+    const model = readFileSync(path, "utf8").match(/model OpenCreditIntegration \{[\s\S]*?\n\}/)![0];
+    assert.match(model, /passiveInboundEnabled\s+Boolean\s+@default\(false\)/);
+    assert.match(model, /\benabled\s+Boolean\s+@default\(false\)/);
+  }
+  const migration = readFileSync("prisma/migrations/20261030150000_separate_opencredit_passive_inbound_enable/migration.sql", "utf8");
+  assert.match(migration, /ADD COLUMN "passiveInboundEnabled" BOOLEAN NOT NULL DEFAULT false/);
+  assert.doesNotMatch(migration.replace(/--[^\n]*/g, ""), /\b(?:UPDATE|INSERT|DELETE|DROP)\b/i);
 });

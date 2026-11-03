@@ -107,6 +107,11 @@ There is no conversational bridge, controller change or modification of aiProfil
 
 A integração local possui três estados:
 
+Estes estados controlam exclusivamente o webhook legado `/webhooks/`. A inbox
+passiva `/inbound/` usa `passiveInboundEnabled`, independente e false por padrão;
+nenhum desses estados a habilita ou desabilita. A interface mostra estados e URLs
+separados. A rotação do segredo compartilhado desabilita ambas as rotas.
+
 - `ACTIVE`: o webhook aceita os eventos e os novos leads são gravados sem retenção.
 - `PAUSED`: o webhook continua autenticando, persistindo e respondendo sucesso para a Prospecta; os novos leads são marcados com `held=true`.
 - `DISABLED`: bloqueio total; o webhook é recusado e nenhum evento é ingerido.

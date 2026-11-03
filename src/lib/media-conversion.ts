@@ -113,7 +113,7 @@ export async function prepareRecordedAudioForWhatsApp({
     const input = await probeAudio(inputPath, deadline, expected.format);
     const formats = input.format.format_name!.split(",");
     const inputDuration = Number(input.format.duration);
-    if (expected.format === "ogg" && input.streams[0].codec_name === "opus") inspectOggOpus(bytes);
+    const ogg = expected.format === "ogg" && input.streams[0].codec_name === "opus" ? inspectOggOpus(bytes) : undefined;
     if (!formats.includes(expected.format) || !(expected.codecs as readonly string[]).includes(input.streams[0].codec_name!) ||
         (recordedAudio && Number.isFinite(inputDuration) && inputDuration > maxRecordedAudioSeconds)) {
       throw new AudioPreparationError();
@@ -126,7 +126,22 @@ export async function prepareRecordedAudioForWhatsApp({
       "-progress", "pipe:1", "-f", "null", "-"
     ], deadline);
     const decodedTimes = Array.from(validatedInput.stdout.matchAll(/^out_time_us=(\d+)$/gm), match => Number(match[1]));
-    const decodedSeconds = Math.max(0, ...decodedTimes) / 1000000;
+    let decodedSeconds = Math.max(0, ...decodedTimes) / 1000000;
+    // FFmpeg 6.1 can report time zero for a decoded single-frame Ogg stream.
+    // Require actual decoded samples, not just a successful exit or container metadata.
+    if (decodedSeconds === 0 && ogg) {
+      const decodedFrame = await runAudioTool(process.env.FFPROBE_PATH || "ffprobe", [
+        "-v", "error", "-max_alloc", "67108864", "-err_detect", "explode",
+        "-protocol_whitelist", "file,pipe", "-f", "ogg", "-read_intervals", "%+#1",
+        "-show_frames", "-show_entries", "frame=nb_samples", "-of", "json", inputPath
+      ], deadline, 15000);
+      const frames = (JSON.parse(decodedFrame.stdout) as { frames?: Array<{ nb_samples?: number }> }).frames;
+      if (decodedFrame.stderr.trim() || !Array.isArray(frames) || frames.length === 0 ||
+          frames.some(frame => !Number.isSafeInteger(frame.nb_samples) || frame.nb_samples! <= 0)) {
+        throw new AudioPreparationError();
+      }
+      decodedSeconds = ogg.duration;
+    }
     if (validatedInput.stderr.trim() || !Number.isFinite(decodedSeconds) || decodedSeconds <= 0 ||
         (recordedAudio && decodedSeconds > maxRecordedAudioSeconds)) throw new AudioPreparationError();
     if (!normalize) return { bytes, fileName, mimeType };

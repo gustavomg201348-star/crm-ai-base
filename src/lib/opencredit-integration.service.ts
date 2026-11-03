@@ -6,6 +6,7 @@ export type OpenCreditStatus = "ACTIVE" | "PAUSED" | "DISABLED";
 export type SafeOpenCreditIntegration = {
   id: string; publicWebhookId: string; enabled: boolean; status: OpenCreditStatus;
   createdAt: string; updatedAt: string; hasWebhookSecret: boolean; webhookPath: string;
+  passiveInboundEnabled: boolean; passiveInboundPath: string;
 };
 
 function statusOf(row: Pick<OpenCreditIntegration, "enabled" | "paused">): OpenCreditStatus {
@@ -18,7 +19,9 @@ export function mapOpenCreditIntegration(row: OpenCreditIntegration): SafeOpenCr
     id: row.id, publicWebhookId: row.publicWebhookId, enabled: row.enabled, status: statusOf(row),
     createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString(),
     hasWebhookSecret: Boolean(row.webhookSecret),
-    webhookPath: `/api/integrations/opencredit/webhooks/${row.publicWebhookId}`
+    webhookPath: `/api/integrations/opencredit/webhooks/${row.publicWebhookId}`,
+    passiveInboundEnabled: row.passiveInboundEnabled,
+    passiveInboundPath: `/api/integrations/opencredit/inbound/${row.publicWebhookId}`
   };
 }
 
@@ -39,11 +42,12 @@ export function createOpenCreditIntegrationService(db: Db, encryption?: SecretEn
     return row;
   };
   const change = async (delegate: IntegrationDelegate, row: OpenCreditIntegration,
-    data: { enabled?: boolean; paused?: boolean; webhookSecret?: string }) => {
+    data: { enabled?: boolean; paused?: boolean; webhookSecret?: string; passiveInboundEnabled?: boolean }) => {
     try {
       return await delegate.update({
         where: { id: row.id, companyId: row.companyId, updatedAt: row.updatedAt,
-          enabled: row.enabled, paused: row.paused, webhookSecret: row.webhookSecret }, data
+          enabled: row.enabled, paused: row.paused, webhookSecret: row.webhookSecret,
+          passiveInboundEnabled: row.passiveInboundEnabled }, data
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
@@ -81,7 +85,7 @@ export function createOpenCreditIntegrationService(db: Db, encryption?: SecretEn
       const webhookSecret = encrypt(setupSecret);
       const row = await db.openCreditIntegration.create({ data: {
         companyId, publicWebhookId: createOpenCreditPublicWebhookId(), webhookSecret,
-        enabled: false, paused: false
+        enabled: false, paused: false, passiveInboundEnabled: false
       } });
       return { integration: mapOpenCreditIntegration(row), setupSecret };
     },
@@ -94,7 +98,7 @@ export function createOpenCreditIntegrationService(db: Db, encryption?: SecretEn
       const setupSecret = createOpenCreditWebhookSecret();
       const webhookSecret = encrypt(setupSecret);
       const integration = await change(db.openCreditIntegration, row, {
-        webhookSecret, enabled: false, paused: false
+        webhookSecret, enabled: false, paused: false, passiveInboundEnabled: false
       });
       return { integration: mapOpenCreditIntegration(integration), setupSecret };
     }

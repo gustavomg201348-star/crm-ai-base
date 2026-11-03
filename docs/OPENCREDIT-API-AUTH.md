@@ -3144,6 +3144,40 @@ business mutation or Railway change is performed in production by implementation
 
 ## Passive lead.assigned inbox — local foundation, 2026-10-29
 
+### Independent receive flags — 2026-10-30
+
+`OpenCreditIntegration.enabled` and `paused` retain their legacy lead-ingestion
+semantics. Only `passiveInboundEnabled` opts into the passive `/inbound/` route;
+neither legacy flag, providerScope, secret presence nor commercial records imply
+passive activation. The passive flag is rechecked inside the locked persistence
+transaction, including duplicate reconciliation. Legacy code never reads it.
+
+| enabled (legacy) | passiveInboundEnabled | /webhooks/ | /inbound/ |
+| --- | --- | --- | --- |
+| false | false | blocked | blocked |
+| false | true | blocked | metadata-only inbox |
+| true | false | legacy ingestion | blocked |
+| true | true | legacy ingestion | metadata-only inbox |
+
+These are enablement gates, not authentication bypasses: scope/secret/HMAC and
+all existing contracts remain mandatory. Migration
+`20261030150000_separate_opencredit_passive_inbound_enable` only adds a NOT NULL
+boolean DEFAULT false. Existing legacy flags, scope, public ID, ciphertext and
+timestamps are preserved; there is no DML or activation backfill.
+
+The admin read DTO/UI displays both states and distinct URLs. Existing status
+controls still change only the legacy state; no passive activation API/button is
+introduced here. Creation starts both disabled. Because both routes share a
+secret, explicit secret rotation disables both atomically; legacy status changes
+do not change the passive flag. Rotating never enables either path.
+
+Rollout requires a separately authorized, explicit passive flag change, retaining
+legacy enabled=false for passive-only operation. No integration, environment,
+secret or provider URL is changed by this implementation. Rollback disables the
+passive flag and retains the additive column/inbox audit rows. When reverting to
+older application code, first disable both gates: older versions used the legacy
+flag for the inbox as well. Do not drop persisted events or columns automatically.
+
 The official partner OpenAPI 2.10.0 publishes only the webhook `lead.assigned`.
 It does NOT publish simulation-completed or proposal/status callbacks, nor a
 public webhook URL registration endpoint. This inbox never substitutes simulation/
@@ -3151,8 +3185,8 @@ proposal GET polling. No provider URL, secret or production integration is
 configured by this implementation.
 
 The EXISTING `POST /api/integrations/opencredit/webhooks/[publicWebhookId]`,
-its parser, 8-second budget, integration management and lead ingestion remain
-unchanged. That older path can create Contact/OpenCreditLead; the NEW
+its parser, 8-second budget and lead ingestion remain unchanged. The legacy
+`enabled` flag still controls only that older path. It can create Contact/OpenCreditLead; the NEW
 `POST /api/integrations/opencredit/inbound/[publicWebhookId]` never calls it.
 ConversationInboundEvent/Meta models are not reused for a different domain fact.
 
@@ -3160,8 +3194,8 @@ Migration `20261029190000_add_opencredit_passive_inbound` adds nullable
 OpenCreditIntegration.providerScope and a metadata-only OpenCreditInboundEvent.
 There is NO backfill or inferred binding, DML, automatic integration creation,
 activation, UI, provisioning endpoint or processor. Historical rows remain NULL.
-The new route requires an explicitly persisted valid local scope, an enabled
-integration and a decryptable nonempty secret. Existing AES-256-GCM secret
+The new route requires an explicitly persisted valid local scope,
+`passiveInboundEnabled=true` and a decryptable nonempty secret. Existing AES-256-GCM secret
 storage/key infrastructure is reused; there is no plaintext/unsigned fallback.
 Local provisioning/rotation must be separately reviewed before any production
 setup; changing env alone does not bind an integration.
@@ -3193,7 +3227,7 @@ provenanceVersion=1, receivedAt and processingState=RECEIVED are persisted.
 No raw body, signature/header, ciphertext, secret, CPF, phone, email, name or
 financial data is placed in the inbox. A request-local unforgeable receipt binds
 authenticated metadata to the exact integration snapshot; the transaction locks
-and rechecks the binding, enabled state and ciphertext before inserting.
+and rechecks the binding, passiveInboundEnabled state and ciphertext before inserting.
 
 The PostgreSQL unique (companyId,providerScope,eventId) is the deduplication
 authority, including concurrent INSERT races. Transactions use Serializable;

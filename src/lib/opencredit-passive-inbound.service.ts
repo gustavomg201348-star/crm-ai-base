@@ -9,9 +9,9 @@ function duplicate(row: { externalLeadId: string; eventType: string; contractVer
 }
 async function current(tx: Prisma.TransactionClient, b: PassiveBinding) {
   // Compare ciphertext in memory, never in query arguments that Prisma error logging could render.
-  const rows = await tx.$queryRaw<Array<{ providerScope: string | null; webhookSecret: string; enabled: boolean }>>`SELECT "providerScope", "webhookSecret", "enabled" FROM "OpenCreditIntegration" WHERE "id" = ${b.id} AND "companyId" = ${b.companyId} FOR SHARE`;
+  const rows = await tx.$queryRaw<Array<{ providerScope: string | null; webhookSecret: string; passiveInboundEnabled: boolean }>>`SELECT "providerScope", "webhookSecret", "passiveInboundEnabled" FROM "OpenCreditIntegration" WHERE "id" = ${b.id} AND "companyId" = ${b.companyId} FOR SHARE`;
   const row = rows[0];
-  if (rows.length !== 1 || !row.enabled || row.providerScope !== b.providerScope || row.webhookSecret !== b.webhookSecret) throw new PassiveInboundError("UNAVAILABLE", 403);
+  if (rows.length !== 1 || row.passiveInboundEnabled !== true || row.providerScope !== b.providerScope || row.webhookSecret !== b.webhookSecret) throw new PassiveInboundError("UNAVAILABLE", 403);
 }
 /** Only inbox metadata is written. A successful return always follows a committed transaction. */
 export async function persistPassiveInbound(db: Db, receipt: PassiveReceipt, deadline: OpenCreditDeadline) {

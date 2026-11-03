@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { AudioPreparationError, prepareRecordedAudioForWhatsApp } from "./media-conversion";
 import { supportedAudioMime } from "./recorded-audio";
-import { inspectOggOpus } from "./ogg-opus-integrity";
+import { inspectOggOpus, OggOpusIntegrityError } from "./ogg-opus-integrity";
 import { fixtureChecksum, oggPage, opusHeaders, opusSilence, rawOggPage, syntheticOgg, versionedOpusHeaders } from "./ogg-opus-test-fixtures";
 
 let directory: string;
@@ -158,14 +158,25 @@ test("accepts the existing recorder's last interval plus AAC/Opus padding", asyn
   assert.ok(Number(info.format.duration) >= 181 && Number(info.format.duration) <= 182);
 });
 
-test("browser-style millisecond timestamps reproduce the pre-upload granule defect and are regenerated from samples", async () => {
+test("browser-style millisecond timestamps normalize from samples independently of historical encoder behavior", async (t) => {
+  assert.throws(() => inspectOggOpus(syntheticOgg(312, 47976)),
+    (error: unknown) => error instanceof OggOpusIntegrityError && error.code === "INITIAL_GRANULE");
   for (const expression of ["PTS-8*gt(N,0)", "PTS+mod(N,3)"]) {
     const source = join(directory, "timestamp-input.webm");
     execFileSync(ffmpeg, ["-v", "error", "-y", "-f", "lavfi", "-i", "sine=duration=6", "-ac", "2", "-c:a", "libopus", "-bsf:a", `setts=pts='${expression}':dts='${expression}'`, source], { timeout: 15000 });
     const before = join(directory, "timestamp-before.ogg");
     execFileSync(ffmpeg, ["-v", "error", "-y", "-f", "webm", "-i", source, "-map", "0:a:0", "-vn", "-map_metadata", "-1", "-acodec", "libopus", "-ac", "1", "-ar", "48000", "-b:a", "32k", "-threads", "1", before], { timeout: 15000 });
     const beforeBytes = await readFile(before);
-    assert.throws(() => inspectOggOpus(beforeBytes));
+    // Fixture generation itself differs between FFmpeg versions; only the fixed
+    // output and the deterministic 47976/48000 counterexample are release gates.
+    try {
+      inspectOggOpus(beforeBytes);
+      t.diagnostic(`Historical arguments produced valid granules for ${expression}`);
+    } catch (error) {
+      assert.ok(error instanceof OggOpusIntegrityError);
+      assert.ok(["INITIAL_GRANULE", "PAGE_GRANULE"].includes(error.code));
+      t.diagnostic(`Historical arguments reproduced ${error.code} for ${expression}`);
+    }
     const result = await prepareRecordedAudioForWhatsApp({ bytes: await readFile(source), fileName: "recording.webm", mimeType: "audio/webm", recordedAudio: true });
     assertNormalizedTimeline(result.bytes);
     const info = inspectOggOpus(result.bytes, { normalized: true });
