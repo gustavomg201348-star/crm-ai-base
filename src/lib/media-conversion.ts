@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { audioFormats, supportedAudioMime, type SupportedAudioMime } from "./recorded-audio";
+import { inspectOggOpus } from "./ogg-opus-integrity";
 
 const execFileAsync = promisify(execFile);
 export const maxAudioBytes = 16 * 1024 * 1024;
@@ -112,6 +113,7 @@ export async function prepareRecordedAudioForWhatsApp({
     const input = await probeAudio(inputPath, deadline, expected.format);
     const formats = input.format.format_name!.split(",");
     const inputDuration = Number(input.format.duration);
+    const ogg = expected.format === "ogg" && input.streams[0].codec_name === "opus" ? inspectOggOpus(bytes) : undefined;
     if (!formats.includes(expected.format) || !(expected.codecs as readonly string[]).includes(input.streams[0].codec_name!) ||
         (recordedAudio && Number.isFinite(inputDuration) && inputDuration > maxRecordedAudioSeconds)) {
       throw new AudioPreparationError();
@@ -124,7 +126,22 @@ export async function prepareRecordedAudioForWhatsApp({
       "-progress", "pipe:1", "-f", "null", "-"
     ], deadline);
     const decodedTimes = Array.from(validatedInput.stdout.matchAll(/^out_time_us=(\d+)$/gm), match => Number(match[1]));
-    const decodedSeconds = Math.max(0, ...decodedTimes) / 1000000;
+    let decodedSeconds = Math.max(0, ...decodedTimes) / 1000000;
+    // FFmpeg 6.1 can report time zero for a decoded single-frame Ogg stream.
+    // Require actual decoded samples, not just a successful exit or container metadata.
+    if (decodedSeconds === 0 && ogg) {
+      const decodedFrame = await runAudioTool(process.env.FFPROBE_PATH || "ffprobe", [
+        "-v", "error", "-max_alloc", "67108864", "-err_detect", "explode",
+        "-protocol_whitelist", "file,pipe", "-f", "ogg", "-read_intervals", "%+#1",
+        "-show_frames", "-show_entries", "frame=nb_samples", "-of", "json", inputPath
+      ], deadline, 15000);
+      const frames = (JSON.parse(decodedFrame.stdout) as { frames?: Array<{ nb_samples?: number }> }).frames;
+      if (decodedFrame.stderr.trim() || !Array.isArray(frames) || frames.length === 0 ||
+          frames.some(frame => !Number.isSafeInteger(frame.nb_samples) || frame.nb_samples! <= 0)) {
+        throw new AudioPreparationError();
+      }
+      decodedSeconds = ogg.duration;
+    }
     if (validatedInput.stderr.trim() || !Number.isFinite(decodedSeconds) || decodedSeconds <= 0 ||
         (recordedAudio && decodedSeconds > maxRecordedAudioSeconds)) throw new AudioPreparationError();
     if (!normalize) return { bytes, fileName, mimeType };
@@ -134,6 +151,7 @@ export async function prepareRecordedAudioForWhatsApp({
         "-v", "error", "-nostdin", "-y", "-max_alloc", "67108864", "-threads", "1", "-filter_threads", "1",
         "-xerror", "-err_detect", "explode", "-protocol_whitelist", "file,pipe", "-f", expected.format, "-i", inputPath,
         "-map", "0:a:0", "-vn", "-map_metadata", "-1",
+        "-af", "aresample=48000,asettb=1/48000,asetpts=N/SR/TB",
         "-acodec", "libopus", "-ac", "1", "-ar", "48000", "-b:a", "32k", "-threads", "1",
         // Stop disk growth above the accepted ceiling; never accept this truncated output.
         "-fs", String(maxAudioBytes + 1024 * 1024),
@@ -160,6 +178,7 @@ export async function prepareRecordedAudioForWhatsApp({
     ], deadline);
     if (decoded.stderr.trim()) throw new AudioPreparationError();
     const converted = await readBoundedAudio(outputPath);
+    inspectOggOpus(converted, { normalized: true });
     if (performance.now() > deadline) throw new AudioPreparationError();
     return {
       bytes: converted,

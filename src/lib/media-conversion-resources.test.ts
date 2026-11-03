@@ -8,6 +8,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 import ts from "typescript";
+import { syntheticOgg } from "./ogg-opus-test-fixtures";
 
 const nativeExec = promisify(execFile);
 type ToolResult = { stdout: string; stderr: string };
@@ -35,6 +36,48 @@ function load(root: string, tool: Tool, now = () => performance.now(), filesyste
 }
 
 const input = { bytes: Buffer.from("controlled fixture"), mimeType: "audio/webm" as const, fileName: "input.webm", recordedAudio: true };
+
+test("zero-time Ogg progress requires real decoded samples and preserves native failure checks", async () => {
+  const cases = [
+    { frames: [{ nb_samples: 648 }], accepted: true },
+    { frames: [], accepted: false },
+    { frames: [{ nb_samples: 0 }], accepted: false },
+    { frames: [{ nb_samples: "648" }], accepted: false },
+    { frames: [{}], accepted: false },
+    { frames: [{ nb_samples: 648 }], stderr: "synthetic decode failure", accepted: false },
+    { frames: [{ nb_samples: 648 }], inputError: true, accepted: false },
+    { frames: [{ nb_samples: 648 }], nativeError: true, accepted: false }
+  ];
+  for (const scenario of cases) {
+    const root = await fs.mkdtemp(path.join(tmpdir(), "qevora-zero-time-"));
+    let encoded = 0;
+    let confirmations = 0;
+    try {
+      const converter = load(root, async (_command, args) => {
+        if (args.includes("-show_frames")) {
+          confirmations++;
+          assert.equal(args[args.indexOf("-read_intervals") + 1], "%+#1");
+          if (scenario.nativeError) throw new Error("synthetic native failure");
+          return { stdout: JSON.stringify({ frames: scenario.frames }), stderr: scenario.stderr || "" };
+        }
+        if (args.includes("-show_streams")) return probe("ogg");
+        if (args.includes("-progress")) return {
+          stdout: "out_time_us=0\nprogress=end\n", stderr: scenario.inputError ? "synthetic decode failure" : ""
+        };
+        if (args.includes("libopus")) { encoded++; await fs.writeFile(args[args.length - 1], syntheticOgg()); }
+        return { stdout: "", stderr: "" };
+      });
+      const operation = converter.prepareRecordedAudioForWhatsApp({
+        bytes: syntheticOgg(), mimeType: "audio/ogg", fileName: "input.ogg", recordedAudio: true
+      });
+      if (scenario.accepted) assert.ok((await operation).bytes.length > 0);
+      else await assert.rejects(operation, converter.AudioPreparationError);
+      assert.equal(confirmations, 1);
+      assert.equal(encoded, scenario.accepted ? 1 : 0);
+      assert.deepEqual(await fs.readdir(root), []);
+    } finally { await fs.rm(root, { recursive: true, force: true }); }
+  }
+});
 
 test("oversized native output is rejected before output probe, decode or Buffer read", async () => {
   const root = await fs.mkdtemp(path.join(tmpdir(), "qevora-resource-"));
@@ -76,7 +119,7 @@ test("remaining 60-second budget kills an actually pending child and cleans/reli
         try { await nativeExec(process.execPath, ["-e", "setInterval(() => {}, 1000)"], options); }
         catch (error) { timedOut = Boolean((error as { killed?: boolean }).killed); throw error; }
       }
-      if (args.includes("libopus")) await fs.writeFile(args[args.length - 1], "controlled output");
+      if (args.includes("libopus")) await fs.writeFile(args[args.length - 1], syntheticOgg());
       return progress;
     }, () => clock);
     await assert.rejects(converter.prepareRecordedAudioForWhatsApp(input), converter.AudioPreparationError);
@@ -105,7 +148,7 @@ test("at most two preparations run per runtime, without queue, with recovery aft
         });
         return result;
       }
-      if (args.includes("libopus")) await fs.writeFile(args[args.length - 1], "controlled output");
+      if (args.includes("libopus")) await fs.writeFile(args[args.length - 1], syntheticOgg());
       return progress;
     });
     const first = converter.prepareRecordedAudioForWhatsApp(input);
