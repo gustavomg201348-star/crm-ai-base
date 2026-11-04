@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { safeLogError } from "@/lib/safe-logger";
 import { mapTask, taskInclude } from "@/lib/tasks";
+import { parseTaskPage, taskPage, TaskPaginationError } from "@/lib/tasks-pagination";
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,24 +15,22 @@ export async function GET(request: NextRequest) {
       return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
 
-    const contactId = request.nextUrl.searchParams.get("contactId") ?? "";
-    const assigneeId = request.nextUrl.searchParams.get("assigneeId") ?? "";
-    const status = request.nextUrl.searchParams.get("status") ?? "PENDING";
-
+    const query = parseTaskPage(request.nextUrl.searchParams, session);
     const tasks = await prisma.task.findMany({
-      where: {
-        companyId: session.companyId,
-        ...(contactId ? { contactId } : {}),
-        ...(assigneeId ? { assigneeId } : {}),
-        ...(status === "ALL" ? {} : { status })
-      },
+      where: query.where,
       include: taskInclude,
-      orderBy: [{ status: "asc" }, { dueAt: "asc" }],
-      take: 100
+      orderBy: [{ status: "asc" }, { dueAt: "asc" }, { id: "asc" }],
+      take: query.limit + 1
     });
 
-    return NextResponse.json({ tasks: tasks.map(mapTask) });
+    const page = taskPage(tasks, query);
+    return NextResponse.json({ ...page, tasks: page.tasks.map(mapTask) }, {
+      headers: { "Cache-Control": "private, no-store" }
+    });
   } catch (error) {
+    if (error instanceof TaskPaginationError) {
+      return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
+    }
     safeLogError("http-api", error, {
       route: "/api/tasks",
       method: "GET",
