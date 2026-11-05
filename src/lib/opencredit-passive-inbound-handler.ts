@@ -1,15 +1,56 @@
 import "server-only";
 import { authenticatePassiveInbound, validatePassiveBinding, PassiveInboundError, type PassiveBinding, type PassiveReceipt } from "./opencredit-passive-inbound-contract";
 import { OpenCreditDeadline, OpenCreditInputError, OPENCREDIT_MAX_BODY_BYTES } from "./opencredit-webhook-contract";
+import type { RateLimitDecision } from "./rate-limit";
+
+type LimitedDecision = Extract<RateLimitDecision, { status: "limited" }>;
+type RateLimitEvent = Omit<LimitedDecision, "status" | "windowStart" | "expiresAt"> & {
+  event: "opencredit_passive_rate_limited";
+  stage: "public/global-ip" | "authenticated";
+  windowStart: string;
+  expiresAt: string;
+};
+
 type Dependencies = {
   lookup(publicId: string): Promise<PassiveBinding | null>;
   secret(encrypted: string): string;
-  limit(binding?: PassiveBinding): Promise<Response | null>;
+  limit(binding?: PassiveBinding): Promise<RateLimitDecision>;
+  logRateLimit?(event: RateLimitEvent): void;
   persist(receipt: PassiveReceipt, deadline: OpenCreditDeadline): Promise<{ duplicate: boolean }>;
   deadline?(): OpenCreditDeadline;
 };
-const reply = (status: number, code: string) => Response.json(status === 200 ? { ok: true } : { code }, { status, headers: { "Cache-Control": "no-store" } });
+const reply = (status: number, code: string, retryAfterSeconds?: number) => {
+  const headers = new Headers({ "Cache-Control": "no-store" });
+  if (retryAfterSeconds !== undefined) headers.set("Retry-After", String(retryAfterSeconds));
+  return Response.json(status === 200 ? { ok: true } : { code }, { status, headers });
+};
+
 export function createPassiveInboundHandler(deps: Dependencies) {
+  function rateLimitReply(decision: Exclude<RateLimitDecision, { status: "allowed" }>, stage: RateLimitEvent["stage"]) {
+    if (decision.status === "unavailable") return reply(503, "INGESTION_UNAVAILABLE");
+    const log = deps.logRateLimit;
+    if (log) {
+      setImmediate(() => {
+        try {
+          log({
+            event: "opencredit_passive_rate_limited",
+            category: decision.category,
+            stage,
+            limit: decision.limit,
+            count: decision.count,
+            windowStart: decision.windowStart.toISOString(),
+            expiresAt: decision.expiresAt.toISOString(),
+            retryAfterSeconds: decision.retryAfterSeconds,
+            bucketRef: decision.bucketRef,
+          });
+        } catch {
+          // Telemetry must not change the HTTP decision.
+        }
+      });
+    }
+    return reply(429, "RATE_LIMITED", decision.retryAfterSeconds);
+  }
+
   return async (request: Request, context: { params: Promise<{ publicWebhookId: string }> }) => {
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     let complete = false;
@@ -19,7 +60,7 @@ export function createPassiveInboundHandler(deps: Dependencies) {
       const { publicWebhookId } = await deadline.wait(() => context.params);
       if (!/^[a-f0-9]{48}(?![\s\S])/.test(publicWebhookId) || new URL(request.url).search) return reply(403, "INTEGRATION_UNAVAILABLE");
       const publicLimit = await deadline.wait(() => deps.limit());
-      if (publicLimit) return reply(publicLimit.status === 429 ? 429 : 503, publicLimit.status === 429 ? "RATE_LIMITED" : "INGESTION_UNAVAILABLE");
+      if (publicLimit.status !== "allowed") return rateLimitReply(publicLimit, "public/global-ip");
       const binding = await deadline.wait(() => deps.lookup(publicWebhookId));
       if (!binding) return reply(403, "INTEGRATION_UNAVAILABLE");
       validatePassiveBinding(binding);
@@ -38,7 +79,7 @@ export function createPassiveInboundHandler(deps: Dependencies) {
       }
       const receipt = authenticatePassiveInbound(Buffer.concat(chunks, size), request.headers.get("x-creditcore-sig"), secret, binding);
       const authenticatedLimit = await deadline.wait(() => deps.limit(binding));
-      if (authenticatedLimit) return reply(authenticatedLimit.status === 429 ? 429 : 503, authenticatedLimit.status === 429 ? "RATE_LIMITED" : "INGESTION_UNAVAILABLE");
+      if (authenticatedLimit.status !== "allowed") return rateLimitReply(authenticatedLimit, "authenticated");
       await deadline.wait(() => deps.persist(receipt, deadline));
       return reply(200, "OK");
     } catch (error) {
