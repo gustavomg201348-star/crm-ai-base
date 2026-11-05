@@ -11,10 +11,10 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pu
     lookup: publicWebhookId => prisma.openCreditIntegration.findUnique({ where: { publicWebhookId }, select: { id: true, companyId: true, providerScope: true, passiveInboundEnabled: true, webhookSecret: true } }).then(row => row?.providerScope ? { ...row, providerScope: row.providerScope } : null),
     secret: resolveOpenCreditWebhookSecret,
     limit: binding => consumeRateLimits(binding ? [
-      { category: "opencredit-passive-authenticated", identifiers: [binding.companyId, binding.providerScope, binding.id], limit: 120, windowMs: 60000 },
+      { category: "opencredit-passive-authenticated", identifiers: [binding.companyId, binding.providerScope, binding.id], limit: 400, windowMs: 60000 },
     ] : [
       { category: "opencredit-passive-global", identifiers: ["ingress"], limit: 600, windowMs: 60000 },
-      { category: "opencredit-passive-ip", identifiers: [getRequestIpKey(request)], limit: 120, windowMs: 60000 },
+      { category: "opencredit-passive-ip", identifiers: [getRequestIpKey(request)], limit: 400, windowMs: 60000 },
     ]),
     logRateLimit: event => console.warn(JSON.stringify(event)),
     persist: (receipt, deadline) => persistPassiveInbound(prisma, receipt, deadline),
