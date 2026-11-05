@@ -17,6 +17,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pu
       { category: "opencredit-passive-ip", identifiers: [getRequestIpKey(request)], limit: 400, windowMs: 60000 },
     ]),
     logRateLimit: event => console.warn(JSON.stringify(event)),
-    persist: (receipt, deadline) => persistPassiveInbound(prisma, receipt, deadline),
+    logIngestionUnavailable: event => console.warn(JSON.stringify(event)),
+    persist: (receipt, deadline, onTransactionEntry) => persistPassiveInbound(prisma, receipt, deadline, onTransactionEntry),
   })(request, context);
 }
