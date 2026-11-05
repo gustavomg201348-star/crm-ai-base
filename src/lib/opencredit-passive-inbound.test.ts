@@ -6,12 +6,14 @@ import { readFileSync, readdirSync } from "node:fs";
 import { setImmediate as nextTurn } from "node:timers/promises";
 import { NextRequest } from "next/server";
 import { Prisma } from "@prisma/client";
+import { encryptSecret } from "./secret-encryption";
 let handler: typeof import("./opencredit-passive-inbound-handler");
 let contract: typeof import("./opencredit-passive-inbound-contract");
 let service: typeof import("./opencredit-passive-inbound.service");
 let post: typeof import("../app/api/integrations/opencredit/inbound/[publicWebhookId]/route").POST;
 let prepareSecret: typeof import("./opencredit-secrets").prepareOpenCreditWebhookSecret;
 let OpenCreditDeadline: typeof import("./opencredit-webhook-contract").OpenCreditDeadline;
+let materializationPayload: typeof import("./opencredit-lead-materialization-payload");
 
 // Replace only the database boundary. The route still runs its real policy,
 // counter decisions, binding lookup, signature checks and response handling.
@@ -74,6 +76,7 @@ before(async () => {
     post = require("../app/api/integrations/opencredit/inbound/[publicWebhookId]/route").POST;
     prepareSecret = require("./opencredit-secrets").prepareOpenCreditWebhookSecret;
     OpenCreditDeadline = require("./opencredit-webhook-contract").OpenCreditDeadline;
+    materializationPayload = require("./opencredit-lead-materialization-payload");
   } finally {
     loader._load = original;
   }
@@ -386,6 +389,73 @@ test("receipt snapshot cannot be changed through input bytes, binding or a retur
   b.companyId = "other"; raw.fill(0); const copy = contract.readPassiveReceipt(receipt); copy.binding.companyId = "other"; copy.metadata.eventId = "other:partner";
   const unchanged = contract.readPassiveReceipt(receipt); assert.equal(unchanged.binding.companyId,binding.companyId); assert.equal(unchanged.metadata.eventId,payload().eventId);
 });
+test("signed receipt isolates minimal normalized identity from its metadata reader", async () => {
+  const client = { cpf: "123.456.789-09", phone: "(11) 98765-4321", name: " Synthetic Person ", email: "synthetic@example.invalid", balance: "PRIVATE_FINANCE" };
+  const raw = Buffer.from(JSON.stringify({ ...payload(), client }));
+  const receipt = contract.authenticatePassiveInbound(raw, sign(raw), secret, binding);
+  assert.deepEqual(Object.keys(receipt), []);
+  assert.deepEqual(Object.keys(contract.readPassiveReceipt(receipt)).sort(), ["binding", "metadata"]);
+  assert.deepEqual(contract.readPassiveMaterializationInput(receipt), {
+    cpf: "12345678909", phone: "5511987654321", name: "Synthetic Person", email: "synthetic@example.invalid",
+  });
+  assert(Object.isFrozen(contract.readPassiveMaterializationInput(receipt)));
+  assert.throws(() => contract.readPassiveMaterializationInput({} as never), /INVALID_SIGNATURE/);
+  const invalid = Buffer.from(JSON.stringify({ ...payload(), client: { cpf: "12345678900", phone: "+12125550199", name: 22, email: "invalid" } }));
+  const partial = contract.authenticatePassiveInbound(invalid, sign(invalid), secret, binding);
+  assert.deepEqual(contract.readPassiveMaterializationInput(partial), { cpf: null, phone: null, name: null, email: null });
+  assert.equal((await setup().send(invalid)).status, 200);
+});
+
+test("materialization envelope is authenticated and bound to all five origin values", () => {
+  const options = { activeKeyId: "test", keys: { test: Buffer.alloc(32, 17) } };
+  const binding = { companyId: "company", providerScope: "scope", integrationId: "integration", eventId: "lead:partner", externalLeadId: "lead" };
+  const identity = { cpf: "12345678909", phone: "5511987654321", name: "Synthetic Person", email: "synthetic@example.invalid" };
+  const ciphertext = materializationPayload.protectMaterializationIdentity(binding, identity, options);
+  assert.match(ciphertext, /^enc:v1:aes-256-gcm:/);
+  for (const value of Object.values(identity)) assert(!ciphertext.includes(value));
+  assert.deepEqual(materializationPayload.openMaterializationIdentity(ciphertext, binding, options), identity);
+  for (const field of Object.keys(binding)) {
+    assert.throws(() => materializationPayload.openMaterializationIdentity(ciphertext, { ...binding, [field]: "mismatch" }, options), /ENVELOPE_INVALID/);
+  }
+  const invalid = ciphertext.replace(/:([^:])([^:]*)$/, (_part, first: string, rest: string) => ":" + (first === "a" ? "b" : "a") + rest);
+  assert.throws(() => materializationPayload.openMaterializationIdentity(invalid, binding, options), /ENVELOPE_INVALID/);
+  assert.throws(() => materializationPayload.protectMaterializationIdentity(binding, identity, null), /KEY_UNAVAILABLE/);
+  for (const changed of [{ version: 2 }, { purpose: "wrong-purpose" }]) {
+    const malformed = encryptSecret(JSON.stringify({ ...binding, ...identity, version: 1, purpose: "opencredit_lead_materialization_v1", ...changed }), options);
+    assert.throws(() => materializationPayload.openMaterializationIdentity(malformed, binding, options), /ENVELOPE_INVALID/);
+  }
+});
+
+for (const [target, recovers] of [
+  ["OCMaterialization_company_scope_lead_key", true],
+  [["companyId", "providerScope", "externalLeadId"], true],
+  ["OCMaterialization_inbound_event_key", false],
+] as const) {
+  test("only the expected materialization unique can recover a distinct event: " + String(target), async t => {
+    const oldKey = process.env.QEVORA_DATA_ENCRYPTION_KEY_V1;
+    process.env.QEVORA_DATA_ENCRYPTION_KEY_V1 = Buffer.alloc(32, 17).toString("base64");
+    t.after(() => {
+      if (oldKey === undefined) delete process.env.QEVORA_DATA_ENCRYPTION_KEY_V1;
+      else process.env.QEVORA_DATA_ENCRYPTION_KEY_V1 = oldKey;
+    });
+    let attempts = 0;
+    const db = { $transaction: async (run: (tx: unknown) => Promise<unknown>) => {
+      attempts++;
+      return run({
+        $queryRaw: async () => [{ ...binding, materializationEnabled: true }],
+        openCreditInboundEvent: { findUnique: async () => null, create: async () => ({ id: "event", receivedAt: new Date() }) },
+        openCreditLeadMaterialization: {
+          findUnique: async () => attempts === 1 ? null : { id: "winner" },
+          create: async () => { throw new Prisma.PrismaClientKnownRequestError("synthetic unique", { code: "P2002", clientVersion: "test", meta: { target } }); },
+        },
+      });
+    } };
+    const f = setup({}, { persist: (receipt, deadline, onEntry) => service.persistPassiveInbound(db as never, receipt, deadline, onEntry) });
+    const response = await f.send();
+    assert.equal(response.status, recovers ? 200 : 503);
+    assert.equal(attempts, recovers ? 2 : 1);
+  });
+}
 test("caller cannot fabricate authenticated provenance", async () => { const db = { $transaction: async () => { throw Error("MUST_NOT_QUERY"); } }; await assert.rejects(() => service.persistPassiveInbound(db as never, {} as never, {} as never), /OPENCREDIT_INBOUND_INVALID_SIGNATURE/); });
 test("handler receipt is accepted by the real persistence boundary in the same module graph; 200 follows commit", async () => {
   let entered!: () => void, release!: () => void;

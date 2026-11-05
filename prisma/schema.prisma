@@ -521,6 +521,7 @@ model OpenCreditCommercialOperationEvent {
 
 model OpenCreditIntegration {
   passiveInboundEnabled Boolean @default(false)
+  materializationEnabled Boolean @default(false)
   id              String @id @default(cuid())
   providerScope   String?
   companyId       String
@@ -553,9 +554,30 @@ model OpenCreditInboundEvent {
   receivedAt        DateTime @default(now())
   processingState   String @default("RECEIVED")
   integration       OpenCreditIntegration @relation(fields: [integrationId, companyId, providerScope], references: [id, companyId, providerScope], onDelete: Restrict, onUpdate: NoAction)
+  materializations  OpenCreditLeadMaterialization[]
 
   @@unique([companyId, providerScope, eventId], map: "OCInbound_company_scope_event_key")
+  @@unique([id, companyId, providerScope, integrationId, externalLeadId], map: "OCInbound_id_company_scope_integration_lead_key")
   @@index([companyId, providerScope, receivedAt], map: "OCInbound_company_scope_received_idx")
+}
+
+model OpenCreditLeadMaterialization {
+  id                String @id @default(cuid())
+  companyId         String
+  providerScope     String
+  integrationId     String
+  externalLeadId    String
+  inboundEventId    String @unique(map: "OCMaterialization_inbound_event_key")
+  state             String
+  protectedEnvelope String?
+  expiresAt         DateTime
+  reviewCode        String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  inboundEvent      OpenCreditInboundEvent @relation(fields: [inboundEventId, companyId, providerScope, integrationId, externalLeadId], references: [id, companyId, providerScope, integrationId, externalLeadId], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([companyId, providerScope, externalLeadId], map: "OCMaterialization_company_scope_lead_key")
+  @@index([expiresAt], map: "OCMaterialization_expires_idx")
 }
 
 model OpenCreditLead {
