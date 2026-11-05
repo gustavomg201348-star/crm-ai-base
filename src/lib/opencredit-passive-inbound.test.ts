@@ -4,19 +4,77 @@ import { createHmac } from "node:crypto";
 import Module, { createRequire } from "node:module";
 import { readFileSync, readdirSync } from "node:fs";
 import { setImmediate as nextTurn } from "node:timers/promises";
-import { consumeRateLimits, type RateLimitStore } from "./rate-limit";
+import { NextRequest } from "next/server";
+import type { Prisma } from "@prisma/client";
 let handler: typeof import("./opencredit-passive-inbound-handler");
 let contract: typeof import("./opencredit-passive-inbound-contract");
 let service: typeof import("./opencredit-passive-inbound.service");
+let post: typeof import("../app/api/integrations/opencredit/inbound/[publicWebhookId]/route").POST;
+let prepareSecret: typeof import("./opencredit-secrets").prepareOpenCreditWebhookSecret;
+
+// Replace only the database boundary. The route still runs its real policy,
+// counter decisions, binding lookup, signature checks and response handling.
+const routeIntegrations = new Map<string, typeof binding>();
+const routeBuckets = new Map<string, number>();
+const secondPublicId = "b".repeat(48);
+const windowStart = "2026-11-05T16:32:00.000Z";
+const expiresAt = "2026-11-05T16:33:00.000Z";
+let routeLookups = 0;
+let routeWrites = 0;
+
+const routeDb = {
+  async $queryRaw(query: Prisma.Sql) {
+    assert.match(query.sql, /INSERT INTO "RateLimitBucket"/);
+    const [key, start, expiry] = query.values as [string, Date, Date];
+    assert.equal(start.toISOString(), windowStart);
+    assert.equal(expiry.toISOString(), expiresAt);
+    const count = (routeBuckets.get(key) ?? 0) + 1;
+    routeBuckets.set(key, count);
+    return [{ count, expiresAt: expiry }];
+  },
+  async $executeRaw() { return 0; },
+  openCreditIntegration: {
+    async findUnique({ where }: { where: { publicWebhookId: string } }) {
+      routeLookups++;
+      return routeIntegrations.get(where.publicWebhookId);
+    },
+  },
+  async $transaction(run: (tx: {
+    $queryRaw: (_query: TemplateStringsArray, id: string, companyId: string) => Promise<(typeof binding)[]>;
+    openCreditInboundEvent: { findUnique: () => Promise<null>; create: () => Promise<void> };
+  }) => Promise<unknown>) {
+    return run({
+      $queryRaw: async (_query, id, companyId) =>
+        Array.from(routeIntegrations.values()).filter(row => row.id === id && row.companyId === companyId),
+      openCreditInboundEvent: {
+        findUnique: async () => null,
+        create: async () => { routeWrites++; },
+      },
+    });
+  },
+};
+
 const originalFetch = globalThis.fetch;
 before(async () => {
   globalThis.fetch = async () => { throw Error("REAL_HTTP_FORBIDDEN"); };
   const loader = Module as typeof Module & { _load(s: string, ...a: unknown[]): unknown }, original = loader._load;
-  loader._load = (s, ...a) => s === "server-only" ? {} : original.call(loader, s, ...a);
+  loader._load = (s, ...a) => {
+    if (s === "server-only") return {};
+    if (s === "@/lib/db") return { prisma: routeDb };
+    return original.call(loader, s, ...a);
+  };
   // Node 20/tsx can evaluate a direct dynamic import separately from a transitive
   // CJS dependency. Keep this stateful receipt boundary in one loader/cache graph.
   const require = createRequire(import.meta.url);
-  try { handler = require("./opencredit-passive-inbound-handler"); contract = require("./opencredit-passive-inbound-contract"); service = require("./opencredit-passive-inbound.service"); } finally { loader._load = original; }
+  try {
+    handler = require("./opencredit-passive-inbound-handler");
+    contract = require("./opencredit-passive-inbound-contract");
+    service = require("./opencredit-passive-inbound.service");
+    post = require("../app/api/integrations/opencredit/inbound/[publicWebhookId]/route").POST;
+    prepareSecret = require("./opencredit-secrets").prepareOpenCreditWebhookSecret;
+  } finally {
+    loader._load = original;
+  }
 });
 after(() => { globalThis.fetch = originalFetch; });
 const secret = "synthetic-passive-inbound-secret";
@@ -24,23 +82,20 @@ const publicId = "a".repeat(48);
 const binding = { id: "synthetic-integration", companyId: "synthetic-company", providerScope: "synthetic-scope", webhookSecret: "synthetic-ciphertext", passiveInboundEnabled: true };
 const payload = () => ({ event: "lead.assigned", eventId: "synthetic-lead:synthetic-partner", lead: { id: "synthetic-lead" }, contractVersion: 2, client: { cpf: "00000000000", phone: "5511999999999", name: "PRIVATE_SENTINEL", email: "private@example.invalid" }, companyId: "attacker", providerScope: "attacker" });
 const sign = (raw: Uint8Array) => "sha256=" + createHmac("sha256", secret).update(raw).digest("hex");
-type HandlerDeps = Parameters<typeof handler.createPassiveInboundHandler>[0];
-function setup(options: { binding?: unknown; secret?: string; fail?: boolean; unavailable?: boolean; hold?: () => Promise<void>; limit?: HandlerDeps["limit"]; log?: HandlerDeps["logRateLimit"] } = {}) {
-  let writes = 0, lookups = 0, captured: unknown, complete = false;
-  const events: Parameters<NonNullable<HandlerDeps["logRateLimit"]>>[0][] = [];
+type RateLimitEvent = Parameters<NonNullable<Parameters<typeof handler.createPassiveInboundHandler>[0]["logRateLimit"]>>[0];
+function setup(options: { binding?: unknown; secret?: string; fail?: boolean; unavailable?: boolean; hold?: () => Promise<void> } = {}) {
+  let writes = 0, captured: unknown, complete = false;
+  const events: RateLimitEvent[] = [];
   const h = handler.createPassiveInboundHandler({
-    lookup: async () => {
-      lookups++;
-      return Object.hasOwn(options, "binding") ? options.binding as typeof binding : binding;
-    },
+    lookup: async () => Object.hasOwn(options, "binding") ? options.binding as typeof binding : binding,
     secret: () => options.secret ?? secret,
-    limit: options.limit ?? (async () => ({ status: options.unavailable ? "unavailable" : "allowed" })),
-    logRateLimit: event => { events.push(event); options.log?.(event); },
+    limit: async () => ({ status: options.unavailable ? "unavailable" : "allowed" }),
+    logRateLimit: event => { events.push(event); },
     persist: async receipt => { writes++; captured = contract.readPassiveReceipt(receipt); if (options.fail) throw Error(secret + " PRIVATE_SENTINEL"); if (options.hold) await options.hold(); complete = true; return { duplicate: false }; },
   });
   const send = (raw = Buffer.from(JSON.stringify(payload())), signature: string | null = sign(raw), extra: Record<string, string> = {}, method = "POST") =>
     h(new Request("https://crm.example.invalid/api/inbound", { method, headers: { "content-type": "application/json", ...(signature === null ? {} : { "x-creditcore-sig": signature }), ...extra }, ...(method === "POST" ? { body: raw } : {}) }), { params: Promise.resolve({ publicWebhookId: publicId }) });
-  return { h, send, events, writes: () => writes, lookups: () => lookups, captured: () => captured, complete: () => complete };
+  return { h, send, events, writes: () => writes, captured: () => captured, complete: () => complete };
 }
 test("valid RAW HMAC -> persisted metadata only, trusted binding not payload, no PII in response", async () => {
   const f = setup(), r = await f.send(); assert.equal(r.status, 200); assert.equal(f.writes(), 1); assert(f.complete());
@@ -85,74 +140,115 @@ test("2xx waits for persistence completion", async () => {
   let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; }), f = setup({ hold: () => gate }); let returned = false;
   const response = f.send().then(r => { returned = true; return r; }); for (let n = 0; n < 50; n++) await Promise.resolve(); assert.equal(returned, false); release(); assert.equal((await response).status, 200); assert(f.complete());
 });
-for (const [winner, stage, counts] of [
-  ["global", "public/global-ip", [601]],
-  ["ip", "public/global-ip", [600, 121]],
-  ["authenticated", "authenticated", [600, 120, 121]],
-] as const) test(`429 identifies only the ${winner} limiter internally`, async t => {
-  const ip = "192.0.2.42";
-  const rateSecret = "synthetic-rate-limit-credential";
-  const authSecret = "synthetic-auth-credential";
-  const originalRateSecret = process.env.RATE_LIMIT_SECRET;
-  const originalAuthSecret = process.env.AUTH_SECRET;
-  process.env.RATE_LIMIT_SECRET = rateSecret;
-  process.env.AUTH_SECRET = authSecret;
-  t.after(() => {
-    if (originalRateSecret === undefined) delete process.env.RATE_LIMIT_SECRET;
-    else process.env.RATE_LIMIT_SECRET = originalRateSecret;
-    if (originalAuthSecret === undefined) delete process.env.AUTH_SECRET;
-    else process.env.AUTH_SECRET = originalAuthSecret;
-  });
-  const keys: string[] = [];
-  const store: RateLimitStore = {
-    async increment({ key, expiresAt }) {
-      const count = counts[keys.length];
-      keys.push(key);
-      return { count, expiresAt };
-    }
+const rateLimitScenarios = [
+  { winner: "ip", limit: 400, checkpoints: [182, 364, 399, 400], alternateIp: false, alternateIntegration: false, counters: [400, 401, 401] },
+  { winner: "authenticated", limit: 400, checkpoints: [399, 400], alternateIp: true, alternateIntegration: false, counters: [200, 201, 401, 401] },
+  { winner: "global", limit: 600, checkpoints: [599, 600], alternateIp: true, alternateIntegration: true, counters: [300, 300, 300, 300, 601] },
+] as const;
+
+for (const scenario of rateLimitScenarios) test(`passive route hits the ${scenario.winner} limit at ${scenario.limit + 1}`, async t => {
+  const { winner, limit, checkpoints, alternateIp, alternateIntegration, counters } = scenario;
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-11-05T16:32:52.150Z") });
+  const env = {
+    RATE_LIMIT_SECRET: "synthetic-rate-limit-credential",
+    AUTH_SECRET: "synthetic-auth-credential",
+    QEVORA_DATA_ENCRYPTION_KEY_V1: Buffer.alloc(32, 23).toString("base64"),
   };
-  const now = new Date("2026-11-05T16:32:52.150Z");
-  const f = setup({
-    limit: active => consumeRateLimits(active ? [
-      { category: "opencredit-passive-authenticated", identifiers: [active.companyId, active.providerScope, active.id], limit: 120, windowMs: 60_000 },
-    ] : [
-      { category: "opencredit-passive-global", identifiers: ["ingress"], limit: 600, windowMs: 60_000 },
-      { category: "opencredit-passive-ip", identifiers: [ip], limit: 120, windowMs: 60_000 },
-    ], { store, now, shouldCleanup: () => false }),
-    log: () => { throw Error("synthetic logger failure"); },
+  const previous = Object.keys(env).map(key => [key, process.env[key]] as const);
+  Object.assign(process.env, env);
+  t.after(() => {
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   });
-  const raw = Buffer.from(JSON.stringify(payload()));
-  const signature = winner === "authenticated" ? sign(raw) : "invalid-signature";
-  if (winner === "authenticated") {
-    const invalid = await f.send(raw, "invalid-signature");
-    assert.equal(invalid.status, 403);
-    assert.equal(keys.length, 2);
-    keys.length = 0;
+
+  routeBuckets.clear();
+  routeIntegrations.clear();
+  routeLookups = 0;
+  routeWrites = 0;
+  const webhookSecret = prepareSecret(secret);
+  const secondId = "synthetic-integration-two";
+  routeIntegrations.set(publicId, { ...binding, webhookSecret });
+  routeIntegrations.set(secondPublicId, { ...binding, id: secondId, webhookSecret });
+
+  const events: RateLimitEvent[] = [];
+  t.mock.method(console, "warn", (line: string) => {
+    events.push(JSON.parse(line));
+    throw Error("synthetic logger failure");
+  });
+  const ips = ["192.0.2.42", "192.0.2.43"];
+  let lastSignature = "";
+  async function send(n: number, validSignature = true) {
+    const index = n % 2;
+    const ip = ips[alternateIp ? index : 0];
+    const target = alternateIntegration && index ? secondPublicId : publicId;
+    const leadId = `synthetic-lead-${n}`;
+    const raw = Buffer.from(JSON.stringify({ ...payload(), lead: { id: leadId }, eventId: `${leadId}:synthetic-partner` }));
+    lastSignature = validSignature ? sign(raw) : "invalid-signature";
+    const request = new NextRequest(`https://crm.example.invalid/api/integrations/opencredit/inbound/${target}`, {
+      method: "POST",
+      body: raw,
+      headers: {
+        "content-type": "application/json",
+        "x-creditcore-sig": lastSignature,
+        "x-forwarded-for": ip,
+        "x-railway-request-id": "untrusted-request-id",
+      },
+    });
+    return post(request, { params: Promise.resolve({ publicWebhookId: target }) });
   }
-  const r = await f.send(raw, signature, { "x-forwarded-for": ip, "x-railway-request-id": "untrusted-request-id" });
+
+  for (let n = 1; n <= limit; n++) {
+    const response = await send(n);
+    assert.equal(response.status, 200, `request ${n}`);
+    assert.equal(response.headers.get("retry-after"), null);
+    if ((checkpoints as readonly number[]).includes(n)) {
+      assert.equal(routeWrites, n);
+      assert.deepEqual(await response.json(), { ok: true });
+    }
+  }
+  assert.equal(events.length, 0);
+  const r = await send(limit + 1);
   assert.equal(r.status, 429);
-  assert.equal(f.events.length, 0);
+  assert.equal(events.length, 0);
   assert.equal(r.headers.get("cache-control"), "no-store");
   assert.equal(r.headers.get("retry-after"), "8");
   assert.deepEqual(Array.from(r.headers.keys()).sort(), ["cache-control", "content-type", "retry-after"]);
   assert.equal(await r.text(), '{"code":"RATE_LIMITED"}');
-  assert.equal(f.writes(), 0);
-  assert.equal(f.lookups(), winner === "authenticated" ? 2 : 0);
-  assert.equal(keys.length, counts.length);
+  assert.equal(routeWrites, limit);
+  assert.equal(routeLookups, winner === "authenticated" ? limit + 1 : limit);
+  assert.deepEqual(Array.from(routeBuckets.values()).sort((a, b) => a - b), counters);
+
   await nextTurn();
-  assert.equal(f.events.length, 1);
-  const event = f.events[0];
+  assert.equal(events.length, 1);
+  const event = events[0];
   assert.match(event.bucketRef, /^[a-f0-9]{24}$/);
   assert.deepEqual(event, {
-    event: "opencredit_passive_rate_limited", category: `opencredit-passive-${winner}`, stage,
-    limit: winner === "global" ? 600 : 120, count: counts.at(-1),
-    windowStart: "2026-11-05T16:32:00.000Z", expiresAt: "2026-11-05T16:33:00.000Z",
-    retryAfterSeconds: 8, bucketRef: event.bucketRef,
+    event: "opencredit_passive_rate_limited",
+    category: `opencredit-passive-${winner}`,
+    stage: winner === "authenticated" ? "authenticated" : "public/global-ip",
+    limit,
+    count: limit + 1,
+    windowStart,
+    expiresAt,
+    retryAfterSeconds: 8,
+    bucketRef: event.bucketRef,
   });
   const log = JSON.stringify(event);
-  for (const value of [secret, signature, binding.webhookSecret, binding.id, binding.companyId, binding.providerScope,
-    publicId, ip, rateSecret, authSecret, "untrusted-request-id", "00000000000", "5511999999999",
-    "PRIVATE_SENTINEL", "private@example.invalid", ...keys]) assert(!log.includes(value), "sensitive value reached telemetry");
+  for (const value of [secret, lastSignature, webhookSecret, binding.id, secondId, binding.companyId, binding.providerScope,
+    publicId, secondPublicId, ...ips, ...Object.values(env), "untrusted-request-id", "00000000000", "5511999999999",
+    "PRIVATE_SENTINEL", "private@example.invalid", ...Array.from(routeBuckets.keys())]) {
+    assert(!log.includes(value), "sensitive value reached telemetry");
+  }
+
+  if (winner === "authenticated") {
+    const invalid = await send(limit + 2, false);
+    assert.equal(invalid.status, 403);
+    assert.equal(routeWrites, limit);
+    await nextTurn();
+    assert.equal(events.length, 1);
+  }
 });
 test("receipt snapshot cannot be changed through input bytes, binding or a returned copy", () => {
   const b = {...binding}, raw = Buffer.from(JSON.stringify(payload()));
