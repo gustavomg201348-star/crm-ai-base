@@ -5,12 +5,13 @@ import Module, { createRequire } from "node:module";
 import { readFileSync, readdirSync } from "node:fs";
 import { setImmediate as nextTurn } from "node:timers/promises";
 import { NextRequest } from "next/server";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 let handler: typeof import("./opencredit-passive-inbound-handler");
 let contract: typeof import("./opencredit-passive-inbound-contract");
 let service: typeof import("./opencredit-passive-inbound.service");
 let post: typeof import("../app/api/integrations/opencredit/inbound/[publicWebhookId]/route").POST;
 let prepareSecret: typeof import("./opencredit-secrets").prepareOpenCreditWebhookSecret;
+let OpenCreditDeadline: typeof import("./opencredit-webhook-contract").OpenCreditDeadline;
 
 // Replace only the database boundary. The route still runs its real policy,
 // counter decisions, binding lookup, signature checks and response handling.
@@ -72,6 +73,7 @@ before(async () => {
     service = require("./opencredit-passive-inbound.service");
     post = require("../app/api/integrations/opencredit/inbound/[publicWebhookId]/route").POST;
     prepareSecret = require("./opencredit-secrets").prepareOpenCreditWebhookSecret;
+    OpenCreditDeadline = require("./opencredit-webhook-contract").OpenCreditDeadline;
   } finally {
     loader._load = original;
   }
@@ -83,19 +85,27 @@ const binding = { id: "synthetic-integration", companyId: "synthetic-company", p
 const payload = () => ({ event: "lead.assigned", eventId: "synthetic-lead:synthetic-partner", lead: { id: "synthetic-lead" }, contractVersion: 2, client: { cpf: "00000000000", phone: "5511999999999", name: "PRIVATE_SENTINEL", email: "private@example.invalid" }, companyId: "attacker", providerScope: "attacker" });
 const sign = (raw: Uint8Array) => "sha256=" + createHmac("sha256", secret).update(raw).digest("hex");
 type RateLimitEvent = Parameters<NonNullable<Parameters<typeof handler.createPassiveInboundHandler>[0]["logRateLimit"]>>[0];
-function setup(options: { binding?: unknown; secret?: string; fail?: boolean; unavailable?: boolean; hold?: () => Promise<void> } = {}) {
+type HandlerDependencies = Parameters<typeof handler.createPassiveInboundHandler>[0];
+type IngestionEvent = Parameters<NonNullable<HandlerDependencies["logIngestionUnavailable"]>>[0];
+function setup(options: { binding?: unknown; secret?: string; hold?: () => Promise<void> } = {}, overrides: Partial<HandlerDependencies> = {}) {
   let writes = 0, captured: unknown, complete = false;
   const events: RateLimitEvent[] = [];
+  const ingestionEvents: IngestionEvent[] = [];
   const h = handler.createPassiveInboundHandler({
     lookup: async () => Object.hasOwn(options, "binding") ? options.binding as typeof binding : binding,
     secret: () => options.secret ?? secret,
-    limit: async () => ({ status: options.unavailable ? "unavailable" : "allowed" }),
+    limit: async () => ({ status: "allowed" }),
     logRateLimit: event => { events.push(event); },
-    persist: async receipt => { writes++; captured = contract.readPassiveReceipt(receipt); if (options.fail) throw Error(secret + " PRIVATE_SENTINEL"); if (options.hold) await options.hold(); complete = true; return { duplicate: false }; },
+    persist: async receipt => { writes++; captured = contract.readPassiveReceipt(receipt); if (options.hold) await options.hold(); complete = true; return { duplicate: false }; },
+    ...overrides,
+    logIngestionUnavailable: event => {
+      ingestionEvents.push(event);
+      return overrides.logIngestionUnavailable?.(event);
+    },
   });
   const send = (raw = Buffer.from(JSON.stringify(payload())), signature: string | null = sign(raw), extra: Record<string, string> = {}, method = "POST") =>
     h(new Request("https://crm.example.invalid/api/inbound", { method, headers: { "content-type": "application/json", ...(signature === null ? {} : { "x-creditcore-sig": signature }), ...extra }, ...(method === "POST" ? { body: raw } : {}) }), { params: Promise.resolve({ publicWebhookId: publicId }) });
-  return { h, send, events, writes: () => writes, captured: () => captured, complete: () => complete };
+  return { h, send, events, ingestionEvents, writes: () => writes, captured: () => captured, complete: () => complete };
 }
 test("valid RAW HMAC -> persisted metadata only, trusted binding not payload, no PII in response", async () => {
   const f = setup(), r = await f.send(); assert.equal(r.status, 200); assert.equal(f.writes(), 1); assert(f.complete());
@@ -103,6 +113,7 @@ test("valid RAW HMAC -> persisted metadata only, trusted binding not payload, no
   await nextTurn();
   assert.equal(r.headers.get("retry-after"), null);
   assert.deepEqual(f.events, []);
+  assert.deepEqual(f.ingestionEvents, []);
   const captured = f.captured() as { binding: typeof binding; metadata: object }; assert.deepEqual(captured.binding, binding);
   assert.deepEqual(Object.keys(captured.metadata).sort(), ["contractVersion", "eventId", "eventType", "externalLeadId"]);
   for (const pii of ["00000000000", "5511999999999", "PRIVATE_SENTINEL", "private@example.invalid"]) assert(!JSON.stringify(captured.metadata).includes(pii));
@@ -128,14 +139,133 @@ test("oversize streamed or declared body rejects; media/encoding/method closed",
   assert.equal((await setup().send(undefined, undefined, {}, "GET")).status, 405);
 });
 test("invalid UTF8 is rejected after authenticating RAW bytes", async () => { const f = setup(); assert.equal((await f.send(Buffer.from([0xff]))).status, 400); });
-for (const option of [{ unavailable: true }, { fail: true }]) test("rate/storage failure never acknowledges: " + JSON.stringify(option), async () => {
-  const f = setup(option), r = await f.send();
+const privateFailureDetails = [
+  secret, publicId, binding.id, binding.companyId, binding.providerScope, binding.webhookSecret,
+  payload().eventId, payload().lead.id, ...Object.values(payload().client),
+  "SELECT private FROM secret_table", "198.51.100.42", "PRIVATE_STACK_SENTINEL",
+  "PRIVATE_RATE_KEY_SENTINEL", "PRIVATE_CREDENTIAL_SENTINEL",
+  sign(Buffer.from(JSON.stringify(payload()))), JSON.stringify(payload()),
+];
+const privateFailure = () => Error(privateFailureDetails.join(" "));
+async function assertIngestionUnavailable(r: Response, events: IngestionEvent[], expected: Omit<IngestionEvent, "event" | "elapsedMs" | "remainingDeadlineMs">) {
   assert.equal(r.status, 503);
-  assert.deepEqual(await r.json(), { code: "INGESTION_UNAVAILABLE" });
+  assert.equal(await r.text(), '{"code":"INGESTION_UNAVAILABLE"}');
+  assert.equal(r.headers.get("cache-control"), "no-store");
   assert.equal(r.headers.get("retry-after"), null);
   await nextTurn();
-  assert.deepEqual(f.events, []);
+  assert.equal(events.length, 1);
+  const { elapsedMs, remainingDeadlineMs, ...event } = events[0];
+  assert(Number.isInteger(elapsedMs) && elapsedMs >= 0);
+  assert(Number.isInteger(remainingDeadlineMs) && remainingDeadlineMs >= 0);
+  if (expected.stage === "deadline") assert.equal(remainingDeadlineMs, 0);
+  assert.deepEqual(event, { event: "opencredit_passive_ingestion_unavailable", ...expected });
+  const log = JSON.stringify(events[0]);
+  for (const value of privateFailureDetails) assert(!log.includes(value), "sensitive value reached telemetry");
+}
+
+for (const stage of ["public_rate_limit", "authenticated_rate_limit"] as const) {
+  test(`503 logs only the ${stage} stage for limiter unavailable`, async () => {
+    const f = setup({}, { limit: async b => ({ status: Boolean(b) === (stage === "authenticated_rate_limit") ? "unavailable" : "allowed" }) });
+    await assertIngestionUnavailable(await f.send(), f.ingestionEvents, { stage, errorClass: "limiter_unavailable" });
+    assert.equal(f.writes(), 0);
+    assert.deepEqual(f.events, []);
+  });
+}
+
+test("503 from the route serializes only sanitized lookup telemetry", async t => {
+  const previous = process.env.RATE_LIMIT_SECRET;
+  process.env.RATE_LIMIT_SECRET = "synthetic-rate-limit-credential";
+  t.after(() => {
+    if (previous === undefined) delete process.env.RATE_LIMIT_SECRET;
+    else process.env.RATE_LIMIT_SECRET = previous;
+  });
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-11-05T16:32:52.150Z") });
+  routeBuckets.clear();
+  t.mock.method(routeDb.openCreditIntegration, "findUnique", async () => { throw privateFailure(); });
+  const events: IngestionEvent[] = [];
+  t.mock.method(console, "warn", (line: string) => { events.push(JSON.parse(line)); });
+  const r = await post(new NextRequest("https://crm.example.invalid", { method: "POST" }), { params: Promise.resolve({ publicWebhookId: publicId }) });
+  await assertIngestionUnavailable(r, events, { stage: "lookup", errorClass: "lookup_failed" });
 });
+
+test("503 logs a stream read failure without forwarding the error", async () => {
+  const f = setup();
+  const body = new ReadableStream<Uint8Array>({ start(controller) { controller.error(privateFailure()); } });
+  const req = new Request("https://crm.example.invalid", { method: "POST", headers: { "content-type": "application/json" }, body, duplex: "half" } as RequestInit);
+  await assertIngestionUnavailable(await f.h(req, { params: Promise.resolve({ publicWebhookId: publicId }) }), f.ingestionEvents, { stage: "body", errorClass: "body_read_failed" });
+});
+
+for (const stage of ["public_rate_limit", "lookup", "authenticated_rate_limit", "persistence"] as const) {
+  test(`503 records deadline while waiting for ${stage}`, async () => {
+    let now = 0;
+    async function expire() { now = 3000; }
+    const f = setup({}, {
+      deadline: () => new OpenCreditDeadline(3000, () => now),
+      limit: async b => {
+        if (stage === (b ? "authenticated_rate_limit" : "public_rate_limit")) await expire();
+        return { status: "allowed" };
+      },
+      lookup: async () => {
+        if (stage === "lookup") await expire();
+        return binding;
+      },
+      persist: async () => { await expire(); return { duplicate: false }; },
+    });
+    await assertIngestionUnavailable(await f.send(), f.ingestionEvents, { stage: "deadline", waitingStage: stage, errorClass: "deadline_exceeded" });
+  });
+}
+
+test("503 distinguishes a persistence rejection before the transaction callback", async () => {
+  const db = { $transaction: async () => { throw privateFailure(); } };
+  const f = setup({}, { persist: (receipt, deadline, onEntry) => service.persistPassiveInbound(db as never, receipt, deadline, onEntry) });
+  await assertIngestionUnavailable(await f.send(), f.ingestionEvents, { stage: "persistence", errorClass: "persistence_before_transaction" });
+});
+
+for (const [failure, prismaCode] of [
+  [new Prisma.PrismaClientKnownRequestError(privateFailure().message, { code: "P2028", clientVersion: "test", meta: { detail: privateFailureDetails } }), "P2028"],
+  [new Prisma.PrismaClientKnownRequestError(privateFailure().message, { code: "P9999", clientVersion: "test" }), undefined],
+  [Object.assign(privateFailure(), { code: "P2028" }), undefined],
+] as const) {
+  test(`503 reports typed allowlisted Prisma codes only (${failure.constructor.name}, ${failure.code})`, async () => {
+    const db = { $transaction: async (run: (tx: unknown) => Promise<unknown>) => run({ $queryRaw: async () => { throw failure; } }) };
+    const f = setup({}, { persist: (receipt, deadline, onEntry) => service.persistPassiveInbound(db as never, receipt, deadline, onEntry) });
+    await assertIngestionUnavailable(await f.send(), f.ingestionEvents, {
+      stage: "persistence", errorClass: "persistence_after_transaction_entry", ...(prismaCode ? { prismaCode } : {}),
+    });
+  });
+}
+
+for (const recoveryCannotStart of [false, true]) {
+  test(`503 classifies persistence recovery (before callback: ${recoveryCannotStart})`, async () => {
+    let attempts = 0;
+    const db = { $transaction: async (run: (tx: unknown) => Promise<unknown>) => {
+      attempts++;
+      if (attempts === 2 && recoveryCannotStart) throw privateFailure();
+      return run({
+        $queryRaw: async () => {
+          if (attempts === 1) throw new Prisma.PrismaClientKnownRequestError(privateFailure().message, { code: "P2034", clientVersion: "test" });
+          return [binding];
+        },
+        openCreditInboundEvent: { findUnique: async () => null },
+      });
+    } };
+    const f = setup({}, { persist: (receipt, deadline, onEntry) => service.persistPassiveInbound(db as never, receipt, deadline, onEntry) });
+    await assertIngestionUnavailable(await f.send(), f.ingestionEvents, {
+      stage: "persistence",
+      errorClass: recoveryCannotStart ? "persistence_before_transaction" : "persistence_after_transaction_entry",
+    });
+    assert.equal(attempts, 2);
+  });
+}
+
+for (const logIngestionUnavailable of [() => { throw privateFailure(); }, async () => { throw privateFailure(); }]) {
+  test(`unexpected 503 survives a failing ${logIngestionUnavailable.constructor.name} logger`, async () => {
+    const f = setup({}, { deadline: () => { throw privateFailure(); }, logIngestionUnavailable });
+    const r = await f.send();
+    assert.deepEqual(f.ingestionEvents, []);
+    await assertIngestionUnavailable(r, f.ingestionEvents, { stage: "internal", errorClass: "unexpected" });
+  });
+}
 test("2xx waits for persistence completion", async () => {
   let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; }), f = setup({ hold: () => gate }); let returned = false;
   const response = f.send().then(r => { returned = true; return r; }); for (let n = 0; n < 50; n++) await Promise.resolve(); assert.equal(returned, false); release(); assert.equal((await response).status, 200); assert(f.complete());
@@ -275,11 +405,14 @@ test("handler receipt is accepted by the real persistence boundary in the same m
   assert.equal(rows[0].provenanceKind,"OPENCREDIT_HMAC_SHA256_VERIFIED"); release(); assert.equal((await response).status,200);
 });
 test("public boundary deadline is below provider 5s; pending body cancels and returns 503", async () => {
-  const { OpenCreditDeadline } = await import("./opencredit-webhook-contract");
-  const h = handler.createPassiveInboundHandler({ lookup: async () => binding, secret: () => secret, limit: async () => ({ status: "allowed" }), persist: async () => { throw Error(); }, deadline: () => new OpenCreditDeadline(25) });
-  const body = new ReadableStream<Uint8Array>({ pull: () => new Promise(() => {}) });
+  const f = setup({}, { deadline: () => new OpenCreditDeadline(100) });
+  let cancelled = false;
+  const body = new ReadableStream<Uint8Array>({ pull: () => new Promise(() => {}), cancel: () => { cancelled = true; } });
   const req = new Request("https://crm.example.invalid", { method: "POST", headers: { "content-type": "application/json" }, body, duplex: "half" } as RequestInit);
-  assert.equal((await h(req, { params: Promise.resolve({ publicWebhookId: publicId }) })).status, 503);
+  await assertIngestionUnavailable(await f.h(req, { params: Promise.resolve({ publicWebhookId: publicId }) }), f.ingestionEvents, {
+    stage: "deadline", waitingStage: "body", errorClass: "deadline_exceeded",
+  });
+  assert.equal(cancelled, true);
 });
 test("source boundaries have no commercial/domain consumers; legacy handler/route not reused", () => {
   const files = ["contract", "handler", "service"].map(s => "src/lib/opencredit-passive-inbound" + (s === "service" ? ".service" : "-" + s) + ".ts");

@@ -14,12 +14,16 @@ async function current(tx: Prisma.TransactionClient, b: PassiveBinding) {
   if (rows.length !== 1 || row.passiveInboundEnabled !== true || row.providerScope !== b.providerScope || row.webhookSecret !== b.webhookSecret) throw new PassiveInboundError("UNAVAILABLE", 403);
 }
 /** Only inbox metadata is written. A successful return always follows a committed transaction. */
-export async function persistPassiveInbound(db: Db, receipt: PassiveReceipt, deadline: OpenCreditDeadline) {
+export async function persistPassiveInbound(db: Db, receipt: PassiveReceipt, deadline: OpenCreditDeadline, onTransactionEntry?: (entered: boolean) => void) {
   const { binding: b, metadata } = readPassiveReceipt(receipt);
   const where = { companyId_providerScope_eventId: { companyId: b.companyId, providerScope: b.providerScope, eventId: metadata.eventId } };
   const transact = <T>(run: (tx: Prisma.TransactionClient) => Promise<T>) => {
+    onTransactionEntry?.(false);
     deadline.assertRemaining();
-    return db.$transaction(run, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: Math.min(150, deadline.remainingMs()), timeout: Math.min(1000, deadline.remainingMs()) });
+    return db.$transaction(tx => {
+      onTransactionEntry?.(true);
+      return run(tx);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: Math.min(150, deadline.remainingMs()), timeout: Math.min(1000, deadline.remainingMs()) });
   };
   try {
     return await transact(async tx => {
