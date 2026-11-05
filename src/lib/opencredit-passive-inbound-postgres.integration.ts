@@ -33,7 +33,7 @@ async function fixture() {
   const payload = (version: number | undefined = 2) => JSON.stringify({ event: "lead.assigned", eventId: "external-lead:partner", lead: { id: "external-lead" }, ...(version === undefined ? {} : { contractVersion: version }), client: { cpf: "00000000000", phone: "5511999999999", name: "PRIVATE_SENTINEL", email: "private@example.invalid" }, companyId: companies[1].id, providerScope: "attacker" });
   const receiver = (storage: Parameters<typeof service.persistPassiveInbound>[0] = db, beforePersist?: () => Promise<void>) => handler.createPassiveInboundHandler({
     lookup: async publicWebhookId => { const row = await db.openCreditIntegration.findUnique({ where: { publicWebhookId } }); return row?.providerScope ? { ...row, providerScope: row.providerScope } : null; },
-    secret: e => resolveOpenCreditWebhookSecret(e, encryption), limit: async () => null,
+    secret: e => resolveOpenCreditWebhookSecret(e, encryption), limit: async () => ({ status: "allowed" }),
     persist: async (receipt, deadline) => { if (beforePersist) await beforePersist(); return service.persistPassiveInbound(storage, receipt, deadline); },
   });
   const send = (target = a, h = receiver(), raw = payload()) => h(new Request("https://crm.example.invalid/inbound", { method: "POST", headers: { "content-type": "application/json", "x-creditcore-sig": "sha256=" + createHmac("sha256", secret).update(Buffer.from(raw)).digest("hex") }, body: raw }), { params: Promise.resolve({ publicWebhookId: target.publicWebhookId }) });

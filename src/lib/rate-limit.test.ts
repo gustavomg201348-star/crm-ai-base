@@ -67,6 +67,36 @@ test("janela expirada reinicia a cota", async () => {
   assert.equal((await consumeRateLimits([rule()], { store, now: nextWindow })).status, "allowed");
 });
 
+test("decisão identifica a primeira regra excedida e a janela efetiva sem expor a chave", async () => {
+  const now = new Date("2026-11-05T16:32:52.150Z");
+  const expiresAt = new Date("2026-11-05T16:33:00.000Z");
+  const keys: string[] = [];
+  const store: RateLimitStore = {
+    async increment({ key }) {
+      keys.push(key);
+      return { count: 121, expiresAt };
+    }
+  };
+  const first = { ...rule(), category: "first", limit: 120 };
+  const second = { ...rule(), category: "second", limit: 120 };
+  const decision = await consumeRateLimits([first, second], { store, now, shouldCleanup: () => false });
+  assert.equal(keys.length, 1);
+  assert.equal(decision.status, "limited");
+  assert.match(decision.bucketRef, /^[a-f0-9]{24}$/);
+  assert(!keys[0].includes(decision.bucketRef));
+  assert.deepEqual(decision, {
+    status: "limited", category: "first", limit: 120, count: 121,
+    windowStart: new Date("2026-11-05T16:32:00.000Z"), expiresAt,
+    retryAfterSeconds: 8, bucketRef: decision.bucketRef
+  });
+  const repeat = await consumeRateLimits([first], { store, now, shouldCleanup: () => false });
+  const other = await consumeRateLimits([second], { store, now, shouldCleanup: () => false });
+  assert.equal(repeat.status, "limited");
+  assert.equal(other.status, "limited");
+  assert.equal(repeat.bucketRef, decision.bucketRef);
+  assert.notEqual(other.bucketRef, decision.bucketRef);
+});
+
 test("tenant e usuario possuem cotas isoladas", async () => {
   const { store } = memoryStore();
   const now = new Date("2026-09-22T12:00:00.000Z");

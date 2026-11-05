@@ -1,4 +1,4 @@
-import { createHmac, randomInt } from "node:crypto";
+import { createHash, createHmac, randomInt } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
@@ -27,7 +27,16 @@ export type RateLimitRule = {
 
 export type RateLimitDecision =
   | { status: "allowed" }
-  | { status: "limited"; retryAfterSeconds: number }
+  | {
+      status: "limited";
+      category: string;
+      limit: number;
+      count: number;
+      windowStart: Date;
+      expiresAt: Date;
+      retryAfterSeconds: number;
+      bucketRef: string;
+    }
   | { status: "unavailable" };
 
 export const rateLimitPolicies = {
@@ -144,8 +153,9 @@ export async function consumeRateLimits(
       const windowStartMs = Math.floor(now.getTime() / rule.windowMs) * rule.windowMs;
       const windowStart = new Date(windowStartMs);
       const expiresAt = new Date(windowStartMs + rule.windowMs);
+      const key = rateLimitKey(rule);
       const result = await store.increment({
-        key: rateLimitKey(rule),
+        key,
         windowStart,
         expiresAt,
         now
@@ -155,6 +165,13 @@ export async function consumeRateLimits(
         await cleanupExpiredBuckets(store, now, shouldCleanup);
         return {
           status: "limited",
+          category: rule.category,
+          limit: rule.limit,
+          count: result.count,
+          windowStart: new Date(result.expiresAt.getTime() - rule.windowMs),
+          expiresAt: result.expiresAt,
+          // Keep the keyed storage digest out of telemetry.
+          bucketRef: createHash("sha256").update("rate-limit-log:v1:").update(key).digest("hex").slice(0, 24),
           retryAfterSeconds: Math.max(
             1,
             Math.ceil((result.expiresAt.getTime() - now.getTime()) / 1000)
