@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHmac } from "node:crypto";
+import Module, { createRequire } from "node:module";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { createOpenCreditWebhookHandler } from "./opencredit-webhook-handler";
 import { ingestOpenCreditLead } from "./opencredit-lead.service";
@@ -46,6 +47,33 @@ test("HMAC validates exact raw bytes, not reserialized JSON", () => {
   const raw = Buffer.from('{ "event": "lead.assigned" }');
   assert.equal(verifyOpenCreditSignature(raw, signature(raw), secret), true);
   assert.equal(verifyOpenCreditSignature(Buffer.from('{"event":"lead.assigned"}'), signature(raw), secret), false);
+});
+test("legacy route rejects materialization before reading body, decrypting or ingesting", async () => {
+  const loader = Module as typeof Module & { _load(name: string, ...args: unknown[]): unknown };
+  const original = loader._load;
+  const require = createRequire(import.meta.url);
+  const effects: string[] = [];
+  const row = { publicWebhookId: publicId, enabled: false, materializationEnabled: true };
+  let lookup: unknown;
+  loader._load = (name, ...args) => {
+    if (name === "@/lib/db") return { prisma: { openCreditIntegration: { findUnique: async ({ where }: { where: Record<string, unknown> }) => {
+      lookup = where;
+      return Object.entries(where).every(([key, value]) => row[key as keyof typeof row] === value) ? row : null;
+    } } } };
+    if (name === "@/lib/opencredit-secrets") return { resolveOpenCreditWebhookSecret: () => { effects.push("secret"); throw Error(); } };
+    if (name === "@/lib/opencredit-lead.service") return { ingestOpenCreditLead: () => { effects.push("ingest"); throw Error(); } };
+    return original.call(loader, name, ...args);
+  };
+  let post: typeof import("../app/api/integrations/opencredit/webhooks/[publicWebhookId]/route").POST;
+  try { ({ POST: post } = require("../app/api/integrations/opencredit/webhooks/[publicWebhookId]/route")); }
+  finally { loader._load = original; }
+  const req = request();
+  Object.defineProperty(req, "body", { get: () => { effects.push("body"); throw Error(); } });
+  const response = await post(req, { params: Promise.resolve({ publicWebhookId: publicId }) });
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), { code: "INTEGRATION_UNAVAILABLE" });
+  assert.deepEqual(lookup, { publicWebhookId: publicId, enabled: true, materializationEnabled: false });
+  assert.deepEqual(effects, []);
 });
 for (const [label, sig] of [["missing", null], ["invalid", "sha256=" + "0".repeat(64)], ["malformed", "sha256=xyz"]] as const) {
   test("signature " + label + " rejects before functional writes", async () => {
@@ -115,15 +143,11 @@ function databaseFixture(initial: FakeContact[] = []) {
   let transientCode = "P2034";
   let integrationEnabled = true;
   let integrationPaused = false;
+  let materializationEnabled = false;
   let transientMeta: Record<string, unknown> | undefined;
   const same = (row: Record<string, unknown>, where: Record<string, unknown>) =>
     Object.entries(where).every(([key, value]) => row[key] === value);
   const tx = {
-    openCreditIntegration: { findFirst: async ({ where }: { where: Record<string, unknown> }) => {
-      assert.equal(where.enabled, true);
-      assert.ok(where.companyId);
-      return integrationEnabled ? { id: where.id, paused: integrationPaused } : null;
-    } },
     contact: {
       findMany: async ({ where }: { where: Record<string, unknown> }) => state.contacts.filter(c => same(c, where)).slice(0, 2),
       findFirst: async ({ where }: { where: Record<string, unknown> }) => state.contacts.find(c => same(c, where)) ?? null,
@@ -151,6 +175,11 @@ function databaseFixture(initial: FakeContact[] = []) {
     },
     $queryRaw: async (strings: TemplateStringsArray, ...params: unknown[]) => {
       const query = Prisma.sql(strings, ...params);
+      if (query.text.includes('FROM "OpenCreditIntegration"')) {
+        assert.match(query.text, /WHERE "companyId" = \$1 AND "id" = \$2\s+FOR UPDATE/);
+        assert.ok(query.values.every(value => typeof value === "string" && value));
+        return [{ enabled: integrationEnabled, materializationEnabled, paused: integrationPaused }];
+      }
       assert.match(query.text, /WHERE "companyId" = \$1/);
       assert.equal(typeof query.values[0], "string");
       const phones = query.values.slice(1).filter(v => typeof v === "string" && /^\d{10,13}$/.test(v));
@@ -180,7 +209,8 @@ function databaseFixture(initial: FakeContact[] = []) {
     uniqueConflict: (meta: Record<string, unknown> = {
       modelName: "OpenCreditEvent", target: ["integrationId", "eventId"]
     }) => { transient = 1; transientCode = "P2002"; transientMeta = meta; },
-    disable: () => { integrationEnabled = false; }, pause: () => { integrationPaused = true; } };
+    disable: () => { integrationEnabled = false; }, pause: () => { integrationPaused = true; },
+    materialize: () => { integrationEnabled = false; materializationEnabled = true; } };
 }
 test("retry deduplicates event and Contact; another event reuses external lead", async () => {
   const f = databaseFixture();
@@ -305,13 +335,15 @@ test("invalid identity fields are not silently stripped into valid identifiers",
   assert.throws(() => parseOpenCreditAssignedLead({ ...validPayload(), client: { phone: "abc11987654321" } }));
 });
 
-test("integration is rechecked inside transaction before any domain writes", async () => {
-  const f = databaseFixture(); f.disable();
-  await assert.rejects(ingestOpenCreditLead(f.db, binding, parseOpenCreditAssignedLead(validPayload())), /INTEGRATION_UNAVAILABLE/);
-  assert.equal(f.state.contacts.length, 0);
-  assert.equal(f.state.leads.length, 0);
-  assert.equal(f.state.events.length, 0);
-});
+for (const mode of ["disable", "materialize"] as const) {
+  test("integration is rechecked inside transaction before domain writes: " + mode, async () => {
+    const f = databaseFixture(); f[mode]();
+    await assert.rejects(ingestOpenCreditLead(f.db, binding, parseOpenCreditAssignedLead(validPayload())), /INTEGRATION_UNAVAILABLE/);
+    assert.equal(f.state.contacts.length, 0);
+    assert.equal(f.state.leads.length, 0);
+    assert.equal(f.state.events.length, 0);
+  });
+}
 
 test("unique conflict recovers a committed duplicate without repeating Contact creation", async () => {
   const f = databaseFixture();

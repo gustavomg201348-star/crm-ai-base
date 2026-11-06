@@ -6,7 +6,7 @@ import { createOpenCreditWebhookHandler } from "@/lib/opencredit-webhook-handler
 export const runtime = "nodejs";
 export const POST = createOpenCreditWebhookHandler({
   resolveIntegration: (publicWebhookId) => prisma.openCreditIntegration.findUnique({
-    where: { publicWebhookId },
+    where: { publicWebhookId, enabled: true, materializationEnabled: false },
     select: { id: true, companyId: true, enabled: true, webhookSecret: true }
   }),
   resolveSecret: resolveOpenCreditWebhookSecret,

@@ -52,7 +52,10 @@ async function fixture() {
   const send = (target = a, h = receiver(), raw = payload()) => h(new Request("https://crm.example.invalid/inbound", { method: "POST", headers: { "content-type": "application/json", "x-creditcore-sig": "sha256=" + createHmac("sha256", secret).update(Buffer.from(raw)).digest("hex") }, body: raw }), { params: Promise.resolve({ publicWebhookId: target.publicWebhookId }) });
   const inbox = () => db.openCreditInboundEvent.findMany({ where: { companyId: { in: companyIds } }, orderBy: { receivedAt: "asc" } });
   const jobs = () => db.openCreditLeadMaterialization.findMany({ where: { companyId: { in: companyIds } } });
-  const setOptIn = (target = a, materializationEnabled = true) => db.openCreditIntegration.update({ where: { id: target.id }, data: { materializationEnabled } });
+  const setOptIn = (target = a, materializationEnabled = true) => db.openCreditIntegration.update({
+    where: { id: target.id },
+    data: { materializationEnabled, ...(materializationEnabled ? { enabled: false } : {}) }
+  });
   const effects = async () => ({ contacts: await db.contact.count({ where: { companyId: { in: companyIds } } }), leads: await db.openCreditLead.count({ where: { companyId: { in: companyIds } } }), legacyEvents: await db.openCreditEvent.count({ where: { companyId: { in: companyIds } } }), conversations: await db.conversation.count({ where: { contact: { companyId: { in: companyIds } } } }), operations: await db.openCreditCommercialOperation.count({ where: { companyId: { in: companyIds } } }) });
   return { a, b, other, same, legacy, send, receiver, payload, inbox, jobs, effects, companyIds, setOptIn, ingestionEvents };
 }
@@ -72,6 +75,8 @@ function material(name: string, run: (f: Fixture) => Promise<void>) {
   } });
 }
 material("valid event commits only inbox technical metadata before 200", async f => {
+  assert.equal(f.a.enabled, true);
+  assert.equal(f.a.passiveInboundEnabled, true);
   const before = await f.effects(), r = await f.send(); assert.equal(r.status, 200); assert.deepEqual(await r.json(), { ok: true });
   const rows = await f.inbox(); assert.equal(rows.length, 1); const row = rows[0]; assert.equal(row.companyId, f.a.companyId); assert.equal(row.providerScope, f.a.providerScope); assert.equal(row.integrationId, f.a.id); assert.equal(row.provenanceKind, "OPENCREDIT_HMAC_SHA256_VERIFIED"); assert.equal(row.provenanceVersion, 1); assert.equal(row.processingState, "RECEIVED"); assert(row.receivedAt instanceof Date);
   assert.deepEqual(Object.keys(row).sort(), ["id","companyId","providerScope","integrationId","eventId","eventType","externalLeadId","contractVersion","provenanceKind","provenanceVersion","receivedAt","processingState"].sort());
@@ -183,7 +188,10 @@ function distinctEvent(f: Fixture) {
 }
 material("opt-in commits event and bound ciphertext together before 200", async f => {
   installMaterializationKey();
-  await f.setOptIn();
+  const optedIn = await f.setOptIn();
+  assert.equal(optedIn.enabled, false);
+  assert.equal(optedIn.passiveInboundEnabled, true);
+  assert.equal(optedIn.materializationEnabled, true);
   let enter!: () => void, release!: () => void;
   const started = new Promise<void>(r => { enter = r; });
   const gate = new Promise<void>(r => { release = r; });
@@ -214,6 +222,11 @@ material("opt-in commits event and bound ciphertext together before 200", async 
   assert.throws(() => materializationPayload.openMaterializationIdentity(job.protectedEnvelope!, { ...event, eventId: "external-lead:other" }), /ENVELOPE_INVALID/);
   assertNoPlaintext(event, job, responseBody, f.ingestionEvents);
   assert.equal(responseBody, '{"ok":true}');
+  assert.equal((await f.effects()).contacts, 0);
+  const optedOut = await f.setOptIn(f.a, false);
+  assert.equal(optedOut.enabled, false);
+  assert.equal(optedOut.passiveInboundEnabled, true);
+  assert.equal(optedOut.materializationEnabled, false);
   assert.deepEqual(await f.effects(), { contacts: 0, leads: 0, legacyEvents: 0, conversations: 0, operations: 0 });
 });
 
