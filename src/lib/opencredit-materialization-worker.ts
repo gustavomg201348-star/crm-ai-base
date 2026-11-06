@@ -38,7 +38,7 @@ function positiveInteger(value: number, name: string) {
 }
 
 export function isOpenCreditMaterializationWorkerEnabled(
-  env: WorkerEnvironment = process.env
+  env: WorkerEnvironment = process.env as WorkerEnvironment
 ) {
   return env.OPENCREDIT_MATERIALIZATION_WORKER_ENABLED === "true";
 }
