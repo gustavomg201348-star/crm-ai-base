@@ -577,9 +577,15 @@ model OpenCreditLeadMaterialization {
   leaseToken        String?
   leaseUntil        DateTime?
   lastErrorCode     String?
+  contactId         String?
+  channelId         String?
+  conversationId    String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
   inboundEvent      OpenCreditInboundEvent @relation(fields: [inboundEventId, companyId, providerScope, integrationId, externalLeadId], references: [id, companyId, providerScope, integrationId, externalLeadId], onDelete: Restrict, onUpdate: NoAction, map: "OCMaterialization_inbound_binding_fkey")
+  contact           Contact? @relation(fields: [companyId, contactId], references: [companyId, id], onDelete: Restrict, onUpdate: NoAction, map: "OCMaterialization_contact_fkey")
+  channel           Channel? @relation(fields: [companyId, channelId], references: [companyId, id], onDelete: Restrict, onUpdate: NoAction, map: "OCMaterialization_channel_fkey")
+  conversation      Conversation? @relation(fields: [conversationId, contactId, channelId], references: [id, contactId, channelId], onDelete: Restrict, onUpdate: NoAction, map: "OCMaterialization_conversation_fkey")
 
   @@unique([companyId, providerScope, externalLeadId], map: "OCMaterialization_company_scope_lead_key")
   @@index([expiresAt], map: "OCMaterialization_expires_idx")
@@ -635,6 +641,7 @@ model RateLimitBucket {
 }
 
 model Channel {
+  openCreditMaterializations OpenCreditLeadMaterialization[]
   id            String     @id @default(cuid())
   companyId     String
   name          String
@@ -850,6 +857,7 @@ model NextBestActionEvent {
 }
 
 model Contact {
+  openCreditMaterializations OpenCreditLeadMaterialization[]
   openCreditConsumerAuthorizations OpenCreditConsumerAuthorization[]
   id                 String              @id @default(cuid())
   companyId          String
@@ -1127,6 +1135,7 @@ model PipelineStage {
 }
 
 model Conversation {
+  openCreditMaterializations OpenCreditLeadMaterialization[]
   id            String         @id @default(cuid())
   contactId     String
   agentId       String?

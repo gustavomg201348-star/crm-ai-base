@@ -2,17 +2,50 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 
 const maxBatchSize = 10;
 const maxAttempts = 10;
-const retryErrors = ["TRANSIENT_FAILURE", "KEY_UNAVAILABLE", "SERIALIZATION_CONFLICT", "LEASE_EXPIRED"] as const;
-const reviewReasons = ["ENVELOPE_INVALID", "BINDING_MISMATCH", "IDENTITY_INSUFFICIENT"] as const;
+const retryErrors = ["TRANSIENT_FAILURE", "KEY_UNAVAILABLE", "SERIALIZATION_CONFLICT", "LEASE_EXPIRED", "MODE_UNAVAILABLE"] as const;
+const reviewReasons = [
+  "ENVELOPE_INVALID", "BINDING_MISMATCH", "IDENTITY_INSUFFICIENT",
+  "CONTACT_IDENTITY_CONFLICT", "CONTACT_ARCHIVED_MATCH", "CONTACT_DATA_INCOMPLETE",
+  "CHANNEL_CONFIGURATION_CONFLICT", "CONVERSATION_CONFIGURATION_CONFLICT"
+] as const;
 
 type RetryError = typeof retryErrors[number];
-type ReviewReason = typeof reviewReasons[number];
+export type MaterializationReviewReason = typeof reviewReasons[number];
 type QueueDb = Pick<PrismaClient, "$queryRaw" | "$transaction">;
-type Lease = { id: string; leaseToken: string };
+export type MaterializationLease = { id: string; leaseToken: string };
+type Lease = MaterializationLease;
 type ClaimedJob = Lease & { attempts: number; leaseUntil: Date };
 type FinalState = "RETRY" | "NEEDS_REVIEW" | "COMPLETED" | "EXPIRED";
 type Outcome = { id: string; state: FinalState };
-type Transition = { state: Exclude<FinalState, "EXPIRED">; delayMs: number; error: RetryError | null; review: ReviewReason | "RETRY_EXHAUSTED" | null };
+type Transition = { state: "RETRY" | "NEEDS_REVIEW"; delayMs: number; error: RetryError | null; review: MaterializationReviewReason | "RETRY_EXHAUSTED" | null };
+
+export class MaterializationLeaseLostError extends Error {
+  constructor() { super("OPENCREDIT_MATERIALIZATION_LEASE_LOST"); }
+}
+
+export async function completeInTransaction(
+  tx: Prisma.TransactionClient,
+  lease: Lease,
+  outcome: { contactId: string; channelId: string; conversationId: string }
+) {
+  const [result] = await tx.$queryRaw<Array<{ id: string; state: "COMPLETED" }>>`
+    WITH locked AS MATERIALIZED (
+      SELECT "id" FROM "OpenCreditLeadMaterialization"
+      WHERE "id" = ${lease.id} AND "state" = 'PROCESSING' AND "leaseToken" = ${lease.leaseToken}
+      FOR UPDATE
+    ), t AS MATERIALIZED (
+      SELECT "id", clock_timestamp() AT TIME ZONE 'UTC' AS now FROM locked
+    )
+    UPDATE "OpenCreditLeadMaterialization" AS q
+    SET "state" = 'COMPLETED', "contactId" = ${outcome.contactId}, "channelId" = ${outcome.channelId},
+        "conversationId" = ${outcome.conversationId}, "protectedEnvelope" = NULL, "availableAt" = NULL,
+        "leaseToken" = NULL, "leaseUntil" = NULL, "lastErrorCode" = NULL, "reviewCode" = NULL, "updatedAt" = t.now
+    FROM t
+    WHERE q."id" = t."id" AND q."leaseUntil" > t.now AND q."expiresAt" > t.now
+    RETURNING q."id", q."state"`;
+  if (!result) throw new MaterializationLeaseLostError();
+  return result;
+}
 
 function batchSize(requested: number) {
   if (!Number.isInteger(requested) || requested < 1) throw new Error("INVALID_MATERIALIZATION_BATCH_SIZE");
@@ -37,7 +70,7 @@ async function transitionLease(tx: Prisma.TransactionClient, lease: Lease, next:
         "leaseUntil" = NULL,
         "lastErrorCode" = CASE WHEN q."expiresAt" <= t.now THEN NULL ELSE ${next.error}::text END,
         "reviewCode" = CASE WHEN q."expiresAt" <= t.now THEN q."reviewCode" ELSE ${next.review}::text END,
-        "protectedEnvelope" = CASE WHEN q."expiresAt" <= t.now OR ${next.state} = 'COMPLETED'
+        "protectedEnvelope" = CASE WHEN q."expiresAt" <= t.now
                                    THEN NULL ELSE q."protectedEnvelope" END,
         "updatedAt" = t.now
     FROM t
@@ -96,15 +129,9 @@ export function createOpenCreditMaterializationQueue(db: QueueDb, random: () => 
       return withLease(lease, attempts => retryTransition(attempts, error));
     },
 
-    review(lease: Lease, reason: ReviewReason) {
+    review(lease: Lease, reason: MaterializationReviewReason) {
       if (!reviewReasons.includes(reason)) throw new Error("INVALID_MATERIALIZATION_REVIEW_CODE");
       return withLease(lease, () => ({ state: "NEEDS_REVIEW", delayMs: 0, error: null, review: reason }));
-    },
-
-    // Technical transition for state-machine tests. A future materializer must
-    // complete in the same transaction as its domain writes.
-    complete(lease: Lease) {
-      return withLease(lease, () => ({ state: "COMPLETED", delayMs: 0, error: null, review: null }));
     },
 
     async recover(limit = maxBatchSize) {
