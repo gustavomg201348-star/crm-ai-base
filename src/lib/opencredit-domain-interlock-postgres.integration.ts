@@ -200,7 +200,7 @@ test("upgrade preserves existing legacy, passive inbox and new-mode rows without
     const [history] = await isolated.$queryRaw<Array<{ count: number }>>`
       SELECT count(*)::int AS count FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL
     `;
-    assert.equal(history.count, names.length);
+    assert.equal(history.count, names.filter(entry => entry <= migration).length);
   } finally {
     await isolated.$disconnect();
     await db.$executeRawUnsafe('DROP DATABASE "' + name + '"');

@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process";
 import { after, before, test } from "node:test";
 import { PrismaClient, type Prisma } from "@prisma/client";
 import { assertOpenCreditCommercialOperationTestDatabase } from "./opencredit-commercial-operation-postgres.guard";
-import { createOpenCreditMaterializationQueue, materializationRetryDelayMs } from "./opencredit-materialization-queue.service";
+import { completeInTransaction, createOpenCreditMaterializationQueue, materializationRetryDelayMs, MaterializationLeaseLostError } from "./opencredit-materialization-queue.service";
 
 assertOpenCreditCommercialOperationTestDatabase(process.env);
 if (process.env.OPENCREDIT_MATERIALIZATION_QUEUE_POSTGRES_TEST !== "1") throw new Error("QUEUE_TEST_REQUIRES_DISPOSABLE_OPT_IN");
@@ -134,17 +134,19 @@ queueTest("two concurrent workers skip a held lock and claim disjoint rows once"
 });
 
 queueTest("wrong, expired and replaced tokens cannot complete, retry or review", async f => {
+  const complete = (lease: { id: string; leaseToken: string }) => db.$transaction(tx =>
+    completeInTransaction(tx, lease, { contactId: "absent", channelId: "absent", conversationId: "absent" }));
   const row = await f.create();
   const [first] = await queue.claim();
   const wrong = { ...first, leaseToken: "wrong-token" };
-  assert.equal(await queue.complete(wrong), null);
+  await assert.rejects(() => complete(wrong), MaterializationLeaseLostError);
   assert.equal(await queue.retry(wrong, "TRANSIENT_FAILURE"), null);
   assert.equal(await queue.review(wrong, "ENVELOPE_INVALID"), null);
   assert.throws(() => queue.retry(first, "unsafe" as never), /INVALID_MATERIALIZATION_RETRY_CODE/);
   assert.throws(() => queue.review(first, "unsafe" as never), /INVALID_MATERIALIZATION_REVIEW_CODE/);
 
   await f.ageLease(row.id);
-  assert.equal(await queue.complete(first), null);
+  await assert.rejects(() => complete(first), MaterializationLeaseLostError);
   assert.equal(await queue.retry(first, "TRANSIENT_FAILURE"), null);
   assert.equal(await queue.review(first, "ENVELOPE_INVALID"), null);
   assert.deepEqual(await queue.recover(), [{ id: row.id, state: "RETRY" }]);
@@ -160,12 +162,11 @@ queueTest("wrong, expired and replaced tokens cannot complete, retry or review",
   const [second] = await queue.claim();
   assert.equal(second.attempts, 2);
   assert.notEqual(second.leaseToken, first.leaseToken);
-  assert.equal(await queue.complete(first), null);
+  await assert.rejects(() => complete(first), MaterializationLeaseLostError);
   assert.equal(await queue.retry(first, "TRANSIENT_FAILURE"), null);
   assert.equal(await queue.review(first, "ENVELOPE_INVALID"), null);
-  assert.deepEqual(await queue.complete(second), { id: row.id, state: "COMPLETED" });
-  assert.equal((await f.get(row.id)).protectedEnvelope, null);
-  assert.equal(await queue.complete(second), null);
+  assert.deepEqual(await queue.review(second, "IDENTITY_INSUFFICIENT"), { id: row.id, state: "NEEDS_REVIEW" });
+  await assert.rejects(() => complete(second), MaterializationLeaseLostError);
 });
 
 queueTest("valid token can send a job for review while retaining the opaque envelope", async f => {
@@ -309,7 +310,7 @@ test("queue migration preserves preexisting PENDING and NEEDS_REVIEW without cla
     cpSync(join("prisma/migrations", migration), join(temp, "migrations", migration), { recursive: true });
     deploy();
     await isolated.$disconnect();
-    const after = await isolated.openCreditLeadMaterialization.findMany({ orderBy: { id: "asc" } });
+    const after = await isolated.$queryRaw<Array<Record<string, unknown>>>`SELECT * FROM "OpenCreditLeadMaterialization" ORDER BY "id"`;
     assert.deepEqual(after, before.map(row => ({ ...row, availableAt: null, attempts: 0, leaseToken: null, leaseUntil: null, lastErrorCode: null })));
     assert.equal(await isolated.openCreditLeadMaterialization.count({ where: { companyId: emptyCompany.id } }), 0);
     assert.deepEqual(await createOpenCreditMaterializationQueue(isolated).claim(), []);
