@@ -46,6 +46,8 @@ type ContextMessageRecord = {
 type ContextConversationRecord = {
   id: string;
   channelId: string | null;
+  channel?: string;
+  channelRef?: { type: string; provider: string } | null;
   contact: {
     id: string;
     cpf: string | null;
@@ -166,6 +168,8 @@ const defaultDependencies: AiResponseContextDependencies = {
       select: {
         id: true,
         channelId: true,
+        channel: true,
+        channelRef: openCreditChannelRef,
         contact: {
           select: {
             id: true,
@@ -387,6 +391,7 @@ export async function buildAiResponseContext(
   dependencies: AiResponseContextDependencies = defaultDependencies
 ): Promise<AiResponseContext> {
   const conversation = await dependencies.loadConversation({ companyId, conversationId });
+  if (conversation && isOpenCreditConversation(conversation)) throw new OpenCreditTransportBlockedError();
   if (!conversation) throw new AiResponseContextNotFoundError();
 
   const selectedMessageId = replyToMessageId?.trim() || null;
@@ -501,3 +506,4 @@ export async function buildAiResponseContext(
     financialFacts: { ...opportunityFacts.financialFacts, proposal: projection.proposal }
   };
 }
+import { isOpenCreditConversation, openCreditChannelRef, OpenCreditTransportBlockedError } from "@/lib/conversation-channel.service";

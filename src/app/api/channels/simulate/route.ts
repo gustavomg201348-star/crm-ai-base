@@ -29,17 +29,19 @@ export async function POST(request: NextRequest) {
       return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
     }
 
-    const channel = body.channelId
-      ? await prisma.channel.findFirst({
-          where: { id: body.channelId, companyId: session.companyId }
-        })
-      : await prisma.channel.findFirst({
-          where: { companyId: session.companyId, type: "whatsapp" }
-        });
+    const channel = await prisma.channel.findFirst({
+      where: {
+        ...(body.channelId ? { id: body.channelId } : {}),
+        companyId: session.companyId,
+        type: "whatsapp",
+        provider: "meta"
+      }
+    });
+    if (!channel) return publicErrorResponse({ code: "CHANNEL_NOT_FOUND", status: 404 });
 
     const conversation = await processInboundMessage({
       companyId: session.companyId,
-      channelId: channel?.id ?? null,
+      channelId: channel.id,
       name: body.name,
       phone: body.phone,
       body: body.message

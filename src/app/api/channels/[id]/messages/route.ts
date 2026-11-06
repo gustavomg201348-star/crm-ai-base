@@ -4,7 +4,7 @@ import { getSessionFromRequest } from "@/lib/auth";
 import { observeTextOutboundAuthority } from "@/lib/authority-text-shadow-runtime";
 import { createActivity } from "@/lib/activities";
 import { resolveChannelAccessToken } from "@/lib/channel-secrets";
-import { conversationMatchesChannel } from "@/lib/conversation-channel.service";
+import { conversationMatchesChannel, isOpenCreditConversation, openCreditChannelRef } from "@/lib/conversation-channel.service";
 import { findOrCreateConversationForChannel } from "@/lib/conversation-lifecycle.service";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import {
@@ -33,7 +33,10 @@ type RouteContext = {
   params: Promise<{ id: string }>;
 };
 
-type ConversationWithContact = Conversation & { contact: Contact };
+type ConversationWithContact = Conversation & {
+  contact: Contact;
+  channelRef?: { type: string; provider: string } | null;
+};
 
 export async function POST(request: NextRequest, context: RouteContext) {
   let failedConversationId: string | undefined;
@@ -47,15 +50,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (!session) {
       return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
     }
-
-    const limited = await enforceRateLimits([
-      {
-        category: "message-send",
-        identifiers: [session.companyId, session.id],
-        ...rateLimitPolicies.messageSend
-      }
-    ]);
-    if (limited) return limited;
 
     const { id } = await context.params;
     const body = (await request.json().catch(() => null)) as
@@ -72,37 +66,40 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
     }
 
-    const channel = await prisma.channel.findFirst({
-      where: { id, companyId: session.companyId, type: "whatsapp" }
-    });
-
-    if (!channel) {
-      return publicErrorResponse({ code: "CHANNEL_NOT_FOUND", status: 404 });
-    }
-
-    if (channel.provider !== "meta") {
-      return publicErrorResponse({ code: "CHANNEL_INVALID_INPUT", status: 400 });
-    }
-
-    const accessToken = resolveChannelAccessToken(channel.accessToken, {
-      channelId: channel.id
-    });
-
-    if (!channel.phoneNumberId || !accessToken) {
-      return publicErrorResponse({ code: "CHANNEL_INVALID_INPUT", status: 400 });
-    }
-
-    const normalizedPhone = normalizeContactPhone(body.to);
-    const contactNormalizedPhone = getContactNormalizedPhone(normalizedPhone);
     let conversation: ConversationWithContact | null = body.conversationId
       ? await prisma.conversation.findFirst({
           where: {
             id: body.conversationId,
             contact: { companyId: session.companyId }
           },
-          include: { contact: true }
+          include: { contact: true, channelRef: openCreditChannelRef }
         })
       : null;
+
+    if (conversation && isOpenCreditConversation(conversation)) {
+      return publicErrorResponse({ code: "FORBIDDEN", status: 403 });
+    }
+
+    const limited = await enforceRateLimits([
+      {
+        category: "message-send",
+        identifiers: [session.companyId, session.id],
+        ...rateLimitPolicies.messageSend
+      }
+    ]);
+    if (limited) return limited;
+
+    const normalizedPhone = normalizeContactPhone(body.to);
+    const contactNormalizedPhone = getContactNormalizedPhone(normalizedPhone);
+    const channel = await prisma.channel.findFirst({
+      where: { id, companyId: session.companyId, type: "whatsapp" }
+    });
+    if (!channel) {
+      return publicErrorResponse({ code: "CHANNEL_NOT_FOUND", status: 404 });
+    }
+    if (channel.provider !== "meta") {
+      return publicErrorResponse({ code: "CHANNEL_INVALID_INPUT", status: 400 });
+    }
 
     if (body.conversationId) {
       if (!conversation) {
@@ -121,7 +118,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
       if (!conversationPhone || conversationPhone !== normalizedPhone) {
         return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
       }
+    }
 
+    const accessToken = resolveChannelAccessToken(channel.accessToken, { channelId: channel.id });
+    if (!channel.phoneNumberId || !accessToken) {
+      return publicErrorResponse({ code: "CHANNEL_INVALID_INPUT", status: 400 });
+    }
+    if (conversation) {
       failedConversationId = conversation.id;
       failedCompanyId = session.companyId;
       failedMessageBody = message;

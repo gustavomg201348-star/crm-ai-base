@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { hasOpenCreditChannelMarker } from "@/lib/conversation-channel.service";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
@@ -126,10 +127,16 @@ export async function PATCH(
     if (!current) {
       return publicErrorResponse({ code: "CHANNEL_NOT_FOUND", status: 404 });
     }
+    if (hasOpenCreditChannelMarker(current)) {
+      return publicErrorResponse({ code: "FORBIDDEN", status: 403 });
+    }
 
     const name = body?.name?.trim();
     const type = body?.type?.trim();
     const provider = body?.provider?.trim();
+    if (hasOpenCreditChannelMarker({ type, provider })) {
+      return publicErrorResponse({ code: "CHANNEL_INVALID_INPUT", status: 400 });
+    }
     const status = body?.status?.trim().toUpperCase();
 
     if (body?.name !== undefined && !name) {

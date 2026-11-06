@@ -341,7 +341,8 @@ export async function processCampaign(campaignId: string) {
   });
 
   if (!campaign) throw new Error("Disparo nao encontrado.");
-  if (campaign.channel.provider !== "meta") {
+  if (campaign.channel.type !== "whatsapp" || campaign.channel.provider !== "meta" ||
+      campaign.channel.companyId !== campaign.companyId) {
     throw new Error("Disparo real exige canal WhatsApp Meta.");
   }
   const accessToken = resolveChannelAccessToken(campaign.channel.accessToken, {

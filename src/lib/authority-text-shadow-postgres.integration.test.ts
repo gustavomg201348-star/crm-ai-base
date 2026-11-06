@@ -9,6 +9,12 @@ import { createShadowAuthorityReader } from "./authority-text-shadow-reader";
 import { createTextAuthorityObserver } from "./authority-text-shadow";
 import type { ShadowMetric } from "./authority-text-shadow-contract";
 import { createConversationAuthorityService } from "./conversation-authority.service";
+import {
+  conversationMatchesChannel,
+  isOpenCreditConversation,
+  openCreditChannelRef,
+  OpenCreditTransportBlockedError,
+} from "./conversation-channel.service";
 import { createInboundMessageWithDurableEvent, inboundEventTransaction } from "./conversation-inbound-event";
 import { conversationInclude, mapConversation } from "./conversations";
 
@@ -88,7 +94,12 @@ test("real private PostgreSQL pool cannot starve either legacy text route, even 
             "@/lib/db": { prisma: { conversation: { findFirst: async () => conversation }, channel: { findFirst: async () => channel },
               $transaction: async (fn: (tx: unknown) => unknown) => fn({ message: { create: persist }, conversation: { update: async () => conversation } }) } },
             "@/lib/channel-secrets": { resolveChannelAccessToken: () => "fake" },
-            "@/lib/conversation-channel.service": { conversationMatchesChannel: () => true },
+            "@/lib/conversation-channel.service": {
+              conversationMatchesChannel,
+              isOpenCreditConversation,
+              openCreditChannelRef,
+              OpenCreditTransportBlockedError,
+            },
             "@/lib/conversation-lifecycle.service": {}, "@/lib/contacts": { normalizeContactPhone: (value: string) => value, getContactNormalizedPhone: (value: string) => value },
             "@/lib/conversation-message.service": { getConversationIntegration: async () => ({ conversation, channel }),
               saveOutboundMessage: async () => { await persist(); return mapConversation(conversation); } },

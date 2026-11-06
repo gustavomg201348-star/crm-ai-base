@@ -358,6 +358,12 @@ jobs:
           OPENCREDIT_COMMERCIAL_OPERATION_POSTGRES_TEST: "1"
           OPENCREDIT_MATERIALIZATION_QUEUE_POSTGRES_TEST: "1"
 
+      - name: Validate OpenCredit transport isolation on disposable PostgreSQL
+        run: npx --yes tsx@4.20.6 --test src/lib/opencredit-transport-isolation-postgres.integration.ts
+        env:
+          OPENCREDIT_COMMERCIAL_OPERATION_POSTGRES_TEST: "1"
+          OPENCREDIT_TRANSPORT_ISOLATION_POSTGRES_TEST: "1"
+
       - name: Validate OpenCredit one-shot dispatcher on disposable PostgreSQL with fake provider
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-create-client-dispatcher-postgres.integration.ts
         env:

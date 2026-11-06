@@ -3,6 +3,7 @@ import { getSessionFromRequest } from "@/lib/auth";
 import { normalizeAiMode, updateConversationAiMode } from "@/lib/ai-attendant.service";
 import { resolveConversationAccess } from "@/lib/conversation-access-control";
 import { prisma } from "@/lib/db";
+import { OpenCreditTransportBlockedError } from "@/lib/conversation-channel.service";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -47,7 +48,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     });
 
     return NextResponse.json({ conversation });
-  } catch {
+  } catch (error) {
+    if (error instanceof OpenCreditTransportBlockedError) {
+      return NextResponse.json({ code: "FORBIDDEN" }, { status: 403 });
+    }
     return NextResponse.json(
       { error: "Nao foi possivel atualizar modo da IA." },
       { status: 500 }

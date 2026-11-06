@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { isOpenCreditConversation, openCreditChannelRef, OpenCreditTransportBlockedError } from "@/lib/conversation-channel.service";
 import { getSessionFromRequest } from "@/lib/auth";
 import { observeTextOutboundAuthority } from "@/lib/authority-text-shadow-runtime";
 import { createActivity } from "@/lib/activities";
@@ -51,7 +52,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         id: (await context.params).id,
         contact: { companyId: session.companyId }
       },
-      include: { contact: true }
+      include: { contact: true, channelRef: openCreditChannelRef }
     });
 
     if (!conversation) {
@@ -60,6 +61,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     if (!canAccessConversation({ session, agentId: conversation.agentId })) {
       return NextResponse.json({ error: "Conversa atribuida a outro atendente." }, { status: 403 });
+    }
+
+    if (isOpenCreditConversation(conversation)) {
+      return publicErrorResponse({ code: "FORBIDDEN", status: 403 });
     }
 
     const direction = body?.direction ?? "outbound";
@@ -156,6 +161,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     return NextResponse.json({ conversation: mapConversation(updated) });
   } catch (error) {
+    if (error instanceof OpenCreditTransportBlockedError) return publicErrorResponse({ code: "FORBIDDEN", status: 403 });
     if (error instanceof InvalidMessageReplyError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
