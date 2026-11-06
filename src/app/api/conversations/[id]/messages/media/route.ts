@@ -7,6 +7,7 @@ import { saveFailedOutboundMessage } from "@/lib/message-delivery";
 import { safeLogError } from "@/lib/safe-logger";
 import { enforceRateLimits, rateLimitPolicies } from "@/lib/rate-limit";
 import { maxMediaSize, sendConversationMedia } from "@/lib/whatsapp-media.service";
+import { isOpenCreditConversation, openCreditChannelRef, OpenCreditTransportBlockedError } from "@/lib/conversation-channel.service";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -34,6 +35,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (access.status === "forbidden") {
       return NextResponse.json({ error: "Conversa atribuida a outro atendente." }, { status: 403 });
     }
+
+    const channel = await prisma.conversation.findFirst({
+      where: { id: access.conversation.id, contact: { companyId: session.companyId } },
+      select: { channel: true, channelRef: openCreditChannelRef }
+    });
+    if (!channel) return publicErrorResponse({ code: "NOT_FOUND", status: 404 });
+    if (isOpenCreditConversation(channel)) return publicErrorResponse({ code: "FORBIDDEN", status: 403 });
 
     const limited = await enforceRateLimits([
       {
@@ -75,6 +83,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     return NextResponse.json({ conversation });
   } catch (error) {
+    if (error instanceof OpenCreditTransportBlockedError) return publicErrorResponse({ code: "FORBIDDEN", status: 403 });
     const message = "Falha ao enviar midia.";
 
     if (authorizedConversation) {

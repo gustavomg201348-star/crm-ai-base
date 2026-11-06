@@ -392,10 +392,11 @@ function fallbackSuggestion(conversation: Awaited<ReturnType<typeof loadAiContex
 async function loadAiContext(conversationId: string, companyId: string) {
   const conversation = await prisma.conversation.findFirst({
     where: { id: conversationId, contact: { companyId } },
-    include: conversationInclude
+    include: { ...conversationInclude, channelRef: openCreditChannelRef }
   });
 
   if (!conversation) throw new Error("Conversa nao encontrada.");
+  if (isOpenCreditConversation(conversation)) throw new OpenCreditTransportBlockedError();
   return conversation;
 }
 
@@ -561,10 +562,12 @@ export async function updateConversationAiMode({
   paused?: boolean;
 }) {
   const conversation = await prisma.conversation.findFirst({
-    where: { id: conversationId, contact: { companyId } }
+    where: { id: conversationId, contact: { companyId } },
+    include: { channelRef: openCreditChannelRef }
   });
 
   if (!conversation) throw new Error("Conversa nao encontrada.");
+  if (isOpenCreditConversation(conversation)) throw new OpenCreditTransportBlockedError();
 
   const updated = await prisma.conversation.update({
     where: { id: conversationId },
@@ -587,14 +590,15 @@ export async function maybeSendAutomaticAiReply({
 }) {
   const conversation = await prisma.conversation.findFirst({
     where: { id: conversationId, contact: { companyId } },
-    include: { contact: true }
+    include: { contact: true, channelRef: openCreditChannelRef }
   });
+  if (!conversation || isOpenCreditConversation(conversation)) return null;
   const company = await prisma.company.findUnique({
     where: { id: companyId },
     select: { aiMode: true }
   });
 
-  if (!conversation || !company) return null;
+  if (!company) return null;
   if (
     !shouldAutoReply({
       companyMode: company.aiMode,
@@ -629,3 +633,4 @@ export async function maybeSendAutomaticAiReply({
     senderType: "ai"
   });
 }
+import { isOpenCreditConversation, openCreditChannelRef, OpenCreditTransportBlockedError } from "@/lib/conversation-channel.service";

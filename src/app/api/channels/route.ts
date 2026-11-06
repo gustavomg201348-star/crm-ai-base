@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { hasOpenCreditChannelMarker, OPEN_CREDIT_CHANNEL_PROVIDER, OPEN_CREDIT_CHANNEL_TYPE } from "@/lib/conversation-channel.service";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
@@ -98,7 +99,7 @@ export async function GET(request: NextRequest) {
     if (blocked) return blocked;
 
     const channels = await prisma.channel.findMany({
-      where: { companyId: session.companyId },
+      where: { companyId: session.companyId, type: { not: OPEN_CREDIT_CHANNEL_TYPE }, provider: { not: OPEN_CREDIT_CHANNEL_PROVIDER } },
       orderBy: { createdAt: "asc" }
     });
 
@@ -128,6 +129,7 @@ export async function POST(request: NextRequest) {
     const body = (await request.json().catch(() => null)) as
       | {
           name?: string;
+          type?: string;
           provider?: string;
           externalId?: string;
           phoneNumberId?: string;
@@ -144,6 +146,9 @@ export async function POST(request: NextRequest) {
     }
 
     const provider = body.provider?.trim() || "sandbox";
+    if (hasOpenCreditChannelMarker({ type: body.type?.trim(), provider })) {
+      return publicErrorResponse({ code: "CHANNEL_INVALID_INPUT", status: 400 });
+    }
     const phoneNumberId = body.phoneNumberId?.trim() || null;
     const externalId = body.externalId?.trim() || phoneNumberId;
     const rawSecrets = {

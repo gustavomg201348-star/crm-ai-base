@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { createActivity } from "@/lib/activities";
 import { resolveChannelAccessToken } from "@/lib/channel-secrets";
-import { resolveConversationChannelId } from "@/lib/conversation-channel.service";
+import { isOpenCreditConversation, openCreditChannelRef, OpenCreditTransportBlockedError, resolveConversationChannelId } from "@/lib/conversation-channel.service";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
 
@@ -28,10 +28,11 @@ export async function getConversationIntegration({
 }): Promise<ConversationIntegration> {
   const conversation = await prisma.conversation.findFirst({
     where: { id: conversationId, contact: { companyId } },
-    include: { contact: true }
+    include: { contact: true, channelRef: openCreditChannelRef }
   });
 
   if (!conversation) throw new Error("Conversa nao encontrada.");
+  if (isOpenCreditConversation(conversation)) throw new OpenCreditTransportBlockedError();
 
   const channelId = resolveConversationChannelId(conversation);
 

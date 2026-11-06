@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { resolveChannelAccessToken } from "@/lib/channel-secrets";
-import { resolveConversationChannelId } from "@/lib/conversation-channel.service";
+import { isOpenCreditConversation, openCreditChannelRef, resolveConversationChannelId } from "@/lib/conversation-channel.service";
 import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { canAccessConversation } from "@/lib/permissions";
@@ -55,7 +55,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
       include: {
         conversation: {
           include: {
-            contact: true
+            contact: true,
+            channelRef: openCreditChannelRef
           }
         }
       }
@@ -70,6 +71,10 @@ export async function GET(request: NextRequest, context: RouteContext) {
         { error: "Conversa atribuida a outro atendente." },
         { status: 403 }
       );
+    }
+
+    if (isOpenCreditConversation(message.conversation)) {
+      return publicErrorResponse({ code: "FORBIDDEN", status: 403 });
     }
 
     if (!message.mediaId) {

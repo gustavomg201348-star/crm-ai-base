@@ -1,5 +1,28 @@
 export const LEGACY_WHATSAPP_CHANNEL = "whatsapp";
 export const WHATSAPP_CHANNEL_PREFIX = "whatsapp:";
+export const OPEN_CREDIT_CHANNEL_TYPE = "OPEN_CREDIT";
+export const OPEN_CREDIT_CHANNEL_PROVIDER = "internal";
+export const OPEN_CREDIT_CONVERSATION_CHANNEL = "OPEN_CREDIT";
+
+type ChannelKind = { type?: string | null; provider?: string | null };
+
+// Reserve either marker, including rows that have an inconsistent pair.
+export function hasOpenCreditChannelMarker(channel?: ChannelKind | null): boolean {
+  return channel?.type === OPEN_CREDIT_CHANNEL_TYPE || channel?.provider === OPEN_CREDIT_CHANNEL_PROVIDER;
+}
+
+export const openCreditChannelRef = { select: { type: true, provider: true } } as const;
+
+export function isOpenCreditConversation(conversation: { channel?: string | null; channelRef?: ChannelKind | null }): boolean {
+  return conversation.channel === OPEN_CREDIT_CONVERSATION_CHANNEL || hasOpenCreditChannelMarker(conversation.channelRef);
+}
+
+export class OpenCreditTransportBlockedError extends Error {
+  constructor() {
+    super("OPENCREDIT_TRANSPORT_BLOCKED");
+    this.name = "OpenCreditTransportBlockedError";
+  }
+}
 
 export type ConversationChannelLike = {
   channel?: string | null;

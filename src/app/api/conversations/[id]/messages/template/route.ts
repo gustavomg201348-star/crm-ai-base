@@ -7,6 +7,7 @@ import { canAccessConversation } from "@/lib/permissions";
 import { safeLogError } from "@/lib/safe-logger";
 import { enforceRateLimits, rateLimitPolicies } from "@/lib/rate-limit";
 import { sendConversationTemplate } from "@/lib/whatsapp-template.service";
+import { isOpenCreditConversation, openCreditChannelRef, OpenCreditTransportBlockedError } from "@/lib/conversation-channel.service";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -38,7 +39,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     const current = await prisma.conversation.findFirst({
       where: { id: (await context.params).id, contact: { companyId: session.companyId } },
-      select: { agentId: true }
+      select: { agentId: true, channel: true, channelRef: openCreditChannelRef }
     });
 
     if (!current) {
@@ -48,6 +49,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (!canAccessConversation({ session, agentId: current.agentId })) {
       return NextResponse.json({ error: "Conversa atribuida a outro atendente." }, { status: 403 });
     }
+    if (isOpenCreditConversation(current)) return publicErrorResponse({ code: "FORBIDDEN", status: 403 });
 
     const limited = await enforceRateLimits([
       {
@@ -71,6 +73,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     return NextResponse.json({ conversation });
   } catch (error) {
+    if (error instanceof OpenCreditTransportBlockedError) return publicErrorResponse({ code: "FORBIDDEN", status: 403 });
     const message = "Falha ao enviar template.";
 
     if (authorizedConversation) {

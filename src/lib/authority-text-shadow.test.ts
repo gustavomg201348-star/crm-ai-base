@@ -6,6 +6,7 @@ import { shadowMode, type ShadowAuthority, type ShadowContext, type ShadowMetric
 import { evaluateTextAuthority } from "./authority-text-shadow-evaluator";
 import { createTextAuthorityObserver } from "./authority-text-shadow";
 import { createInboundMessageWithDurableEvent, inboundEventTransaction } from "./conversation-inbound-event";
+import * as conversationChannel from "./conversation-channel.service";
 
 const context: ShadowContext = { companyId: "company", channelId: "channel", conversationId: "conversation",
   actorUserId: "actor", assignedUserId: "actor", source: "CHANNEL_TEXT", intentId: null };
@@ -144,8 +145,9 @@ async function routeScenario(channel: boolean, mode: "OFF" | "SHADOW", row: Shad
     if (row === "pending") return new Promise<ShadowAuthority | null>(() => {});
     return row;
   }, emit: metric => metrics.push(metric) });
-  const conversation = { id: "conversation", agentId: "actor", contactId: "contact", status: "OPEN", contact: { phone: "5500000000000" } };
-  const integration = { id: "channel", provider: "meta", phoneNumberId: "fake", accessToken: "fake" };
+  const integration = { id: "channel", type: "whatsapp", provider: "meta", phoneNumberId: "fake", accessToken: "fake" };
+  const conversation = { id: "conversation", agentId: "actor", contactId: "contact", status: "OPEN",
+    channel: "whatsapp:channel", channelId: integration.id, channelRef: integration, contact: { phone: "5500000000000" } };
   const tx = { message: { create: async ({ data }: { data: Record<string, unknown> }) => {
     assert.equal(data.conversationId, conversation.id);
     effects.push("message"); return { id: "synthetic-message" };
@@ -173,7 +175,7 @@ async function routeScenario(channel: boolean, mode: "OFF" | "SHADOW", row: Shad
         return fn(tx);
       } } },
     "@/lib/channel-secrets": { resolveChannelAccessToken: () => "fake" },
-    "@/lib/conversation-channel.service": { conversationMatchesChannel: () => true },
+    "@/lib/conversation-channel.service": conversationChannel,
     "@/lib/conversation-lifecycle.service": {}, "@/lib/contacts": { normalizeContactPhone: (phone: string) => phone, getContactNormalizedPhone: (phone: string) => phone },
     "@/lib/conversation-message.service": { getConversationIntegration: async () => ({ conversation, channel: integration }),
       saveOutboundMessage: async () => { effects.push("message"); return conversation; } },
