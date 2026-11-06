@@ -126,7 +126,7 @@ type WorkerRuntimeGlobal = typeof globalThis & {
 };
 
 export async function startOpenCreditMaterializationWorkerFromRuntime(
-  env: WorkerEnvironment = process.env
+  env: WorkerEnvironment = process.env as WorkerEnvironment
 ) {
   if (!isOpenCreditMaterializationWorkerEnabled(env)) {
     return { started: false as const, reason: "disabled" as const };
