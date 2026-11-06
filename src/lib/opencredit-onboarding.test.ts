@@ -19,6 +19,7 @@ function fixture(options: typeof encryption | null = encryption, session: Sessio
   let counter = 0;
   let conflict = false;
   let createError: string | null = null;
+  let beforeUpdate: (() => void) | undefined;
   type Args = { where?: Record<string, unknown>; data?: Record<string, unknown>; orderBy?: unknown };
   const matches = (row: OpenCreditIntegration, where: Record<string, unknown> = {}) => Object.entries(where).every(([key, value]) => {
     const actual = row[key as keyof OpenCreditIntegration];
@@ -30,11 +31,12 @@ function fixture(options: typeof encryption | null = encryption, session: Sessio
     async create(args: Args) {
       if (createError) throw new Error(createError);
       calls.push({ method: "create", args });
-      const row = { ...args.data, id: `integration-${++counter}`, createdAt: new Date(counter), updatedAt: new Date(counter) } as OpenCreditIntegration;
+      const row = { materializationEnabled: false, ...args.data, id: `integration-${++counter}`, createdAt: new Date(counter), updatedAt: new Date(counter) } as OpenCreditIntegration;
       rows.push(row); return { ...row };
     },
     async update(args: Args) {
       calls.push({ method: "update", args });
+      beforeUpdate?.();
       const row = rows.find(row => matches(row, args.where));
       if (conflict || !row) throw new Prisma.PrismaClientKnownRequestError("synthetic conflict", { code: "P2025", clientVersion: "5.22.0" });
       Object.assign(row, args.data, { updatedAt: new Date(++counter) });
@@ -59,7 +61,9 @@ function fixture(options: typeof encryption | null = encryption, session: Sessio
   } as unknown as Pick<PrismaClient, "$transaction" | "openCreditIntegration" | "openCreditLead">;
   const service = createOpenCreditIntegrationService(db, options);
   const handlers = createOpenCreditManagementHandlers({ getSession: async () => session, service });
-  return { rows, leads, calls, db, service, handlers, conflict: () => { conflict = true; }, failCreate: (marker: string) => { createError = marker; } };
+  return { rows, leads, calls, db, service, handlers, conflict: () => { conflict = true; },
+    failCreate: (marker: string) => { createError = marker; },
+    onUpdate: (run: () => void) => { beforeUpdate = run; } };
 }
 function request(method: string, body?: unknown) {
   return new NextRequest("http://localhost/api/integrations/opencredit", {
@@ -68,6 +72,36 @@ function request(method: string, body?: unknown) {
 }
 const context = (id: string) => ({ params: Promise.resolve({ id }) });
 function assertNoStore(response: Response) { assert.equal(response.headers.get("Cache-Control"), "no-store"); }
+
+test("management rejects legacy activation and pause while materialization owns the integration", async () => {
+  const f = fixture();
+  const { integration } = await f.service.create(admin.companyId);
+  f.rows[0].materializationEnabled = true;
+  const before = { ...f.rows[0] };
+  f.calls.length = 0;
+  for (const input of [{ status: "ACTIVE" }, { status: "PAUSED" }, { enabled: true }]) {
+    const response = await f.handlers.PATCH(request("PATCH", input), context(integration.id));
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).error, "CONFLICT");
+    assertNoStore(response);
+    assert.deepEqual(f.rows[0], before);
+  }
+  assert.ok(f.calls.every(call => call.method === "findFirst"));
+  assert.equal((await f.handlers.PATCH(request("PATCH", { status: "DISABLED" }), context(integration.id))).status, 200);
+  assert.equal(f.rows[0].materializationEnabled, true);
+});
+
+test("management cannot enable legacy after its read loses a concurrent mode change", async () => {
+  const f = fixture();
+  const { integration } = await f.service.create(admin.companyId);
+  f.onUpdate(() => { f.rows[0].materializationEnabled = true; });
+  const response = await f.handlers.PATCH(request("PATCH", { enabled: true }), context(integration.id));
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).error, "CONFLICT");
+  assert.equal(f.rows[0].enabled, false);
+  assert.equal(f.rows[0].materializationEnabled, true);
+  assert.ok(!f.calls.some(call => call.method === "lead.updateMany"));
+});
 
 test("server secrets use 32 random bytes, hex encoding and distinct CSPRNG samples", () => {
   const samples = Array.from({ length: 100 }, () => createOpenCreditWebhookSecret());

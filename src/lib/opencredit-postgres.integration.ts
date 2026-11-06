@@ -15,7 +15,7 @@ function assertDisposableCiDatabase() {
   catch { throw new Error("OPENCREDIT_TEST_DATABASE_URL_INVALID"); }
   assert.ok(url.protocol === "postgresql:", "PostgreSQL test protocol required");
   assert.ok(["127.0.0.1", "localhost"].includes(url.hostname), "Only loopback test host permitted");
-  assert.ok(url.port === "5432" && url.pathname === "/qevora_ci", "Only disposable CI database permitted");
+  assert.ok(["5432", "55432"].includes(url.port) && url.pathname === "/qevora_ci", "Only disposable CI database permitted");
   assert.ok(url.username === "qevora_ci" && url.password === "qevora_ci_password", "Only fictitious CI credentials permitted");
   assert.ok(url.search === "?schema=public" && !url.hash, "Only public CI schema permitted");
 }

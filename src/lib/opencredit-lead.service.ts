@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { findContactPhoneIdentityMatch } from "@/lib/contacts";
+import { lockOpenCreditDomainMode, OpenCreditDomainModeUnavailableError } from "./opencredit-domain-interlock";
 import { OpenCreditDeadline, OpenCreditInputError, type OpenCreditAssignedLead } from "@/lib/opencredit-webhook-contract";
 
 type Db = Pick<PrismaClient, "$transaction" | "openCreditEvent">;
@@ -92,11 +93,10 @@ export async function ingestOpenCreditLead(db: Db, binding: OpenCreditBinding, p
     try {
       return await db.$transaction(async (tx) => {
         deadline.assertRemaining();
-        const integration = await tx.openCreditIntegration.findFirst({
-          where: { id: binding.id, companyId: binding.companyId, enabled: true },
-          select: { id: true, paused: true }
+        const integration = await lockOpenCreditDomainMode(tx, {
+          companyId: binding.companyId, integrationId: binding.id, expectedMode: "LEGACY"
         });
-        if (!integration) throw new OpenCreditInputError("INTEGRATION_UNAVAILABLE", 403);
+        deadline.assertRemaining();
         const where = { integrationId_eventId: { integrationId: binding.id, eventId: payload.eventId } };
         const previous = await tx.openCreditEvent.findUnique({ where });
         if (previous) return validateDuplicate(previous, binding, payload);
@@ -143,6 +143,9 @@ export async function ingestOpenCreditLead(db: Db, binding: OpenCreditBinding, p
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
         maxWait: Math.min(500, deadline.remainingMs()), timeout: Math.min(1500, deadline.remainingMs()) });
     } catch (error) {
+      if (error instanceof OpenCreditDomainModeUnavailableError) {
+        throw new OpenCreditInputError("INTEGRATION_UNAVAILABLE", 403);
+      }
       if (!(error instanceof Prisma.PrismaClientKnownRequestError) ||
           !(error.code === "P2034" || (error.code === "P2002" && expectedUniqueConflict(error)))) throw error;
       deadline.assertRemaining();

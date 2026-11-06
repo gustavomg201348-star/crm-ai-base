@@ -47,7 +47,8 @@ export function createOpenCreditIntegrationService(db: Db, encryption?: SecretEn
       return await delegate.update({
         where: { id: row.id, companyId: row.companyId, updatedAt: row.updatedAt,
           enabled: row.enabled, paused: row.paused, webhookSecret: row.webhookSecret,
-          passiveInboundEnabled: row.passiveInboundEnabled }, data
+          passiveInboundEnabled: row.passiveInboundEnabled,
+          ...(data.enabled === true ? { materializationEnabled: false } : {}) }, data
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
@@ -59,9 +60,13 @@ export function createOpenCreditIntegrationService(db: Db, encryption?: SecretEn
 
   async function setStatus(companyId: string, id: string, status: OpenCreditStatus) {
     const row = await find(companyId, id);
-    if (status !== "DISABLED") resolveOpenCreditWebhookSecret(row.webhookSecret, encryption);
     const data = { enabled: status !== "DISABLED", paused: status === "PAUSED" };
-    if (status === "ACTIVE") {
+    if (data.enabled && row.materializationEnabled) throw new OpenCreditConfigurationError("CONFLICT", 409);
+    if (data.enabled) resolveOpenCreditWebhookSecret(row.webhookSecret, encryption);
+    if (status !== "ACTIVE") {
+      return { integration: mapOpenCreditIntegration(await change(db.openCreditIntegration, row, data)) };
+    }
+    try {
       const changed = await db.$transaction(async tx => {
         const integration = await change(tx.openCreditIntegration, row, data);
         await tx.openCreditLead.updateMany({
@@ -71,8 +76,12 @@ export function createOpenCreditIntegrationService(db: Db, encryption?: SecretEn
         return integration;
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
       return { integration: mapOpenCreditIntegration(changed) };
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
+        throw new OpenCreditConfigurationError("CONFLICT", 409);
+      }
+      throw error;
     }
-    return { integration: mapOpenCreditIntegration(await change(db.openCreditIntegration, row, data)) };
   }
 
   return {
