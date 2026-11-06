@@ -77,12 +77,15 @@ async function resolveContact(tx: Tx, companyId: string, { cpf, phone, name, ema
       ))
     ))
   )`;
-  const active = await tx.$queryRaw<Array<{ id: string }>>`
-    SELECT "id" FROM "Contact"
+  const active = await tx.$queryRaw<Array<{ id: string; cpf: string | null }>>`
+    SELECT "id", "cpf" FROM "Contact"
     WHERE "companyId" = ${companyId} AND "archivedAt" IS NULL AND ${match}
     ORDER BY "id" LIMIT 2 FOR UPDATE`;
-  if (active.length > 1) throw new ReviewRequired("CONTACT_IDENTITY_CONFLICT");
-  if (active[0]) return active[0].id;
+  const [existing] = active;
+  if (active.length > 1 || (cpf && existing?.cpf?.trim() && existing.cpf !== cpf)) {
+    throw new ReviewRequired("CONTACT_IDENTITY_CONFLICT");
+  }
+  if (existing) return existing.id;
   const [archived] = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT "id" FROM "Contact"
     WHERE "companyId" = ${companyId} AND "archivedAt" IS NOT NULL AND ${match}

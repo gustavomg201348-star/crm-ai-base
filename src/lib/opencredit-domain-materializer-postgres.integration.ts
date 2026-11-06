@@ -153,7 +153,7 @@ materialize("new domain and outcome commit together, replay does nothing, outbou
 });
 
 for (const lookup of ["cpf", "phone", "legacy phone", "both"] as const) {
-  materialize("reuse exact active Contact by " + lookup, async f => {
+  materialize("reuse exact active Contact by " + (lookup === "phone" ? "phone with no local CPF" : lookup), async f => {
     const contact = await f.contact({
       cpf: lookup === "cpf" || lookup === "both" ? identity.cpf : null,
       phone: lookup === "cpf" ? otherIdentity.phone : lookup === "legacy phone" ? "(11) 98765-4321" : identity.phone,
@@ -165,6 +165,24 @@ for (const lookup of ["cpf", "phone", "legacy phone", "both"] as const) {
     assert.deepEqual(await db.contact.findUniqueOrThrow({ where: { id: contact.id } }), contact);
   });
 }
+
+materialize("matching phone with conflicting local CPF requires review and preserves the Contact", async f => {
+  const contact = await f.contact({ cpf: "52998224725" });
+  const { row } = await runJob(f);
+  assert.equal(row.state, "NEEDS_REVIEW");
+  assert.equal(row.reviewCode, "CONTACT_IDENTITY_CONFLICT");
+  assert.deepEqual([row.contactId, row.channelId, row.conversationId], [null, null, null]);
+  assert.deepEqual(await db.contact.findUniqueOrThrow({ where: { id: contact.id } }), contact);
+  assert.deepEqual(await f.counts(), [1, 0, 0, 0, 0]);
+});
+
+materialize("lead without CPF can reuse the matching phone with a local CPF", async f => {
+  const contact = await f.contact({ cpf: "52998224725" });
+  const { row } = await runJob(f, { ...identity, cpf: null });
+  assert.equal(row.state, "COMPLETED");
+  assert.equal(row.contactId, contact.id);
+  assert.deepEqual(await db.contact.findUniqueOrThrow({ where: { id: contact.id } }), contact);
+});
 
 for (const reason of ["CONTACT_IDENTITY_CONFLICT", "CONTACT_ARCHIVED_MATCH", "CONTACT_DATA_INCOMPLETE"] as const) {
   materialize(reason + " leaves domain unchanged", async f => {
