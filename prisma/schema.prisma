@@ -572,6 +572,11 @@ model OpenCreditLeadMaterialization {
   protectedEnvelope String?
   expiresAt         DateTime
   reviewCode        String?
+  availableAt       DateTime?
+  attempts          Int @default(0)
+  leaseToken        String?
+  leaseUntil        DateTime?
+  lastErrorCode     String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
   inboundEvent      OpenCreditInboundEvent @relation(fields: [inboundEventId, companyId, providerScope, integrationId, externalLeadId], references: [id, companyId, providerScope, integrationId, externalLeadId], onDelete: Restrict, onUpdate: NoAction)
