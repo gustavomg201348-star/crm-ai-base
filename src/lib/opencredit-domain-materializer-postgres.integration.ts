@@ -135,6 +135,32 @@ async function runJob(f: Fixture, details?: Parameters<Fixture["createJob"]>[0],
   return { row: await f.get(job.id), lease };
 }
 
+materialize("compatible Contact arriving after readiness is reused by the materializer", async f => {
+  const { job } = await f.createJob();
+  const lease = await f.claim(job.id);
+  const contact = await f.contact({ cpf: identity.cpf });
+  await f.process(lease);
+  const row = await f.get(job.id);
+  assert.equal(row.state, "COMPLETED");
+  assert.equal(row.contactId, contact.id);
+  assert.equal(row.attempts, 1);
+  assert.deepEqual(await db.contact.findUniqueOrThrow({ where: { id: contact.id } }), contact);
+  assert.deepEqual(await f.counts(), [1, 1, 1, 0, 0]);
+});
+
+materialize("conflicting Contact arriving after readiness fails closed without wrong linkage", async f => {
+  const { job } = await f.createJob();
+  const lease = await f.claim(job.id);
+  const contact = await f.contact({ cpf: "52998224725" });
+  await f.process(lease);
+  const row = await f.get(job.id);
+  assert.equal(row.state, "NEEDS_REVIEW");
+  assert.equal(row.reviewCode, "CONTACT_IDENTITY_CONFLICT");
+  assert.deepEqual([row.contactId, row.channelId, row.conversationId], [null, null, null]);
+  assert.deepEqual(await db.contact.findUniqueOrThrow({ where: { id: contact.id } }), contact);
+  assert.deepEqual(await f.counts(), [1, 0, 0, 0, 0]);
+});
+
 materialize("new domain and outcome commit together, replay does nothing, outbound is blocked and no message exists", async f => {
   const { row, lease } = await runJob(f);
   assert.equal(row.state, "COMPLETED");

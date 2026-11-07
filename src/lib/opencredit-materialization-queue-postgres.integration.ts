@@ -519,15 +519,14 @@ queueTest("bounded keyset scanning crosses more than 100 waiting jobs on later c
   assert.equal(await db.openCreditLeadMaterialization.count({ where: { companyId: f.companyId, state: "PENDING", attempts: 0, leaseToken: null } }), 105);
 });
 
-queueTest("an active Contact writer makes claim fail closed without waiting or mutation", async f => {
+queueTest("an active Contact writer does not prevent a readiness claim", async f => {
   const job = await f.create();
   await db.$transaction(async tx => {
-    await tx.$executeRaw`LOCK TABLE "Contact" IN ROW EXCLUSIVE MODE`;
-    assert.equal(await queue.claimPilotJob(targetOf(job)), null);
+    await tx.contact.create({ data: { companyId: f.companyId, name: "Synthetic", phone: "5511976543210" } });
+    assert.equal((await queue.claimPilotJob(targetOf(job)))?.attempts, 1);
   });
-  assert.deepEqual(await f.get(job.id), job);
-  assert.equal((await queue.claimPilotJob(targetOf(job)))?.attempts, 1);
-});
+  assert.equal((await f.get(job.id)).state, "PROCESSING");
+}, 1);
 
 queueTest("preflight audits all four readiness conditions read-only and never returns identity", async f => {
   const existing = await cpfJob(f);
@@ -582,7 +581,7 @@ queueTest("expiry between readiness and lease update still prevents claim", asyn
   assert.deepEqual(await f.get(job.id), job);
 });
 
-queueTest("Contact insertion cannot race the readiness-to-lease interval", async f => {
+queueTest("Contact creation and editing finish while readiness claim remains open", async f => {
   const job = await f.create();
   let entered!: () => void;
   let release!: () => void;
@@ -603,15 +602,15 @@ queueTest("Contact insertion cannot race the readiness-to-lease interval", async
   } as never);
   const claiming = observed.claimPilotJob(targetOf(job));
   await reached;
-  let inserted = false;
-  const inserting = db.contact.create({ data: { companyId: f.companyId, name: "Synthetic", phone: "5511987654321" } })
-    .then(() => { inserted = true; });
   try {
-    await new Promise(r => setTimeout(r, 50));
-    assert.equal(inserted, false);
+    // A former table SHARE lock would make this fail on lock_timeout before release().
+    await db.$transaction(async tx => {
+      await tx.$executeRaw`SET LOCAL lock_timeout = '500ms'`;
+      const contact = await tx.contact.create({ data: { companyId: f.companyId, name: "Synthetic", phone: "5511987654321" } });
+      await tx.contact.update({ where: { id: contact.id }, data: { name: "Confirmed synthetic" } });
+    });
   } finally { release(); }
   assert.equal((await claiming)?.id, job.id);
-  await inserting;
 }, 1);
 
 queueTest("a finite scan ceiling revisits older jobs even while new ready jobs arrive", async f => {
@@ -626,3 +625,53 @@ queueTest("a finite scan ceiling revisits older jobs even while new ready jobs a
   for (let index = 0; index < 30; index++) await f.create({ createdAt: new Date(f.now + index) });
   assert.equal((await scanning.claim(1))[0].id, first.id);
 });
+
+queueTest("claim(10) scans at most 100 WAITING jobs while Contact writes remain unblocked", async f => {
+  for (let index = 0; index < 100; index++) await cpfJob(f);
+  let entered!: () => void;
+  let release!: () => void;
+  const reached = new Promise<void>(r => { entered = r; });
+  const gate = new Promise<void>(r => { release = r; });
+  let pages = 0;
+  let evaluations = 0;
+  const observed = createOpenCreditMaterializationQueue({
+    $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      if (strings.join("?").includes("LIMIT 25")) pages++;
+      return db.$queryRaw(strings, ...values);
+    },
+    $transaction: (run: (tx: Prisma.TransactionClient) => Promise<unknown>, options: object) =>
+      db.$transaction(tx => run(new Proxy(tx, {
+        get(t, property) {
+          if (property === "$executeRaw") return (strings: TemplateStringsArray, ...values: unknown[]) => {
+            assert.doesNotMatch(strings.join("?"), /LOCK\s+TABLE/i);
+            return t.$executeRaw(strings, ...values);
+          };
+          if (property !== "$queryRaw") return Reflect.get(t, property);
+          return async (strings: TemplateStringsArray, ...values: unknown[]) => {
+            assert.doesNotMatch(strings.join("?"), /LOCK\s+TABLE/i);
+            if (strings.join("?").includes('FROM "Contact"')) {
+              evaluations++;
+              if (evaluations === 1) { entered(); await gate; }
+            }
+            return t.$queryRaw(strings, ...values);
+          };
+        },
+      })), options),
+  } as never);
+  const claiming = observed.claim(10);
+  await reached;
+  try {
+    await db.$transaction(async tx => {
+      await tx.$executeRaw`SET LOCAL lock_timeout = '500ms'`;
+      const contact = await tx.contact.create({ data: { companyId: f.companyId, name: "Synthetic", phone: "5511976543210" } });
+      await tx.contact.update({ where: { id: contact.id }, data: { name: "Confirmed synthetic" } });
+    });
+  } finally { release(); }
+  assert.deepEqual(await claiming, []);
+  assert.equal(pages, 4);
+  assert.equal(evaluations, 100);
+  assert.equal(await db.openCreditLeadMaterialization.count({ where: {
+    companyId: f.companyId, state: "PENDING", attempts: 0, leaseToken: null, leaseUntil: null,
+    reviewCode: null, lastErrorCode: null,
+  } }), 100);
+}, 1);

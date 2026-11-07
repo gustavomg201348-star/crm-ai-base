@@ -111,7 +111,6 @@ export function createOpenCreditMaterializationQueue(db: QueueDb, random: () => 
   async function claimReady(target: MaterializationPilotTarget, pilot: boolean): Promise<ClaimedJob | null> {
     try {
       return await db.$transaction(async tx => {
-        await tx.$executeRaw`LOCK TABLE "Contact" IN SHARE MODE NOWAIT`;
         const [job] = await tx.$queryRaw<Array<ReadinessJob>>`
           SELECT "id", "companyId", "integrationId", "providerScope", "externalLeadId", "inboundEventId", "protectedEnvelope"
           FROM "OpenCreditLeadMaterialization"
@@ -129,8 +128,8 @@ export function createOpenCreditMaterializationQueue(db: QueueDb, random: () => 
             AND NOT "enabled" AND NOT "paused" AND "materializationEnabled"
           FOR SHARE SKIP LOCKED`;
         if (!integration) return null;
-        // Protect absence predicates as well as matching rows against all Contact writers.
-        // NOWAIT avoids waiting on unrelated writes; held only for this candidate's claim.
+        // Readiness admits a lease, not a frozen Contact identity. Contact writers remain
+        // free; the materializer revalidates identity and conflicts before domain writes.
         const readiness = await evaluateMaterializationReadiness(tx, job);
         if (readiness !== "READY_EXISTING_CONTACT" && readiness !== "READY_NEW_CONTACT") return null;
         const [lease] = await tx.$queryRaw<ClaimedJob[]>`
@@ -148,7 +147,7 @@ export function createOpenCreditMaterializationQueue(db: QueueDb, random: () => 
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError &&
           (error.code === "P2034" || error.code === "P2010" &&
-            ["55P03", "40001", "40P01"].includes(String(error.meta?.code)))) return null;
+            ["40001", "40P01"].includes(String(error.meta?.code)))) return null;
       throw new Error("MATERIALIZATION_CLAIM_UNAVAILABLE");
     }
   }
