@@ -12,7 +12,10 @@ let service: typeof import("./opencredit-materialization-preflight.service");
 before(async () => {
   const loader = Module as typeof Module & { _load(s: string, ...args: unknown[]): unknown };
   const original = loader._load;
-  loader._load = (s, ...args) => s === "server-only" ? {} : original.call(loader, s, ...args);
+    loader._load = (s, ...args) => s === "server-only" ? {} : s === "./opencredit-materialization-readiness" ? {
+    evaluateMaterializationReadiness: async (_tx: unknown, job: { id: string }) =>
+      job.id.startsWith("waiting") ? "WAITING_IDENTITY" : "READY_NEW_CONTACT",
+  } : original.call(loader, s, ...args);
   try {
     boundary = await import("./opencredit-materialization-preflight-admin-handler");
     service = await import("./opencredit-materialization-preflight.service");
@@ -71,7 +74,9 @@ test("handler requires platform admin and same origin", async () => {
 
 test("service returns only sanitized queue metadata and exact readiness counts", async () => {
   const countCalls: unknown[] = [];
+  let readinessPage = 0;
   const tx = {
+    $executeRaw: async () => 0,
     user: { findUnique: async () => actor },
     company: { findUnique: async () => ({ id: "company" }) },
     openCreditIntegration: {
@@ -98,7 +103,8 @@ test("service returns only sanitized queue metadata and exact readiness counts",
         if (text.includes('"attempts":{"lt":10}')) return 2;
         return 11;
       },
-      findMany: async () => [{
+      findMany: async (q: { select?: { protectedEnvelope?: boolean } }) => q.select?.protectedEnvelope
+        ? readinessPage++ === 0 ? [{ id: "ready-1" }, { id: "ready-2" }] : [] : [{
         id: "queue-1",
         externalLeadId: "lead-1",
         state: "PENDING",
@@ -139,13 +145,52 @@ test("service returns only sanitized queue metadata and exact readiness counts",
   }
 });
 
-test("preflight source is read-only and never decrypts identities", () => {
+test("preflight source has no mutations and declares a read-only transaction", () => {
   const svc = readFileSync("src/lib/opencredit-materialization-preflight.service.ts", "utf8");
   const handler = readFileSync("src/lib/opencredit-materialization-preflight-admin-handler.ts", "utf8");
   const route = readFileSync("src/app/api/admin/integrations/opencredit/materialization/preflight/route.ts", "utf8");
   assert.match(svc, /^import "server-only"/);
-  assert.doesNotMatch(svc, /\.(create|createMany|update|updateMany|upsert|delete|deleteMany|executeRaw|queryRaw)\b|protectedEnvelope\s*:\s*true|decrypt|unprotect|opencredit-api-client|\bfetch\s*\(/i);
+  assert.doesNotMatch(svc, /\.(create|createMany|update|updateMany|upsert|delete|deleteMany|queryRaw)\b|decrypt|unprotect|opencredit-api-client|\bfetch\s*\(/i);
+  assert.match(svc, /SET TRANSACTION READ ONLY/);
   assert.match(handler, /sameOrigin/);
   assert.match(handler, /requirePlatformAdmin/);
   assert.match(route, /export const POST = createOpenCreditMaterializationPreflightHandler/);
+});
+
+test("preflight caps identity reads and labels partial counts instead of claiming full readiness", async () => {
+  let pages = 0;
+  const tx = {
+    $executeRaw: async (sql: TemplateStringsArray) => { assert.equal(sql.join(""), "SET TRANSACTION READ ONLY"); return 0; },
+    user: { findUnique: async () => actor }, company: { findUnique: async () => ({ id: "company" }) },
+    openCreditIntegration: { findMany: async () => [{ id: "integration", enabled: false, paused: false,
+      passiveInboundEnabled: true, materializationEnabled: true, createdAt: new Date(), updatedAt: new Date() }] },
+    openCreditLeadMaterialization: {
+      count: async (q: { where: { state?: unknown; attempts?: unknown } }) =>
+        q.where.state === "PENDING" || q.where.state === undefined || q.where.attempts ? 201 : 0,
+      findMany: async (q: { take: number; select: { protectedEnvelope?: boolean }; where: { id?: { gt: string } } }) => {
+        if (!q.select.protectedEnvelope) return [];
+        assert.equal(q.take, 25);
+        if (pages) assert.equal(q.where.id?.gt, "waiting-" + (pages * 25 - 1));
+        const start = pages++ * 25;
+        return Array.from({ length: 25 }, (_, index) => ({ id: "waiting-" + (start + index), protectedEnvelope: "never-return-this" }));
+      },
+    },
+  };
+  const previous = process.env.PLATFORM_COMPANY_ID;
+  process.env.PLATFORM_COMPANY_ID = actor.companyId;
+  try {
+    const r = await service.getOpenCreditMaterializationPreflight({ $transaction: async (fn: (t: typeof tx) => unknown) => fn(tx) } as never,
+      { actor, companyId: "company", providerScope: scope });
+    const q = r.integrations[0].queue;
+    assert.equal(pages, 8);
+    assert.equal(q.pendingTotal, 201);
+    assert.equal(q.readiness.evaluated, 200);
+    assert.equal(q.readiness.waitingIdentity, 200);
+    assert.equal(q.readiness.complete, false);
+    assert.equal(q.readiness.nextCursor, "waiting-199");
+    assert.equal(q.claimableNow, 0);
+    assert(!JSON.stringify(r).includes("never-return-this"));
+  } finally {
+    if (previous === undefined) delete process.env.PLATFORM_COMPANY_ID; else process.env.PLATFORM_COMPANY_ID = previous;
+  }
 });

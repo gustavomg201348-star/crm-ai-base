@@ -1,4 +1,5 @@
 import "server-only";
+import { evaluateMaterializationReadiness, type ReadinessJob } from "./opencredit-materialization-readiness";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import type { SessionUser } from "./auth";
 import { isPlatformAdmin } from "./permissions";
@@ -21,7 +22,7 @@ function safeDate(value: Date | null) {
   return value ? value.toISOString() : null;
 }
 
-/** Read-only production preflight. It never reads protected payload contents and never mutates domain rows. */
+/** Read-only production preflight. It never returns protected payload contents and never mutates domain rows. */
 export async function getOpenCreditMaterializationPreflight(db: Db, input: Input) {
   try {
     if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?![\s\S])/.test(input.companyId)) return fail("STORAGE_ERROR");
@@ -29,6 +30,7 @@ export async function getOpenCreditMaterializationPreflight(db: Db, input: Input
     if (!isPlatformAdmin(input.actor)) return fail("NOT_AUTHORIZED");
 
     return await db.$transaction(async tx => {
+      await tx.$executeRaw`SET TRANSACTION READ ONLY`;
       const actor = await tx.user.findUnique({
         where: { id: input.actor.id },
         select: { id: true, companyId: true, name: true, email: true, role: true },
@@ -108,6 +110,33 @@ export async function getOpenCreditMaterializationPreflight(db: Db, input: Input
           }),
         ]);
 
+        // Bounded read-only identity audit. Counts are explicitly partial if the cap is hit.
+        const readiness = { readyExistingContact: 0, readyNewContact: 0, waitingIdentity: 0, reviewRisk: 0,
+          evaluated: 0, complete: true, nextCursor: null as string | null, scanLimit: 200 };
+        let after: string | undefined;
+        while (readiness.evaluated < readiness.scanLimit) {
+          const page = await tx.openCreditLeadMaterialization.findMany({
+            where: { ...readyWhere, ...(after ? { id: { gt: after } } : {}) },
+            select: { id: true, companyId: true, integrationId: true, providerScope: true,
+              externalLeadId: true, inboundEventId: true, protectedEnvelope: true },
+            orderBy: { id: "asc" }, take: 25,
+          });
+          if (!page.length) break;
+          for (const job of page) {
+            const decision = await evaluateMaterializationReadiness(tx, job as ReadinessJob);
+            if (decision === "READY_EXISTING_CONTACT") readiness.readyExistingContact++;
+            else if (decision === "READY_NEW_CONTACT") readiness.readyNewContact++;
+            else if (decision === "WAITING_IDENTITY") readiness.waitingIdentity++;
+            else readiness.reviewRisk++;
+            readiness.evaluated++;
+            after = job.id;
+          }
+          if (page.length < 25) break;
+        }
+        readiness.complete = readiness.evaluated === readyIfEnabled;
+        readiness.nextCursor = readiness.complete ? null : after ?? null;
+        const identityReady = readiness.readyExistingContact + readiness.readyNewContact;
+
         snapshots.push({
           integrationId: integration.id,
           enabled: integration.enabled,
@@ -120,8 +149,11 @@ export async function getOpenCreditMaterializationPreflight(db: Db, input: Input
           queue: {
             total,
             counts,
-            readyIfEnabled,
-            claimableNow: integration.materializationEnabled ? readyIfEnabled : 0,
+            readyIfEnabled: identityReady,
+            readiness,
+            pendingTotal: counts.PENDING,
+            expiredOrIneligible: Math.max(0, counts.PENDING + counts.RETRY - readyIfEnabled),
+            claimableNow: !integration.enabled && !integration.paused && integration.materializationEnabled ? identityReady : 0,
             staleProcessing,
             expiredActive,
             candidates: candidates.map(candidate => ({
