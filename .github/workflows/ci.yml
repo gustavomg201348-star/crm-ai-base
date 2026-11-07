@@ -50,6 +50,9 @@ jobs:
       - name: Validate OpenCredit single-job pilot guard
         run: node --import tsx --test scripts/run-opencredit-materialization.test.ts
 
+      - name: Validate OpenCredit controlled worker rollout
+        run: node --unhandled-rejections=strict --import tsx --test src/lib/opencredit-materialization-worker.test.ts
+
       - name: Validate template media association contract
         run: npx --yes tsx@4.20.6 --test src/lib/meta-template-media-association.test.ts
 
