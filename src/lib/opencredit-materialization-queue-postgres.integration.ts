@@ -8,16 +8,21 @@ import { spawnSync } from "node:child_process";
 import { after, before, test } from "node:test";
 import { PrismaClient, type Prisma } from "@prisma/client";
 import { assertOpenCreditCommercialOperationTestDatabase } from "./opencredit-commercial-operation-postgres.guard";
-import { completeInTransaction, createOpenCreditMaterializationQueue, materializationRetryDelayMs, MaterializationLeaseLostError } from "./opencredit-materialization-queue.service";
+type QueueModule = typeof import("./opencredit-materialization-queue.service");
+let completeInTransaction: QueueModule["completeInTransaction"];
+let createOpenCreditMaterializationQueue: QueueModule["createOpenCreditMaterializationQueue"];
+let materializationRetryDelayMs: QueueModule["materializationRetryDelayMs"];
+let MaterializationLeaseLostError: QueueModule["MaterializationLeaseLostError"];
 
 assertOpenCreditCommercialOperationTestDatabase(process.env);
 if (process.env.OPENCREDIT_MATERIALIZATION_QUEUE_POSTGRES_TEST !== "1") throw new Error("QUEUE_TEST_REQUIRES_DISPOSABLE_OPT_IN");
 const db = new PrismaClient({ log: [] });
-const queue = createOpenCreditMaterializationQueue(db, () => 0.5);
+let queue: ReturnType<QueueModule["createOpenCreditMaterializationQueue"]>;
 const originalFetch = globalThis.fetch;
 let externalRequests = 0;
 let payload: typeof import("./opencredit-lead-materialization-payload");
 let preflight: typeof import("./opencredit-materialization-preflight.service");
+let readinessCore: typeof import("./opencredit-materialization-readiness");
 const previousKey = process.env.QEVORA_DATA_ENCRYPTION_KEY_V1;
 before(() => {
   process.env.QEVORA_DATA_ENCRYPTION_KEY_V1 = Buffer.alloc(32, 27).toString("base64");
@@ -27,6 +32,10 @@ before(() => {
   try {
     payload = createRequire(import.meta.url)("./opencredit-lead-materialization-payload");
     preflight = createRequire(import.meta.url)("./opencredit-materialization-preflight.service");
+    readinessCore = createRequire(import.meta.url)("./opencredit-materialization-readiness");
+    ({ completeInTransaction, createOpenCreditMaterializationQueue, materializationRetryDelayMs,
+      MaterializationLeaseLostError } = createRequire(import.meta.url)("./opencredit-materialization-queue.service"));
+    queue = createOpenCreditMaterializationQueue(db, () => 0.5);
   }
   finally { loader._load = original; }
   globalThis.fetch = async () => { externalRequests++; throw new Error("EXTERNAL_HTTP_FORBIDDEN"); };
@@ -409,8 +418,7 @@ const targetOf = (job: { id: string; companyId: string; integrationId: string; p
   id: job.id, companyId: job.companyId, integrationId: job.integrationId, providerScope: job.providerScope,
 });
 async function readiness(job: Parameters<typeof targetOf>[0]) {
-  const { evaluateMaterializationReadiness } = await import("./opencredit-materialization-readiness");
-  return db.$transaction(async tx => evaluateMaterializationReadiness(tx,
+  return db.$transaction(async tx => readinessCore.evaluateMaterializationReadiness(tx,
     await tx.openCreditLeadMaterialization.findUniqueOrThrow({ where: { id: job.id } })));
 }
 

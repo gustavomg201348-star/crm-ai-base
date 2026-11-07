@@ -10,13 +10,13 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import { isOpenCreditConversation } from "./conversation-channel.service";
 import { assertOpenCreditCommercialOperationTestDatabase } from "./opencredit-commercial-operation-postgres.guard";
 import { ingestOpenCreditLead } from "./opencredit-lead.service";
-import { createOpenCreditMaterializationQueue, type MaterializationLease } from "./opencredit-materialization-queue.service";
+import type { MaterializationLease } from "./opencredit-materialization-queue.service";
 import { parseOpenCreditAssignedLead } from "./opencredit-webhook-contract";
 
 assertOpenCreditCommercialOperationTestDatabase(process.env);
 if (process.env.OPENCREDIT_DOMAIN_MATERIALIZER_POSTGRES_TEST !== "1") throw new Error("DOMAIN_MATERIALIZER_REQUIRES_DISPOSABLE_OPT_IN");
 const db = new PrismaClient({ log: [] });
-const queue = createOpenCreditMaterializationQueue(db);
+let queue: ReturnType<typeof import("./opencredit-materialization-queue.service")["createOpenCreditMaterializationQueue"]>;
 const key = Buffer.alloc(32, 21).toString("base64");
 const keyVariable = "QEVORA_DATA_ENCRYPTION_KEY_V1";
 const previousKey = process.env[keyVariable];
@@ -42,6 +42,7 @@ before(() => {
   };
   try {
     core = require("./opencredit-domain-materializer");
+    queue = require("./opencredit-materialization-queue.service").createOpenCreditMaterializationQueue(db);
     crypto = require("./opencredit-lead-materialization-payload");
     outbound = require("./conversation-message.service");
   } finally { loader._load = original; }

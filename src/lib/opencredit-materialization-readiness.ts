@@ -1,4 +1,6 @@
 import { Prisma } from "@prisma/client";
+import { getSecretEncryptionKeyStatus } from "./secret-encryption-env";
+import { openMaterializationIdentity } from "./opencredit-lead-materialization-payload";
 
 export type ReadinessJob = {
   id: string; companyId: string; integrationId: string; providerScope: string;
@@ -20,9 +22,7 @@ export async function evaluateMaterializationReadiness(
       event.providerScope !== job.providerScope || event.externalLeadId !== job.externalLeadId ||
       event.eventType !== "lead.assigned" || event.provenanceKind !== "OPENCREDIT_HMAC_SHA256_VERIFIED" ||
       event.provenanceVersion !== 1 || !job.protectedEnvelope) return "REVIEW_REQUIRED";
-  const { getSecretEncryptionKeyStatus } = await import("./secret-encryption-env");
   if (getSecretEncryptionKeyStatus().status !== "configured") throw new Error("MATERIALIZATION_READINESS_UNAVAILABLE");
-  const { openMaterializationIdentity } = await import("./opencredit-lead-materialization-payload");
   let identity;
   try { identity = openMaterializationIdentity(job.protectedEnvelope, event); }
   catch { return "REVIEW_REQUIRED"; }
