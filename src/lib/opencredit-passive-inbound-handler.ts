@@ -1,6 +1,6 @@
 import "server-only";
 import { Prisma } from "@prisma/client";
-import { authenticatePassiveInbound, validatePassiveBinding, PassiveInboundError, type PassiveBinding, type PassiveReceipt } from "./opencredit-passive-inbound-contract";
+import { authenticatePassiveInbound, validatePassiveBinding, PassiveInboundError, type PassiveBinding, type PassiveInboundShapeDiagnostic, type PassiveReceipt } from "./opencredit-passive-inbound-contract";
 import { OpenCreditDeadline, OpenCreditInputError, OPENCREDIT_MAX_BODY_BYTES } from "./opencredit-webhook-contract";
 import type { RateLimitDecision } from "./rate-limit";
 
@@ -32,6 +32,7 @@ type Dependencies = {
   limit(binding?: PassiveBinding): Promise<RateLimitDecision>;
   logRateLimit?(event: RateLimitEvent): void;
   logIngestionUnavailable?(event: IngestionUnavailableEvent): void | Promise<void>;
+  logShapeDiagnostic?(event: PassiveInboundShapeDiagnostic): void | Promise<void>;
   persist(receipt: PassiveReceipt, deadline: OpenCreditDeadline, onTransactionEntry: (entered: boolean) => void): Promise<{ duplicate: boolean }>;
   deadline?(): OpenCreditDeadline;
 };
@@ -126,7 +127,11 @@ export function createPassiveInboundHandler(deps: Dependencies) {
         if (value.byteLength) chunks.push(value);
       }
       stage = "internal";
-      const receipt = authenticatePassiveInbound(Buffer.concat(chunks, size), request.headers.get("x-creditcore-sig"), secret, binding);
+      const logShape = deps.logShapeDiagnostic;
+      const receipt = authenticatePassiveInbound(Buffer.concat(chunks, size), request.headers.get("x-creditcore-sig"), secret, binding,
+        logShape && (event => {
+          setImmediate(() => { void Promise.resolve().then(() => logShape(event)).catch(() => {}); });
+        }));
       stage = "authenticated_rate_limit";
       const authenticatedLimit = await budget.wait(() => deps.limit(binding));
       if (authenticatedLimit.status === "unavailable") return unavailable("limiter_unavailable");

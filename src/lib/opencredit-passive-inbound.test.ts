@@ -121,6 +121,93 @@ test("valid RAW HMAC -> persisted metadata only, trusted binding not payload, no
   assert.deepEqual(Object.keys(captured.metadata).sort(), ["contractVersion", "eventId", "eventType", "externalLeadId"]);
   for (const pii of ["00000000000", "5511999999999", "PRIVATE_SENTINEL", "private@example.invalid"]) assert(!JSON.stringify(captured.metadata).includes(pii));
 });
+test("shape telemetry emits only allowed keys and types after authentication, with bounded depth", async () => {
+  const events: unknown[] = [];
+  const f = setup({}, { logShapeDiagnostic: event => { events.push(event); } });
+  const fixture = payload();
+  const unknownKey = "sensitive-dynamic-key@example.invalid";
+  const raw = Buffer.from(JSON.stringify({
+    ...fixture, [unknownKey]: secret,
+    client: { ...fixture.client, [unknownKey]: binding.webhookSecret, cellphone: 123, whatsapp: false,
+      mobile: null, phones: [{ phone: fixture.client.phone }], contact: { email: fixture.client.email,
+        contact: { phone: fixture.client.phone }, [unknownKey]: fixture.client.name } }
+  }));
+  assert.equal((await f.send(raw, "sha256=" + "0".repeat(64))).status, 403);
+  assert.equal((await f.send(Buffer.from("{"))).status, 400);
+  assert.equal((await f.send(Buffer.from(JSON.stringify({ ...fixture, event: "other" })))).status, 422);
+  await nextTurn();
+  assert.deepEqual(events, []);
+
+  const response = await f.send(raw);
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true });
+  assert.equal(f.writes(), 1);
+  await nextTurn();
+  assert.deepEqual(events, [{
+    event: "opencredit_inbound_shape_diagnostic", eventType: "lead.assigned", contractVersion: 2,
+    topLevelKeys: ["client", "contractVersion", "event", "eventId", "lead"], unknownTopLevelKeys: true,
+    clientShape: { type: "object", unknownKeys: true, fields: {
+      cellphone: { type: "number" },
+      contact: { type: "object", unknownKeys: true, fields: { contact: { type: "object" }, email: { type: "string" } } },
+      cpf: { type: "string" }, email: { type: "string" }, mobile: { type: "null" },
+      name: { type: "string" }, phone: { type: "string" }, phones: { type: "array" }, whatsapp: { type: "boolean" }
+    }},
+    phoneCandidates: { cellphone: true, contact: true, mobile: true, phone: true, phones: true, telephone: false, whatsapp: true }
+  }]);
+  const log = JSON.stringify(events);
+  for (const value of [...Object.values(fixture.client), fixture.eventId, fixture.lead.id, secret,
+    binding.webhookSecret, sign(raw), raw.toString(), unknownKey]) assert.equal(log.includes(value), false);
+});
+
+test("shape telemetry failures are best-effort", async () => {
+  for (const logShapeDiagnostic of [
+    () => { throw Error(secret); },
+    async () => { throw Error(secret); }
+  ]) {
+    const f = setup({}, { logShapeDiagnostic });
+    assert.equal((await f.send()).status, 200);
+    await nextTurn();
+    assert.equal(f.writes(), 1);
+  }
+});
+
+test("the real route emits shape telemetry only for the exact opt-in", async t => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-11-05T16:32:52.150Z") });
+  const flag = "OPENCREDIT_INBOUND_SHAPE_DIAGNOSTIC";
+  const env = {
+    RATE_LIMIT_SECRET: "synthetic-rate-limit-credential",
+    QEVORA_DATA_ENCRYPTION_KEY_V1: Buffer.alloc(32, 9).toString("base64"),
+    [flag]: undefined
+  };
+  const previous = Object.keys(env).map(key => [key, process.env[key]] as const);
+  t.after(() => {
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+  for (const [key, value] of Object.entries(env)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  routeBuckets.clear();
+  routeIntegrations.clear();
+  routeIntegrations.set(publicId, { ...binding, webhookSecret: prepareSecret(secret) });
+  const events: unknown[] = [];
+  t.mock.method(console, "info", (line: string) => { events.push(JSON.parse(line)); });
+  for (const value of [undefined, "false", "TRUE", "true"]) {
+    if (value === undefined) delete process.env[flag];
+    else process.env[flag] = value;
+    const raw = Buffer.from(JSON.stringify(payload()));
+    const response = await post(new NextRequest("https://crm.example.invalid/inbound", {
+      method: "POST", body: raw, headers: { "content-type": "application/json", "x-creditcore-sig": sign(raw) }
+    }), { params: Promise.resolve({ publicWebhookId: publicId }) });
+    assert.equal(response.status, 200);
+    await nextTurn();
+    assert.equal(events.length, value === "true" ? 1 : 0);
+  }
+});
+
 test("one changed byte and reserialized JSON reject original signature", async () => {
   const raw = Buffer.from(JSON.stringify(payload(), null, 2)), signature = sign(raw); const changed = Buffer.from(raw); changed[1] = 32;
   for (const body of [changed, Buffer.from(JSON.stringify(JSON.parse(raw.toString())))]) { const f = setup(); assert.equal((await f.send(body, signature)).status, 403); assert.equal(f.writes(), 0); }
