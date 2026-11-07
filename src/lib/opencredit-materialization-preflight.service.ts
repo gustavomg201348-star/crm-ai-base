@@ -21,7 +21,7 @@ function safeDate(value: Date | null) {
   return value ? value.toISOString() : null;
 }
 
-/** Read-only production preflight. It never decrypts protectedEnvelope and never mutates domain rows. */
+/** Read-only production preflight. It never reads protected payload contents and never mutates domain rows. */
 export async function getOpenCreditMaterializationPreflight(db: Db, input: Input) {
   try {
     if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?![\s\S])/.test(input.companyId)) return fail("STORAGE_ERROR");
