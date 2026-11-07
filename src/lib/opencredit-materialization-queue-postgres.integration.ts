@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { cpSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
-import { createRequire } from "node:module";
+import Module, { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -16,11 +16,25 @@ const db = new PrismaClient({ log: [] });
 const queue = createOpenCreditMaterializationQueue(db, () => 0.5);
 const originalFetch = globalThis.fetch;
 let externalRequests = 0;
+let payload: typeof import("./opencredit-lead-materialization-payload");
+let preflight: typeof import("./opencredit-materialization-preflight.service");
+const previousKey = process.env.QEVORA_DATA_ENCRYPTION_KEY_V1;
 before(() => {
+  process.env.QEVORA_DATA_ENCRYPTION_KEY_V1 = Buffer.alloc(32, 27).toString("base64");
+  const loader = Module as typeof Module & { _load(s: string, ...args: unknown[]): unknown };
+  const original = loader._load;
+  loader._load = (s, ...args) => s === "server-only" ? {} : original.call(loader, s, ...args);
+  try {
+    payload = createRequire(import.meta.url)("./opencredit-lead-materialization-payload");
+    preflight = createRequire(import.meta.url)("./opencredit-materialization-preflight.service");
+  }
+  finally { loader._load = original; }
   globalThis.fetch = async () => { externalRequests++; throw new Error("EXTERNAL_HTTP_FORBIDDEN"); };
 });
 after(async () => {
   globalThis.fetch = originalFetch;
+  if (previousKey === undefined) delete process.env.QEVORA_DATA_ENCRYPTION_KEY_V1;
+  else process.env.QEVORA_DATA_ENCRYPTION_KEY_V1 = previousKey;
   await db.$disconnect();
   assert.equal(externalRequests, 0);
 });
@@ -45,7 +59,8 @@ async function fixture() {
       data: { ...binding, eventId: externalLeadId + ":partner", eventType: "lead.assigned", provenanceKind: "OPENCREDIT_HMAC_SHA256_VERIFIED", provenanceVersion: 1 },
     });
     return db.openCreditLeadMaterialization.create({ data: {
-      ...binding, inboundEventId: event.id, state: "PENDING", protectedEnvelope: "synthetic-opaque-envelope",
+      ...binding, inboundEventId: event.id, state: "PENDING", protectedEnvelope: payload.protectMaterializationIdentity({ ...binding, eventId: event.eventId },
+        { cpf: null, phone: "5511987654321", name: null, email: null }),
       createdAt: new Date(now - 60_000), expiresAt: new Date(now + 600_000), ...overrides,
     } });
   }
@@ -57,7 +72,7 @@ async function fixture() {
   return { companyId, integration, providerScope, now, create, get, disable, ageLease };
 }
 
-function queueTest(name: string, run: (f: Awaited<ReturnType<typeof fixture>>) => Promise<void>) {
+function queueTest(name: string, run: (f: Awaited<ReturnType<typeof fixture>>) => Promise<void>, contacts = 0) {
   test(name, async () => {
     const f = await fixture();
     const { companyId } = f;
@@ -69,11 +84,13 @@ function queueTest(name: string, run: (f: Awaited<ReturnType<typeof fixture>>) =
         db.channel.count({ where: { companyId } }),
         db.message.count({ where: { conversation: { contact: { companyId } } } }),
         db.leadAssignmentHistory.count({ where: { companyId } }),
-      ]), [0, 0, 0, 0, 0]);
+      ]), [contacts, 0, 0, 0, 0]);
     } finally {
       await db.openCreditLeadMaterialization.deleteMany({ where: { companyId } });
       await db.openCreditInboundEvent.deleteMany({ where: { companyId } });
       await db.openCreditIntegration.deleteMany({ where: { companyId } });
+      await db.contact.deleteMany({ where: { companyId } });
+      await db.user.deleteMany({ where: { companyId } });
       await db.company.delete({ where: { id: companyId } });
     }
   });
@@ -378,4 +395,226 @@ test("queue migration preserves preexisting PENDING and NEEDS_REVIEW without cla
     await db.$executeRawUnsafe('DROP DATABASE "' + name + '"');
     rmSync(temp, { recursive: true, force: true });
   }
+});
+
+async function cpfJob(f: Awaited<ReturnType<typeof fixture>>, phone: string | null = null,
+  overrides: Partial<Prisma.OpenCreditLeadMaterializationUncheckedCreateInput> = {}) {
+  const job = await f.create(overrides);
+  const event = await db.openCreditInboundEvent.findUniqueOrThrow({ where: { id: job.inboundEventId } });
+  return db.openCreditLeadMaterialization.update({ where: { id: job.id }, data: {
+    protectedEnvelope: payload.protectMaterializationIdentity(event, { cpf: "12345678909", phone, name: null, email: null }),
+  } });
+}
+const targetOf = (job: { id: string; companyId: string; integrationId: string; providerScope: string }) => ({
+  id: job.id, companyId: job.companyId, integrationId: job.integrationId, providerScope: job.providerScope,
+});
+async function readiness(job: Parameters<typeof targetOf>[0]) {
+  const { evaluateMaterializationReadiness } = await import("./opencredit-materialization-readiness");
+  return db.$transaction(async tx => evaluateMaterializationReadiness(tx,
+    await tx.openCreditLeadMaterialization.findUniqueOrThrow({ where: { id: job.id } })));
+}
+
+queueTest("CPF-only waits without any row change in normal and pilot claim", async f => {
+  const job = await cpfJob(f);
+  assert.equal(await readiness(job), "WAITING_IDENTITY");
+  assert.equal(await queue.claimPilotJob(targetOf(job)), null);
+  assert.deepEqual(await queue.claim(), []);
+  assert.deepEqual(await f.get(job.id), job);
+});
+
+queueTest("CPF-only reuses one active same-company Contact", async f => {
+  const job = await cpfJob(f);
+  await db.contact.create({ data: { companyId: f.companyId, name: "Synthetic", cpf: "12345678909", phone: "5511987654321" } });
+  assert.equal(await readiness(job), "READY_EXISTING_CONTACT");
+  assert.equal((await queue.claimPilotJob(targetOf(job)))?.attempts, 1);
+}, 1);
+
+queueTest("valid normalized phone with no Contact is ready for a new Contact", async f => {
+  const job = await f.create();
+  assert.equal(await readiness(job), "READY_NEW_CONTACT");
+  assert.equal((await queue.claimPilotJob(targetOf(job)))?.id, job.id);
+});
+
+queueTest("ambiguous CPF is review risk and neither claim mutates it", async f => {
+  const job = await cpfJob(f);
+  for (const phone of ["5511987654321", "5511976543210"]) await db.contact.create({ data: {
+    companyId: f.companyId, name: "Synthetic", cpf: "12345678909", phone,
+  } });
+  assert.equal(await readiness(job), "REVIEW_REQUIRED");
+  assert.equal(await queue.claimPilotJob(targetOf(job)), null);
+  assert.deepEqual(await queue.claim(), []);
+  assert.deepEqual(await f.get(job.id), job);
+}, 2);
+
+queueTest("archived matching Contact is review risk, never silently reused", async f => {
+  const job = await cpfJob(f);
+  await db.contact.create({ data: { companyId: f.companyId, name: "Synthetic", cpf: "12345678909",
+    phone: "5511987654321", archivedAt: new Date() } });
+  assert.equal(await readiness(job), "REVIEW_REQUIRED");
+  assert.equal(await queue.claimPilotJob(targetOf(job)), null);
+  assert.deepEqual(await f.get(job.id), job);
+}, 1);
+
+queueTest("CPF match with conflicting phone fails closed", async f => {
+  const job = await cpfJob(f, "5511987654321");
+  await db.contact.create({ data: { companyId: f.companyId, name: "Synthetic", cpf: "12345678909",
+    phone: "5511976543210", normalizedPhone: "5511976543210" } });
+  assert.equal(await readiness(job), "REVIEW_REQUIRED");
+  assert.equal(await queue.claimPilotJob(targetOf(job)), null);
+  assert.deepEqual(await f.get(job.id), job);
+}, 1);
+
+queueTest("foreign Contact never makes a CPF-only job ready", async f => {
+  const job = await cpfJob(f);
+  const other = await db.company.create({ data: { name: "Synthetic foreign" } });
+  try {
+    await db.contact.create({ data: { companyId: other.id, name: "Synthetic", cpf: "12345678909", phone: "5511987654321" } });
+    assert.equal(await readiness(job), "WAITING_IDENTITY");
+    assert.equal(await queue.claimPilotJob(targetOf(job)), null);
+    assert.deepEqual(await f.get(job.id), job);
+  } finally {
+    await db.contact.deleteMany({ where: { companyId: other.id } });
+    await db.company.delete({ where: { id: other.id } });
+  }
+});
+
+queueTest("encrypted scope or integration mismatch is never ready", async f => {
+  for (const mismatch of [{ providerScope: "wrong" }, { integrationId: "wrong" }]) {
+    const job = await cpfJob(f, "5511987654321");
+    const event = await db.openCreditInboundEvent.findUniqueOrThrow({ where: { id: job.inboundEventId } });
+    await db.openCreditLeadMaterialization.update({ where: { id: job.id }, data: {
+      protectedEnvelope: payload.protectMaterializationIdentity({ ...event, ...mismatch }, {
+        cpf: "12345678909", phone: "5511987654321", name: null, email: null,
+      }),
+    } });
+    assert.equal(await readiness(job), "REVIEW_REQUIRED");
+    assert.equal(await queue.claimPilotJob(targetOf(job)), null);
+    assert.equal((await f.get(job.id)).attempts, 0);
+  }
+});
+
+queueTest("bounded keyset scanning crosses more than 100 waiting jobs on later cycles", async f => {
+  for (let index = 0; index < 105; index++) await cpfJob(f, null, { createdAt: new Date(f.now - 120000 + index) });
+  const ready = await f.create({ createdAt: new Date(f.now) });
+  let pages = 0;
+  const observed = createOpenCreditMaterializationQueue({
+    $transaction: db.$transaction.bind(db),
+    $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      if (strings.join("?").includes("LIMIT 25")) pages++;
+      assert.doesNotMatch(strings.join("?"), /protectedEnvelope/);
+      return db.$queryRaw(strings, ...values);
+    },
+  } as never);
+  assert.deepEqual(await observed.claim(1), []);
+  assert.equal(pages, 4);
+  assert.equal((await observed.claim(1))[0].id, ready.id);
+  assert.equal(await db.openCreditLeadMaterialization.count({ where: { companyId: f.companyId, state: "PENDING", attempts: 0, leaseToken: null } }), 105);
+});
+
+queueTest("an active Contact writer makes claim fail closed without waiting or mutation", async f => {
+  const job = await f.create();
+  await db.$transaction(async tx => {
+    await tx.$executeRaw`LOCK TABLE "Contact" IN ROW EXCLUSIVE MODE`;
+    assert.equal(await queue.claimPilotJob(targetOf(job)), null);
+  });
+  assert.deepEqual(await f.get(job.id), job);
+  assert.equal((await queue.claimPilotJob(targetOf(job)))?.attempts, 1);
+});
+
+queueTest("preflight audits all four readiness conditions read-only and never returns identity", async f => {
+  const existing = await cpfJob(f);
+  await db.contact.create({ data: { companyId: f.companyId, name: "Synthetic", cpf: "12345678909", phone: "5511976543210" } });
+  const waiting = await cpfJob(f);
+  const event = await db.openCreditInboundEvent.findUniqueOrThrow({ where: { id: waiting.inboundEventId } });
+  await db.openCreditLeadMaterialization.update({ where: { id: waiting.id }, data: {
+    protectedEnvelope: payload.protectMaterializationIdentity(event, { cpf: "52998224725", phone: null, name: null, email: null }),
+  } });
+  await f.create();
+  await f.create({ protectedEnvelope: "invalid" });
+  await f.create({ availableAt: new Date(f.now + 120000) });
+  const actor = await db.user.create({ data: { companyId: f.companyId, name: "Synthetic", email: randomUUID() + "@example.invalid", passwordHash: "synthetic", role: "ADMIN" } });
+  const previous = process.env.PLATFORM_COMPANY_ID;
+  process.env.PLATFORM_COMPANY_ID = f.companyId;
+  const before = await db.openCreditLeadMaterialization.findMany({ where: { companyId: f.companyId }, orderBy: { id: "asc" } });
+  try {
+    const result = await preflight.getOpenCreditMaterializationPreflight(db, {
+      actor: { ...actor, role: "ADMIN" }, companyId: f.companyId, providerScope: f.providerScope as Parameters<typeof preflight.getOpenCreditMaterializationPreflight>[1]["providerScope"],
+    });
+    const q = result.integrations[0].queue;
+    assert.equal(q.pendingTotal, 5);
+    assert.equal(q.expiredOrIneligible, 1);
+    assert.deepEqual(q.readiness, { readyExistingContact: 1, readyNewContact: 1, waitingIdentity: 1,
+      reviewRisk: 1, evaluated: 4, complete: true, nextCursor: null, scanLimit: 200 });
+    assert.equal(q.readyIfEnabled, 2);
+    assert.equal(q.claimableNow, 2);
+    const output = JSON.stringify(result);
+    for (const sensitive of ["12345678909", "52998224725", "5511976543210", "protectedEnvelope", existing.protectedEnvelope!]) assert(!output.includes(sensitive));
+    assert.deepEqual(await db.openCreditLeadMaterialization.findMany({ where: { companyId: f.companyId }, orderBy: { id: "asc" } }), before);
+  } finally {
+    if (previous === undefined) delete process.env.PLATFORM_COMPANY_ID; else process.env.PLATFORM_COMPANY_ID = previous;
+  }
+}, 1);
+
+queueTest("expiry between readiness and lease update still prevents claim", async f => {
+  const job = await f.create({ expiresAt: new Date(Date.now() + 500) });
+  const observed = createOpenCreditMaterializationQueue({
+    $queryRaw: db.$queryRaw.bind(db),
+    $transaction: (run: (tx: Prisma.TransactionClient) => Promise<unknown>, options: object) =>
+      db.$transaction(tx => run(new Proxy(tx, {
+        get(t, property) {
+          if (property !== "$queryRaw") return Reflect.get(t, property);
+          return async (strings: TemplateStringsArray, ...values: unknown[]) => {
+            if (strings.join("?").includes('UPDATE "OpenCreditLeadMaterialization" q')) await t.$queryRaw`SELECT pg_sleep(0.6)::text`;
+            return t.$queryRaw(strings, ...values);
+          };
+        },
+      })), options),
+  } as never);
+  assert.equal(await observed.claimPilotJob(targetOf(job)), null);
+  assert.deepEqual(await f.get(job.id), job);
+});
+
+queueTest("Contact insertion cannot race the readiness-to-lease interval", async f => {
+  const job = await f.create();
+  let entered!: () => void;
+  let release!: () => void;
+  const reached = new Promise<void>(r => { entered = r; });
+  const gate = new Promise<void>(r => { release = r; });
+  const observed = createOpenCreditMaterializationQueue({
+    $queryRaw: db.$queryRaw.bind(db),
+    $transaction: (run: (tx: Prisma.TransactionClient) => Promise<unknown>, options: object) =>
+      db.$transaction(tx => run(new Proxy(tx, {
+        get(t, property) {
+          if (property !== "$queryRaw") return Reflect.get(t, property);
+          return async (strings: TemplateStringsArray, ...values: unknown[]) => {
+            if (strings.join("?").includes('UPDATE "OpenCreditLeadMaterialization" q')) { entered(); await gate; }
+            return t.$queryRaw(strings, ...values);
+          };
+        },
+      })), options),
+  } as never);
+  const claiming = observed.claimPilotJob(targetOf(job));
+  await reached;
+  let inserted = false;
+  const inserting = db.contact.create({ data: { companyId: f.companyId, name: "Synthetic", phone: "5511987654321" } })
+    .then(() => { inserted = true; });
+  try {
+    await new Promise(r => setTimeout(r, 50));
+    assert.equal(inserted, false);
+  } finally { release(); }
+  assert.equal((await claiming)?.id, job.id);
+  await inserting;
+}, 1);
+
+queueTest("a finite scan ceiling revisits older jobs even while new ready jobs arrive", async f => {
+  const first = await cpfJob(f, null, { createdAt: new Date(f.now - 120000) });
+  for (let index = 1; index < 105; index++) await cpfJob(f, null, { createdAt: new Date(f.now - 120000 + index) });
+  const scanning = createOpenCreditMaterializationQueue(db);
+  assert.deepEqual(await scanning.claim(1), []);
+  const event = await db.openCreditInboundEvent.findUniqueOrThrow({ where: { id: first.inboundEventId } });
+  await db.openCreditLeadMaterialization.update({ where: { id: first.id }, data: {
+    protectedEnvelope: payload.protectMaterializationIdentity(event, { cpf: "12345678909", phone: "5511987654321", name: null, email: null }),
+  } });
+  for (let index = 0; index < 30; index++) await f.create({ createdAt: new Date(f.now + index) });
+  assert.equal((await scanning.claim(1))[0].id, first.id);
 });

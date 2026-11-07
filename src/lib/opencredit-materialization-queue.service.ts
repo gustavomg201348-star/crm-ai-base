@@ -1,4 +1,5 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
+import { evaluateMaterializationReadiness, type ReadinessJob } from "./opencredit-materialization-readiness";
 
 const maxBatchSize = 10;
 const maxAttempts = 10;
@@ -104,57 +105,98 @@ export function createOpenCreditMaterializationQueue(db: QueueDb, random: () => 
     });
   }
 
-  return {
-    async claimPilotJob(target: MaterializationPilotTarget): Promise<ClaimedJob | null> {
-      const [lease] = await db.$queryRaw<ClaimedJob[]>`
-        WITH job AS MATERIALIZED (
-          SELECT q."id", q."companyId", q."integrationId", q."providerScope"
-          FROM "OpenCreditLeadMaterialization" q
-          WHERE q."id" = ${target.id} AND q."companyId" = ${target.companyId}
-            AND q."integrationId" = ${target.integrationId} AND q."providerScope" = ${target.providerScope}
-            AND q."state" = 'PENDING' AND q."attempts" = 0
-          FOR UPDATE OF q SKIP LOCKED
-        ), permitted AS MATERIALIZED (
-          SELECT job."id" FROM job
-          JOIN "OpenCreditIntegration" i ON i."id" = job."integrationId"
-            AND i."companyId" = job."companyId" AND i."providerScope" = job."providerScope"
-          WHERE NOT i."enabled" AND NOT i."paused" AND i."materializationEnabled"
-          FOR SHARE OF i SKIP LOCKED
-        ), t AS MATERIALIZED (
-          SELECT "id", clock_timestamp() AT TIME ZONE 'UTC' AS now FROM permitted
-        )
-        UPDATE "OpenCreditLeadMaterialization" q
-        SET "state" = 'PROCESSING', "availableAt" = NULL, "leaseToken" = gen_random_uuid()::text,
-            "leaseUntil" = t.now + INTERVAL '60 seconds', "attempts" = q."attempts" + 1, "updatedAt" = t.now
-        FROM t WHERE q."id" = t."id" AND q."expiresAt" > t.now
-          AND (q."availableAt" IS NULL OR q."availableAt" <= t.now)
-        RETURNING q."id", q."leaseToken", q."leaseUntil", q."attempts"`;
-      return lease ?? null;
-    },
-
-    async claim(limit = maxBatchSize) {
-      // A single statement acquires, updates and releases row locks before returning.
-      return db.$queryRaw<ClaimedJob[]>`
-        WITH t AS (SELECT statement_timestamp() AT TIME ZONE 'UTC' AS now),
-        candidates AS (
-          SELECT q."id", COALESCE(q."availableAt", q."createdAt") AS ready
-          FROM "OpenCreditLeadMaterialization" AS q
-          JOIN "OpenCreditIntegration" AS i ON i."id" = q."integrationId"
-            AND i."companyId" = q."companyId" AND i."providerScope" = q."providerScope"
-          CROSS JOIN t
-          WHERE q."state" IN ('PENDING', 'RETRY') AND q."expiresAt" > t.now
-            AND (q."availableAt" <= t.now OR (q."state" = 'PENDING' AND q."availableAt" IS NULL))
-            AND q."attempts" < ${maxAttempts} AND i."materializationEnabled" = true
-          ORDER BY ready, q."id" LIMIT ${batchSize(limit)}
-          FOR UPDATE OF q SKIP LOCKED
-        ), claimed AS (
-          UPDATE "OpenCreditLeadMaterialization" AS q
+  // The process-local keyset cursor advances across waiting jobs, at most 100 per call.
+  let cursor: { ready: Date; id: string } | null = null;
+  let ceiling: { ready: Date; id: string } | null = null;
+  async function claimReady(target: MaterializationPilotTarget, pilot: boolean): Promise<ClaimedJob | null> {
+    try {
+      return await db.$transaction(async tx => {
+        await tx.$executeRaw`LOCK TABLE "Contact" IN SHARE MODE NOWAIT`;
+        const [job] = await tx.$queryRaw<Array<ReadinessJob>>`
+          SELECT "id", "companyId", "integrationId", "providerScope", "externalLeadId", "inboundEventId", "protectedEnvelope"
+          FROM "OpenCreditLeadMaterialization"
+          WHERE "id" = ${target.id} AND "companyId" = ${target.companyId}
+            AND "integrationId" = ${target.integrationId} AND "providerScope" = ${target.providerScope}
+            AND "state" IN ('PENDING', 'RETRY') AND "attempts" < ${maxAttempts}
+            AND (NOT ${pilot} OR ("state" = 'PENDING' AND "attempts" = 0))
+            AND "expiresAt" > (clock_timestamp() AT TIME ZONE 'UTC')
+            AND ("availableAt" <= (clock_timestamp() AT TIME ZONE 'UTC') OR ("state" = 'PENDING' AND "availableAt" IS NULL))
+          FOR UPDATE SKIP LOCKED`;
+        if (!job) return null;
+        const [integration] = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT "id" FROM "OpenCreditIntegration"
+          WHERE "id" = ${job.integrationId} AND "companyId" = ${job.companyId} AND "providerScope" = ${job.providerScope}
+            AND NOT "enabled" AND NOT "paused" AND "materializationEnabled"
+          FOR SHARE SKIP LOCKED`;
+        if (!integration) return null;
+        // Protect absence predicates as well as matching rows against all Contact writers.
+        // NOWAIT avoids waiting on unrelated writes; held only for this candidate's claim.
+        const readiness = await evaluateMaterializationReadiness(tx, job);
+        if (readiness !== "READY_EXISTING_CONTACT" && readiness !== "READY_NEW_CONTACT") return null;
+        const [lease] = await tx.$queryRaw<ClaimedJob[]>`
+          WITH t AS (SELECT clock_timestamp() AT TIME ZONE 'UTC' AS now)
+          UPDATE "OpenCreditLeadMaterialization" q
           SET "state" = 'PROCESSING', "availableAt" = NULL, "leaseToken" = gen_random_uuid()::text,
               "leaseUntil" = t.now + INTERVAL '60 seconds', "attempts" = q."attempts" + 1, "updatedAt" = t.now
-          FROM candidates, t WHERE q."id" = candidates."id"
-          RETURNING q."id", q."leaseToken", q."leaseUntil", q."attempts"
-        )
-        SELECT claimed.* FROM claimed JOIN candidates USING ("id") ORDER BY candidates.ready, claimed."id"`;
+          FROM t WHERE q."id" = ${job.id} AND q."expiresAt" > t.now
+            AND q."state" IN ('PENDING', 'RETRY') AND q."attempts" < ${maxAttempts}
+            AND (NOT ${pilot} OR (q."state" = 'PENDING' AND q."attempts" = 0))
+            AND (q."availableAt" <= t.now OR (q."state" = 'PENDING' AND q."availableAt" IS NULL))
+          RETURNING q."id", q."leaseToken", q."leaseUntil", q."attempts"`;
+        return lease ?? null;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 150, timeout: 2000 });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError &&
+          (error.code === "P2034" || error.code === "P2010" &&
+            ["55P03", "40001", "40P01"].includes(String(error.meta?.code)))) return null;
+      throw new Error("MATERIALIZATION_CLAIM_UNAVAILABLE");
+    }
+  }
+
+  return {
+    claimPilotJob(target: MaterializationPilotTarget) { return claimReady(target, true); },
+
+    async claim(limit = maxBatchSize) {
+      const wanted = batchSize(limit);
+      const claimed: ClaimedJob[] = [];
+      for (let page = 0; page < 4 && claimed.length < wanted; page++) {
+        if (ceiling === null) {
+          const [last] = await db.$queryRaw<Array<{ ready: Date; id: string }>>`
+            SELECT COALESCE("availableAt", "createdAt") AS ready, "id"
+            FROM "OpenCreditLeadMaterialization"
+            WHERE "state" IN ('PENDING', 'RETRY') AND "attempts" < ${maxAttempts}
+              AND "expiresAt" > (statement_timestamp() AT TIME ZONE 'UTC')
+              AND ("availableAt" <= (statement_timestamp() AT TIME ZONE 'UTC') OR ("state" = 'PENDING' AND "availableAt" IS NULL))
+            ORDER BY ready DESC, "id" DESC LIMIT 1`;
+          if (!last) break;
+          ceiling = last;
+        }
+        const after: Prisma.Sql = cursor
+          ? Prisma.sql`AND (COALESCE(q."availableAt", q."createdAt"), q."id") > (${cursor.ready}, ${cursor.id})`
+          : Prisma.empty;
+        const candidates = await db.$queryRaw<Array<MaterializationPilotTarget & { ready: Date }>>`
+          SELECT q."id", q."companyId", q."integrationId", q."providerScope", COALESCE(q."availableAt", q."createdAt") AS ready
+          FROM "OpenCreditLeadMaterialization" q
+          JOIN "OpenCreditIntegration" i ON i."id" = q."integrationId" AND i."companyId" = q."companyId" AND i."providerScope" = q."providerScope"
+          WHERE q."state" IN ('PENDING', 'RETRY') AND q."attempts" < ${maxAttempts}
+            AND q."expiresAt" > (statement_timestamp() AT TIME ZONE 'UTC')
+            AND (q."availableAt" <= (statement_timestamp() AT TIME ZONE 'UTC') OR (q."state" = 'PENDING' AND q."availableAt" IS NULL))
+            AND NOT i."enabled" AND NOT i."paused" AND i."materializationEnabled" ${after}
+            AND (COALESCE(q."availableAt", q."createdAt"), q."id") <= (${ceiling.ready}, ${ceiling.id})
+          ORDER BY ready, q."id" LIMIT 25`;
+        if (!candidates.length) {
+          if (cursor !== null) { cursor = null; ceiling = null; continue; }
+          ceiling = null;
+          break;
+        }
+        for (const candidate of candidates) {
+          cursor = { ready: candidate.ready, id: candidate.id };
+          const lease = await claimReady(candidate, false);
+          if (lease) claimed.push(lease);
+          if (claimed.length === wanted) break;
+        }
+      }
+      return claimed;
     },
 
     retry(lease: Lease, error: RetryError) {

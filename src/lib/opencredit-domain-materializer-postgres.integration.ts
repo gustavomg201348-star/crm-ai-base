@@ -122,9 +122,14 @@ function materialize(name: string, run: (f: Fixture) => Promise<void>) {
     finally { await f.cleanup(); }
   });
 }
-async function runJob(f: Fixture, details?: Parameters<Fixture["createJob"]>[0]) {
+async function runJob(f: Fixture, details?: Parameters<Fixture["createJob"]>[0], defenseInDepth = false) {
   const { job } = await f.createJob(details);
-  const lease = await f.claim(job.id);
+  // Explicitly emulate a preexisting lease for materializer defense-in-depth cases.
+  const lease = defenseInDepth
+    ? await db.openCreditLeadMaterialization.update({ where: { id: job.id }, data: {
+      state: "PROCESSING", attempts: 1, leaseToken: randomUUID(), leaseUntil: new Date(Date.now() + 60000),
+    }, select: { id: true, leaseToken: true } }) as MaterializationLease
+    : await f.claim(job.id);
   await f.process(lease);
   return { row: await f.get(job.id), lease };
 }
@@ -159,7 +164,7 @@ for (const lookup of ["cpf", "phone", "legacy phone", "both"] as const) {
       phone: lookup === "cpf" ? otherIdentity.phone : lookup === "legacy phone" ? "(11) 98765-4321" : identity.phone,
       normalizedPhone: lookup === "cpf" ? otherIdentity.phone : lookup === "legacy phone" ? null : identity.phone
     });
-    const { row } = await runJob(f);
+    const { row } = await runJob(f, lookup === "cpf" ? { ...identity, phone: null } : identity);
     assert.equal(row.state, "COMPLETED");
     assert.equal(row.contactId, contact.id);
     assert.deepEqual(await db.contact.findUniqueOrThrow({ where: { id: contact.id } }), contact);
@@ -168,7 +173,7 @@ for (const lookup of ["cpf", "phone", "legacy phone", "both"] as const) {
 
 materialize("matching phone with conflicting local CPF requires review and preserves the Contact", async f => {
   const contact = await f.contact({ cpf: "52998224725" });
-  const { row } = await runJob(f);
+  const { row } = await runJob(f, identity, true);
   assert.equal(row.state, "NEEDS_REVIEW");
   assert.equal(row.reviewCode, "CONTACT_IDENTITY_CONFLICT");
   assert.deepEqual([row.contactId, row.channelId, row.conversationId], [null, null, null]);
@@ -192,7 +197,7 @@ for (const reason of ["CONTACT_IDENTITY_CONFLICT", "CONTACT_ARCHIVED_MATCH", "CO
     }
     if (reason === "CONTACT_ARCHIVED_MATCH") await f.contact({ archivedAt: new Date() });
     const before = await f.counts();
-    const { row } = await runJob(f, reason === "CONTACT_DATA_INCOMPLETE" ? { ...identity, phone: null } : identity);
+    const { row } = await runJob(f, reason === "CONTACT_DATA_INCOMPLETE" ? { ...identity, phone: null } : identity, true);
     assert.equal(row.state, "NEEDS_REVIEW");
     assert.equal(row.reviewCode, reason);
     assert.deepEqual(await f.counts(), before);
@@ -201,7 +206,7 @@ for (const reason of ["CONTACT_IDENTITY_CONFLICT", "CONTACT_ARCHIVED_MATCH", "CO
 materialize("two exact phone matches fail closed", async f => {
   await f.contact();
   await f.contact({ phone: "(11) 98765-4321", normalizedPhone: null });
-  const { row } = await runJob(f);
+  const { row } = await runJob(f, identity, true);
   assert.equal(row.reviewCode, "CONTACT_IDENTITY_CONFLICT");
   assert.deepEqual(await f.counts(), [2, 0, 0, 0, 0]);
 });
