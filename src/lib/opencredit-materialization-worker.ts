@@ -1,88 +1,113 @@
 type MaterializationLease = { id: string; leaseToken: string };
-
+type MaterializationOutcome = { state: "COMPLETED" | "NEEDS_REVIEW" | "RETRY" | "EXPIRED" } | null;
 type Queue = {
   recover(limit?: number): Promise<unknown[]>;
   expire(limit?: number): Promise<unknown[]>;
   claim(limit?: number): Promise<MaterializationLease[]>;
 };
-
-type Materializer = {
-  process(lease: MaterializationLease): Promise<unknown>;
+type Materializer = { process(lease: MaterializationLease): Promise<MaterializationOutcome> };
+type CycleCounts = {
+  recovered: number; expired: number; claimed: number; processed: number;
+  completed: number; needsReview: number; retry: number; failed: number;
 };
-
-type WorkerLogEvent =
-  | { event: "opencredit_materialization_worker_cycle"; skipped: false; recovered: number; expired: number; claimed: number; processed: number; failed: number }
-  | { event: "opencredit_materialization_worker_cycle_failed" };
-
+type WorkerLogEvent = CycleCounts & {
+  event: "opencredit_materialization_worker_cycle";
+  phase: "started" | "completed" | "failed";
+  batchLimit: number; workerEnabled: boolean; skipped: boolean; durationMs: number;
+};
 type WorkerDependencies = {
   queue: Queue;
   materializer: Materializer;
-  log?: (event: WorkerLogEvent) => void;
+  log?: (event: WorkerLogEvent) => void | Promise<void>;
 };
-
-type WorkerOptions = {
-  intervalMs?: number;
-  batchSize?: number;
-};
-
 type WorkerEnvironment = {
   OPENCREDIT_MATERIALIZATION_WORKER_ENABLED?: string;
+  OPENCREDIT_MATERIALIZATION_WORKER_BATCH_LIMIT?: string;
+  OPENCREDIT_MATERIALIZATION_WORKER_INTERVAL_MS?: string;
 };
-
+type WorkerOptions = { intervalMs?: number; batchSize?: number; env?: WorkerEnvironment };
 const defaultIntervalMs = 1_000;
-const defaultBatchSize = 10;
+const maxBatchSize = 10;
 
-function positiveInteger(value: number, name: string) {
-  if (!Number.isInteger(value) || value < 1) throw new Error(`INVALID_${name}`);
-  return value;
+function boundedInteger(value: string | number | undefined, minimum: number, maximum: number, fallback: number) {
+  if (typeof value === "string" && !/^[1-9]\d*$/.test(value)) return fallback;
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isSafeInteger(number) && number >= minimum && number <= maximum ? number : fallback;
 }
 
-export function isOpenCreditMaterializationWorkerEnabled(
-  env: WorkerEnvironment = process.env as WorkerEnvironment
-) {
+export function isOpenCreditMaterializationWorkerEnabled(env: WorkerEnvironment = process.env as WorkerEnvironment) {
   return env.OPENCREDIT_MATERIALIZATION_WORKER_ENABLED === "true";
 }
 
-export function createOpenCreditMaterializationWorker(
-  deps: WorkerDependencies,
-  options: WorkerOptions = {}
-) {
-  const intervalMs = positiveInteger(options.intervalMs ?? defaultIntervalMs, "MATERIALIZATION_WORKER_INTERVAL");
-  const batchSize = positiveInteger(options.batchSize ?? defaultBatchSize, "MATERIALIZATION_WORKER_BATCH_SIZE");
+export function openCreditMaterializationWorkerConfig(env: WorkerEnvironment = process.env as WorkerEnvironment) {
+  return {
+    batchLimit: boundedInteger(env.OPENCREDIT_MATERIALIZATION_WORKER_BATCH_LIMIT, 1, maxBatchSize, 1),
+    intervalMs: boundedInteger(env.OPENCREDIT_MATERIALIZATION_WORKER_INTERVAL_MS, defaultIntervalMs, 2_147_483_647, defaultIntervalMs),
+  };
+}
+
+export function createOpenCreditMaterializationWorker(deps: WorkerDependencies, options: WorkerOptions = {}) {
+  // Retain the environment reference: the enabled flag is never snapshotted at boot.
+  const env = options.env ?? process.env as WorkerEnvironment;
+  const intervalMs = boundedInteger(options.intervalMs ?? openCreditMaterializationWorkerConfig(env).intervalMs,
+    defaultIntervalMs, 2_147_483_647, defaultIntervalMs);
+  const enabled = () => isOpenCreditMaterializationWorkerEnabled(env);
   let running = false;
   let inFlight = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
+  function log(event: WorkerLogEvent) {
+    // Logging is best-effort; neither synchronous errors nor rejected promises escape.
+    try { void Promise.resolve(deps.log?.(event)).catch(() => {}); } catch {}
+  }
+
   async function runOnce() {
     if (inFlight) return { skipped: true as const };
     inFlight = true;
+    const started = Date.now();
+    const batchLimit = boundedInteger(options.batchSize ?? openCreditMaterializationWorkerConfig(env).batchLimit, 1, maxBatchSize, 1);
+    const counts: CycleCounts = { recovered: 0, expired: 0, claimed: 0, processed: 0,
+      completed: 0, needsReview: 0, retry: 0, failed: 0 };
+    let failed = false;
+    const outcome = () => ({ skipped: counts.claimed === 0, ...counts });
+    const emit = (phase: WorkerLogEvent["phase"]) => log({
+      event: "opencredit_materialization_worker_cycle", phase, batchLimit,
+      workerEnabled: enabled(), ...outcome(), durationMs: Math.max(0, Date.now() - started),
+    });
+    emit("started");
     try {
-      const recovered = await deps.queue.recover(batchSize);
-      const expired = await deps.queue.expire(batchSize);
-      const leases = await deps.queue.claim(batchSize);
-      let processed = 0;
-      let failed = 0;
+      if (!enabled()) return outcome();
+      counts.recovered = (await deps.queue.recover(batchLimit)).length;
+      if (!enabled()) return outcome();
+      counts.expired = (await deps.queue.expire(batchLimit)).length;
+      if (!enabled()) return outcome();
+      const leases = await deps.queue.claim(batchLimit);
+      counts.claimed = leases.length;
+      if (leases.length > batchLimit) throw new Error("MATERIALIZATION_WORKER_BATCH_EXCEEDED");
       for (const lease of leases) {
-        try {
-          await deps.materializer.process(lease);
-          processed++;
-        } catch {
-          // A failed lease remains protected by its queue lease. A later cycle
-          // recovers it after lease expiry; do not fan out failures or leak IDs.
-          failed++;
+        if (!enabled()) break;
+        // The materializer owns typed retry/review transitions. Unexpected exceptions
+        // escape runOnce after a sanitized failure event; never refill the batch.
+        const result = await deps.materializer.process(lease);
+        if (result === null) { counts.failed++; continue; } // Lost lease, no fallback.
+        switch (result.state) {
+          case "COMPLETED": counts.completed++; break;
+          case "NEEDS_REVIEW": counts.needsReview++; break;
+          case "RETRY": counts.retry++; break;
+          case "EXPIRED": counts.expired++; break;
+          default: throw new Error("MATERIALIZATION_WORKER_INVALID_OUTCOME");
         }
+        counts.processed++;
       }
-      const outcome = {
-        skipped: false as const,
-        recovered: recovered.length,
-        expired: expired.length,
-        claimed: leases.length,
-        processed,
-        failed,
-      };
-      deps.log?.({ event: "opencredit_materialization_worker_cycle", ...outcome });
-      return outcome;
+      return outcome();
+    } catch (error) {
+      failed = true;
+      counts.failed++;
+      emit("failed");
+      throw error;
     } finally {
+      // A failed cycle emits only its failure event, never a misleading success.
+      if (!failed) emit("completed");
       inFlight = false;
     }
   }
@@ -90,13 +115,11 @@ export function createOpenCreditMaterializationWorker(
   function schedule(delayMs: number) {
     if (!running) return;
     timer = setTimeout(async () => {
-      try {
-        await runOnce();
-      } catch {
-        deps.log?.({ event: "opencredit_materialization_worker_cycle_failed" });
-      } finally {
-        schedule(intervalMs);
-      }
+      try { await runOnce(); }
+      catch {
+        // Already logged as failure, with no free-form exception or success signal.
+        // Remaining leases stay protected until normal recovery; wait a full interval.
+      } finally { schedule(intervalMs); }
     }, delayMs);
     timer.unref?.();
   }
@@ -104,52 +127,30 @@ export function createOpenCreditMaterializationWorker(
   return {
     runOnce,
     start() {
-      if (running) return false;
+      if (running || !enabled()) return false;
       running = true;
       schedule(0);
       return true;
     },
-    stop() {
-      running = false;
-      if (timer) clearTimeout(timer);
-      timer = null;
-    },
-    isRunning() {
-      return running;
-    },
+    stop() { running = false; if (timer) clearTimeout(timer); timer = null; },
+    isRunning() { return running; },
   };
 }
 
 type RuntimeWorker = ReturnType<typeof createOpenCreditMaterializationWorker>;
-type WorkerRuntimeGlobal = typeof globalThis & {
-  __openCreditMaterializationWorkerV1?: RuntimeWorker;
-};
+type WorkerRuntimeGlobal = typeof globalThis & { __openCreditMaterializationWorkerV1?: RuntimeWorker };
 
-export async function startOpenCreditMaterializationWorkerFromRuntime(
-  env: WorkerEnvironment = process.env as WorkerEnvironment
-) {
-  if (!isOpenCreditMaterializationWorkerEnabled(env)) {
-    return { started: false as const, reason: "disabled" as const };
-  }
-
+export async function startOpenCreditMaterializationWorkerFromRuntime(env: WorkerEnvironment = process.env as WorkerEnvironment) {
+  if (!isOpenCreditMaterializationWorkerEnabled(env)) return { started: false as const, reason: "disabled" as const };
   const runtime = globalThis as WorkerRuntimeGlobal;
-  if (runtime.__openCreditMaterializationWorkerV1?.isRunning()) {
-    return { started: false as const, reason: "already_running" as const };
-  }
-
-  const [{ prisma }, { createOpenCreditMaterializationQueue }, { createOpenCreditDomainMaterializer }] =
-    await Promise.all([
-      import("./db"),
-      import("./opencredit-materialization-queue.service"),
-      import("./opencredit-domain-materializer"),
-    ]);
-
+  if (runtime.__openCreditMaterializationWorkerV1?.isRunning()) return { started: false as const, reason: "already_running" as const };
+  const [{ prisma }, { createOpenCreditMaterializationQueue }, { createOpenCreditDomainMaterializer }] = await Promise.all([
+    import("./db"), import("./opencredit-materialization-queue.service"), import("./opencredit-domain-materializer"),
+  ]);
   const worker = createOpenCreditMaterializationWorker({
-    queue: createOpenCreditMaterializationQueue(prisma),
-    materializer: createOpenCreditDomainMaterializer(prisma),
+    queue: createOpenCreditMaterializationQueue(prisma), materializer: createOpenCreditDomainMaterializer(prisma),
     log: event => console.info(JSON.stringify(event)),
-  });
+  }, { env });
   runtime.__openCreditMaterializationWorkerV1 = worker;
-  worker.start();
-  return { started: true as const };
+  return { started: worker.start() };
 }

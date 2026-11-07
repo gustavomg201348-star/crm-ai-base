@@ -11,6 +11,7 @@ import { isOpenCreditConversation } from "./conversation-channel.service";
 import { assertOpenCreditCommercialOperationTestDatabase } from "./opencredit-commercial-operation-postgres.guard";
 import { ingestOpenCreditLead } from "./opencredit-lead.service";
 import type { MaterializationLease } from "./opencredit-materialization-queue.service";
+import { createOpenCreditMaterializationWorker } from "./opencredit-materialization-worker";
 import { parseOpenCreditAssignedLead } from "./opencredit-webhook-contract";
 
 assertOpenCreditCommercialOperationTestDatabase(process.env);
@@ -134,6 +135,145 @@ async function runJob(f: Fixture, details?: Parameters<Fixture["createJob"]>[0],
   await f.process(lease);
   return { row: await f.get(job.id), lease };
 }
+
+function rolloutWorker(f: Fixture, batchSize = 1, queueOverride = queue) {
+  return createOpenCreditMaterializationWorker({
+    queue: queueOverride,
+    materializer: { process: f.process },
+  }, { batchSize, env: { OPENCREDIT_MATERIALIZATION_WORKER_ENABLED: "true" } });
+}
+
+materialize("rollout volume: bounded cycles preserve 100 waiting and process at most two READY each", async f => {
+  const waiting: Awaited<ReturnType<Fixture["createJob"]>>["job"][] = [];
+  for (let i = 0; i < 100; i++) waiting.push((await f.createJob({ ...identity, phone: null })).job);
+  // Ready identities are deliberately behind the first 100, exercising the cursor.
+  const ready = [];
+  const existingIds = new Set<string>();
+  for (let i = 0; i < 10; i++) {
+    const phone = `55119900000${String(i).padStart(2, "0")}`;
+    if (i < 5) existingIds.add((await f.contact({ phone, normalizedPhone: phone })).id);
+    ready.push((await f.createJob({ ...identity, cpf: null, phone })).job);
+  }
+  const original = await db.openCreditLeadMaterialization.findMany({
+    where: { id: { in: waiting.map(job => job.id) } }, orderBy: { id: "asc" },
+  });
+  let evaluated = 0;
+  const observedDb = {
+    $queryRaw: db.$queryRaw.bind(db),
+    $transaction: (work: (tx: Prisma.TransactionClient) => Promise<unknown>, options?: object) => db.$transaction(tx => work(new Proxy(tx, {
+      get(target, property) {
+        if (property !== "$queryRaw") return Reflect.get(target, property);
+        return async (strings: TemplateStringsArray, ...values: unknown[]) => {
+          if (strings.join("?").includes('FROM "Contact"')) evaluated++;
+          return target.$queryRaw(strings, ...values);
+        };
+      },
+    })), options),
+  } as unknown as Pick<PrismaClient, "$queryRaw" | "$transaction">;
+  const independentQueue = createRequire(import.meta.url)("./opencredit-materialization-queue.service").createOpenCreditMaterializationQueue(observedDb);
+  const worker = rolloutWorker(f, 2, independentQueue);
+  let completed = 0;
+  for (let cycle = 0; cycle < 12 && completed < 10; cycle++) {
+    evaluated = 0;
+    const result = await worker.runOnce();
+    assert("claimed" in result);
+    assert(result.claimed <= 2);
+    assert(result.processed <= 2);
+    assert(evaluated <= 100, "scan remains bounded independently of batchLimit");
+    completed += result.completed;
+    assert.deepEqual(await db.openCreditLeadMaterialization.findMany({
+      where: { id: { in: waiting.map(job => job.id) } }, orderBy: { id: "asc" },
+    }), original);
+  }
+  assert.equal(completed, 10);
+  const final = await db.openCreditLeadMaterialization.findMany({ where: { id: { in: ready.map(job => job.id) } } });
+  assert(final.every(job => job.state === "COMPLETED" && job.attempts === 1 && job.leaseToken === null && job.leaseUntil === null));
+  assert.equal(final.filter(job => existingIds.has(job.contactId!)).length, 5);
+  assert.equal(new Set(final.map(job => job.contactId)).size, 10);
+  assert.deepEqual(await f.counts(), [10, 1, 10, 0, 0]);
+});
+
+for (const setting of ["paused", "enabled", "materializationEnabled"] as const) materialize(`rollout gate ${setting} prevents claim`, async f => {
+  const { job } = await f.createJob();
+  await db.openCreditIntegration.update({ where: { id: f.integration.id }, data: setting === "enabled"
+    ? { enabled: true, materializationEnabled: false }
+    : { [setting]: setting !== "materializationEnabled" } });
+  const before = await f.get(job.id);
+  const result = await rolloutWorker(f).runOnce();
+  assert("claimed" in result && result.claimed === 0);
+  assert.deepEqual(await f.get(job.id), before);
+  assert.deepEqual(await f.counts(), [0, 0, 0, 0, 0]);
+});
+
+materialize("rollout OFF leaves even stale and expired jobs untouched", async f => {
+  const { job } = await f.createJob();
+  await db.openCreditLeadMaterialization.update({ where: { id: job.id }, data: {
+    state: "PROCESSING", attempts: 1, leaseToken: randomUUID(), leaseUntil: new Date(0), expiresAt: new Date(0),
+  } });
+  const before = await f.get(job.id);
+  const worker = createOpenCreditMaterializationWorker({ queue, materializer: { process: f.process } }, { env: {} });
+  await worker.runOnce();
+  assert.deepEqual(await f.get(job.id), before);
+});
+
+materialize("rollout conflict after claim is NEEDS_REVIEW with no wrong association", async f => {
+  const { job } = await f.createJob();
+  const worker = createOpenCreditMaterializationWorker({ queue, materializer: {
+    async process(lease) {
+      await f.contact({ cpf: "52998224725" });
+      return f.process(lease);
+    },
+  } }, { env: { OPENCREDIT_MATERIALIZATION_WORKER_ENABLED: "true" } });
+  const result = await worker.runOnce();
+  assert("needsReview" in result && result.needsReview === 1);
+  const row = await f.get(job.id);
+  assert.equal(row.reviewCode, "CONTACT_IDENTITY_CONFLICT");
+  assert.deepEqual([row.contactId, row.channelId, row.conversationId], [null, null, null]);
+  assert.deepEqual(await f.counts(), [1, 0, 0, 0, 0]);
+});
+
+for (const jobs of [1, 2]) materialize(`two rollout instances batch=1 cannot double-process ${jobs} job(s)`, async f => {
+  await f.channel();
+  const ids = [];
+  for (let i = 0; i < jobs; i++) ids.push((await f.createJob({ ...identity, cpf: null, phone: `55119900001${String(i).padStart(2, "0")}` })).job.id);
+  const seen: string[] = [];
+  const make = () => createOpenCreditMaterializationWorker({
+    queue: createRequire(import.meta.url)("./opencredit-materialization-queue.service").createOpenCreditMaterializationQueue(db),
+    materializer: { async process(lease) { seen.push(lease.id); return f.process(lease); } },
+  }, { env: { OPENCREDIT_MATERIALIZATION_WORKER_ENABLED: "true" }, batchSize: 1 });
+  const outcomes = await Promise.all([make().runOnce(), make().runOnce()]);
+  for (const result of outcomes) assert("claimed" in result && result.claimed <= 1 && result.processed <= 1);
+  assert(seen.length >= 1 && seen.length <= jobs);
+  assert.equal(new Set(seen).size, seen.length);
+  const rows = await db.openCreditLeadMaterialization.findMany({ where: { id: { in: ids } } });
+  assert(rows.every(row => row.attempts <= 1));
+  assert.equal(rows.reduce((sum, row) => sum + row.attempts, 0), seen.length);
+});
+
+materialize("rollout identity matching never reuses a different tenant Contact", async f => {
+  const other = await fixture();
+  try {
+    const contact = await other.contact({ cpf: identity.cpf });
+    const { job } = await f.createJob();
+    await rolloutWorker(f).runOnce();
+    const row = await f.get(job.id);
+    assert.equal(row.state, "COMPLETED");
+    assert.notEqual(row.contactId, contact.id);
+    assert.equal(await db.contact.count({ where: { id: row.contactId!, companyId: f.companyId } }), 1);
+    assert.deepEqual(await db.contact.findUniqueOrThrow({ where: { id: contact.id } }), contact);
+  } finally { await other.cleanup(); }
+});
+
+materialize("rollout rejects providerScope-misbound identity without attempts or lease", async f => {
+  const { job, event } = await f.createJob();
+  await db.openCreditLeadMaterialization.update({ where: { id: job.id }, data: {
+    protectedEnvelope: crypto.protectMaterializationIdentity({ ...event, providerScope: "different-scope" }, identity),
+  } });
+  const before = await f.get(job.id);
+  await rolloutWorker(f).runOnce();
+  assert.deepEqual(await f.get(job.id), before);
+  assert.deepEqual(await f.counts(), [0, 0, 0, 0, 0]);
+});
 
 materialize("compatible Contact arriving after readiness is reused by the materializer", async f => {
   const { job } = await f.createJob();
