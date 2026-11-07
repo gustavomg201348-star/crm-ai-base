@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "opencredit:materialization:pilot": "tsx --conditions=react-server scripts/run-opencredit-materialization.ts",
     "lint": "next lint",
     "lint:ci": "eslint . --ext .ts,.tsx --max-warnings=0 --no-cache",
     "typecheck": "tsc --noEmit --incremental false",
@@ -30,6 +31,8 @@
     "next": "15.5.28",
     "react": "19.3.0",
     "react-dom": "19.3.0",
+    "server-only": "0.0.1",
+    "tsx": "4.20.6",
     "xlsx": "file:vendor/xlsx-0.20.3.tgz"
   },
   "devDependencies": {

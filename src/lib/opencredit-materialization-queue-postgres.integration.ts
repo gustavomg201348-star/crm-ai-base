@@ -54,7 +54,7 @@ async function fixture() {
   const ageLease = (id: string, expires = false) => db.openCreditLeadMaterialization.update({
     where: { id }, data: { leaseUntil: new Date(now - 2000), ...(expires ? { expiresAt: new Date(now - 1000) } : {}) },
   });
-  return { companyId, now, create, get, disable, ageLease };
+  return { companyId, integration, providerScope, now, create, get, disable, ageLease };
 }
 
 function queueTest(name: string, run: (f: Awaited<ReturnType<typeof fixture>>) => Promise<void>) {
@@ -78,6 +78,65 @@ function queueTest(name: string, run: (f: Awaited<ReturnType<typeof fixture>>) =
     }
   });
 }
+
+queueTest("pilot only claims the authorized binding and ID, once even under concurrency", async f => {
+  const other = await f.create();
+  const job = await f.create();
+  const target = { id: job.id, companyId: f.companyId, integrationId: f.integration.id, providerScope: f.providerScope };
+  for (const wrong of [{ id: "missing" }, { companyId: "wrong" }, { integrationId: "wrong" }, { providerScope: "wrong" }]) {
+    assert.equal(await queue.claimPilotJob({ ...target, ...wrong }), null);
+  }
+  assert.deepEqual(await f.get(job.id), job);
+  const results = await Promise.all([queue.claimPilotJob(target), queue.claimPilotJob(target)]);
+  const claims = results.filter(lease => lease !== null);
+  assert.equal(claims.length, 1);
+  assert.equal(claims[0].id, job.id);
+  assert.equal(claims[0].attempts, 1);
+  const claimed = await f.get(job.id);
+  assert.equal(claimed.state, "PROCESSING");
+  assert.equal(claimed.attempts, 1);
+  assert.equal(claimed.leaseToken, claims[0].leaseToken);
+  assert.equal(await queue.claimPilotJob(target), null);
+  assert.deepEqual(await f.get(other.id), other);
+});
+
+queueTest("packaged pilot CLI loads the production imports and exits on an absent target", async f => {
+  const job = await f.create();
+  const result = spawnSync(process.execPath, [
+    "--conditions=react-server", "--import", "tsx", "scripts/run-opencredit-materialization.ts",
+    "--pilot", "--job-id", "missing", "--company-id", f.companyId,
+    "--integration-id", f.integration.id, "--provider-scope", f.providerScope
+  ], {
+    env: { ...process.env, NODE_ENV: "production", OPENCREDIT_MATERIALIZATION_WORKER_ENABLED: "false" },
+    encoding: "utf8", timeout: 15000
+  });
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout.trim(), "PILOT_NOT_CLAIMED");
+  assert.equal(result.stderr, "");
+  assert.deepEqual(await f.get(job.id), job);
+});
+
+queueTest("pilot leaves ineligible jobs and integrations untouched", async f => {
+  const binding = { companyId: f.companyId, integrationId: f.integration.id, providerScope: f.providerScope };
+  for (const data of [
+    { state: "NEEDS_REVIEW" }, { attempts: 1 },
+    { expiresAt: new Date(f.now - 1000) }, { availableAt: new Date(f.now + 120000) }
+  ]) {
+    const job = await f.create(data);
+    assert.equal(await queue.claimPilotJob({ ...binding, id: job.id }), null);
+    assert.deepEqual(await f.get(job.id), job);
+  }
+  const job = await f.create();
+  for (const data of [
+    { enabled: true, paused: false, materializationEnabled: false },
+    { enabled: false, paused: true, materializationEnabled: true },
+    { enabled: false, paused: false, materializationEnabled: false }
+  ]) {
+    await db.openCreditIntegration.update({ where: { id: f.integration.id }, data });
+    assert.equal(await queue.claimPilotJob({ ...binding, id: job.id }), null);
+    assert.deepEqual(await f.get(job.id), job);
+  }
+});
 
 queueTest("claim orders by effective availability and ID, bounds the batch and returns no envelope", async f => {
   const expired = await f.create({ expiresAt: new Date(f.now - 1000) });

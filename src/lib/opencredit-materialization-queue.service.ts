@@ -15,6 +15,12 @@ type QueueDb = Pick<PrismaClient, "$queryRaw" | "$transaction">;
 export type MaterializationLease = { id: string; leaseToken: string };
 type Lease = MaterializationLease;
 type ClaimedJob = Lease & { attempts: number; leaseUntil: Date };
+export type MaterializationPilotTarget = {
+  id: string;
+  companyId: string;
+  integrationId: string;
+  providerScope: string;
+};
 type FinalState = "RETRY" | "NEEDS_REVIEW" | "COMPLETED" | "EXPIRED";
 type Outcome = { id: string; state: FinalState };
 type Transition = { state: "RETRY" | "NEEDS_REVIEW"; delayMs: number; error: RetryError | null; review: MaterializationReviewReason | "RETRY_EXHAUSTED" | null };
@@ -99,6 +105,33 @@ export function createOpenCreditMaterializationQueue(db: QueueDb, random: () => 
   }
 
   return {
+    async claimPilotJob(target: MaterializationPilotTarget): Promise<ClaimedJob | null> {
+      const [lease] = await db.$queryRaw<ClaimedJob[]>`
+        WITH job AS MATERIALIZED (
+          SELECT q."id", q."companyId", q."integrationId", q."providerScope"
+          FROM "OpenCreditLeadMaterialization" q
+          WHERE q."id" = ${target.id} AND q."companyId" = ${target.companyId}
+            AND q."integrationId" = ${target.integrationId} AND q."providerScope" = ${target.providerScope}
+            AND q."state" = 'PENDING' AND q."attempts" = 0
+          FOR UPDATE OF q SKIP LOCKED
+        ), permitted AS MATERIALIZED (
+          SELECT job."id" FROM job
+          JOIN "OpenCreditIntegration" i ON i."id" = job."integrationId"
+            AND i."companyId" = job."companyId" AND i."providerScope" = job."providerScope"
+          WHERE NOT i."enabled" AND NOT i."paused" AND i."materializationEnabled"
+          FOR SHARE OF i SKIP LOCKED
+        ), t AS MATERIALIZED (
+          SELECT "id", clock_timestamp() AT TIME ZONE 'UTC' AS now FROM permitted
+        )
+        UPDATE "OpenCreditLeadMaterialization" q
+        SET "state" = 'PROCESSING', "availableAt" = NULL, "leaseToken" = gen_random_uuid()::text,
+            "leaseUntil" = t.now + INTERVAL '60 seconds', "attempts" = q."attempts" + 1, "updatedAt" = t.now
+        FROM t WHERE q."id" = t."id" AND q."expiresAt" > t.now
+          AND (q."availableAt" IS NULL OR q."availableAt" <= t.now)
+        RETURNING q."id", q."leaseToken", q."leaseUntil", q."attempts"`;
+      return lease ?? null;
+    },
+
     async claim(limit = maxBatchSize) {
       // A single statement acquires, updates and releases row locks before returning.
       return db.$queryRaw<ClaimedJob[]>`
