@@ -73,7 +73,7 @@ export async function getOpenCreditMaterializationPreflight(db: Db, input: Input
         const total = await tx.openCreditLeadMaterialization.count({ where: baseWhere });
         counts.UNKNOWN = Math.max(0, total - known);
 
-        const readyWhere = {
+        const readyWhere: Prisma.OpenCreditLeadMaterializationWhereInput = {
           ...baseWhere,
           state: { in: ["PENDING", "RETRY"] },
           expiresAt: { gt: now },
@@ -82,7 +82,7 @@ export async function getOpenCreditMaterializationPreflight(db: Db, input: Input
             { availableAt: { lte: now } },
             { state: "PENDING", availableAt: null },
           ],
-        } as const;
+        };
 
         const [readyIfEnabled, staleProcessing, expiredActive, candidates] = await Promise.all([
           tx.openCreditLeadMaterialization.count({ where: readyWhere }),
