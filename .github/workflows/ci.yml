@@ -352,6 +352,9 @@ jobs:
           OPENCREDIT_COMMERCIAL_OPERATION_POSTGRES_TEST: "1"
           OPENCREDIT_PASSIVE_INBOUND_POSTGRES_TEST: "1"
 
+      - name: Validate OpenCredit materialization preflight read-only boundary
+        run: npx --yes tsx@4.20.6 --test src/lib/opencredit-materialization-preflight.test.ts
+
       - name: Validate OpenCredit materialization queue on disposable PostgreSQL
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-materialization-queue-postgres.integration.ts
         env:
