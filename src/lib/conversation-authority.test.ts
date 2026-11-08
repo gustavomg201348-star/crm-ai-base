@@ -49,7 +49,7 @@ test("runtime scope, canonical fingerprints and generation boundaries fail close
       const invalid = { ...input, [field]: bad } as never;
       for (const invoke of [() => authority.get(invalid), () => authority.initialize(invalid), () => authority.transition(invalid),
         () => outbound.prepare(invalid), () => outbound.reserve(invalid), () => outbound.authorizeDispatch(invalid),
-        () => outbound.finish(invalid), () => outbound.recover(invalid), () => outbound.reconcileUnknown(invalid)]) {
+        () => outbound.finish(invalid), () => outbound.cancelBeforeDispatch(invalid), () => outbound.recover(invalid), () => outbound.reconcileUnknown(invalid)]) {
         await assert.rejects(invoke);
       }
     }
@@ -157,6 +157,33 @@ test("shared authority persistence and real concurrent transactions", async t =>
       return { ...scope, scope, current, prepared, initialized, contact, conversation };
     }
     const opInput = (f: Awaited<ReturnType<typeof fixture>>, operationId: string) => ({ ...f.scope, operationId });
+    await t.test("pre-dispatch cancellation requires reservation ownership and never revokes issued or UNKNOWN permits", async () => {
+      for (const status of ["PREPARED", "RESERVED", "DISPATCHING", "UNKNOWN", "SENT"] as const) {
+        const f = await fixture(), op = await outbound.prepare(f.prepared);
+        const input = { ...opInput(f, op.id), expectedGeneration: BigInt(1) };
+        const reservation = status === "PREPARED" ? null : await outbound.reserve(input);
+        if (status !== "PREPARED") assert(reservation?.reservationToken);
+        if (["DISPATCHING", "UNKNOWN", "SENT"].includes(status)) await outbound.authorizeDispatch({ ...input, token: reservation!.reservationToken! });
+        if (status === "UNKNOWN" || status === "SENT") await outbound.finish({ ...input, token: reservation!.reservationToken!, status,
+          ...(status === "SENT" ? { providerMessageId: key() } : {}) });
+        const before = await db.outboundOperation.findUniqueOrThrow({ where: { id: op.id } });
+        if (status === "RESERVED") assert.equal(await outbound.cancelBeforeDispatch({ ...input, token: "wrong-token" }), false);
+        assert.equal(await outbound.cancelBeforeDispatch({ ...input, token: reservation?.reservationToken ?? undefined }), status === "PREPARED" || status === "RESERVED");
+        const after = await db.outboundOperation.findUniqueOrThrow({ where: { id: op.id } });
+        if (status === "PREPARED" || status === "RESERVED") { assert.equal(after.status, "CANCELED"); assert.equal(after.activeSlot, null); assert.equal(after.reservationToken, null); }
+        else assert.deepEqual(after, before);
+      }
+    });
+    await t.test("final database validator runs under the native permit transaction and cannot leave a dispatch after rejection", async () => {
+      const f = await fixture(), op = await outbound.prepare(f.prepared);
+      const input = { ...opInput(f, op.id), expectedGeneration: BigInt(1) };
+      const reservation = await outbound.reserve(input); assert(reservation?.reservationToken);
+      let validations = 0;
+      await assert.rejects(outbound.authorizeDispatch({ ...input, token: reservation.reservationToken, validate: async () => { validations++; throw Error("SYNTHETIC_DENIAL"); } }));
+      assert.equal(validations, 1); assert.equal((await db.outboundOperation.findUniqueOrThrow({ where: { id: op.id } })).status, "RESERVED");
+      assert.equal(await outbound.cancelBeforeDispatch({ ...input, token: reservation.reservationToken }), true);
+      assert.equal((await db.outboundOperation.findUniqueOrThrow({ where: { id: op.id } })).activeSlot, null);
+    });
     await t.test("unstable getters cannot omit scope in any public service operation", async () => {
       const operationsBefore = await db.outboundOperation.count();
       const f = await fixture();
@@ -164,7 +191,7 @@ test("shared authority persistence and real concurrent transactions", async t =>
         status: "UNKNOWN", evidenceReference: "TEST_EVIDENCE", executorTerminated: true, resolution: "FAILED" };
       for (const field of ["companyId", "channelId", "conversationId"] as const) {
         for (const invoke of [authority.get, authority.initialize, authority.transition, outbound.prepare, outbound.reserve,
-          outbound.authorizeDispatch, outbound.finish, outbound.recover, outbound.reconcileUnknown]) {
+          outbound.authorizeDispatch, outbound.finish, outbound.cancelBeforeDispatch, outbound.recover, outbound.reconcileUnknown]) {
           let reads = 0;
           const invalid = Object.defineProperty({ ...input }, field, { enumerable: true,
             get: () => ++reads === 1 ? "foreign-scope" : undefined });

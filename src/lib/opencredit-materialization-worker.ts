@@ -164,7 +164,19 @@ export async function startOpenCreditMaterializationWorkerFromRuntime(env: Worke
   ]);
   const worker = createOpenCreditMaterializationWorker({
     queue: createOpenCreditMaterializationQueue(prisma, Math.random, mode.kind === "ROLLOUT" ? mode.rolloutId : undefined),
-    materializer: createOpenCreditDomainMaterializer(prisma),
+    materializer: {
+      async process(lease) {
+        const result = await createOpenCreditDomainMaterializer(prisma).process(lease);
+        if (result?.state === "COMPLETED") {
+          try {
+            const { bootstrapNewlyCompletedOpenCreditJob } = await import("./opencredit-whatsapp-runtime");
+            const bootstrap = await bootstrapNewlyCompletedOpenCreditJob(lease.id);
+            if (bootstrap) { try { console.info(JSON.stringify({ event: "opencredit_whatsapp_bootstrap", outcome: bootstrap.status })); } catch {} }
+          } catch { try { console.warn(JSON.stringify({ event: "opencredit_whatsapp_bootstrap", outcome: "SEND_FAILED" })); } catch {} }
+        }
+        return result;
+      },
+    },
     log: event => console.info(JSON.stringify(event)),
   }, { env });
   runtime.__openCreditMaterializationWorkerV1 = worker;

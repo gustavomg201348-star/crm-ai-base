@@ -109,7 +109,9 @@ export function createOutboundOperationService(database: AuthorityDatabase) {
         return tx.outboundOperation.findUniqueOrThrow({ where: { id: row.id } });
       });
     },
-    async authorizeDispatch(input: OperationInput & { token: string; expectedGeneration: bigint }) {
+    async authorizeDispatch(input: OperationInput & { token: string; expectedGeneration: bigint;
+      /** Internal database-only revalidation under the authority lock; never network I/O. */
+      validate?: (tx: Prisma.TransactionClient) => Promise<void> }) {
       input = { ...input };
       selection(input); requireReference(input.token); requireGeneration(input.expectedGeneration);
       return storage.transaction(async tx => {
@@ -120,6 +122,7 @@ export function createOutboundOperationService(database: AuthorityDatabase) {
         const conversation = await eligible(tx, authority, row.origin, row.actorUserId);
         requireAuthority(JSON.parse(row.payload).destination === normalizeContactPhone(conversation.contact.phone), "DESTINATION_CHANGED");
         // Authorization is deliberately not replayable: a second caller must never receive a second send permit.
+        await input.validate?.(tx);
         const dispatchAt = await storage.now(tx);
         const changed = database.provider === "postgresql"
           ? await tx.$executeRaw(Prisma.sql`UPDATE "OutboundOperation"
@@ -132,6 +135,19 @@ export function createOutboundOperationService(database: AuthorityDatabase) {
               data: { status: "DISPATCHING", leaseUntil: null, dispatchDeadline: new Date(dispatchAt.getTime() + 60000) } })).count;
         requireAuthority(changed === 1, "RESERVATION_CONFLICT");
         return tx.outboundOperation.findUniqueOrThrow({ where: { id: row.id } });
+      });
+    },
+    async cancelBeforeDispatch(input: OperationInput & { token?: string }) {
+      input = { ...input }; selection(input);
+      return storage.transaction(async tx => {
+        await storage.lock(tx, input); const row = await operation(tx, input);
+        // Never revoke or reset an already issued permit or an uncertain send.
+        if (row.status !== "PREPARED" && row.status !== "RESERVED") return false;
+        if (row.status === "RESERVED" && (!input.token || row.reservationToken !== input.token)) return false;
+        await tx.outboundOperation.update({ where: { id: row.id }, data: {
+          status: "CANCELED", activeSlot: null, reservationToken: null, leaseUntil: null
+        } });
+        return true;
       });
     },
     async finish(input: OperationInput & Result & { token: string }) {

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { OpenCreditStatus, SafeOpenCreditIntegration } from "@/lib/opencredit-integration.service";
+import { OpenCreditWhatsappSettings } from "./OpenCreditWhatsappSettings";
 
 const button = "rounded-xl border border-line px-3 py-2 text-sm font-semibold disabled:opacity-50";
 type Setup = { integration: SafeOpenCreditIntegration; setupSecret: string };
@@ -95,6 +96,7 @@ export function OpenCreditSettingsCard() {
           <p className="text-sm text-slate-500">{statusHelp[row.status]}</p>
           <p className="break-all text-sm">URL legada: {origin + row.webhookPath}</p>
           <p className="text-sm">Inbox passiva: {row.passiveInboundEnabled ? "Habilitada" : "Desabilitada"}</p>
+          <OpenCreditWhatsappSettings integrationId={row.id} />
           <p className="break-all text-sm">URL passiva: {origin + row.passiveInboundPath}</p>
           <p className="text-sm text-slate-500">Habilitação passiva requer provisionamento explícito; os controles abaixo alteram somente o legado, exceto a rotação do segredo, que desabilita ambas as rotas.</p>
 
