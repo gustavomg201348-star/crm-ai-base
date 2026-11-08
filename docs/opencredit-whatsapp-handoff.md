@@ -100,9 +100,34 @@ The existing reply policy remains AUTO or unowned HYBRID, with paused/OFF/COPILO
 blocked. Bridge conversations additionally require SENT bootstrap and unowned
 AI/HUMAN_QUEUE authority before generation and immediately before sending.
 
-Human assignment and native authority transitions are reused. In HYBRID, agent
-assignment blocks the next automatic reply; returning to the queue can resume
-under current policy. After a genuine inbound and successful automatic response,
+The real `assignConversationToUser` / `unassignConversation` services synchronize
+an existing authority and Conversation.agentId in one Serializable transaction,
+using the native authority row lock and transaction core. They validate tenant,
+channel, Contact, actor and target, advance generation only on an actual change,
+and cancel incompatible PREPARED/RESERVED operations. An inconsistent existing
+projection fails closed. Conversations without authority retain their legacy
+assignment behavior and do not acquire one through assignment.
+
+Before generating a bridge AI reply, the current verified inbound event receives
+a stable native AI OutboundOperation bound to the current generation. An unowned
+HUMAN_QUEUE may explicitly transition to AI through the existing core and the
+configured administrator; an existing human is never overridden. The generated
+reply uses the existing IA pipeline. Immediately before Meta I/O, native reserve
+and authorizeDispatch revalidate generation, authority, destination and channel;
+a database-only callback checks current policy and inbound under that same lock.
+A human handoff that wins before this final authorization cancels the operation:
+even a previously generated response cannot obtain a dispatch permit.
+
+Known pre-dispatch denials cancel only PREPARED/owned RESERVED operations and
+release their slot. Issued DISPATCHING permits and uncertain results cannot be
+reset by this cleanup; provider/history ambiguity remains UNKNOWN. Authorization
+is the serialization boundary: a handoff after a permit has already committed
+cannot recall a request already dispatched. No transaction spans provider I/O.
+
+In HYBRID, real agent assignment blocks the next automatic reply; returning to
+the queue allows a new inbound to resume under current policy. A canceled reply
+to an old inbound is never resurrected by returning the conversation to queue.
+After a genuine inbound and successful automatic response,
 only this bridge's still-unowned active conversation is shown as BOT. No global
 conversation status semantics are changed.
 

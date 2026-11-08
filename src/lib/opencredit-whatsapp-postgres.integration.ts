@@ -11,6 +11,7 @@ import { NextRequest } from "next/server";
 import { assertOpenCreditCommercialOperationTestDatabase } from "./opencredit-commercial-operation-postgres.guard";
 import { createOpenCreditWhatsappConfigService } from "./opencredit-whatsapp-config.service";
 import { createConversationAuthorityService } from "./conversation-authority.service";
+import { createOutboundOperationService } from "./outbound-operation.service";
 import { bootstrapPhone } from "./opencredit-whatsapp-policy";
 
 assertOpenCreditCommercialOperationTestDatabase(process.env);
@@ -20,6 +21,7 @@ const originalFetch = globalThis.fetch;
 const oldKey = process.env.QEVORA_DATA_ENCRYPTION_KEY_V1, oldAi = process.env.OPENAI_API_KEY;
 let templates: typeof import("./whatsapp-template.service");
 let ai: typeof import("./ai-attendant.service");
+let assignment: typeof import("./lead-assignment");
 let webhook: typeof import("../app/api/webhooks/whatsapp/route");
 let core: typeof import("./opencredit-domain-materializer");
 let crypto: typeof import("./opencredit-lead-materialization-payload");
@@ -27,6 +29,11 @@ let queue: ReturnType<typeof import("./opencredit-materialization-queue.service"
 let createOpenCreditWhatsappBootstrap: typeof import("./opencredit-whatsapp-bootstrap.service")["createOpenCreditWhatsappBootstrap"];
 const pendingAi: Promise<unknown>[] = [];
 const pipelineErrors: string[] = [];
+let holdAi: (() => Promise<void>) | undefined, failAssignmentProjection = false;
+db.$use(async (params, next) => {
+  if (failAssignmentProjection && params.model === "Conversation" && params.action === "update" && params.args?.data?.agentId) throw Error("SYNTHETIC_PROJECTION_FAILURE");
+  return next(params);
+});
 let network: Array<{ type: string; template?: string }> = [], failNetwork = false, missingAck = false, rejectProvider = false;
 const secret = "synthetic-whatsapp-app-secret";
 before(async () => {
@@ -46,6 +53,7 @@ before(async () => {
     }
     if (String(url) === "https://api.openai.com/v1/responses") {
       network.push({ type: "ai" });
+      await holdAi?.();
       return Response.json({ output_text: JSON.stringify({ summary: "Synthetic", temperature: "WARM", nextAction: "Synthetic",
         suggestedReply: "Synthetic response", confidence: 90, tags: [], shouldTransferToHuman: false }) });
     }
@@ -66,6 +74,7 @@ before(async () => {
     ({ createOpenCreditWhatsappBootstrap } = require("./opencredit-whatsapp-bootstrap.service"));
     templates = require("./whatsapp-template.service");
     ai = require("./ai-attendant.service");
+    assignment = require("./lead-assignment");
     core = require("./opencredit-domain-materializer");
     crypto = require("./opencredit-lead-materialization-payload");
     queue = require("./opencredit-materialization-queue.service").createOpenCreditMaterializationQueue(db);
@@ -89,7 +98,7 @@ after(async () => {
   await independent.$disconnect(); await db.$disconnect();
 });
 async function fixture() {
-  network = []; failNetwork = false; missingAck = false; rejectProvider = false; pendingAi.length = 0; pipelineErrors.length = 0;
+  network = []; failNetwork = false; missingAck = false; rejectProvider = false; holdAi = undefined; failAssignmentProjection = false; pendingAi.length = 0; pipelineErrors.length = 0;
   const company = await db.company.create({ data: { name: "Synthetic bridge", aiMode: "HYBRID" } });
   const actor = await db.user.create({ data: { companyId: company.id, name: "Synthetic", email: randomUUID() + "@invalid.test", role: "ADMIN", passwordHash: "synthetic" } });
   const integration = await db.openCreditIntegration.create({ data: { companyId: company.id, providerScope: "synthetic-scope", publicWebhookId: randomUUID(),
@@ -174,7 +183,8 @@ for (const reason of ["phone", "config", "human", "template"] as const) material
   const service = createOpenCreditWhatsappBootstrap({ ...f.deps, sendTemplate: async input => {
     if (reason === "phone") await db.contact.update({ where: { id: f.contact.id }, data: { phone: "5511976543210", normalizedPhone: "5511976543210" } });
     if (reason === "config") await db.openCreditWhatsappConfig.update({ where: { integrationId: f.integration.id }, data: { revision: { increment: 1 } } });
-    if (reason === "human") await db.conversation.update({ where: { id: input.conversationId }, data: { agentId: f.actor.id } });
+    if (reason === "human") await assignment.assignConversationToUser({ companyId: f.company.id, conversationId: input.conversationId,
+      assignedToUserId: f.actor.id, assignedByUserId: f.actor.id });
     if (reason === "template") await db.metaTemplate.update({ where: { id: f.template.id }, data: { components: JSON.stringify([{ type: "BODY", text: "Changed synthetic" }]) } });
     return send(input);
   } });
@@ -201,16 +211,109 @@ material("real signed Meta webhook reuses bridge Conversation; HYBRID replies, h
   const scope = { companyId: f.company.id, conversationId: h.metaConversationId, channelId: f.channel.id };
   const authority = createConversationAuthorityService({ db, provider: "postgresql" });
   const current = await authority.get(scope); assert(current);
-  await authority.transition({ ...scope, actorUserId: f.actor.id, expectedGeneration: current.generation, state: "HUMAN", ownerUserId: f.actor.id,
-    logicalKey: randomUUID(), reason: "SYNTHETIC_HUMAN_HANDOFF" });
-  await db.conversation.update({ where: { id: h.metaConversationId }, data: { agentId: f.actor.id } });
+  await assignment.assignConversationToUser({ companyId: f.company.id, conversationId: h.metaConversationId,
+    assignedToUserId: f.actor.id, assignedByUserId: f.actor.id });
+  const assigned = await authority.get(scope); assert(assigned);
+  assert.equal(assigned.state, "HUMAN"); assert.equal(assigned.ownerUserId, f.actor.id); assert(assigned.generation > current.generation);
+  assert.equal((await db.conversation.findUniqueOrThrow({ where: { id: h.metaConversationId } })).agentId, assigned.ownerUserId);
   await f.sendInbound(); assert.equal(network.filter(n => n.type === "text").length, 1);
   const human = await authority.get(scope); assert(human);
-  await authority.transition({ ...scope, actorUserId: f.actor.id, expectedGeneration: human.generation, state: "HUMAN_QUEUE", ownerUserId: null,
-    logicalKey: randomUUID(), reason: "SYNTHETIC_RETURN_QUEUE" });
-  await db.conversation.update({ where: { id: h.metaConversationId }, data: { agentId: null } });
+  await assignment.unassignConversation({ companyId: f.company.id, conversationId: h.metaConversationId, assignedByUserId: f.actor.id });
+  const queued = await authority.get(scope); assert(queued);
+  assert.equal(queued.state, "HUMAN_QUEUE"); assert.equal(queued.ownerUserId, null); assert(queued.generation > human.generation);
+  assert.equal((await db.conversation.findUniqueOrThrow({ where: { id: h.metaConversationId } })).agentId, null);
   await f.sendInbound(); assert.equal(network.filter(n => n.type === "text").length, 2);
   assert.equal(await db.conversation.count({ where: { contactId: f.contact.id, channelId: f.channel.id } }), 1);
+});
+for (const reserved of [false, true]) material("real assign wins before final AI dispatch and cancels " + (reserved ? "RESERVED" : "PREPARED") + " generation", async f => {
+  await f.setup(); await f.bootstrap.bootstrap(f.target); const h = await f.handoff();
+  let entered!: () => void, release!: () => void;
+  const started = new Promise<void>(r => { entered = r; }), held = new Promise<void>(r => { release = r; });
+  holdAi = async () => { entered(); await held; };
+  const inbound = f.sendInbound();
+  try {
+    await started;
+    const operation = await db.outboundOperation.findFirstOrThrow({ where: { companyId: f.company.id, conversationId: h.metaConversationId, origin: "AI" } });
+    assert.equal(operation.status, "PREPARED");
+    const scope = { companyId: f.company.id, channelId: f.channel.id, conversationId: h.metaConversationId };
+    const authorities = createConversationAuthorityService({ db: independent, provider: "postgresql" });
+    const before = await authorities.get(scope); assert(before); assert.equal(before.state, "AI");
+    const operations = createOutboundOperationService({ db: independent, provider: "postgresql" });
+    const reservation = reserved ? await operations.reserve({ ...scope, operationId: operation.id, expectedGeneration: before.generation }) : null;
+    if (reserved) assert(reservation?.reservationToken);
+    await assignment.assignConversationToUser({ companyId: f.company.id, conversationId: h.metaConversationId,
+      assignedToUserId: f.actor.id, assignedByUserId: f.actor.id });
+    const after = await authorities.get(scope); assert(after);
+    assert.equal(after.state, "HUMAN"); assert.equal(after.ownerUserId, f.actor.id); assert(after.generation > before.generation);
+    assert.equal((await independent.conversation.findUniqueOrThrow({ where: { id: h.metaConversationId } })).agentId, f.actor.id);
+    const canceled = await independent.outboundOperation.findUniqueOrThrow({ where: { id: operation.id } });
+    assert.equal(canceled.status, "CANCELED"); assert.equal(canceled.activeSlot, null); assert.equal(canceled.reservationToken, null);
+    if (reservation?.reservationToken) await assert.rejects(operations.authorizeDispatch({ ...scope, operationId: operation.id,
+      expectedGeneration: before.generation, token: reservation.reservationToken }));
+  } finally { release(); }
+  await inbound; assert.equal(network.filter(n => n.type === "text").length, 0);
+  assert.equal(await db.message.count({ where: { conversationId: h.metaConversationId, senderType: "ai" } }), 0);
+});
+material("real assignment transfers admin ownership atomically, rejects foreign tenant and preserves legacy absence", async f => {
+  await f.setup(); await f.bootstrap.bootstrap(f.target); const h = await f.handoff();
+  const attendant = await db.user.create({ data: { companyId: f.company.id, name: "Synthetic attendant", role: "AGENT", email: randomUUID() + "@invalid.test", passwordHash: "synthetic" } });
+  const scope = { companyId: f.company.id, channelId: f.channel.id, conversationId: h.metaConversationId };
+  const authorities = createConversationAuthorityService({ db, provider: "postgresql" });
+  await assignment.assignConversationToUser({ companyId: f.company.id, conversationId: h.metaConversationId, assignedToUserId: f.actor.id, assignedByUserId: f.actor.id });
+  const before = await authorities.get(scope); assert(before);
+  await assignment.assignConversationToUser({ companyId: f.company.id, conversationId: h.metaConversationId, assignedToUserId: attendant.id, assignedByUserId: f.actor.id, force: true });
+  const after = await authorities.get(scope); assert(after);
+  assert.equal(after.ownerUserId, attendant.id); assert(after.generation > before.generation);
+  assert.equal((await db.conversation.findUniqueOrThrow({ where: { id: h.metaConversationId } })).agentId, attendant.id);
+  await assignment.assignConversationToUser({ companyId: f.company.id, conversationId: h.metaConversationId, assignedToUserId: attendant.id, assignedByUserId: f.actor.id, force: true });
+  assert.equal((await authorities.get(scope))?.generation, after.generation);
+  const foreign = await db.company.create({ data: { name: "Synthetic foreign assignment" } });
+  const user = await db.user.create({ data: { companyId: foreign.id, name: "Synthetic", email: randomUUID() + "@invalid.test", role: "ADMIN", passwordHash: "synthetic" } });
+  for (const input of [{ companyId: foreign.id, assignedByUserId: user.id, assignedToUserId: user.id },
+    { companyId: f.company.id, assignedByUserId: user.id, assignedToUserId: user.id },
+    { companyId: f.company.id, assignedByUserId: f.actor.id, assignedToUserId: user.id }])
+    await assert.rejects(assignment.assignConversationToUser({ ...input, conversationId: h.metaConversationId, force: true }));
+  assert.deepEqual(await authorities.get(scope), await db.conversationAuthority.findUnique({ where: { conversationId: h.metaConversationId } }));
+  assert.equal((await authorities.get(scope))?.generation, after.generation);
+  await assignment.assignConversationToUser({ companyId: f.company.id, conversationId: f.source.id, assignedToUserId: f.actor.id, assignedByUserId: f.actor.id });
+  await assignment.unassignConversation({ companyId: f.company.id, conversationId: f.source.id, assignedByUserId: f.actor.id });
+  assert.equal(await db.conversationAuthority.count({ where: { conversationId: f.source.id } }), 0);
+});
+material("projection failure rolls back generation, authority transition and cancellation with agentId", async f => {
+  await f.setup(); await f.bootstrap.bootstrap(f.target); const h = await f.handoff();
+  const before = await db.conversationAuthority.findUniqueOrThrow({ where: { conversationId: h.metaConversationId } });
+  const operations = createOutboundOperationService({ db, provider: "postgresql" });
+  const operation = await operations.prepare({ companyId: f.company.id, channelId: f.channel.id, conversationId: h.metaConversationId,
+    expectedGeneration: before.generation, logicalKey: "synthetic-rollback", origin: "CAMPAIGN", actorUserId: f.actor.id, payload: { synthetic: true } });
+  failAssignmentProjection = true;
+  try { await assert.rejects(assignment.assignConversationToUser({ companyId: f.company.id, conversationId: h.metaConversationId,
+    assignedToUserId: f.actor.id, assignedByUserId: f.actor.id })); } finally { failAssignmentProjection = false; }
+  assert.deepEqual(await db.conversationAuthority.findUniqueOrThrow({ where: { id: before.id } }), before);
+  assert.equal((await db.conversation.findUniqueOrThrow({ where: { id: h.metaConversationId } })).agentId, null);
+  assert.equal((await db.outboundOperation.findUniqueOrThrow({ where: { id: operation.id } })).status, "PREPARED");
+});
+material("real AGENT self-claim preserves authority and only an administrator can return it to queue", async f => {
+  await f.setup(); await f.bootstrap.bootstrap(f.target); const h = await f.handoff();
+  const user = await db.user.create({ data: { companyId: f.company.id, name: "Synthetic agent", role: "AGENT", email: randomUUID() + "@invalid.test", passwordHash: "synthetic" } });
+  await assignment.assignConversationToUser({ companyId: f.company.id, conversationId: h.metaConversationId, assignedToUserId: user.id, assignedByUserId: user.id });
+  const owner = await db.conversationAuthority.findUniqueOrThrow({ where: { conversationId: h.metaConversationId } });
+  assert.equal(owner.state, "HUMAN"); assert.equal(owner.ownerUserId, user.id);
+  await assert.rejects(assignment.unassignConversation({ companyId: f.company.id, conversationId: h.metaConversationId, assignedByUserId: user.id }));
+  assert.deepEqual(await db.conversationAuthority.findUniqueOrThrow({ where: { id: owner.id } }), owner);
+  await assignment.unassignConversation({ companyId: f.company.id, conversationId: h.metaConversationId, assignedByUserId: f.actor.id });
+  assert.equal((await db.conversationAuthority.findUniqueOrThrow({ where: { id: owner.id } })).state, "HUMAN_QUEUE");
+  assert.equal((await db.conversation.findUniqueOrThrow({ where: { id: h.metaConversationId } })).agentId, null);
+});
+material("concurrent real AGENT self-claims commit one matching projection and generation", async f => {
+  await f.setup(); await f.bootstrap.bootstrap(f.target); const h = await f.handoff();
+  const users = await Promise.all([1, 2].map(() => db.user.create({ data: { companyId: f.company.id, name: "Synthetic agent", role: "AGENT",
+    email: randomUUID() + "@invalid.test", passwordHash: "synthetic" } })));
+  const results = await Promise.allSettled(users.map(user => assignment.assignConversationToUser({ companyId: f.company.id,
+    conversationId: h.metaConversationId, assignedToUserId: user.id, assignedByUserId: user.id })));
+  assert.equal(results.filter(r => r.status === "fulfilled").length, 1);
+  const authority = await db.conversationAuthority.findUniqueOrThrow({ where: { conversationId: h.metaConversationId } });
+  assert.equal(authority.state, "HUMAN"); assert.equal(authority.generation, BigInt(1));
+  assert.equal((await db.conversation.findUniqueOrThrow({ where: { id: h.metaConversationId } })).agentId, authority.ownerUserId);
 });
 for (const mode of ["paused", "OFF", "COPILOT", "AUTO"] as const) material("real inbound respects automation policy: " + mode, async f => {
   await f.setup(); await f.bootstrap.bootstrap(f.target); const h = await f.handoff();

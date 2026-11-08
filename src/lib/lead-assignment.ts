@@ -1,6 +1,29 @@
 import type { UserAvailability } from "@prisma/client";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
+import { randomUUID } from "node:crypto";
+import { authorityStorage, type AuthorityTx } from "./conversation-authority-storage";
+import { conversationAuthorityTransactionCore } from "./conversation-authority.service";
+import { requireAuthority } from "./conversation-authority-contract";
+
+const assignmentDatabase = () => ({ db: prisma, provider: /^postgres(?:ql)?:/.test(process.env.DATABASE_URL ?? "") ? "postgresql" as const : "sqlite" as const });
+async function synchronizeAssignmentAuthority(tx: AuthorityTx, companyId: string, conversationId: string,
+  ownerUserId: string | null, actorUserId: string | null | undefined, logicalKey: string) {
+  // Legacy conversations stay legacy: assignment never creates an authority.
+  const existing = await tx.conversationAuthority.findUnique({ where: { conversationId } });
+  if (!existing) return;
+  const database = assignmentDatabase(), storage = authorityStorage(database);
+  const conversation = await storage.lockConversation(tx, companyId, conversationId);
+  requireAuthority(existing.companyId === companyId && existing.channelId === conversation.channelId
+    && existing.contactId === conversation.contactId, "INVALID_CONVERSATION_SCOPE");
+  const scope = { companyId, conversationId, channelId: conversation.channelId! };
+  const authority = await storage.lock(tx, scope);
+  requireAuthority(conversation.agentId === authority.ownerUserId, "AUTHORITY_PROJECTION_DRIFT");
+  requireAuthority(actorUserId, "FORBIDDEN");
+  await conversationAuthorityTransactionCore(database).transition({ ...scope, actorUserId, logicalKey,
+    reason: ownerUserId === null ? "ASSIGNMENT_RETURN_TO_QUEUE" : "ASSIGNMENT_HUMAN_HANDOFF",
+    expectedGeneration: authority.generation, state: ownerUserId === null ? "HUMAN_QUEUE" : "HUMAN", ownerUserId })(tx);
+}
 
 export type AssignmentMode = "CLAIM_FIRST" | "ROUND_ROBIN" | "ADMIN_MANUAL";
 export type AvailabilityStatus = "ONLINE" | "BUSY" | "OFFLINE" | "PAUSED";
@@ -277,7 +300,8 @@ export async function assignConversationToUser({
   mode?: string;
   force?: boolean;
 }) {
-  const updated = await prisma.$transaction(async (tx) => {
+  const logicalKey = "lead-assignment:" + randomUUID();
+  const updated = await authorityStorage(assignmentDatabase()).transaction(async (tx) => {
     const conversation = await tx.conversation.findFirst({
       where: { id: conversationId, contact: { companyId } },
       select: { id: true, agentId: true }
@@ -291,6 +315,7 @@ export async function assignConversationToUser({
       throw new Error("Esse lead ja foi assumido por outro atendente.");
     }
 
+    await synchronizeAssignmentAuthority(tx, companyId, conversation.id, assignedToUserId, assignedByUserId ?? assignedToUserId, logicalKey);
     const updated = await tx.conversation.update({
       where: { id: conversation.id },
       data: { agentId: assignedToUserId, updatedAt: new Date() },
@@ -321,7 +346,8 @@ export async function unassignConversation({
   conversationId: string;
   assignedByUserId?: string | null;
 }) {
-  const updated = await prisma.$transaction(async (tx) => {
+  const logicalKey = "lead-assignment:" + randomUUID();
+  const updated = await authorityStorage(assignmentDatabase()).transaction(async (tx) => {
     const conversation = await tx.conversation.findFirst({
       where: { id: conversationId, contact: { companyId } },
       select: { id: true }
@@ -331,6 +357,7 @@ export async function unassignConversation({
       throw new Error("Conversa nao encontrada.");
     }
 
+    await synchronizeAssignmentAuthority(tx, companyId, conversation.id, null, assignedByUserId, logicalKey);
     const updated = await tx.conversation.update({
       where: { id: conversation.id },
       data: { agentId: null, updatedAt: new Date() },

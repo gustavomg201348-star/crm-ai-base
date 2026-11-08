@@ -19,7 +19,7 @@ import {
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
 import { readMetaMessageId, sendMetaTextMessage } from "@/lib/meta-whatsapp";
-import { openCreditWhatsappCanAutoReply } from "./opencredit-whatsapp-ai";
+import { openCreditWhatsappCanAutoReply, prepareOpenCreditWhatsappAiReply } from "./opencredit-whatsapp-ai";
 
 export type AiMode = "OFF" | "COPILOT" | "AUTO" | "HYBRID";
 
@@ -616,31 +616,43 @@ export async function maybeSendAutomaticAiReply({
   // Sem chave de IA, o automatico fica protegido para nao enviar resposta generica.
   if (!process.env.OPENAI_API_KEY) return null;
 
-  const { suggestion } = await generateAiSuggestion({ conversationId, companyId });
-  if (!suggestion.suggestedReply || suggestion.shouldTransferToHuman) return null;
+  const attempt = bridge ? await prepareOpenCreditWhatsappAiReply({ db: prisma,
+    provider: /^postgres(?:ql)?:/.test(process.env.DATABASE_URL ?? "") ? "postgresql" : "sqlite" }, companyId, conversationId, shouldAutoReply) : null;
+  if (bridge && !attempt) return null;
+  try {
+    const { suggestion } = await generateAiSuggestion({ conversationId, companyId });
+    if (!suggestion.suggestedReply || suggestion.shouldTransferToHuman) { await attempt?.cancel(); return null; }
 
-  const { channel } = await getConversationIntegration({ conversationId, companyId });
-  if (bridge && !await openCreditWhatsappCanAutoReply(prisma, companyId, conversationId, shouldAutoReply)) return null;
-  const metaResponse = await sendMetaTextMessage({
-    phoneNumberId: channel.phoneNumberId!,
-    accessToken: channel.accessToken!,
-    to: conversation.contact.phone,
-    body: suggestion.suggestedReply
-  });
+    const { channel } = await getConversationIntegration({ conversationId, companyId });
+    if (attempt && !await attempt.authorize(channel)) return null;
+    const metaResponse = await sendMetaTextMessage({
+      phoneNumberId: channel.phoneNumberId!,
+      accessToken: channel.accessToken!,
+      to: attempt?.destination ?? conversation.contact.phone,
+      body: suggestion.suggestedReply
+    });
+    const providerMessageId = readMetaMessageId(metaResponse);
+    if (attempt && !providerMessageId) { await attempt.finish("UNKNOWN"); return null; }
 
-  const sent = await saveOutboundMessage({
-    conversationId,
-    body: suggestion.suggestedReply,
-    type: "text",
-    providerMessageId: readMetaMessageId(metaResponse),
-    status: "sent",
-    senderType: "ai"
-  });
-  if (bridge && await openCreditWhatsappCanAutoReply(prisma, companyId, conversationId, shouldAutoReply)) {
-    const changed = await prisma.conversation.updateMany({ where: { id: conversationId, contact: { companyId }, agentId: null,
-      aiPaused: false, status: { in: ["OPEN", "PENDING", "BOT"] } }, data: { status: "BOT" } });
-    if (changed.count === 1) return { ...sent, status: "BOT" as const };
+    const sent = await saveOutboundMessage({
+      conversationId,
+      body: suggestion.suggestedReply,
+      type: "text",
+      providerMessageId,
+      status: "sent",
+      senderType: "ai"
+    });
+    await attempt?.finish("SENT", providerMessageId ?? undefined);
+    if (bridge && await openCreditWhatsappCanAutoReply(prisma, companyId, conversationId, shouldAutoReply)) {
+      const changed = await prisma.conversation.updateMany({ where: { id: conversationId, contact: { companyId }, agentId: null,
+        aiPaused: false, status: { in: ["OPEN", "PENDING", "BOT"] } }, data: { status: "BOT" } });
+      if (changed.count === 1) return { ...sent, status: "BOT" as const };
+    }
+    return sent;
+  } catch (error) {
+    if (!attempt) throw error;
+    await attempt.finish("UNKNOWN");
+    return null;
   }
-  return sent;
 }
 import { isOpenCreditConversation, openCreditChannelRef, OpenCreditTransportBlockedError } from "@/lib/conversation-channel.service";
