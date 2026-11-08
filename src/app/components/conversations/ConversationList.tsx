@@ -22,6 +22,11 @@ type ConversationListProps = {
   attendants: AttendantRow[];
   isAdmin: boolean;
   loading: boolean;
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  pageError?: string;
+  onLoadMore?: () => void;
+  onRetry?: () => void;
   selectedConversation: ConversationRow | null;
   highlightedConversationId?: string | null;
   onFiltersChange: (filters: ConversationFilters) => void;
@@ -37,6 +42,7 @@ export function ConversationList({
   attendants,
   isAdmin,
   loading,
+  hasMore, loadingMore, pageError, onLoadMore, onRetry,
   selectedConversation,
   highlightedConversationId,
   onFiltersChange,
@@ -118,6 +124,17 @@ export function ConversationList({
               <div key={item} className="h-24 animate-pulse rounded-2xl bg-white shadow-sm ring-1 ring-line/70" />
             ))}
           </div>
+        )}
+        {pageError && (
+          <div role="alert" className="rounded-2xl bg-white p-3 text-sm text-rose-700">
+            {pageError} <button type="button" onClick={onRetry} className="font-bold underline">Recarregar lista</button>
+          </div>
+        )}
+        {hasMore && (
+          <button type="button" onClick={onLoadMore} disabled={loading || loadingMore}
+            className="w-full rounded-2xl border border-line bg-white p-3 text-sm font-bold text-slate-700 disabled:opacity-50">
+            {loadingMore ? "Carregando mais..." : "Carregar mais"}
+          </button>
         )}
       </div>
     </section>

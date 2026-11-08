@@ -1,17 +1,16 @@
+import { createConversationListGetHandler } from "@/lib/conversation-list.service";
 import { NextResponse, type NextRequest } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { getSessionFromRequest } from "@/lib/auth";
 import {
   conversationInclude,
-  conversationListSelect,
   mapConversation,
-  mapConversationListItem,
   type ConversationStatus
 } from "@/lib/conversations";
 import { findOrCreateConversationForChannel } from "@/lib/conversation-lifecycle.service";
 import { prisma } from "@/lib/db";
 import { maybeAutoAssignConversation } from "@/lib/lead-assignment";
-import { conversationVisibilityWhere, isAdmin } from "@/lib/permissions";
+import { isAdmin } from "@/lib/permissions";
 import {
   findContactPhoneIdentityMatch,
   getContactNormalizedPhone,
@@ -24,119 +23,7 @@ type ConversationWithInclude = Prisma.ConversationGetPayload<{
   include: typeof conversationInclude;
 }>;
 
-export async function GET(request: NextRequest) {
-  try {
-    const session = await getSessionFromRequest(request);
-
-    if (!session) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
-    }
-
-    const search = request.nextUrl.searchParams.get("search")?.trim();
-    const status = request.nextUrl.searchParams.get("status") ?? "OPEN";
-    const assignedTo = request.nextUrl.searchParams.get("assignedTo")?.trim();
-    const tagIds = request.nextUrl.searchParams
-      .getAll("tagId")
-      .concat(request.nextUrl.searchParams.get("tagIds")?.split(",") ?? [])
-      .map((tagId) => tagId.trim())
-      .filter(Boolean);
-
-    const assignmentWhere =
-      assignedTo === "me"
-        ? { agentId: session.id }
-        : assignedTo === "unassigned"
-          ? { agentId: null }
-          : assignedTo && isAdmin(session)
-            ? { agentId: assignedTo }
-            : conversationVisibilityWhere(session);
-
-    const baseWhere = {
-        ...assignmentWhere,
-        contact: {
-          companyId: session.companyId,
-          archivedAt: null,
-          ...(search
-            ? {
-                OR: [
-                  { name: { contains: search } },
-                  { phone: { contains: search } },
-                  { cpf: { contains: search } }
-                ]
-              }
-            : {})
-        },
-        ...(tagIds.length
-          ? {
-              tags: {
-                some: {
-                  tagId: { in: tagIds },
-                  companyId: session.companyId,
-                  tag: { companyId: session.companyId, isActive: true }
-                }
-              }
-            }
-          : {}),
-      };
-
-    const [conversations, statusGroups] = await Promise.all([
-      prisma.conversation.findMany({
-        where: {
-          ...baseWhere,
-          ...(status === "ALL" ? {} : { status })
-        },
-        select: conversationListSelect,
-        orderBy: [
-          { lastMessageAt: { sort: "desc", nulls: "last" } },
-          { createdAt: "desc" }
-        ],
-        take: 100
-      }),
-      prisma.conversation.groupBy({
-        by: ["status"],
-        where: baseWhere,
-        _count: { _all: true }
-      })
-    ]);
-
-    const statusCounts = {
-      OPEN: 0,
-      PENDING: 0,
-      BOT: 0,
-      RESOLVED: 0,
-      SOLD: 0
-    };
-
-    for (const group of statusGroups) {
-      if (group.status in statusCounts) {
-        statusCounts[group.status as keyof typeof statusCounts] = group._count._all;
-      }
-    }
-
-    const mappedConversations = conversations
-      .map(mapConversationListItem)
-      .sort((a, b) => {
-        const aTime = a.lastMessageAt
-          ? new Date(a.lastMessageAt).getTime()
-          : new Date(a.createdAt).getTime();
-        const bTime = b.lastMessageAt
-          ? new Date(b.lastMessageAt).getTime()
-          : new Date(b.createdAt).getTime();
-
-        return bTime - aTime;
-      })
-      .slice(0, 100);
-
-    return NextResponse.json({
-      conversations: mappedConversations,
-      statusCounts
-    });
-  } catch {
-    return NextResponse.json(
-      { error: "Nao foi possivel carregar conversas." },
-      { status: 500 }
-    );
-  }
-}
+export const GET = createConversationListGetHandler({ db: prisma, getSession: getSessionFromRequest });
 
 export async function POST(request: NextRequest) {
   try {
