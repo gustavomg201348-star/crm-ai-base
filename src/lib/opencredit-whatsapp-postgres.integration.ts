@@ -119,9 +119,12 @@ async function fixture() {
   const target = { companyId: company.id, integrationId: integration.id, jobId: job.id };
   const setup = () => config.save(session, integration.id, input);
   const handoff = () => db.openCreditWhatsappHandoff.findUniqueOrThrow({ where: { jobId: job.id } });
+  const inboundBytes = new Map<string, string>();
   const sendInbound = async (messageId = "synthetic-in-" + randomUUID()) => {
-    const raw = JSON.stringify({ entry: [{ changes: [{ value: { metadata: { phone_number_id: channel.phoneNumberId },
+    // A genuine replay preserves the original signed bytes, including timestamp.
+    const raw = inboundBytes.get(messageId) ?? JSON.stringify({ entry: [{ changes: [{ value: { metadata: { phone_number_id: channel.phoneNumberId },
       messages: [{ id: messageId, from: bootstrapPhone(contact), type: "text", text: { body: "Synthetic inbound" }, timestamp: String(Math.floor(Date.now() / 1000)) }] } }] }] });
+    inboundBytes.set(messageId, raw);
     const response = await webhook.POST(new NextRequest("https://synthetic.invalid/api/webhooks/whatsapp", { method: "POST", body: raw,
       headers: { "content-type": "application/json", "x-hub-signature-256": "sha256=" + createHmac("sha256", secret).update(raw).digest("hex") } }));
     await Promise.all(pendingAi.splice(0)); assert.equal(response.status, 200, pipelineErrors.join(";")); return response;
