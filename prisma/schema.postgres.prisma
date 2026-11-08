@@ -107,6 +107,7 @@ model ConversationAuthority {
 }
 
 model OutboundOperation {
+  openCreditWhatsappHandoffs OpenCreditWhatsappHandoff[]
   id                 String @id @default(cuid())
   companyId          String
   channelId          String
@@ -520,6 +521,7 @@ model OpenCreditCommercialOperationEvent {
 }
 
 model OpenCreditIntegration {
+  whatsappConfigs OpenCreditWhatsappConfig[]
   rolloutBudgets OpenCreditMaterializationRolloutBudget[]
   passiveInboundEnabled Boolean @default(false)
   materializationEnabled Boolean @default(false)
@@ -563,6 +565,7 @@ model OpenCreditInboundEvent {
 }
 
 model OpenCreditLeadMaterialization {
+  whatsappHandoffs OpenCreditWhatsappHandoff[]
   rolloutAdmissions OpenCreditMaterializationRolloutAdmission[]
   @@unique([id, companyId, integrationId, providerScope], map: "OCMaterialization_id_binding_key")
   id                String @id @default(cuid())
@@ -680,6 +683,8 @@ model RateLimitBucket {
 }
 
 model Channel {
+  openCreditWhatsappConfigs OpenCreditWhatsappConfig[]
+  openCreditWhatsappHandoffs OpenCreditWhatsappHandoff[]
   openCreditMaterializations OpenCreditLeadMaterialization[]
   id            String     @id @default(cuid())
   companyId     String
@@ -774,6 +779,7 @@ model MediaAsset {
 }
 
 model User {
+  openCreditWhatsappConfigs OpenCreditWhatsappConfig[]
   openCreditConsumerAuthorizationChanges OpenCreditConsumerAuthorization[] @relation("ConsumerAuthorizationChangedBy")
   openCreditConsumerAuthorizationEvents OpenCreditConsumerAuthorizationEvent[] @relation("ConsumerAuthorizationEventActor")
   id            String            @id @default(cuid())
@@ -896,6 +902,7 @@ model NextBestActionEvent {
 }
 
 model Contact {
+  openCreditWhatsappHandoffs OpenCreditWhatsappHandoff[]
   openCreditMaterializations OpenCreditLeadMaterialization[]
   openCreditConsumerAuthorizations OpenCreditConsumerAuthorization[]
   id                 String              @id @default(cuid())
@@ -1174,6 +1181,8 @@ model PipelineStage {
 }
 
 model Conversation {
+  openCreditWhatsappSources OpenCreditWhatsappHandoff[] @relation("OpenCreditWhatsappSource")
+  openCreditWhatsappMetas OpenCreditWhatsappHandoff[] @relation("OpenCreditWhatsappMeta")
   openCreditMaterializations OpenCreditLeadMaterialization[]
   id            String         @id @default(cuid())
   contactId     String
@@ -1485,4 +1494,50 @@ model CltSimulationLog {
   @@index([contactId])
   @@index([bankId])
   @@index([status])
+}
+
+model OpenCreditWhatsappConfig {
+  integrationId String @id
+  companyId String
+  providerScope String
+  defaultWhatsappChannelId String?
+  initialTemplateName String?
+  initialTemplateLanguage String?
+  autoStartEnabled Boolean @default(false)
+  configuredByUserId String
+  revision Int @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  integration OpenCreditIntegration @relation(fields: [integrationId, companyId, providerScope], references: [id, companyId, providerScope], onDelete: Restrict, onUpdate: NoAction)
+  channel Channel? @relation(fields: [companyId, defaultWhatsappChannelId], references: [companyId, id], onDelete: Restrict, onUpdate: NoAction)
+  configuredBy User @relation(fields: [companyId, configuredByUserId], references: [companyId, id], onDelete: Restrict, onUpdate: NoAction)
+}
+
+model OpenCreditWhatsappHandoff {
+  id String @id @default(cuid())
+  companyId String
+  integrationId String
+  providerScope String
+  jobId String @unique
+  contactId String
+  sourceConversationId String @unique
+  metaConversationId String @unique
+  channelId String
+  configRevision Int
+  templateName String
+  templateLanguage String
+  templateFingerprint String
+  outboundOperationId String? @unique
+  state String @default("PREPARED")
+  providerMessageId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  job OpenCreditLeadMaterialization @relation(fields: [jobId, companyId, integrationId, providerScope], references: [id, companyId, integrationId, providerScope], onDelete: Restrict, onUpdate: NoAction)
+  contact Contact @relation(fields: [companyId, contactId], references: [companyId, id], onDelete: Restrict, onUpdate: NoAction)
+  sourceConversation Conversation @relation("OpenCreditWhatsappSource", fields: [sourceConversationId, contactId], references: [id, contactId], onDelete: Restrict, onUpdate: NoAction)
+  metaConversation Conversation @relation("OpenCreditWhatsappMeta", fields: [metaConversationId, contactId, channelId], references: [id, contactId, channelId], onDelete: Restrict, onUpdate: NoAction)
+  channel Channel @relation(fields: [companyId, channelId], references: [companyId, id], onDelete: Restrict, onUpdate: NoAction)
+  outboundOperation OutboundOperation? @relation(fields: [companyId, channelId, metaConversationId, outboundOperationId], references: [companyId, channelId, conversationId, id], onDelete: Restrict, onUpdate: NoAction)
+  @@unique([companyId, contactId])
+  @@index([companyId, integrationId, state])
 }

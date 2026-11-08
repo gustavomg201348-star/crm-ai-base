@@ -696,7 +696,9 @@ export async function sendMetaTemplateMessage({
   headerMedia,
   headerImageUrl,
   buttonPayloads,
-  urlButtonVariables
+  urlButtonVariables,
+  signal,
+  quiet = false
 }: {
   phoneNumberId: string;
   accessToken: string;
@@ -709,6 +711,8 @@ export async function sendMetaTemplateMessage({
   headerImageUrl?: string | null;
   buttonPayloads?: string[];
   urlButtonVariables?: string[];
+  signal?: AbortSignal;
+  quiet?: boolean;
 }) {
   const apiVersion = process.env.META_GRAPH_VERSION || "v20.0";
   const templateComponents = template?.components ?? [];
@@ -811,7 +815,7 @@ export async function sendMetaTemplateMessage({
 
   const requestStartedAt = Date.now();
 
-  safeLogInfo("template-send", "sending Meta template message", {
+  if (!quiet) safeLogInfo("template-send", "sending Meta template message", {
     operation: "send-template-message",
     templateName: name,
     language,
@@ -827,6 +831,7 @@ export async function sendMetaTemplateMessage({
     `https://graph.facebook.com/${apiVersion}/${phoneNumberId}/messages`,
     {
       method: "POST",
+      ...(signal ? { signal } : {}),
       headers: {
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json"
@@ -836,7 +841,7 @@ export async function sendMetaTemplateMessage({
   );
   const data = await response.json().catch(() => null);
 
-  safeLogInfo("template-send", "Meta template response received", {
+  if (!quiet) safeLogInfo("template-send", "Meta template response received", {
     operation: "send-template-message",
     templateName: name,
     language,
@@ -848,7 +853,7 @@ export async function sendMetaTemplateMessage({
   });
 
   if (!response.ok) {
-    safeLogError("template-send", new Error("meta-template-send-failed"), {
+    if (!quiet) safeLogError("template-send", new Error("meta-template-send-failed"), {
       operation: "send-template-message",
       templateName: name,
       language,

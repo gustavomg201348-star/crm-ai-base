@@ -25,6 +25,7 @@ import {
   type MetaTemplateLibraryEntry
 } from "@/lib/meta-template-service";
 import { digitsOnlyPhone } from "@/lib/phone-normalization.service";
+import { bootstrapPhone, bootstrapTemplateFingerprint, compatibleBootstrapTemplate } from "./opencredit-whatsapp-policy";
 import {
   readTemplateMedia,
   TEMPLATE_IMAGE_MIME_TYPES,
@@ -455,7 +456,11 @@ export async function sendConversationTemplate({
   userId,
   templateName,
   language,
-  variables
+  variables,
+  automation = false,
+  signal,
+  dispatchGuard,
+  onProviderAccepted
 }: {
   conversationId: string;
   companyId: string;
@@ -463,6 +468,10 @@ export async function sendConversationTemplate({
   templateName: string;
   language: string;
   variables: string[];
+  automation?: boolean;
+  signal?: AbortSignal;
+  dispatchGuard?: (context: { channelId: string; phoneNumberId: string; wabaId: string; destination: string; templateFingerprint: string }) => Promise<void>;
+  onProviderAccepted?: (id: string) => void;
 }) {
   const { conversation, channel } = await getConversationIntegration({
     conversationId,
@@ -485,12 +494,20 @@ export async function sendConversationTemplate({
   }
   const { localTemplate, template } = localTemplateContext;
 
+  if (automation && (!dispatchGuard || !compatibleBootstrapTemplate(template))) throw new Error("BOOTSTRAP_TEMPLATE_UNAVAILABLE");
+  const destination = automation ? bootstrapPhone({ ...conversation.contact, archivedAt: conversation.contact.archivedAt })
+    : digitsOnlyPhone(conversation.contact.phone);
+  if (!destination) throw new Error("BOOTSTRAP_IDENTITY_UNAVAILABLE");
+
   const requiredVariables = extractVariableCount(extractBodyText(template));
   const cleanVariables = variables.map((value) => value.trim());
 
   if (cleanVariables.length < requiredVariables || cleanVariables.some((value) => !value)) {
     throw new Error("Preencha todas as variaveis obrigatorias do template.");
   }
+
+  await dispatchGuard?.({ channelId: channel.id, phoneNumberId: channel.phoneNumberId, wabaId: channel.wabaId,
+    destination, templateFingerprint: bootstrapTemplateFingerprint(template, channel.wabaId) });
 
   const headerImage = await resolveAndUploadLocalTemplateHeaderImageMedia({
     companyId,
@@ -502,13 +519,18 @@ export async function sendConversationTemplate({
   const metaResponse = await sendMetaTemplateMessage({
     phoneNumberId: channel.phoneNumberId!,
     accessToken: channel.accessToken!,
-    to: digitsOnlyPhone(conversation.contact.phone),
+    to: destination,
     name: templateName,
     language,
     variables: cleanVariables,
     template,
-    headerMedia: headerImage.headerMedia
+    headerMedia: headerImage.headerMedia,
+    ...(automation ? { quiet: true } : {}),
+    ...(signal ? { signal } : {})
   });
+  const providerMessageId = readMetaMessageId(metaResponse);
+  if (automation && !providerMessageId) throw new Error("BOOTSTRAP_OUTCOME_UNKNOWN");
+  if (providerMessageId) onProviderAccepted?.(providerMessageId);
   const historyBody = renderTemplateHistoryBody({
     template,
     variables: cleanVariables
@@ -528,6 +550,20 @@ export async function sendConversationTemplate({
       variables: cleanVariables,
       buttons
     }),
-    providerMessageId: readMetaMessageId(metaResponse)
+    providerMessageId,
+    ...(automation ? { senderType: "automation", assignAgent: false } : {})
   });
+}
+
+/** Reuses the existing local library; V1 intentionally accepts no dynamic/media input. */
+export async function getApprovedBootstrapTemplatesForChannel(input: { channelId: string; companyId: string }) {
+  const channel = await prisma.channel.findFirst({ where: { id: input.channelId, companyId: input.companyId,
+    type: "whatsapp", provider: "meta", status: { in: ["ACTIVE", "CONNECTED"] } }, select: { wabaId: true } });
+  if (!channel?.wabaId) return [];
+  const records = await listMetaTemplatesByWaba(input.companyId, channel.wabaId, {
+    isActive: true, metaStatus: "APPROVED", operationalStatus: "READY",
+  });
+  return records.map(deserializeMetaTemplate).filter(isUsableLocalTemplate).map(mapLocalTemplateToMetaTemplate)
+    .filter((t): t is MetaTemplate => t !== null && compatibleBootstrapTemplate(t))
+    .slice(0, 200).map(t => ({ name: t.name, language: t.language }));
 }

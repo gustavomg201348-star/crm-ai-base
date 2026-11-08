@@ -127,7 +127,7 @@ function formatConversationPreview(item: ConversationRow) {
 function formatConversationChannelLine(item: ConversationRow) {
   const channelName = item.channel?.toLowerCase().includes("whatsapp")
     ? "WhatsApp"
-    : item.channel || "Canal";
+    : item.channel === "OPEN_CREDIT" ? "OpenCredit · origem" : item.channel || "Canal";
   const responsible = item.agent?.name ?? "Sem responsavel";
 
   return `${channelName} • ${responsible}`;

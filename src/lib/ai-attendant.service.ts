@@ -19,6 +19,7 @@ import {
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
 import { readMetaMessageId, sendMetaTextMessage } from "@/lib/meta-whatsapp";
+import { openCreditWhatsappCanAutoReply } from "./opencredit-whatsapp-ai";
 
 export type AiMode = "OFF" | "COPILOT" | "AUTO" | "HYBRID";
 
@@ -590,9 +591,11 @@ export async function maybeSendAutomaticAiReply({
 }) {
   const conversation = await prisma.conversation.findFirst({
     where: { id: conversationId, contact: { companyId } },
-    include: { contact: true, channelRef: openCreditChannelRef }
+    include: { contact: true, channelRef: openCreditChannelRef, openCreditWhatsappMetas: { select: { state: true } } }
   });
   if (!conversation || isOpenCreditConversation(conversation)) return null;
+  const bridge = Boolean(conversation.openCreditWhatsappMetas?.length);
+  if (bridge && !await openCreditWhatsappCanAutoReply(prisma, companyId, conversationId, shouldAutoReply)) return null;
   const company = await prisma.company.findUnique({
     where: { id: companyId },
     select: { aiMode: true }
@@ -617,6 +620,7 @@ export async function maybeSendAutomaticAiReply({
   if (!suggestion.suggestedReply || suggestion.shouldTransferToHuman) return null;
 
   const { channel } = await getConversationIntegration({ conversationId, companyId });
+  if (bridge && !await openCreditWhatsappCanAutoReply(prisma, companyId, conversationId, shouldAutoReply)) return null;
   const metaResponse = await sendMetaTextMessage({
     phoneNumberId: channel.phoneNumberId!,
     accessToken: channel.accessToken!,
@@ -624,7 +628,7 @@ export async function maybeSendAutomaticAiReply({
     body: suggestion.suggestedReply
   });
 
-  return saveOutboundMessage({
+  const sent = await saveOutboundMessage({
     conversationId,
     body: suggestion.suggestedReply,
     type: "text",
@@ -632,5 +636,11 @@ export async function maybeSendAutomaticAiReply({
     status: "sent",
     senderType: "ai"
   });
+  if (bridge && await openCreditWhatsappCanAutoReply(prisma, companyId, conversationId, shouldAutoReply)) {
+    const changed = await prisma.conversation.updateMany({ where: { id: conversationId, contact: { companyId }, agentId: null,
+      aiPaused: false, status: { in: ["OPEN", "PENDING", "BOT"] } }, data: { status: "BOT" } });
+    if (changed.count === 1) return { ...sent, status: "BOT" as const };
+  }
+  return sent;
 }
 import { isOpenCreditConversation, openCreditChannelRef, OpenCreditTransportBlockedError } from "@/lib/conversation-channel.service";

@@ -87,7 +87,8 @@ export async function saveOutboundMessage({
   providerMessageId,
   reply,
   status = "sent",
-  senderType = "agent"
+  senderType = "agent",
+  assignAgent = true
 }: {
   conversationId: string;
   userId?: string;
@@ -110,6 +111,7 @@ export async function saveOutboundMessage({
   } | null;
   status?: string;
   senderType?: string;
+  assignAgent?: boolean;
 }) {
   const updated = await prisma.$transaction(async (tx) => {
     const conversation = await tx.conversation.findUniqueOrThrow({
@@ -150,7 +152,7 @@ export async function saveOutboundMessage({
     return tx.conversation.update({
       where: { id: conversationId },
       data: {
-        ...(userId && !conversation.agentId
+        ...(assignAgent && userId && !conversation.agentId
           ? { agent: { connect: { id: userId } } }
           : {}),
         status: conversation.status === "PENDING" ? "OPEN" : conversation.status,
