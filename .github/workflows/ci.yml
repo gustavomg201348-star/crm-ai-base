@@ -53,6 +53,9 @@ jobs:
       - name: Validate OpenCredit controlled worker rollout
         run: node --unhandled-rejections=strict --import tsx --test src/lib/opencredit-materialization-worker.test.ts
 
+      - name: Validate conversation cursor API, list state and cards
+        run: node --unhandled-rejections=strict --import tsx --test --test-concurrency=1 src/lib/conversation-list.test.ts src/lib/conversation-list-pagination.test.ts src/app/components/conversations/ConversationList.test.ts src/lib/conversation-access-control.test.ts
+
       - name: Validate OpenCredit durable rollout admin and budget unit tests
         run: node --unhandled-rejections=strict --import tsx --test src/lib/opencredit-materialization-rollout-budget.test.ts
 
@@ -393,6 +396,11 @@ jobs:
         env:
           OPENCREDIT_COMMERCIAL_OPERATION_POSTGRES_TEST: "1"
           OPENCREDIT_ROLLOUT_BUDGET_POSTGRES_TEST: "1"
+
+      - name: Validate conversation keyset pagination and representative query plan
+        run: node --unhandled-rejections=strict --import tsx --test src/lib/conversation-list-postgres.integration.ts
+        env:
+          CONVERSATION_LIST_POSTGRES_TEST: "1"
 
       - name: Validate OpenCredit one-shot dispatcher on disposable PostgreSQL with fake provider
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-create-client-dispatcher-postgres.integration.ts

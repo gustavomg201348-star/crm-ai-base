@@ -21,6 +21,7 @@ import {
   Tags
 } from "@/lib/mock-data";
 import { ConversationList } from "@/app/components/conversations/ConversationList";
+import { ConversationPageLoader, appendConversationPage, compareConversationActivity } from "@/lib/conversation-list-pagination";
 import { TemplateVariableDialog } from "@/app/components/conversations/TemplateVariableDialog";
 import { MotorCommercialPage } from "@/app/components/opportunities/MotorCommercialPage";
 import { NextBestActionPage } from "@/app/components/opportunities/NextBestActionPage";
@@ -1356,23 +1357,7 @@ function getConversationBadgeClass(label: string, kind: "tag" | "status" | "agen
   return "bg-slate-100 text-slate-600 ring-slate-200";
 }
 
-function getConversationMessageTime(conversation: ConversationRow) {
-  const value = conversation.lastMessageAt ?? conversation.lastMessage?.createdAt;
-  return value ? new Date(value).getTime() : 0;
-}
-
-function compareConversationsByActivity(a: ConversationRow, b: ConversationRow) {
-  const aMessageTime = getConversationMessageTime(a);
-  const bMessageTime = getConversationMessageTime(b);
-
-  if (aMessageTime || bMessageTime) {
-    if (!aMessageTime) return 1;
-    if (!bMessageTime) return -1;
-    if (aMessageTime !== bMessageTime) return bMessageTime - aMessageTime;
-  }
-
-  return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-}
+const compareConversationsByActivity = compareConversationActivity;
 
 function conversationMatchesActiveFilters({
   conversation,
@@ -1762,7 +1747,14 @@ export default function Home() {
   const [cltDraft, setCltDraft] = useState<CltSimulationDraft | null>(null);
   const selectedConversationRef = useRef<string | null>(null);
   const conversationListRef = useRef<ConversationRow[]>([]);
+  const conversationPaginationRef = useRef(new ConversationPageLoader<ConversationRow>(async (params, signal) => {
+    const response = await fetch(`/api/conversations?${params}`, { signal });
+    if (!response.ok) throw new Error("CONVERSATION_LIST_UNAVAILABLE");
+    return response.json();
+  }));
   const conversationRequestIdRef = useRef(0);
+  const conversationScopeRef = useRef("");
+  conversationScopeRef.current = session ? `${session.company.id}:${session.user.id}:${session.user.role}` : "";
   const conversationHighlightTimeoutRef = useRef<number | null>(null);
   const conversationSearchSettlingRef = useRef(false);
   const knownNotificationIdsRef = useRef<Set<string>>(new Set());
@@ -1929,6 +1921,9 @@ export default function Home() {
   const [contactsLoading, setContactsLoading] = useState(false);
   const [kanbanLoading, setKanbanLoading] = useState(false);
   const [conversationLoading, setConversationLoading] = useState(false);
+  const [conversationLoadingMore, setConversationLoadingMore] = useState(false);
+  const [conversationHasMore, setConversationHasMore] = useState(false);
+  const [conversationPageError, setConversationPageError] = useState("");
   const [channelsLoading, setChannelsLoading] = useState(false);
   const [channelStatusLoading, setChannelStatusLoading] = useState(false);
   const [messageLogsLoading, setMessageLogsLoading] = useState(false);
@@ -2348,83 +2343,50 @@ export default function Home() {
   }
 
   const loadConversations = useCallback(
-    async (
-      filters: typeof conversationFilters,
-      options: { silent?: boolean } = {}
-    ) => {
-      const requestId = options.silent
-        ? conversationRequestIdRef.current
-        : (conversationRequestIdRef.current += 1);
-
-      if (!options.silent) {
-        setConversationLoading(true);
-        setAppError("");
-      }
-
+    async (filters: typeof conversationFilters, options: { silent?: boolean; more?: boolean } = {}) => {
+      const loader = conversationPaginationRef.current;
       const params = new URLSearchParams();
       Object.entries(filters).forEach(([key, value]) => {
-        if (Array.isArray(value)) {
-          value.forEach((item) => {
-            if (item) params.append(key === "tagIds" ? "tagId" : key, item);
-          });
-          return;
-        }
-
-        if (key === "assignedTo" && value === "default") return;
-        if (value) params.set(key, value);
+        if (Array.isArray(value)) value.forEach(item => { if (item) params.append(key === "tagIds" ? "tagId" : key, item); });
+        else if (!(key === "assignedTo" && value === "default") && value) params.set(key, value);
       });
-
+      const key = `${conversationScopeRef.current}:${params}`;
+      const mode = options.more ? "more" : options.silent ? "refresh" : "reset";
+      if (mode !== "reset" && key !== loader.key) return;
+      if (mode === "more" && !loader.canLoadMore) return;
+      const requestId = options.silent ? conversationRequestIdRef.current : ++conversationRequestIdRef.current;
+      if (mode === "reset") setConversationLoadingMore(false);
+      if (mode === "reset" && key !== loader.key) {
+        if (loader.key && !loader.key.startsWith(`${conversationScopeRef.current}:`)) setSelectedConversation(null);
+        setConversationList([]); setConversationHasMore(false); setConversationLoadingMore(false);
+      }
+      if (mode === "more") setConversationLoadingMore(true);
+      else if (mode === "reset") { setConversationLoading(true); setAppError(""); }
+      if (!options.silent) setConversationPageError("");
       try {
-        const response = await fetch(`/api/conversations?${params.toString()}`);
-        if (requestId !== conversationRequestIdRef.current) {
-          return;
-        }
-
-        if (response.ok) {
-          const data = (await response.json()) as {
-            conversations: ConversationRow[];
-            statusCounts?: Partial<ConversationStatusCounts>;
-          };
-          setConversationStatusCounts({
-            ...emptyConversationStatusCounts,
-            ...data.statusCounts
-          });
-          const origin = options.silent ? "polling" : "initial-load";
-          const nextConversations = mergeConversationListSnapshot({
-            current: conversationListRef.current,
-            incoming: data.conversations,
-            origin
-          });
-          setConversationList(nextConversations);
-          setSelectedConversation((current) => {
-            if (!current) return null;
-            const next =
-              nextConversations.find((conversation) => conversation.id === current.id) ??
-              current;
-            const stableNext = preserveConversationTimeline(current, next);
-            logConversationRenderDebug({
-              origin: "selected-conversation-load-sync",
-              previous: current,
-              next: stableNext
-            });
-            return stableNext;
-          });
-        } else if (!options.silent) {
-          setAppError("Nao foi possivel carregar conversas.");
-        }
+        const data = await loader.load(key, params, mode);
+        if (!data || key !== loader.key || !key.startsWith(`${conversationScopeRef.current}:`)) return;
+        setConversationPageError("");
+        setConversationStatusCounts({ ...emptyConversationStatusCounts, ...data.statusCounts });
+        setConversationHasMore(data.hasMore);
+        setConversationList(current => {
+          const rows = data.append ? appendConversationPage(current, data.conversations) : data.conversations;
+          return mergeConversationListSnapshot({ current, incoming: rows, origin: mode === "refresh" ? "polling" : "list-page" });
+        });
+        setSelectedConversation(current => {
+          if (!current) return null;
+          const next = data.conversations.find(conversation => conversation.id === current.id) ?? current;
+          return preserveConversationTimeline(current, next);
+        });
       } catch {
-        if (requestId === conversationRequestIdRef.current && !options.silent) {
-          setAppError("Nao foi possivel carregar conversas.");
-        }
+        if (key === loader.key && requestId === conversationRequestIdRef.current && !options.silent) setConversationPageError("Nao foi possivel carregar conversas. Tente novamente.");
       } finally {
-        if (requestId === conversationRequestIdRef.current && !options.silent) {
-          setConversationLoading(false);
+        if (key === loader.key && requestId === conversationRequestIdRef.current && !options.silent) {
+          if (options.more) setConversationLoadingMore(false); else setConversationLoading(false);
         }
       }
-    },
-    []
+    }, []
   );
-
   const handleConversationSearchSettlingChange = useCallback((settling: boolean) => {
     conversationSearchSettlingRef.current = settling;
   }, []);
@@ -5008,6 +4970,11 @@ export default function Home() {
                 canManageOpenCreditIdentity={userIsPlatformAdmin(session)}
                 isAdmin={userCanManageOperation(session)}
                 loading={conversationLoading}
+                hasMore={conversationHasMore}
+                loadingMore={conversationLoadingMore}
+                pageError={conversationPageError}
+                onLoadMore={() => void loadConversations(conversationFilters, { more: true })}
+                onRetryList={() => void loadConversations(conversationFilters)}
                 selectedConversation={selectedConversation}
                 highlightedConversationId={highlightedConversationId}
                 onFiltersChange={setConversationFilters}
@@ -7083,6 +7050,7 @@ function Atendimento({
   canManageOpenCreditIdentity,
   isAdmin,
   loading,
+  hasMore, loadingMore, pageError, onLoadMore, onRetryList,
   selectedConversation,
   highlightedConversationId,
   onFiltersChange,
@@ -7120,6 +7088,7 @@ function Atendimento({
   canManageOpenCreditIdentity: boolean;
   isAdmin: boolean;
   loading: boolean;
+  hasMore: boolean; loadingMore: boolean; pageError: string; onLoadMore: () => void; onRetryList: () => void;
   selectedConversation: ConversationRow | null;
   highlightedConversationId?: string | null;
   onFiltersChange: (filters: { search: string; status: string; tagIds: string[]; assignedTo: string }) => void;
@@ -8284,6 +8253,7 @@ function Atendimento({
           attendants={attendants}
           isAdmin={isAdmin}
           loading={loading}
+          hasMore={hasMore} loadingMore={loadingMore} pageError={pageError} onLoadMore={onLoadMore} onRetry={onRetryList}
           selectedConversation={selectedConversation}
           highlightedConversationId={highlightedConversationId}
           onFiltersChange={onFiltersChange}
