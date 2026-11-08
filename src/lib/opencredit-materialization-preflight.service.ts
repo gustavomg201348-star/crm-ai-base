@@ -136,6 +136,21 @@ export async function getOpenCreditMaterializationPreflight(db: Db, input: Input
         readiness.complete = readiness.evaluated === readyIfEnabled;
         readiness.nextCursor = readiness.complete ? null : after ?? null;
         const identityReady = readiness.readyExistingContact + readiness.readyNewContact;
+        const budgets = await tx.openCreditMaterializationRolloutBudget.findMany({
+          where: baseWhere, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 100,
+          select: { id: true, state: true, maxAdmitted: true, admittedCount: true, expiresAt: true,
+            closedAt: true, releasedAt: true, _count: { select: { admissions: true } } },
+        });
+        const bindingReserved = await tx.openCreditMaterializationRolloutBudget.count({
+          where: { ...baseWhere, releasedAt: null },
+        }) > 0;
+        const budgetTotal = await tx.openCreditMaterializationRolloutBudget.count({ where: baseWhere });
+        const rollouts = budgets.map(b => ({
+          rolloutId: b.id, state: b.state, maxAdmitted: b.maxAdmitted, admittedCount: b.admittedCount,
+          remaining: Math.max(0, b.maxAdmitted - b.admittedCount), expiresAt: b.expiresAt.toISOString(),
+          closedAt: safeDate(b.closedAt), releasedAt: safeDate(b.releasedAt), admissionCount: b._count.admissions,
+          ledgerConsistent: b.admittedCount === b._count.admissions && b.admittedCount >= 0 && b.admittedCount <= b.maxAdmitted,
+        }));
 
         snapshots.push({
           integrationId: integration.id,
@@ -146,6 +161,7 @@ export async function getOpenCreditMaterializationPreflight(db: Db, input: Input
           interlockReady: !integration.enabled && integration.materializationEnabled,
           createdAt: integration.createdAt.toISOString(),
           updatedAt: integration.updatedAt.toISOString(),
+          rollouts: { items: rollouts, total: budgetTotal, complete: budgets.length === budgetTotal, bindingReserved },
           queue: {
             total,
             counts,
@@ -153,7 +169,7 @@ export async function getOpenCreditMaterializationPreflight(db: Db, input: Input
             readiness,
             pendingTotal: counts.PENDING,
             expiredOrIneligible: Math.max(0, counts.PENDING + counts.RETRY - readyIfEnabled),
-            claimableNow: !integration.enabled && !integration.paused && integration.materializationEnabled ? identityReady : 0,
+            claimableNow: !bindingReserved && !integration.enabled && !integration.paused && integration.materializationEnabled ? identityReady : 0,
             staleProcessing,
             expiredActive,
             candidates: candidates.map(candidate => ({

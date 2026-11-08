@@ -8,6 +8,8 @@ flags, deploy, or process production jobs. Activation requires separate approval
 | Variable | Default | Accepted values |
 | --- | --- | --- |
 | `OPENCREDIT_MATERIALIZATION_WORKER_ENABLED` | OFF | Only the exact string `true` enables the worker |
+| `OPENCREDIT_MATERIALIZATION_WORKER_MODE` | OFF | Explicit `NORMAL` or `ROLLOUT` required |
+| `OPENCREDIT_MATERIALIZATION_WORKER_ROLLOUT_ID` | absent | Required in ROLLOUT; must be absent in NORMAL |
 | `OPENCREDIT_MATERIALIZATION_WORKER_BATCH_LIMIT` | `1` | Canonical decimal integers `1` through `10` |
 | `OPENCREDIT_MATERIALIZATION_WORKER_INTERVAL_MS` | `1000` | Canonical decimal integers `1000` through `2147483647` |
 
@@ -33,10 +35,13 @@ not rewrite an existing process's `process.env`: platform propagation/restart is
 still required. This is not a distributed instantaneous cancellation mechanism.
 No Railway configuration is changed by this PR.
 
-The batch ceiling is **per cycle, per worker instance**, not per boot or a global
+In NORMAL, the batch ceiling is **per cycle, per worker instance**, not per boot or a global
 deployment quota. Multiple instances may collectively process more than one batch.
 Use a single instance and a separately approved conservative interval for a future
 limited rollout. For exactly one job total, use the existing single-job pilot.
+ROLLOUT additionally enforces a durable admission cap shared across instances;
+see [durable budget lifecycle](opencredit-durable-rollout-budget.md). Missing or
+invalid mode configuration prevents startup, even when ENABLED equals true.
 
 The worker calls the unchanged readiness-protected `claim(batchLimit)` once per
 cycle. Its existing cursor evaluates at most 4 pages of 25 candidates per claim,
@@ -45,15 +50,18 @@ or lease. READY_EXISTING_CONTACT and READY_NEW_CONTACT alone admit leases.
 Integration gates remain `enabled=false`, `paused=false`,
 `materializationEnabled=true`, with company/integration/providerScope binding.
 
-Recover and expire remain native bounded maintenance phases, each receiving the
+In NORMAL, recover and expire remain native bounded maintenance phases, each receiving the
 same batchLimit, and can affect up to that many jobs **in addition to** the claimed
 batch. Their existing global scope and expiry/retry behavior are unchanged. OFF
 prevents both. The batch ceiling is not a ceiling on all maintenance mutations.
+ROLLOUT skips both global maintenance phases. Reserved bindings and unreconciled
+admissions cannot be claimed through NORMAL or PILOT.
 
 Existing row locks, SKIP LOCKED, conditional lease updates, Serializable claim,
 identity advisory locks and materializer revalidation remain authoritative.
 Identity conflicts after readiness fail closed through the existing review path.
-There is no global Contact table lock, schema change, or provider fallback.
+There is no global Contact table lock or provider fallback. Durable rollout adds
+budget/admission tables without changing Contact or conversation schemas.
 
 ## Errors and sanitized telemetry
 

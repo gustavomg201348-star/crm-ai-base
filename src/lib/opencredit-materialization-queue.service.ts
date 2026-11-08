@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { evaluateMaterializationReadiness, type ReadinessJob } from "./opencredit-materialization-readiness";
+import { availableRolloutBudget, blockingAdmissionSql, consumeRolloutAdmission, sameRolloutBinding, unreservedScopeSql } from "./opencredit-materialization-rollout-budget.service";
 
 const maxBatchSize = 10;
 const maxAttempts = 10;
@@ -13,7 +14,7 @@ const reviewReasons = [
 type RetryError = typeof retryErrors[number];
 export type MaterializationReviewReason = typeof reviewReasons[number];
 type QueueDb = Pick<PrismaClient, "$queryRaw" | "$transaction">;
-export type MaterializationLease = { id: string; leaseToken: string };
+export type MaterializationLease = { id: string; leaseToken: string; rolloutId?: string; admissionAttempt?: number };
 type Lease = MaterializationLease;
 type ClaimedJob = Lease & { attempts: number; leaseUntil: Date };
 export type MaterializationPilotTarget = {
@@ -87,7 +88,8 @@ async function transitionLease(tx: Prisma.TransactionClient, lease: Lease, next:
   return result ?? null;
 }
 
-export function createOpenCreditMaterializationQueue(db: QueueDb, random: () => number = Math.random) {
+export function createOpenCreditMaterializationQueue(db: QueueDb, random: () => number = Math.random,
+  rolloutId?: string) {
   function retryTransition(attempts: number, error: RetryError): Transition {
     return attempts >= maxAttempts
       ? { state: "NEEDS_REVIEW", delayMs: 0, error, review: "RETRY_EXHAUSTED" }
@@ -111,13 +113,17 @@ export function createOpenCreditMaterializationQueue(db: QueueDb, random: () => 
   async function claimReady(target: MaterializationPilotTarget, pilot: boolean): Promise<ClaimedJob | null> {
     try {
       return await db.$transaction(async tx => {
+        const budget = rolloutId === undefined ? null : await availableRolloutBudget(tx, rolloutId, true);
+        if (rolloutId !== undefined && (!budget || pilot || !sameRolloutBinding(budget, target))) return null;
+        const scopeGuard = budget ? Prisma.sql`TRUE` : unreservedScopeSql;
         const [job] = await tx.$queryRaw<Array<ReadinessJob>>`
           SELECT "id", "companyId", "integrationId", "providerScope", "externalLeadId", "inboundEventId", "protectedEnvelope"
-          FROM "OpenCreditLeadMaterialization"
+          FROM "OpenCreditLeadMaterialization" q
           WHERE "id" = ${target.id} AND "companyId" = ${target.companyId}
             AND "integrationId" = ${target.integrationId} AND "providerScope" = ${target.providerScope}
             AND "state" IN ('PENDING', 'RETRY') AND "attempts" < ${maxAttempts}
             AND (NOT ${pilot} OR ("state" = 'PENDING' AND "attempts" = 0))
+            AND ${scopeGuard} AND ${blockingAdmissionSql}
             AND "expiresAt" > (clock_timestamp() AT TIME ZONE 'UTC')
             AND ("availableAt" <= (clock_timestamp() AT TIME ZONE 'UTC') OR ("state" = 'PENDING' AND "availableAt" IS NULL))
           FOR UPDATE SKIP LOCKED`;
@@ -142,6 +148,10 @@ export function createOpenCreditMaterializationQueue(db: QueueDb, random: () => 
             AND (NOT ${pilot} OR (q."state" = 'PENDING' AND q."attempts" = 0))
             AND (q."availableAt" <= t.now OR (q."state" = 'PENDING' AND q."availableAt" IS NULL))
           RETURNING q."id", q."leaseToken", q."leaseUntil", q."attempts"`;
+        if (lease && budget) {
+          await consumeRolloutAdmission(tx, budget, lease);
+          return { ...lease, rolloutId: budget.id, admissionAttempt: lease.attempts };
+        }
         return lease ?? null;
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 150, timeout: 2000 });
     } catch (error) {
@@ -157,6 +167,11 @@ export function createOpenCreditMaterializationQueue(db: QueueDb, random: () => 
 
     async claim(limit = maxBatchSize) {
       const wanted = batchSize(limit);
+      const budget = rolloutId === undefined ? null : await availableRolloutBudget(db, rolloutId);
+      if (rolloutId !== undefined && !budget) return [];
+      const scopeGuard = budget ? Prisma.sql`AND q."companyId"=${budget.companyId}
+        AND q."integrationId"=${budget.integrationId} AND q."providerScope"=${budget.providerScope}`
+        : Prisma.sql`AND ${unreservedScopeSql}`;
       const claimed: ClaimedJob[] = [];
       for (let page = 0; page < 4 && claimed.length < wanted; page++) {
         if (ceiling === null) {
@@ -181,6 +196,7 @@ export function createOpenCreditMaterializationQueue(db: QueueDb, random: () => 
             AND q."expiresAt" > (statement_timestamp() AT TIME ZONE 'UTC')
             AND (q."availableAt" <= (statement_timestamp() AT TIME ZONE 'UTC') OR (q."state" = 'PENDING' AND q."availableAt" IS NULL))
             AND NOT i."enabled" AND NOT i."paused" AND i."materializationEnabled" ${after}
+            ${scopeGuard} AND ${blockingAdmissionSql}
             AND (COALESCE(q."availableAt", q."createdAt"), q."id") <= (${ceiling.ready}, ${ceiling.id})
           ORDER BY ready, q."id" LIMIT 25`;
         if (!candidates.length) {

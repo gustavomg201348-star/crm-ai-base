@@ -24,7 +24,17 @@ type WorkerEnvironment = {
   OPENCREDIT_MATERIALIZATION_WORKER_ENABLED?: string;
   OPENCREDIT_MATERIALIZATION_WORKER_BATCH_LIMIT?: string;
   OPENCREDIT_MATERIALIZATION_WORKER_INTERVAL_MS?: string;
+  OPENCREDIT_MATERIALIZATION_WORKER_MODE?: string;
+  OPENCREDIT_MATERIALIZATION_WORKER_ROLLOUT_ID?: string;
 };
+export type MaterializationWorkerMode = { kind: "NORMAL" } | { kind: "ROLLOUT"; rolloutId: string } | { kind: "INVALID" };
+export function materializationWorkerMode(env: WorkerEnvironment): MaterializationWorkerMode {
+  const id = env.OPENCREDIT_MATERIALIZATION_WORKER_ROLLOUT_ID;
+  if (env.OPENCREDIT_MATERIALIZATION_WORKER_MODE === "NORMAL" && id === undefined) return { kind: "NORMAL" };
+  if (env.OPENCREDIT_MATERIALIZATION_WORKER_MODE === "ROLLOUT" && typeof id === "string"
+    && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?![\s\S])/.test(id)) return { kind: "ROLLOUT", rolloutId: id };
+  return { kind: "INVALID" };
+}
 type WorkerOptions = { intervalMs?: number; batchSize?: number; env?: WorkerEnvironment };
 const defaultIntervalMs = 1_000;
 const maxBatchSize = 10;
@@ -51,7 +61,9 @@ export function createOpenCreditMaterializationWorker(deps: WorkerDependencies, 
   const env = options.env ?? process.env as WorkerEnvironment;
   const intervalMs = boundedInteger(options.intervalMs ?? openCreditMaterializationWorkerConfig(env).intervalMs,
     defaultIntervalMs, 2_147_483_647, defaultIntervalMs);
-  const enabled = () => isOpenCreditMaterializationWorkerEnabled(env);
+  const mode = materializationWorkerMode(env);
+  const enabled = () => isOpenCreditMaterializationWorkerEnabled(env) && mode.kind !== "INVALID"
+    && JSON.stringify(materializationWorkerMode(env)) === JSON.stringify(mode);
   let running = false;
   let inFlight = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -77,9 +89,11 @@ export function createOpenCreditMaterializationWorker(deps: WorkerDependencies, 
     emit("started");
     try {
       if (!enabled()) return outcome();
-      counts.recovered = (await deps.queue.recover(batchLimit)).length;
-      if (!enabled()) return outcome();
-      counts.expired = (await deps.queue.expire(batchLimit)).length;
+      if (mode.kind === "NORMAL") {
+        counts.recovered = (await deps.queue.recover(batchLimit)).length;
+        if (!enabled()) return outcome();
+        counts.expired = (await deps.queue.expire(batchLimit)).length;
+      }
       if (!enabled()) return outcome();
       const leases = await deps.queue.claim(batchLimit);
       counts.claimed = leases.length;
@@ -141,14 +155,16 @@ type RuntimeWorker = ReturnType<typeof createOpenCreditMaterializationWorker>;
 type WorkerRuntimeGlobal = typeof globalThis & { __openCreditMaterializationWorkerV1?: RuntimeWorker };
 
 export async function startOpenCreditMaterializationWorkerFromRuntime(env: WorkerEnvironment = process.env as WorkerEnvironment) {
-  if (!isOpenCreditMaterializationWorkerEnabled(env)) return { started: false as const, reason: "disabled" as const };
+  const mode = materializationWorkerMode(env);
+  if (!isOpenCreditMaterializationWorkerEnabled(env) || mode.kind === "INVALID") return { started: false as const, reason: "disabled" as const };
   const runtime = globalThis as WorkerRuntimeGlobal;
   if (runtime.__openCreditMaterializationWorkerV1?.isRunning()) return { started: false as const, reason: "already_running" as const };
   const [{ prisma }, { createOpenCreditMaterializationQueue }, { createOpenCreditDomainMaterializer }] = await Promise.all([
     import("./db"), import("./opencredit-materialization-queue.service"), import("./opencredit-domain-materializer"),
   ]);
   const worker = createOpenCreditMaterializationWorker({
-    queue: createOpenCreditMaterializationQueue(prisma), materializer: createOpenCreditDomainMaterializer(prisma),
+    queue: createOpenCreditMaterializationQueue(prisma, Math.random, mode.kind === "ROLLOUT" ? mode.rolloutId : undefined),
+    materializer: createOpenCreditDomainMaterializer(prisma),
     log: event => console.info(JSON.stringify(event)),
   }, { env });
   runtime.__openCreditMaterializationWorkerV1 = worker;

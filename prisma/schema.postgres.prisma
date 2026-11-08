@@ -520,6 +520,7 @@ model OpenCreditCommercialOperationEvent {
 }
 
 model OpenCreditIntegration {
+  rolloutBudgets OpenCreditMaterializationRolloutBudget[]
   passiveInboundEnabled Boolean @default(false)
   materializationEnabled Boolean @default(false)
   id              String @id @default(cuid())
@@ -562,6 +563,8 @@ model OpenCreditInboundEvent {
 }
 
 model OpenCreditLeadMaterialization {
+  rolloutAdmissions OpenCreditMaterializationRolloutAdmission[]
+  @@unique([id, companyId, integrationId, providerScope], map: "OCMaterialization_id_binding_key")
   id                String @id @default(cuid())
   companyId         String
   providerScope     String
@@ -589,6 +592,42 @@ model OpenCreditLeadMaterialization {
 
   @@unique([companyId, providerScope, externalLeadId], map: "OCMaterialization_company_scope_lead_key")
   @@index([expiresAt], map: "OCMaterialization_expires_idx")
+}
+
+model OpenCreditMaterializationRolloutBudget {
+  id String @id @default(cuid())
+  companyId String
+  integrationId String
+  providerScope String
+  state String @default("ACTIVE")
+  maxAdmitted Int
+  admittedCount Int @default(0)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  closedAt DateTime?
+  releasedAt DateTime?
+  integration OpenCreditIntegration @relation(fields: [integrationId, companyId, providerScope], references: [id, companyId, providerScope], onDelete: Restrict, onUpdate: NoAction, map: "OCRollout_integration_fkey")
+  admissions OpenCreditMaterializationRolloutAdmission[]
+  @@unique([id, companyId, integrationId, providerScope], map: "OCRollout_id_binding_key")
+}
+
+model OpenCreditMaterializationRolloutAdmission {
+  rolloutId String
+  slot Int
+  jobId String
+  companyId String
+  integrationId String
+  providerScope String
+  admissionAttempt Int
+  leaseTokenHash String
+  admittedAt DateTime @default(now())
+  reconciledAt DateTime?
+  budget OpenCreditMaterializationRolloutBudget @relation(fields: [rolloutId, companyId, integrationId, providerScope], references: [id, companyId, integrationId, providerScope], onDelete: Restrict, onUpdate: NoAction, map: "OCAdmission_budget_fkey")
+  job OpenCreditLeadMaterialization @relation(fields: [jobId, companyId, integrationId, providerScope], references: [id, companyId, integrationId, providerScope], onDelete: Restrict, onUpdate: NoAction, map: "OCAdmission_job_fkey")
+  @@id([rolloutId, slot])
+  @@unique([rolloutId, jobId], map: "OCAdmission_rollout_job_key")
+  @@index([jobId], map: "OCAdmission_job_idx")
 }
 
 model OpenCreditLead {

@@ -398,6 +398,10 @@ test("queue migration preserves preexisting PENDING and NEEDS_REVIEW without cla
     const after = await isolated.$queryRaw<Array<Record<string, unknown>>>`SELECT * FROM "OpenCreditLeadMaterialization" ORDER BY "id"`;
     assert.deepEqual(after, before.map(row => ({ ...row, availableAt: null, attempts: 0, leaseToken: null, leaseUntil: null, lastErrorCode: null })));
     assert.equal(await isolated.openCreditLeadMaterialization.count({ where: { companyId: emptyCompany.id } }), 0);
+    // Historical migration assertions above remain against that exact schema.
+    // Current runtime claims also require the later additive guard tables.
+    for (const dir of migrations.filter(dir => dir > migration)) cpSync(join("prisma/migrations", dir), join(temp, "migrations", dir), { recursive: true });
+    deploy();
     assert.deepEqual(await createOpenCreditMaterializationQueue(isolated).claim(), []);
   } finally {
     await isolated.$disconnect();

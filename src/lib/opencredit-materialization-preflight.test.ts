@@ -90,6 +90,7 @@ test("service returns only sanitized queue metadata and exact readiness counts",
         updatedAt: new Date("2026-11-06T00:00:00Z"),
       }],
     },
+    openCreditMaterializationRolloutBudget: { findMany: async () => [], count: async () => 0 },
     openCreditLeadMaterialization: {
       count: async (query: unknown) => {
         countCalls.push(query);
@@ -164,6 +165,7 @@ test("preflight caps identity reads and labels partial counts instead of claimin
     user: { findUnique: async () => actor }, company: { findUnique: async () => ({ id: "company" }) },
     openCreditIntegration: { findMany: async () => [{ id: "integration", enabled: false, paused: false,
       passiveInboundEnabled: true, materializationEnabled: true, createdAt: new Date(), updatedAt: new Date() }] },
+    openCreditMaterializationRolloutBudget: { findMany: async () => [], count: async () => 0 },
     openCreditLeadMaterialization: {
       count: async (q: { where: { state?: unknown; attempts?: unknown } }) =>
         q.where.state === "PENDING" || q.where.state === undefined || q.where.attempts ? 201 : 0,
