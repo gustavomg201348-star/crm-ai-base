@@ -53,6 +53,9 @@ jobs:
       - name: Validate OpenCredit controlled worker rollout
         run: node --unhandled-rejections=strict --import tsx --test src/lib/opencredit-materialization-worker.test.ts
 
+      - name: Validate OpenCredit durable rollout admin and budget unit tests
+        run: node --unhandled-rejections=strict --import tsx --test src/lib/opencredit-materialization-rollout-budget.test.ts
+
       - name: Validate template media association contract
         run: npx --yes tsx@4.20.6 --test src/lib/meta-template-media-association.test.ts
 
@@ -384,6 +387,12 @@ jobs:
         env:
           OPENCREDIT_COMMERCIAL_OPERATION_POSTGRES_TEST: "1"
           OPENCREDIT_DOMAIN_MATERIALIZER_POSTGRES_TEST: "1"
+
+      - name: Validate OpenCredit durable rollout transactions, upgrade and concurrency
+        run: node --unhandled-rejections=strict --import tsx --test src/lib/opencredit-materialization-rollout-postgres.integration.ts
+        env:
+          OPENCREDIT_COMMERCIAL_OPERATION_POSTGRES_TEST: "1"
+          OPENCREDIT_ROLLOUT_BUDGET_POSTGRES_TEST: "1"
 
       - name: Validate OpenCredit one-shot dispatcher on disposable PostgreSQL with fake provider
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-create-client-dispatcher-postgres.integration.ts

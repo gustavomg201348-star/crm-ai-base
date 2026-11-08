@@ -140,7 +140,7 @@ function rolloutWorker(f: Fixture, batchSize = 1, queueOverride = queue) {
   return createOpenCreditMaterializationWorker({
     queue: queueOverride,
     materializer: { process: f.process },
-  }, { batchSize, env: { OPENCREDIT_MATERIALIZATION_WORKER_ENABLED: "true" } });
+  }, { batchSize, env: { OPENCREDIT_MATERIALIZATION_WORKER_ENABLED: "true", OPENCREDIT_MATERIALIZATION_WORKER_MODE: "NORMAL" } });
 }
 
 materialize("rollout volume: bounded cycles preserve 100 waiting and process at most two READY each", async f => {
@@ -223,7 +223,7 @@ materialize("rollout conflict after claim is NEEDS_REVIEW with no wrong associat
       await f.contact({ cpf: "52998224725" });
       return f.process(lease);
     },
-  } }, { env: { OPENCREDIT_MATERIALIZATION_WORKER_ENABLED: "true" } });
+  } }, { env: { OPENCREDIT_MATERIALIZATION_WORKER_ENABLED: "true", OPENCREDIT_MATERIALIZATION_WORKER_MODE: "NORMAL" } });
   const result = await worker.runOnce();
   assert("needsReview" in result && result.needsReview === 1);
   const row = await f.get(job.id);
@@ -240,7 +240,7 @@ for (const jobs of [1, 2]) materialize(`two rollout instances batch=1 cannot dou
   const make = () => createOpenCreditMaterializationWorker({
     queue: createRequire(import.meta.url)("./opencredit-materialization-queue.service").createOpenCreditMaterializationQueue(db),
     materializer: { async process(lease) { seen.push(lease.id); return f.process(lease); } },
-  }, { env: { OPENCREDIT_MATERIALIZATION_WORKER_ENABLED: "true" }, batchSize: 1 });
+  }, { env: { OPENCREDIT_MATERIALIZATION_WORKER_ENABLED: "true", OPENCREDIT_MATERIALIZATION_WORKER_MODE: "NORMAL" }, batchSize: 1 });
   const outcomes = await Promise.all([make().runOnce(), make().runOnce()]);
   for (const result of outcomes) assert("claimed" in result && result.claimed <= 1 && result.processed <= 1);
   assert(seen.length >= 1 && seen.length <= jobs);

@@ -11,6 +11,7 @@ import {
   type MaterializationLease, type MaterializationReviewReason
 } from "./opencredit-materialization-queue.service";
 import { getSecretEncryptionKeyStatus } from "./secret-encryption-env";
+import { validateRolloutLease } from "./opencredit-materialization-rollout-budget.service";
 
 type Tx = Prisma.TransactionClient;
 const activeStatuses = ["OPEN", "PENDING", "BOT"];
@@ -29,10 +30,10 @@ async function advisoryLock(tx: Tx, scope: string, companyId: string, identity?:
 async function loadJob(tx: Tx, lease: MaterializationLease) {
   const [job] = await tx.$queryRaw<Array<{
     id: string; inboundEventId: string; companyId: string; integrationId: string; providerScope: string;
-    externalLeadId: string; protectedEnvelope: string | null; leaseUntil: Date; expiresAt: Date;
+    externalLeadId: string; protectedEnvelope: string | null; leaseUntil: Date; expiresAt: Date; attempts: number;
   }>>`
     SELECT "id", "inboundEventId", "companyId", "integrationId", "providerScope",
-           "externalLeadId", "protectedEnvelope", "leaseUntil", "expiresAt"
+           "externalLeadId", "protectedEnvelope", "leaseUntil", "expiresAt", "attempts"
     FROM "OpenCreditLeadMaterialization"
     WHERE "id" = ${lease.id} AND "state" = 'PROCESSING' AND "leaseToken" = ${lease.leaseToken}
       AND "leaseUntil" > (statement_timestamp() AT TIME ZONE 'UTC')
@@ -180,6 +181,7 @@ export function createOpenCreditDomainMaterializer(db: Pick<PrismaClient, "$quer
       try {
         return await db.$transaction(async tx => {
           const job = await loadJob(tx, lease);
+          if (!await validateRolloutLease(tx, job, lease)) throw new MaterializationLeaseLostError();
           const identity = await readIdentity(tx, job);
           const { companyId, integrationId } = job;
           await lockOpenCreditDomainMode(tx, { companyId, integrationId, expectedMode: "MATERIALIZATION" });

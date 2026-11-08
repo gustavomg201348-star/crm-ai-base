@@ -2,10 +2,30 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createOpenCreditMaterializationWorker, isOpenCreditMaterializationWorkerEnabled,
-  openCreditMaterializationWorkerConfig } from "./opencredit-materialization-worker";
+  openCreditMaterializationWorkerConfig, materializationWorkerMode } from "./opencredit-materialization-worker";
 
-const on = () => ({ OPENCREDIT_MATERIALIZATION_WORKER_ENABLED: "true" });
-function fixture(env: { OPENCREDIT_MATERIALIZATION_WORKER_ENABLED?: string } = on(), batchSize?: number) {
+const on = () => ({ OPENCREDIT_MATERIALIZATION_WORKER_ENABLED: "true", OPENCREDIT_MATERIALIZATION_WORKER_MODE: "NORMAL" });
+for (const config of [
+  {}, { OPENCREDIT_MATERIALIZATION_WORKER_MODE: "normal" },
+  { OPENCREDIT_MATERIALIZATION_WORKER_MODE: "ROLLOUT" },
+  { OPENCREDIT_MATERIALIZATION_WORKER_MODE: "ROLLOUT", OPENCREDIT_MATERIALIZATION_WORKER_ROLLOUT_ID: "" },
+  { OPENCREDIT_MATERIALIZATION_WORKER_MODE: "ROLLOUT", OPENCREDIT_MATERIALIZATION_WORKER_ROLLOUT_ID: "bad id" },
+  { OPENCREDIT_MATERIALIZATION_WORKER_MODE: "NORMAL", OPENCREDIT_MATERIALIZATION_WORKER_ROLLOUT_ID: "rollout" },
+  { OPENCREDIT_MATERIALIZATION_WORKER_MODE: "NORMAL", OPENCREDIT_MATERIALIZATION_WORKER_ROLLOUT_ID: "" },
+]) test("invalid mode/ID never falls back: " + JSON.stringify(config), async () => {
+  assert.equal(materializationWorkerMode(config).kind, "INVALID");
+  const f = fixture({ OPENCREDIT_MATERIALIZATION_WORKER_ENABLED: "true", ...config });
+  const worker = f.worker(); assert.equal(worker.start(), false); await worker.runOnce();
+  assert.deepEqual(f.order, []);
+});
+test("ROLLOUT processes through its injected guarded queue only, without recover/expire", async () => {
+  const f = fixture({ ...on(), OPENCREDIT_MATERIALIZATION_WORKER_MODE: "ROLLOUT", OPENCREDIT_MATERIALIZATION_WORKER_ROLLOUT_ID: "rollout" });
+  const worker = f.worker(); await worker.runOnce();
+  assert.deepEqual(f.order, ["claim:1", "process:job-0"]);
+  f.env.OPENCREDIT_MATERIALIZATION_WORKER_ROLLOUT_ID = "another";
+  await worker.runOnce(); assert.equal(f.order.length, 2);
+});
+function fixture(env: { OPENCREDIT_MATERIALIZATION_WORKER_ENABLED?: string; OPENCREDIT_MATERIALIZATION_WORKER_MODE?: string; OPENCREDIT_MATERIALIZATION_WORKER_ROLLOUT_ID?: string } = on(), batchSize?: number) {
   const order: string[] = [];
   const logs: unknown[] = [];
   const deps = {
@@ -26,7 +46,7 @@ function fixture(env: { OPENCREDIT_MATERIALIZATION_WORKER_ENABLED?: string } = o
 }
 
 for (const flag of [undefined, "false", "TRUE", "1", "true"]) test(`worker flag ${flag} gates ALL mutations`, async () => {
-  const env = { OPENCREDIT_MATERIALIZATION_WORKER_ENABLED: flag };
+  const env = { ...on(), OPENCREDIT_MATERIALIZATION_WORKER_ENABLED: flag };
   assert.equal(isOpenCreditMaterializationWorkerEnabled(env), flag === "true");
   const f = fixture(env);
   await f.worker().runOnce();
