@@ -37,7 +37,7 @@ export async function runOpenCreditAiSimulation(db: PrismaClient, ctx: CltAiInbo
     contactId: c.contactId, channelId: ctx.channelId, metaConversationId: c.id, state: "SENT" } });
   const a = await db.conversationAuthority.findFirst({ where: { companyId: ctx.companyId, conversationId: c.id,
     channelId: ctx.channelId, generation: ctx.generation, ownerUserId: null, state: { in: ["AI", "HUMAN_QUEUE"] } } });
-  if (!h || !a || event.createdAt < h.createdAt || c.agentId || c.aiPaused || !["OPEN","PENDING","BOT"].includes(c.status)) return null;
+  if (!a || (h && event.createdAt < h.createdAt) || c.agentId || c.aiPaused || !["OPEN","PENDING","BOT"].includes(c.status)) return null;
   const access = await db.openCreditCommercialAccess.findFirst({ where: { companyId: ctx.companyId, providerScope: config.providerScope, enabled: true } });
   const identity = await db.openCreditRemoteIdentity.findFirst({ where: { companyId: ctx.companyId, providerScope: config.providerScope, contactId: c.contactId, enabled: true } });
   const auth = await db.openCreditConsumerAuthorization.findFirst({ where: { companyId: ctx.companyId, providerScope: config.providerScope,
@@ -63,9 +63,13 @@ export async function runOpenCreditAiSimulation(db: PrismaClient, ctx: CltAiInbo
     ? "O crédito CLT depende de análise do banco e de autorização para a consulta. Posso ajudar com informações ou chamar um atendente."
     : "Posso ajudar com informações sobre crédito CLT. Para verificar condições reais, precisamos de cadastro e autorização válidos." };
   if (getSecretEncryptionKeyStatus().status !== "configured") return {reply:human,handoffAfterReply:true};
-  const configured = await db.openCreditWhatsappConfig.findFirst({ where: { companyId: ctx.companyId, providerScope: config.providerScope, integrationId: h.integrationId } });
-  const actor = configured && await db.user.findFirst({ where: { id: configured.configuredByUserId, companyId: ctx.companyId, role: "ADMIN" }, select: { id: true, companyId: true, name: true, email: true } });
-  if (!actor) return { reply: human };
+  const configured = h ? await db.openCreditWhatsappConfig.findFirst({ where: {
+    companyId: ctx.companyId, providerScope: config.providerScope, integrationId: h.integrationId
+  } }) : null;
+  const actorId = h ? configured?.configuredByUserId : auth.changedByUserId;
+  const actor = actorId && await db.user.findFirst({ where: { id: actorId, companyId: ctx.companyId, role: "ADMIN" },
+    select: { id: true, companyId: true, name: true, email: true } });
+  if (!actor || (h && configured?.configuredByUserId !== actor.id)) return { reply: human };
   const session = { ...actor, role: "ADMIN" as const }, input = { actor: session, companyId: ctx.companyId, contactId: c.contactId };
   const id = createHash("sha256").update(JSON.stringify([ctx.companyId, c.id, event.id,"CREDIT_SIMULATION",1])).digest("hex");
   const token = randomBytes(32).toString("hex"), permit = { workflowId: id, token };
