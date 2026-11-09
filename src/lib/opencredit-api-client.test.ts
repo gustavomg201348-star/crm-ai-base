@@ -398,3 +398,10 @@ test("existing runtime browser guard remains effective after the server-marker t
     f.client.dispose();
   }
 });
+
+test("read gate is revalidated after authentication and before provider GET",async()=>{
+  const calls:string[]=[];
+  const client=createOpenCreditApiClient({credentials:()=>creds,fetch:async url=>{calls.push(String(url));return Response.json({data:{accessToken:"synthetic-access",refreshToken:"synthetic-refresh",expiresIn:3600}});}});
+  try {await assert.rejects(client.getOnce("/api/tenants/synthetic/simulations/synthetic",async()=>{throw Error("TAKEOVER");}));assert.equal(calls.length,1);assert(calls[0].endsWith("/api/auth/login"));}
+  finally {client.dispose();}
+});

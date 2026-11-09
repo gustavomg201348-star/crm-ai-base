@@ -8,6 +8,7 @@ datasource db {
 }
 
 model OpenCreditConsumerAuthorization {
+  cltAiSimulations OpenCreditAiSimulation[]
   id String @id @default(cuid())
   companyId String
   contactId String
@@ -58,6 +59,7 @@ model OpenCreditConsumerAuthorizationEvent {
 }
 
 model ConversationInboundEvent {
+  cltAiSimulations OpenCreditAiSimulation[]
   provenanceKind String?
   provenanceVersion Int?
   id             String @id @default(cuid())
@@ -473,6 +475,7 @@ model OpenCreditRemoteIdentityEvent {
 }
 
 model OpenCreditCommercialOperation {
+  cltAiSimulations OpenCreditAiSimulation[]
   diagnostic       String?
   id               String   @id @default(cuid())
   companyId        String
@@ -902,6 +905,7 @@ model NextBestActionEvent {
 }
 
 model Contact {
+  cltAiSimulations OpenCreditAiSimulation[]
   openCreditWhatsappHandoffs OpenCreditWhatsappHandoff[]
   openCreditMaterializations OpenCreditLeadMaterialization[]
   openCreditConsumerAuthorizations OpenCreditConsumerAuthorization[]
@@ -1181,6 +1185,7 @@ model PipelineStage {
 }
 
 model Conversation {
+  cltAiSimulations OpenCreditAiSimulation[]
   openCreditWhatsappSources OpenCreditWhatsappHandoff[] @relation("OpenCreditWhatsappSource")
   openCreditWhatsappMetas OpenCreditWhatsappHandoff[] @relation("OpenCreditWhatsappMeta")
   openCreditMaterializations OpenCreditLeadMaterialization[]
@@ -1541,4 +1546,35 @@ model OpenCreditWhatsappHandoff {
   outboundOperation OutboundOperation? @relation(fields: [companyId, channelId, metaConversationId, outboundOperationId], references: [companyId, channelId, conversationId, id], onDelete: Restrict, onUpdate: NoAction)
   @@unique([companyId, contactId])
   @@index([companyId, integrationId, state])
+}
+
+model OpenCreditAiSimulation {
+  id String @id
+  companyId String
+  contactId String
+  conversationId String
+  channelId String
+  inboundEventId String
+  providerScope String
+  authorizationId String
+  authorizationRevision Int
+  authorityGeneration BigInt
+  decisionVersion Int @default(1)
+  intent String
+  state String @default("RUNNING")
+  tokenHash String
+  deadlineAt DateTime
+  pollCount Int @default(0)
+  operationId String? @unique
+  protectedFacts String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  contact Contact @relation(fields: [companyId, contactId], references: [companyId, id], onDelete: Restrict, onUpdate: NoAction)
+  conversation Conversation @relation(fields: [conversationId, contactId, channelId], references: [id, contactId, channelId], onDelete: Restrict, onUpdate: NoAction)
+  evidence ConversationInboundEvent @relation(fields: [inboundEventId, companyId, contactId], references: [id, companyId, contactId], onDelete: Restrict, onUpdate: NoAction)
+  authorization OpenCreditConsumerAuthorization @relation(fields: [authorizationId, companyId, providerScope], references: [id, companyId, providerScope], onDelete: Restrict, onUpdate: NoAction)
+  operation OpenCreditCommercialOperation? @relation(fields: [operationId, companyId, providerScope], references: [id, companyId, providerScope], onDelete: Restrict, onUpdate: NoAction)
+  @@unique([companyId, conversationId, inboundEventId], map: "CltAi_inbound_key")
+  @@unique([companyId, conversationId, authorizationId, authorizationRevision], map: "CltAi_grant_key")
+  @@index([companyId, providerScope, state], map: "CltAi_scope_idx")
 }

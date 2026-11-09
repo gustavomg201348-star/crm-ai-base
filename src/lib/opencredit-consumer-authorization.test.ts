@@ -325,6 +325,17 @@ test("only approved human admin mutation boundary; reservation only reads author
             }
             ts.forEachChild(n, visit);
           }; visit(ast);
+        } else if (["src/lib/opencredit-ai-simulation.service.ts", "src/lib/opencredit-ai-simulation-guard.ts"].includes(path)) {
+          const source=readFileSync(path,"utf8");
+          assert.doesNotMatch(source,/consumer-authorization\.service|grantOpenCredit|revokeOpenCredit|\$executeRaw/);
+          const ast=ts.createSourceFile(path,source,ts.ScriptTarget.Latest,true);
+          const visit=(n:ts.Node):void=>{
+            if(ts.isPropertyAccessExpression(n)&&["openCreditConsumerAuthorization","openCreditConsumerAuthorizationEvent"].includes(n.name.text)) {
+              assert(ts.isPropertyAccessExpression(n.parent));assert(["findFirst","findUnique"].includes(n.parent.name.text));
+              assert(ts.isCallExpression(n.parent.parent)&&n.parent.parent.expression===n.parent);
+            }
+            ts.forEachChild(n,visit);
+          };visit(ast);
         } else if (["src/lib/opencredit-consumer-authorization-context.service.ts", "src/lib/opencredit-client-validation.service.ts"].includes(path)) {
           const source = readFileSync(path, "utf8");
           assert.doesNotMatch(source, /grantOpenCreditConsumerAuthorization|revokeOpenCreditConsumerAuthorization|consumer-authorization\.service/);
@@ -352,6 +363,7 @@ test("only approved human admin mutation boundary; reservation only reads author
           "src/lib/opencredit-client-validation.test.ts",
           "src/lib/opencredit-client-correction-postgres.integration.ts",
           "src/lib/opencredit-clt-simulation.test.ts", "src/lib/opencredit-clt-simulation-postgres.integration.ts",
+          "src/lib/opencredit-whatsapp-postgres.integration.ts",
           "src/app/components/integrations/OpenCreditSimulationAuthorizationPanel.tsx",
           "src/app/api/admin/integrations/opencredit/clt-simulation/authorization/context/route.ts",
           "src/app/api/admin/integrations/opencredit/clt-simulation/authorization/grant/route.ts",

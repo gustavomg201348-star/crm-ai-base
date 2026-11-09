@@ -10,11 +10,13 @@ import { safeDiagnosticId } from "./opencredit-create-client-diagnostic";
 import { simulationParameters, simulationPayload, simulationId, parseSimulationPost, parseSimulationPoll, type SimulationParameters, type SimulationResult, type SimulationBank } from "./opencredit-clt-simulation";
 import { parseOpenCreditBankCapabilities } from "./opencredit-banks";
 
+import { validateAiSimulationPermit, type AiSimulationPermit } from "./opencredit-ai-simulation-guard";
+
 const KIND = "CREDIT_SIMULATION";
 type Db = Pick<PrismaClient, "$transaction">;
 type Input = { actor: SessionUser; companyId: string; contactId: string };
 type Config = ReturnType<typeof resolveConfiguredOpenCreditProviderContext>;
-type Options = { client?: Pick<typeof openCreditApiClient, "simulateJsonAfterCommit" | "getOnce">; resolve?: () => Config; banks?: () => Promise<SimulationBank[]> };
+type Options = { automationSignal?: AbortSignal; beforeRead?: () => Promise<unknown>; automation?: AiSimulationPermit; client?: Pick<typeof openCreditApiClient, "simulateJsonAfterCommit" | "getOnce">; resolve?: () => Config; banks?: () => Promise<SimulationBank[]> };
 
 const id = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?![\s\S])/.test(v);
 export class CltSimulationError extends Error {
@@ -33,11 +35,12 @@ function view(o: Operation) {
 function config(resolve: () => Config) {
   try { return resolve(); } catch { throw new CltSimulationError("CONFIGURATION"); }
 }
-async function target(tx: Prisma.TransactionClient, i: Input, c: Config, inspectOnly = false) {
-  if (typeof window !== "undefined" || !id(i.companyId) || !id(i.contactId) || !id(i.actor?.id) || !isPlatformAdmin(i.actor)) throw new CltSimulationError("NOT_AUTHORIZED");
+async function target(tx: Prisma.TransactionClient, i: Input, c: Config, inspectOnly = false, automation?: AiSimulationPermit) {
+  if (automation) await validateAiSimulationPermit(tx, automation, i, c.providerScope);
+  if (typeof window !== "undefined" || !id(i.companyId) || !id(i.contactId) || !id(i.actor?.id) || (!automation && !isPlatformAdmin(i.actor))) throw new CltSimulationError("NOT_AUTHORIZED");
   const a = await tx.user.findUnique({ where: { id: i.actor.id }, select: { id: true, companyId: true, role: true, email: true, name: true } });
   if (!a || a.role !== "ADMIN" || a.companyId !== i.actor.companyId || a.email.trim().toLowerCase() !== i.actor.email.trim().toLowerCase()
-    || !isPlatformAdmin({ ...a, role: "ADMIN" })) throw new CltSimulationError("NOT_AUTHORIZED");
+    || (!automation && !isPlatformAdmin({ ...a, role: "ADMIN" }))) throw new CltSimulationError("NOT_AUTHORIZED");
   const contact = await tx.contact.findUnique({ where: { companyId_id: { companyId: i.companyId, id: i.contactId } }, select: { id: true, companyId: true, cpf: true, archivedAt: true } });
   if (!contact || contact.companyId !== i.companyId || contact.id !== i.contactId) return deny();
   const identity = await tx.openCreditRemoteIdentity.findUnique({ where: { companyId_providerScope_contactId: { companyId: i.companyId, providerScope: c.providerScope, contactId: i.contactId } } });
@@ -108,7 +111,7 @@ function operationView(o: Operation) {
 /** Manual catalog read only, fixed tenant + CLT; no bank/account details or PII escape. */
 export async function readSimulationBanks(options: Options = {}): Promise<SimulationBank[]> {
   const resolve = options.resolve ?? resolveConfiguredOpenCreditProviderContext, c = config(resolve);
-  const execution = await (options.client ?? openCreditApiClient).getOnce(`/api/tenants/${c.tenantId}/banks?product=clt`);
+  const execution = await (options.client ?? openCreditApiClient).getOnce(`/api/tenants/${c.tenantId}/banks?product=clt`, options.beforeRead, options.automationSignal);
   if (execution.response.status !== 200) { void execution.response.body?.cancel().catch(() => {}); return deny(); }
   const payload = await readOpenCreditStrictJsonResponse(execution.response);
   const banks = parseOpenCreditBankCapabilities(payload);
@@ -129,7 +132,7 @@ function selectedBank(banks: SimulationBank[], p: SimulationParameters) {
 }
 export async function readSimulationContext(db: Db, i: Input, options: Options = {}) {
   const c = config(options.resolve ?? resolveConfiguredOpenCreditProviderContext);
-  const t = await db.$transaction(tx => target(tx, i, c, true), settings);
+  const t = await db.$transaction(tx => target(tx, i, c, true, options.automation), settings);
   return { ok: true as const, operation: t.existing ? operationView(t.existing) : null };
 }
 class ExistingSimulation extends Error { constructor(readonly operation: Operation) { super("EXISTING_SIMULATION"); } }
@@ -151,7 +154,7 @@ async function record(db: Db, i: Input, c: Config, op: Operation, diagnostic: Di
 /** Auth -> current catalog -> frozen payload -> durable reservation -> one paid POST. */
 export async function dispatchCltSimulation(db: Db, i: Input & SimulationParameters, options: Options = {}) {
   const resolve = options.resolve ?? resolveConfiguredOpenCreditProviderContext, c = config(resolve);
-  const initial = await db.$transaction(tx => target(tx, i, c), settings);
+  const initial = await db.$transaction(tx => target(tx, i, c, false, options.automation), settings);
   if (initial.existing) return { ok: true as const, operation: operationView(initial.existing), result: null };
   let parameters: SimulationParameters;
   try { parameters = Object.freeze(simulationParameters(i)); } catch { throw new CltSimulationError("INVALID_FIELDS"); }
@@ -166,14 +169,14 @@ export async function dispatchCltSimulation(db: Db, i: Input & SimulationParamet
     || credentials[0] !== process.env.OPENCREDIT_API_EMAIL || credentials[1] !== process.env.OPENCREDIT_API_PASSWORD) return deny(); };
   try {
     const execution = await (options.client ?? openCreditApiClient).simulateJsonAfterCommit(`/api/tenants/${c.tenantId}/integration/simulate`, async () => {
-      selectedBank(await (options.banks ?? (() => readSimulationBanks(options)))(), parameters); unchanged();
+      selectedBank(await (options.banks ?? (() => readSimulationBanks({ ...options, beforeRead: options.automation ? () => db.$transaction(tx => validateAiSimulationPermit(tx, options.automation!, i, c.providerScope), settings) : undefined })))(), parameters); unchanged();
       reserved = await db.$transaction(async tx => {
         await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${i.actor.id} FOR SHARE`;
         await tx.$queryRaw`SELECT "id" FROM "Contact" WHERE "id" = ${i.contactId} AND "companyId" = ${i.companyId} FOR SHARE`;
         await tx.$queryRaw`SELECT "id" FROM "OpenCreditCommercialAccess" WHERE "companyId" = ${i.companyId} AND "providerScope" = ${c.providerScope} FOR SHARE`;
         await tx.$queryRaw`SELECT "id" FROM "OpenCreditRemoteIdentity" WHERE "id" = ${initial.identityId} AND "companyId" = ${i.companyId} AND "providerScope" = ${c.providerScope} FOR SHARE`;
         await tx.$queryRaw`SELECT "id" FROM "OpenCreditConsumerAuthorization" WHERE "id" = ${initial.authorizationId} AND "companyId" = ${i.companyId} AND "providerScope" = ${c.providerScope} FOR SHARE`;
-        const current = await target(tx, i, c);
+        const current = await target(tx, i, c, false, options.automation);
         if (current.existing) throw new ExistingSimulation(current.existing);
         if (current.cpf !== initial.cpf || current.identityId !== initial.identityId || current.grantId !== initial.grantId || current.revision !== initial.revision || current.authorizationId !== initial.authorizationId) return deny();
         const op = await tx.openCreditCommercialOperation.create({ data: { companyId: i.companyId, providerScope: c.providerScope, remoteIdentityId: current.identityId,
@@ -185,7 +188,7 @@ export async function dispatchCltSimulation(db: Db, i: Input & SimulationParamet
         unchanged(); return { ...op, state: "IN_FLIGHT", revision: 1 };
       }, settings);
       diagnostic.dispatchCommittedAt = new Date().toISOString(); return { body, committed: reserved };
-    });
+    }, options.automationSignal);
     diagnostic.stage = "RESPONSE"; diagnostic.respondedAt = new Date().toISOString(); diagnostic.httpStatus = execution.response.status;
     const safe = (v: unknown) => { const value = safeDiagnosticId(execution.sanitizeDiagnosticIdentifier(v)); return value && ![initial.cpf, ...credentials].some(secret => secret && value.includes(secret)) ? value : null; };
     diagnostic.requestId = safe(execution.response.headers.get("x-request-id")); diagnostic.correlationId = safe(execution.response.headers.get("x-correlation-id"));
@@ -198,7 +201,7 @@ export async function dispatchCltSimulation(db: Db, i: Input & SimulationParamet
     if (!reserved) {
       if (error instanceof ExistingSimulation) return { ok: true as const, operation: operationView(error.operation), result: null };
       if (error instanceof CltSimulationError) throw error;
-      const current = await db.$transaction(tx => target(tx, i, c), settings);
+      const current = await db.$transaction(tx => target(tx, i, c, false, options.automation), settings);
       if (current.grantId === initial.grantId && current.existing) return { ok: true as const, operation: operationView(current.existing), result: null };
       throw new CltSimulationError("PRE_DISPATCH_FAILED");
     }
@@ -213,24 +216,24 @@ export async function dispatchCltSimulation(db: Db, i: Input & SimulationParamet
 /** One bounded manual provider GET, never a second POST. Local CAS records a conclusive observation. */
 export async function pollCltSimulation(db: Db, i: Input, options: Options = {}) {
   const c = config(options.resolve ?? resolveConfiguredOpenCreditProviderContext);
-  const t = await db.$transaction(tx => target(tx, i, c, true), settings), op = t.existing;
+  const t = await db.$transaction(tx => target(tx, i, c, true, options.automation), settings), op = t.existing;
   if (!op) return deny();
   const d = diagnosticRead(op.diagnostic);
   if (!["IN_FLIGHT", "SUCCEEDED"].includes(op.state) || !d?.simulationId || op.state === "IN_FLIGHT" && !["pendente", "waiting_authorization"].includes(d.providerStatus ?? "")) return deny();
   try {
-    const execution = await (options.client ?? openCreditApiClient).getOnce(`/api/tenants/${c.tenantId}/simulations/${simulationId(d.simulationId)}`);
+    const execution = await (options.client ?? openCreditApiClient).getOnce(`/api/tenants/${c.tenantId}/simulations/${simulationId(d.simulationId)}`, options.automation ? () => db.$transaction(tx => validateAiSimulationPermit(tx, options.automation!, i, c.providerScope), settings) : undefined, options.automationSignal);
     if (execution.response.status !== 200) { void execution.response.body?.cancel().catch(() => {}); throw Error(); }
     const payload = await readOpenCreditStrictJsonResponse(execution.response);
     const result = parseSimulationPoll(payload, { simulationId: d.simulationId, bankId: d.bankId, cpf: t.cpf, tenantId: c.tenantId });
     const now = config(options.resolve ?? resolveConfiguredOpenCreditProviderContext);
     if (now.tenantId !== c.tenantId || now.providerScope !== c.providerScope) return deny();
-    const current = await db.$transaction(tx => target(tx, i, c, true), settings);
+    const current = await db.$transaction(tx => target(tx, i, c, true, options.automation), settings);
     if (current.cpf !== t.cpf || current.identityId !== t.identityId || current.existing?.id !== op.id) return deny();
     if (op.state === "SUCCEEDED") return { ok: true as const, operation: operationView(op), result };
     const safe = (v: unknown) => { const value = safeDiagnosticId(execution.sanitizeDiagnosticIdentifier(v)); return value && !value.includes(t.cpf) ? value : null; };
     return await record(db, i, c, op, { ...d, requestId: safe(execution.response.headers.get("x-request-id")), correlationId: safe(execution.response.headers.get("x-correlation-id")), stage: "POLL", respondedAt: new Date().toISOString(), httpStatus: 200, responseReadable: true, responseParsed: true, providerStatus: result.status, category: pending(result) ? "PENDING" : "NONE", settlement: "NOT_CONFIRMED" }, result);
   } catch {
-    const current = await db.$transaction(tx => target(tx, i, c, true), settings);
+    const current = await db.$transaction(tx => target(tx, i, c, true, options.automation), settings);
     return { ok: true as const, operation: current.existing ? operationView(current.existing) : operationView(op), result: null, pollUnavailable: true };
   }
 }

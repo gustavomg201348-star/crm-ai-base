@@ -98,6 +98,6 @@ test("source limits paid consumer, auth evidence and UI; no background requests 
     if (/from ["'](?:.*\/)opencredit-clt-simulation.service["']/.test(source)) consumers.push(path);
   }
   assert.deepEqual(paid, ["src/lib/opencredit-clt-simulation.service.ts"]);
-  assert.deepEqual(consumers, ["src/lib/opencredit-clt-simulation-admin-handler.ts"]);
+  assert.deepEqual(consumers.sort(), ["src/lib/opencredit-ai-simulation.service.ts", "src/lib/opencredit-clt-simulation-admin-handler.ts"]);
   const auth = readFileSync("src/app/components/integrations/OpenCreditSimulationAuthorizationPanel.tsx", "utf8"); assert.match(auth, /CREDIT_SIMULATION/); assert.doesNotMatch(auth, /CLIENT_PROFILE_UPSERT|CLIENT_PROFILE_CORRECTION/);
 });

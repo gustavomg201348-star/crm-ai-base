@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { validBootstrapChannel } from "./opencredit-whatsapp-policy";
 import { authorityStorage, type AuthorityDatabase } from "./conversation-authority-storage";
 import { conversationAuthorityTransactionCore } from "./conversation-authority.service";
@@ -57,9 +57,10 @@ export async function prepareOpenCreditWhatsappAiReply(database: AuthorityDataba
         ...(status === "SENT" ? { providerMessageId } : {}) }).catch(() => {});
     };
     return {
+      context: Object.freeze({ companyId, conversationId, channelId: plan.scope.channelId, inboundEventId: plan.eventId, generation: plan.generation }),
       destination,
       cancel: () => finish("UNKNOWN"),
-      async authorize(channel: { id: string; phoneNumberId: string | null; wabaId: string | null }) {
+      async authorize(channel: { id: string; phoneNumberId: string | null; wabaId: string | null }, validateFinancial?: (tx: Prisma.TransactionClient) => Promise<void>) {
         try {
           requireAuthority(channel.id === plan.scope.channelId && channel.phoneNumberId === plan.phoneNumberId && channel.wabaId === plan.wabaId,
             "INVALID_CONVERSATION_SCOPE");
@@ -75,9 +76,21 @@ export async function prepareOpenCreditWhatsappAiReply(database: AuthorityDataba
                 "INVALID_CONVERSATION_SCOPE");
               const latest = await tx.conversationInboundEvent.findFirst({ where: plan.scope, orderBy: { sequence: "desc" }, select: { id: true } });
               requireAuthority(latest?.id === plan.eventId, "INBOUND_CHANGED");
+              await validateFinancial?.(tx);
             } });
           return true;
         } catch { await finish("UNKNOWN"); return false; }
+      },
+      async transferToHuman() {
+        await storage.transaction(async tx => {
+          const c = await storage.lockConversation(tx, companyId, conversationId);
+          const a = await storage.lock(tx, plan.scope);
+          requireAuthority(a.generation === plan.generation && !a.ownerUserId && !c.agentId, "GENERATION_CONFLICT");
+          await core.transition({ ...plan.scope, actorUserId: (await tx.openCreditWhatsappConfig.findFirstOrThrow({ where: {
+            companyId, integrationId: (await tx.openCreditWhatsappHandoff.findFirstOrThrow({ where: { companyId, metaConversationId: conversationId } })).integrationId } })).configuredByUserId,
+            logicalKey: "clt-human:" + plan.eventId, reason: "CLT_CUSTOMER_HANDOFF", expectedGeneration: plan.generation, state: "HUMAN_QUEUE", ownerUserId: null })(tx);
+          await tx.conversation.update({ where: { id: conversationId }, data: { aiPaused: true } });
+        });
       },
       finish,
     };
