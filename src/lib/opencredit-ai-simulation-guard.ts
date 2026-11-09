@@ -46,7 +46,7 @@ async function validateBindings(tx: Prisma.TransactionClient, w: OpenCreditAiSim
   const access = await tx.openCreditCommercialAccess.findUnique({ where: { companyId_providerScope: { companyId: w.companyId, providerScope } } });
   const bridgeActorValid = !!h && !!config && config.configuredByUserId === input.actor.id;
   const directActorValid = !h && !!auth && auth.changedByUserId === input.actor.id;
-  const evidenceAfterOrigin = !h || auth?.evidence.createdAt >= h.createdAt;
+  const evidenceAfterOrigin = !h || (!!auth?.evidence?.createdAt && auth.evidence.createdAt >= h.createdAt);
   const eventAfterOrigin = !h || (!!event && event.createdAt >= h.createdAt);
   const integrationValid = !h || !!await tx.openCreditIntegration.findFirst({ where: {
     id: h.integrationId, companyId: w.companyId, providerScope,
