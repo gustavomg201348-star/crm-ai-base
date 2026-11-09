@@ -31,6 +31,10 @@ export function deterministicCltIntent(text: unknown): CltAiIntent {
   ];
   return rules.find(([, pattern]) => pattern.test(message))?.[0] ?? "UNKNOWN";
 }
+export function deterministicCltIntentProposal(text: unknown): CltAiIntentProposal | null {
+  const intent = deterministicCltIntent(text);
+  return intent === "UNKNOWN" ? null : Object.freeze({ intent, confidence: 1 });
+}
 export function validateCltAiIntent(proposal: unknown, currentCustomerText: unknown): CltAiIntentProposal {
   const parsed = parseCltAiIntent(proposal), confirmed = deterministicCltIntent(currentCustomerText);
   return parsed.confidence >= 0.9 && parsed.intent === confirmed ? parsed : unknown();
