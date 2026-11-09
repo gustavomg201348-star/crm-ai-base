@@ -5,10 +5,11 @@ import { sameOrigin } from "./opencredit-admin-request";
 import { readOpenCreditWhatsappBody } from "./opencredit-whatsapp-management-handler";
 import type { createOpenCreditWhatsappBootstrap } from "./opencredit-whatsapp-bootstrap.service";
 import type { RateLimitRule } from "./rate-limit";
+import { formatConversationChannel } from "./conversation-channel.service";
 
 const reply = (body: object, status = 200) => NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
 export function createOpenCreditWhatsappCanary(deps: {
-  db: Pick<PrismaClient, "user" | "conversation" | "openCreditLeadMaterialization">;
+  db: Pick<PrismaClient, "user" | "conversation" | "openCreditLeadMaterialization" | "openCreditWhatsappHandoff">;
   getSession(request: NextRequest): Promise<SessionUser | null>;
   bootstrap: ReturnType<typeof createOpenCreditWhatsappBootstrap>;
   enforceLimits(rules: readonly RateLimitRule[]): Promise<Response | null>;
@@ -37,10 +38,26 @@ export function createOpenCreditWhatsappCanary(deps: {
       if (!source) return reply({ error: "NOT_FOUND" }, 404);
       const jobs = await deps.db.openCreditLeadMaterialization.findMany({ where: { companyId: actor.companyId,
         conversationId: source.id, state: "COMPLETED" }, take: 2,
-        select: { id: true, integrationId: true, contactId: true, channelId: true } });
+        select: { id: true, integrationId: true, providerScope: true, contactId: true, channelId: true } });
       if (jobs.length !== 1 || jobs[0].contactId !== source.contactId || jobs[0].channelId !== source.channelId) return reply({ error: "IDENTITY_UNAVAILABLE" }, 409);
-      return reply(await deps.bootstrap.bootstrap({ companyId: actor.companyId, integrationId: jobs[0].integrationId,
-        jobId: jobs[0].id, trigger: "ADMIN_CANARY", adminUserId: actor.id, sourceConversationId: source.id }));
+      const result = await deps.bootstrap.bootstrap({ companyId: actor.companyId, integrationId: jobs[0].integrationId,
+        jobId: jobs[0].id, trigger: "ADMIN_CANARY", adminUserId: actor.id, sourceConversationId: source.id });
+      if (result.status === "SENT" || result.status === "ALREADY_STARTED") {
+        try {
+          const handoff = await deps.db.openCreditWhatsappHandoff.findFirst({ where: { companyId: actor.companyId,
+            sourceConversationId: source.id, jobId: jobs[0].id, integrationId: jobs[0].integrationId,
+            providerScope: jobs[0].providerScope, contactId: source.contactId, state: "SENT",
+            sourceConversation: { channel: "OPEN_CREDIT", channelId: source.channelId,
+              contact: { companyId: actor.companyId }, channelRef: { companyId: actor.companyId, type: "OPEN_CREDIT", provider: "internal" } } },
+            select: { metaConversationId: true, channelId: true } });
+          const meta = handoff && await deps.db.conversation.findFirst({ where: { id: handoff.metaConversationId,
+            contactId: source.contactId, contact: { companyId: actor.companyId }, channelId: handoff.channelId,
+            channel: { in: ["whatsapp", formatConversationChannel(handoff.channelId)] },
+            channelRef: { companyId: actor.companyId, type: "whatsapp", provider: "meta" } }, select: { id: true } });
+          if (meta) return reply({ status: result.status, metaConversationId: meta.id });
+        } catch { /* Navigation lookup must not turn a confirmed send into an ambiguous outcome. */ }
+      }
+      return reply(result);
     } catch { return reply({ error: "UNAVAILABLE" }, 503); }
   };
 }
