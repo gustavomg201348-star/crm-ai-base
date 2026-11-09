@@ -8,7 +8,7 @@ const read = (path: string) => readFileSync(new URL("../../" + path, import.meta
 const op = "OpenCreditCommercialOperation"; const event = op + "Event";
 const model = (source: string, name: string) => source.match(new RegExp("^model " + name + " \\{[\\s\\S]*?^\\}", "m"))?.[0];
 const fields = (source: string) => source.split(/\r?\n/).slice(1).map(l => l.trim()).filter(l => /^[a-z]/.test(l)).map(l => l.split(/\s+/)[0]);
-const operationFields = ["diagnostic", "id", "companyId", "remoteIdentityId", "providerScope", "operationKind", "intentKey", "state", "revision", "createdByUserId", "createdAt", "updatedAt", "company", "remoteIdentity", "createdBy", "events"];
+const operationFields = ["cltAiSimulations", "diagnostic", "id", "companyId", "remoteIdentityId", "providerScope", "operationKind", "intentKey", "state", "revision", "createdByUserId", "createdAt", "updatedAt", "company", "remoteIdentity", "createdBy", "events"];
 const eventFields = ["dispatchAuthorizationEventId", "dispatchAuthorizationEvent", "id", "operationId", "companyId", "providerScope", "actorUserId", "action", "previousState", "nextState", "revision", "createdAt", "operation", "actor"];
 test("both logical models, exact fields and inverse relations are equivalent across providers", () => {
   const sqlite = read("prisma/schema.prisma"); const pg = read("prisma/schema.postgres.prisma");
