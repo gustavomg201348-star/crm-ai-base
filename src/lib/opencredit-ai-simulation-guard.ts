@@ -32,7 +32,9 @@ async function validateBindings(tx: Prisma.TransactionClient, w: OpenCreditAiSim
   const company = await tx.company.findUnique({ where: { id: w.companyId }, select: { aiMode: true } });
   const h = await tx.openCreditWhatsappHandoff.findFirst({ where: { companyId: w.companyId, providerScope,
     contactId: w.contactId, channelId: w.channelId, metaConversationId: w.conversationId, state: "SENT" } });
-  const config = h && await tx.openCreditWhatsappConfig.findFirst({ where: { companyId: w.companyId, integrationId: h.integrationId, providerScope } });
+  const config = h && await tx.openCreditWhatsappConfig.findFirst({ where: {
+    companyId: w.companyId, integrationId: h.integrationId, providerScope
+  } });
   const event = await tx.conversationInboundEvent.findFirst({ where: { companyId: w.companyId, conversationId: w.conversationId,
     channelId: w.channelId, contactId: w.contactId }, orderBy: { sequence: "desc" }, include: { message: true } });
   const auth = await tx.openCreditConsumerAuthorization.findFirst({ where: { id: w.authorizationId, companyId: w.companyId,
@@ -42,19 +44,25 @@ async function validateBindings(tx: Prisma.TransactionClient, w: OpenCreditAiSim
   const matches=normalized && formatted ? await tx.contact.findMany({where:{companyId:w.companyId,cpf:{in:[normalized,formatted]}},select:{id:true},take:2}):[];
   const actor = await tx.user.findFirst({where:{id:input.actor.id,companyId:w.companyId,role:"ADMIN"},select:{id:true}});
   const access = await tx.openCreditCommercialAccess.findUnique({ where: { companyId_providerScope: { companyId: w.companyId, providerScope } } });
+  const bridgeActorValid = !!h && !!config && config.configuredByUserId === input.actor.id;
+  const directActorValid = !h && !!auth && auth.changedByUserId === input.actor.id;
+  const evidenceAfterOrigin = !h || (!!auth?.evidence?.createdAt && auth.evidence.createdAt >= h.createdAt);
+  const eventAfterOrigin = !h || (!!event && event.createdAt >= h.createdAt);
+  const integrationValid = !h || !!await tx.openCreditIntegration.findFirst({ where: {
+    id: h.integrationId, companyId: w.companyId, providerScope,
+    enabled: false, paused: false, passiveInboundEnabled: true, materializationEnabled: true
+  } });
   if (matches.length !== 1 || matches[0].id !== w.contactId || !c || !a || c.agentId || !["OPEN", "PENDING", "BOT"].includes(c.status) || !hasUsableCpf(c.contact.cpf) || !company
     || !shouldAutoReply({ companyMode: company.aiMode, conversationMode: c.aiMode, aiPaused: c.aiPaused, agentId: c.agentId })
-    || !actor || !h || !config || config.configuredByUserId !== input.actor.id || !auth || !access?.enabled || !auth.remoteIdentity.enabled
+    || !actor || (!bridgeActorValid && !directActorValid) || !auth || !access?.enabled || !auth.remoteIdentity.enabled
     || auth.remoteIdentity.contactId !== w.contactId || auth.remoteIdentity.normalizedCpf !== c.contact.cpf?.replace(/[.\-\s]/g, "")
     || auth.evidence.companyId !== w.companyId || auth.evidence.contactId !== w.contactId || auth.evidence.conversationId !== w.conversationId
-    || auth.evidence.channelId !== w.channelId || auth.evidence.createdAt < h.createdAt
+    || auth.evidence.channelId !== w.channelId || !evidenceAfterOrigin
     || auth.evidence.provenanceKind !== "META_WEBHOOK_HMAC_SHA256_VERIFIED" || auth.evidence.provenanceVersion !== 1
     || !event || event.id !== w.inboundEventId
     || event.provenanceKind !== "META_WEBHOOK_HMAC_SHA256_VERIFIED" || event.provenanceVersion !== 1
-    || event.createdAt < h.createdAt || event.message.direction !== "inbound" || event.message.type !== "text"
-    || !event.message.body.trim() || event.message.conversationId !== c.id
-    || !await tx.openCreditIntegration.findFirst({ where: { id: h.integrationId, companyId: w.companyId, providerScope,
-      enabled: false, paused: false, passiveInboundEnabled: true, materializationEnabled: true } })) throw Error("AI_SIMULATION_DENIED");
+    || !eventAfterOrigin || event.message.direction !== "inbound" || event.message.type !== "text"
+    || !event.message.body.trim() || event.message.conversationId !== c.id || !integrationValid) throw Error("AI_SIMULATION_DENIED");
   return w;
 }
 
@@ -63,9 +71,12 @@ export async function validateAiSimulationReply(tx:Prisma.TransactionClient,work
   const w=await tx.openCreditAiSimulation.findFirst({where:{id:workflowId,companyId:ctx.companyId,conversationId:ctx.conversationId,channelId:ctx.channelId,
     authorityGeneration:ctx.generation,state:"COMPLETED",deadlineAt:{gt:new Date()}}});
   if(!w)throw Error("AI_SIMULATION_DENIED");
-  const h=await tx.openCreditWhatsappHandoff.findFirstOrThrow({where:{companyId:w.companyId,metaConversationId:w.conversationId,providerScope:w.providerScope,state:"SENT"}});
-  const config=await tx.openCreditWhatsappConfig.findFirstOrThrow({where:{companyId:w.companyId,integrationId:h.integrationId,providerScope:w.providerScope}});
-  const actor=await tx.user.findFirst({where:{id:config.configuredByUserId,companyId:w.companyId,role:"ADMIN"},select:{id:true}});
+  const h=await tx.openCreditWhatsappHandoff.findFirst({where:{companyId:w.companyId,metaConversationId:w.conversationId,providerScope:w.providerScope,state:"SENT"}});
+  const config=h?await tx.openCreditWhatsappConfig.findFirst({where:{companyId:w.companyId,integrationId:h.integrationId,providerScope:w.providerScope}}):null;
+  const auth=!h?await tx.openCreditConsumerAuthorization.findFirst({where:{id:w.authorizationId,companyId:w.companyId,providerScope:w.providerScope,
+    contactId:w.contactId,purpose:"CREDIT_SIMULATION",active:true,revision:w.authorizationRevision},select:{changedByUserId:true}}):null;
+  const actorId=h?config?.configuredByUserId:auth?.changedByUserId;
+  const actor=actorId?await tx.user.findFirst({where:{id:actorId,companyId:w.companyId,role:"ADMIN"},select:{id:true}}):null;
   if(!actor)throw Error("AI_SIMULATION_DENIED");
   await validateBindings(tx,{...w,inboundEventId:ctx.inboundEventId},{companyId:w.companyId,contactId:w.contactId,actor},w.providerScope,true);
 }
