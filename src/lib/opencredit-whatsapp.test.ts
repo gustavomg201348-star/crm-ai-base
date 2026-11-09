@@ -4,7 +4,7 @@ import Module, { createRequire } from "node:module";
 import { test } from "node:test";
 import type { Channel } from "@prisma/client";
 import { NextRequest } from "next/server";
-import { bootstrapPhone, compatibleBootstrapTemplate, bootstrapTemplateFingerprint, validBootstrapChannel } from "./opencredit-whatsapp-policy";
+import { bootstrapPhone, analyzeOpenCreditBootstrapTemplate, resolveBootstrapVariables, bootstrapTemplateFingerprint, validBootstrapChannel } from "./opencredit-whatsapp-policy";
 import { parseWhatsappBootstrapConfig } from "./opencredit-whatsapp-config.service";
 import type { SessionUser } from "./auth";
 
@@ -28,11 +28,12 @@ test("phone uses existing normalization, rejects archived or divergent identity;
   for (const c of [{ phone: "12345678909", normalizedPhone: null, archivedAt: new Date() },
     { phone: "5511987654321", normalizedPhone: "5511976543210", archivedAt: null }, { phone: "", normalizedPhone: null, archivedAt: null }]) assert.equal(bootstrapPhone(c), null);
 });
-test("V1 only accepts approved static templates and fingerprint binds WABA/content/language", () => {
-  assert.equal(compatibleBootstrapTemplate(template), true);
+const local = { companyId: "synthetic-company", wabaId: "synthetic-waba", isActive: true, operationalStatus: "READY", defaultHeaderMediaAssetId: null };
+test("V2 preserves static template binding and rejects unconfigured variables/media", () => {
+  assert.equal(analyzeOpenCreditBootstrapTemplate(template, local, null).eligible, true);
   for (const t of [{ ...template, status: "REJECTED" }, { ...template, components: [{ type: "BODY", text: "Hello {{1}}" }] },
     { ...template, components: [{ type: "HEADER", format: "IMAGE" }, ...template.components] },
-    { ...template, components: [{ type: "UNKNOWN" }, ...template.components] }]) assert.equal(compatibleBootstrapTemplate(t), false);
+    { ...template, components: [{ type: "UNKNOWN" }, ...template.components] }]) assert.equal(analyzeOpenCreditBootstrapTemplate(t, local, null).eligible, false);
   const fp = bootstrapTemplateFingerprint(template, "synthetic-waba"); assert.match(fp, /^[a-f0-9]{64}$/);
   assert.equal(fp, bootstrapTemplateFingerprint(template, "synthetic-waba"));
   assert.notEqual(fp, bootstrapTemplateFingerprint(template, "foreign-waba"));
@@ -43,6 +44,54 @@ test("closed configuration payload defaults disabled and rejects implicit/partia
   for (const bad of [null, {}, { ...config, extra: true }, { ...config, autoStartEnabled: "true" },
     { ...config, expectedRevision: -1 }, { ...config, initialTemplateLanguage: null },
     { ...config, autoStartEnabled: true, defaultWhatsappChannelId: null }]) assert.equal(parseWhatsappBootstrapConfig(bad), null);
+});
+const named = { ...template, components: [{ type: "BODY", text: "Olá, {{1}}." }] };
+const image = { ...template, components: [{ type: "HEADER", format: "IMAGE" }, ...template.components] };
+const imageLocal = { ...local, defaultHeaderMediaAssetId: "synthetic-asset" };
+const media = { assetId: "synthetic-asset", fingerprint: "a".repeat(64) };
+for (const [title, t, l, mapping, binding, expected] of [
+  ["static", template, local, null, null, null],
+  ["BODY CONTACT_NAME", named, local, "CONTACT_NAME", null, null],
+  ["image", image, imageLocal, "NONE", media, null],
+  ["image and name", { ...image, components: [image.components[0], ...named.components] }, imageLocal, "CONTACT_NAME", media, null],
+  ["no mapping", named, local, null, null, "VARIABLE_MAPPING_REQUIRED"],
+  ["old image requires V2 opt-in", image, imageLocal, null, media, "VARIABLE_MAPPING_REQUIRED"],
+  ["missing image", image, local, "NONE", null, "MEDIA_REQUIRED"],
+  ["unready image", image, imageLocal, "NONE", null, "MEDIA_NOT_READY"],
+  ["wrong image", image, imageLocal, "NONE", { ...media, assetId: "other" }, "MEDIA_NOT_READY"],
+  ["not ready", template, { ...local, operationalStatus: "NEEDS_MEDIA" }, null, null, "NOT_READY"],
+  ["inactive", template, { ...local, isActive: false }, null, null, "NOT_READY"],
+  ["not approved", { ...template, status: "PENDING" }, local, null, null, "NOT_APPROVED"],
+  ["too many", { ...template, components: [{ type: "BODY", text: "{{1}} {{2}}" }] }, local, "CONTACT_NAME", null, "TOO_MANY_VARIABLES"],
+  ["named variable", { ...template, components: [{ type: "BODY", text: "{{name}}" }] }, local, "CONTACT_NAME", null, "UNSUPPORTED_VARIABLE"],
+  ["non sequential", { ...template, components: [{ type: "BODY", text: "{{2}}" }] }, local, "CONTACT_NAME", null, "UNSUPPORTED_VARIABLE"],
+  ["financial variable", { ...template, components: [{ type: "BODY", text: "{{margin}}" }] }, local, null, null, "UNSUPPORTED_VARIABLE"],
+  ["dynamic header", { ...template, components: [{ type: "HEADER", format: "TEXT", text: "{{1}}" }, ...template.components] }, local, null, null, "UNSUPPORTED_HEADER"],
+  ["video header", { ...template, components: [{ type: "HEADER", format: "VIDEO" }, ...template.components] }, local, null, null, "UNSUPPORTED_HEADER"],
+  ["unknown component", { ...template, components: [...template.components, { type: "UNKNOWN" }] }, local, null, null, "UNSUPPORTED_COMPONENT"],
+] as const) test("V2 eligibility: " + title, () => {
+  const analysis = analyzeOpenCreditBootstrapTemplate(t as typeof template, l, mapping, binding);
+  assert.equal(analysis.reason, expected); assert.equal(analysis.eligible, expected === null);
+});
+test("CONTACT_NAME is explicit, canonical and normalized without identity or financial fallbacks", () => {
+  assert.deepEqual(resolveBootstrapVariables("  Maria   José  ", "CONTACT_NAME"), ["Maria José"]);
+  for (const name of ["", "  ", "5511987654321", "123.456.789-09", "Cliente", "Sem Nome", "Maria\nJosé", "Maria\u202eJosé", "{{1}}", "a".repeat(121)])
+    assert.equal(resolveBootstrapVariables(name, "CONTACT_NAME"), null);
+  assert.deepEqual(resolveBootstrapVariables("", null), []);
+  for (const bad of ["CPF", "PHONE", "MARGIN", "LITERAL", { field: "bank" }]) assert.equal(parseWhatsappBootstrapConfig({ ...config, initialTemplateVariableMapping: bad }), null);
+  assert.equal(parseWhatsappBootstrapConfig({ ...config, initialTemplateVariableMapping: "CONTACT_NAME" })?.initialTemplateVariableMapping, "CONTACT_NAME");
+});
+test("V2 fingerprint binds image version, mapping and resolved value while preserving static V1", () => {
+  const binding = { mapping: "CONTACT_NAME" as const, variables: ["Synthetic"], media };
+  const fp = bootstrapTemplateFingerprint(named, local.wabaId, binding);
+  for (const changed of [{ ...binding, variables: ["Changed"] }, { ...binding, media: { ...media, fingerprint: "b".repeat(64) } },
+    { ...binding, mapping: null }, { ...binding, media: null }]) assert.notEqual(fp, bootstrapTemplateFingerprint(named, local.wabaId, changed));
+  assert.equal(bootstrapTemplateFingerprint(template, local.wabaId), bootstrapTemplateFingerprint(template, local.wabaId, { mapping: null, variables: [], media: null }));
+});
+test("V2 migration adds only a nullable closed mapping; no backfill or autoStart default change", () => {
+  const sql = readFileSync("prisma/migrations/20261108230000_opencredit_whatsapp_template_mapping/migration.sql", "utf8");
+  assert.match(sql, /ADD COLUMN "initialTemplateVariableMapping" TEXT;/); assert.doesNotMatch(sql, /\b(?:DEFAULT|UPDATE|DELETE|INSERT|DROP|TRUNCATE)\b/);
+  assert.doesNotMatch(sql, /autoStartEnabled/); assert.match(sql, /'NONE', 'CONTACT_NAME'/);
 });
 function fixture() {
   let actor: SessionUser | null = { id: "synthetic-admin", companyId: "synthetic-company", name: "Synthetic", email: "synthetic@invalid.test", role: "ADMIN" };

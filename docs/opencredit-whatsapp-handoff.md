@@ -14,10 +14,40 @@ accessible access token. There is no alternate-channel fallback. Configuration
 uses an optimistic revision and revalidates the actor and channel at commit.
 
 Template choices use the existing local template library, scoped by company and
-WABA. V1 accepts only APPROVED/READY static templates with no variables, media,
-unsupported components or dynamic header/buttons. Synchronizing/approving a
-template remains the existing explicit administrative workflow. Saving config
-does not send anything or process history.
+WABA. V2 supports APPROVED/READY active static text, BODY `{{1}}`, HEADER IMAGE,
+and image plus BODY `{{1}}`. Other header media, named/nonsequential/multiple
+variables and unsupported/dynamic components are ineligible. Synchronization,
+approval and default image association remain the existing administrative flows.
+Saving config does not send anything or process history.
+
+`initialTemplateVariableMapping` is nullable, with a closed contract: CONTACT_NAME
+explicitly binds BODY `{{1}}` to the canonical Contact name; NONE explicitly opts
+an image-only template into V2 without BODY variables. NULL preserves static V1.
+This prevents previously ineligible image configurations from silently becoming
+sendable on deployment, even if an old record already has autoStartEnabled=true.
+The additive migration does no backfill and never changes autoStart, revision or
+existing configuration timestamps. No literal/CPF/phone/financial field mappings
+are accepted. Margin, rates, bank, proposal, installments, approval and other
+financial sources need a separate future authority contract.
+
+CONTACT_NAME uses NFKC, trim and collapsed spaces. It requires a real bounded
+letter-based name, rejects digits, control/bidi characters and generic identity
+placeholders. An absent/invalid name returns IDENTITY_UNAVAILABLE, without CPF,
+phone or invented “cliente” fallback. Static templates do not require a name.
+
+Template labels distinguish text/image/name requirements. Unready choices are
+disabled with a closed technical reason. “Prontidão do atendimento automático”
+comes from persisted config, validated credentials/channel, local template,
+actual readable media, mapping, company AUTO/HYBRID policy and integration gates;
+it does not claim unsaved form values are ready. It is configuration readiness,
+not proof that every Contact has a valid name or that the worker is enabled.
+
+HEADER IMAGE requires a same-company READY TEMPLATE_HEADER_IMAGE MediaAsset,
+JPEG/PNG within existing limits, the configured defaultHeaderMediaAssetId and
+recoverable existing storage. Preflight reads bytes through readTemplateMedia
+and reuses existing image validation. No association validator that might mutate
+MediaAsset status is called. Choices are bounded to 200, with at most four
+concurrent media reads; no parallel storage or template library is introduced.
 
 ## Runtime
 
@@ -54,6 +84,12 @@ binding before network I/O. Uniqueness covers job, source conversation, Meta
 conversation and company/contact: even different leads/integrations cannot send
 multiple initial templates to that same local Contact through this bridge.
 
+The V2 fingerprint binds components, WABA/language, mapping, resolved variables,
+selected MediaAsset metadata/version and a digest of actual image bytes. No
+plaintext name or image value is logged. Identical static V1 fingerprints remain
+compatible. Name, mapping, asset replacement or content/config changes cannot
+silently reuse an incompatible PREPARED intent.
+
 The existing ConversationAuthority/OutboundOperation services initialize only
 an unowned HUMAN_QUEUE authority if absent. Existing ownership is respected.
 The stable operation key, generation checks, native reservation and non-replayable
@@ -61,7 +97,14 @@ The stable operation key, generation checks, native reservation and non-replayab
 limit remains active. Config, gates, channel, Contact, template fingerprint and
 automation policy are checked again before dispatch.
 
-The existing template sender commits DISPATCHING before its first provider call.
+The existing template sender commits DISPATCHING before its first provider call,
+including media upload. Bytes and identity are validated before the permit;
+resolveAndUploadLocalTemplateHeaderImageMedia uploads those exact validated
+bytes using the existing uploadMetaMedia. After upload, a second guard revalidates
+config, identity, media, channel, binding and authority before messages I/O.
+No second permit is issued. Media upload is not a sent template. Its timeout or
+ambiguous ACK conservatively consumes this intent as UNKNOWN, with no message
+and no automatic upload/resend; failed upload can never become SENT.
 It sends only the configured template, never free text. Its existing history
 writer is reused and SENT requires a provider message ID and a matching sent
 outbound template Message. No provider call runs inside a retrying transaction.

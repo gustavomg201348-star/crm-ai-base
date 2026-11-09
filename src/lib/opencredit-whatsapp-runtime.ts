@@ -3,7 +3,7 @@ import { prisma } from "./db";
 import { resolveChannelAccessToken } from "./channel-secrets";
 import { enforceRateLimits, rateLimitPolicies } from "./rate-limit";
 import { shouldAutoReply } from "./ai-attendant.service";
-import { findReadyLocalMetaTemplate, getApprovedBootstrapTemplatesForChannel, sendConversationTemplate } from "./whatsapp-template.service";
+import { findReadyOpenCreditBootstrapTemplate, getApprovedBootstrapTemplatesForChannel, sendConversationTemplate } from "./whatsapp-template.service";
 import { createOpenCreditWhatsappConfigService } from "./opencredit-whatsapp-config.service";
 import { createOpenCreditWhatsappBootstrap } from "./opencredit-whatsapp-bootstrap.service";
 import type { Channel } from "@prisma/client";
@@ -13,9 +13,9 @@ const credential = (channel: Channel) => {
   if (!resolveChannelAccessToken(channel.accessToken, { channelId: channel.id })) throw new Error("CHANNEL_UNAVAILABLE");
 };
 export const openCreditWhatsappConfig = createOpenCreditWhatsappConfigService({ db: prisma, provider, credential,
-  templates: getApprovedBootstrapTemplatesForChannel });
+  templates: getApprovedBootstrapTemplatesForChannel, canAutomate: shouldAutoReply });
 export const openCreditWhatsappBootstrap = createOpenCreditWhatsappBootstrap({ db: prisma, provider, credential,
-  template: findReadyLocalMetaTemplate, sendTemplate: sendConversationTemplate, canAutomate: shouldAutoReply,
+  template: findReadyOpenCreditBootstrapTemplate, sendTemplate: sendConversationTemplate, canAutomate: shouldAutoReply,
   limited: async input => !!await enforceRateLimits([{ category: "message-send", identifiers: [input.companyId, input.userId], ...rateLimitPolicies.messageSend }]),
 });
 

@@ -25,7 +25,12 @@ import {
   type MetaTemplateLibraryEntry
 } from "@/lib/meta-template-service";
 import { digitsOnlyPhone } from "@/lib/phone-normalization.service";
-import { bootstrapPhone, bootstrapTemplateFingerprint, compatibleBootstrapTemplate } from "./opencredit-whatsapp-policy";
+import { BootstrapBlocked, analyzeOpenCreditBootstrapTemplate, bootstrapPhone, bootstrapTemplateFingerprint, resolveBootstrapVariables,
+  validBootstrapMediaAsset, type BootstrapMediaBinding, type BootstrapVariableMapping } from "./opencredit-whatsapp-policy";
+import { authorityFingerprint } from "./conversation-authority-contract";
+import { createHash } from "node:crypto";
+import type { MediaAsset } from "@prisma/client";
+import { validateTemplateHeaderMedia } from "./template-media-storage-validation";
 import {
   readTemplateMedia,
   TEMPLATE_IMAGE_MIME_TYPES,
@@ -240,6 +245,26 @@ type ResolvedTemplateHeaderImageMedia = {
   historyMediaUrl: string | null;
   mimeType: string | null;
 };
+type PreparedBootstrapMedia = { asset: MediaAsset; stored: import("./template-media-storage").ReadTemplateMediaResult; binding: BootstrapMediaBinding };
+/** Read-only storage validation. No Meta upload and no MediaAsset status mutation. */
+export async function prepareOpenCreditTemplateMedia(companyId: string, localTemplate: MetaTemplateLibraryEntry, template: MetaTemplate): Promise<PreparedBootstrapMedia | null> {
+  try {
+    if (!templateHasHeaderImage(template)) return null;
+    if (localTemplate.companyId !== companyId) throw Error("MEDIA_NOT_READY");
+    if (!localTemplate.defaultHeaderMediaAssetId) throw Error("MEDIA_REQUIRED");
+    const asset = await findMediaAssetById(companyId, localTemplate.defaultHeaderMediaAssetId);
+    if (!validBootstrapMediaAsset(asset, companyId)) throw Error("MEDIA_NOT_READY");
+    const stored = await readTemplateMedia({ storageProvider: asset!.storageProvider, storageKey: asset!.storageKey, mimeType: asset!.mimeType, fileName: asset!.fileName });
+    const checked = validateTemplateHeaderMedia({ bytes: stored.bytes, mimeType: stored.mimeType, fileName: stored.fileName });
+    const checksum = createHash("sha256").update(stored.bytes).digest("hex");
+    if (stored.sizeBytes !== asset!.sizeBytes || stored.bytes.length !== asset!.sizeBytes || checked.storedMedia.mimeType !== asset!.mimeType
+      || asset!.checksum && asset!.checksum !== checksum) throw Error("MEDIA_NOT_READY");
+    const binding = { assetId: asset!.id, fingerprint: authorityFingerprint({ assetId: asset!.id, companyId, status: asset!.status,
+      type: asset!.type, mimeType: asset!.mimeType, sizeBytes: asset!.sizeBytes, storageProvider: asset!.storageProvider,
+      storageKey: asset!.storageKey, publicUrl: asset!.publicUrl, updatedAt: asset!.updatedAt.toISOString(), checksum }) };
+    return { asset: asset!, stored, binding };
+  } catch { throw new BootstrapBlocked("TEMPLATE_UNAVAILABLE"); }
+}
 
 function isSupportedTemplateImageMimeType(mimeType: string) {
   return (TEMPLATE_IMAGE_MIME_TYPES as readonly string[]).includes(mimeType);
@@ -305,13 +330,17 @@ export async function resolveAndUploadLocalTemplateHeaderImageMedia({
   phoneNumberId,
   accessToken,
   localTemplate,
-  template
+  template,
+  preparedMedia,
+  signal
 }: {
   companyId: string;
   phoneNumberId: string;
   accessToken: string;
   localTemplate: MetaTemplateLibraryEntry;
   template: MetaTemplate;
+  preparedMedia?: PreparedBootstrapMedia | null;
+  signal?: AbortSignal;
 }): Promise<ResolvedTemplateHeaderImageMedia> {
   if (!templateHasHeaderImage(template)) {
     return {
@@ -325,10 +354,11 @@ export async function resolveAndUploadLocalTemplateHeaderImageMedia({
     throw new Error("Template com imagem no cabecalho sem midia padrao configurada.");
   }
 
-  const mediaAsset = await findMediaAssetById(
+  const mediaAsset = preparedMedia?.asset ?? await findMediaAssetById(
     companyId,
     localTemplate.defaultHeaderMediaAssetId
   );
+  if (preparedMedia && preparedMedia.asset.id !== localTemplate.defaultHeaderMediaAssetId) throw new BootstrapBlocked("TEMPLATE_UNAVAILABLE");
 
   assertUsableHeaderImageMediaAsset(mediaAsset);
 
@@ -336,7 +366,7 @@ export async function resolveAndUploadLocalTemplateHeaderImageMedia({
     throw new Error("Midia padrao do template nao pertence a empresa.");
   }
 
-  const storedMedia = await readTemplateMedia({
+  const storedMedia = preparedMedia?.stored ?? await readTemplateMedia({
     storageProvider: mediaAsset.storageProvider,
     storageKey: mediaAsset.storageKey,
     mimeType: mediaAsset.mimeType,
@@ -350,7 +380,8 @@ export async function resolveAndUploadLocalTemplateHeaderImageMedia({
     accessToken,
     fileName: storedMedia.fileName,
     mimeType: storedMedia.mimeType,
-    bytes: storedMedia.bytes
+    bytes: storedMedia.bytes,
+    ...(signal ? { signal } : {})
   });
 
   return {
@@ -390,6 +421,12 @@ export async function findReadyLocalMetaTemplate({
   }
 
   return { localTemplate, template };
+}
+export async function findReadyOpenCreditBootstrapTemplate(input: Parameters<typeof findReadyLocalMetaTemplate>[0]) {
+  const context = await findReadyLocalMetaTemplate(input);
+  if (!context) return null;
+  const preparedMedia = await prepareOpenCreditTemplateMedia(input.companyId, context.localTemplate, context.template);
+  return { ...context, media: preparedMedia?.binding ?? null };
 }
 
 export async function getApprovedTemplatesForConversation({
@@ -458,9 +495,11 @@ export async function sendConversationTemplate({
   language,
   variables,
   automation = false,
+  variableMapping = null,
   signal,
   dispatchGuard,
-  onProviderAccepted
+  onProviderAccepted,
+  beforeMessageGuard
 }: {
   conversationId: string;
   companyId: string;
@@ -469,9 +508,11 @@ export async function sendConversationTemplate({
   language: string;
   variables: string[];
   automation?: boolean;
+  variableMapping?: BootstrapVariableMapping;
   signal?: AbortSignal;
   dispatchGuard?: (context: { channelId: string; phoneNumberId: string; wabaId: string; destination: string; templateFingerprint: string }) => Promise<void>;
   onProviderAccepted?: (id: string) => void;
+  beforeMessageGuard?: () => Promise<void>;
 }) {
   const { conversation, channel } = await getConversationIntegration({
     conversationId,
@@ -494,7 +535,10 @@ export async function sendConversationTemplate({
   }
   const { localTemplate, template } = localTemplateContext;
 
-  if (automation && (!dispatchGuard || !compatibleBootstrapTemplate(template))) throw new Error("BOOTSTRAP_TEMPLATE_UNAVAILABLE");
+  const preparedMedia = automation ? await prepareOpenCreditTemplateMedia(companyId, localTemplate, template) : null;
+  const binding = { mapping: variableMapping, variables, media: preparedMedia?.binding ?? null };
+  if (automation && (!dispatchGuard || !beforeMessageGuard || !analyzeOpenCreditBootstrapTemplate(template, localTemplate, variableMapping, binding.media).eligible)) throw new BootstrapBlocked("TEMPLATE_UNAVAILABLE");
+  if (automation && JSON.stringify(resolveBootstrapVariables(conversation.contact.name, variableMapping)) !== JSON.stringify(variables)) throw new BootstrapBlocked("IDENTITY_UNAVAILABLE");
   const destination = automation ? bootstrapPhone({ ...conversation.contact, archivedAt: conversation.contact.archivedAt })
     : digitsOnlyPhone(conversation.contact.phone);
   if (!destination) throw new Error("BOOTSTRAP_IDENTITY_UNAVAILABLE");
@@ -507,15 +551,17 @@ export async function sendConversationTemplate({
   }
 
   await dispatchGuard?.({ channelId: channel.id, phoneNumberId: channel.phoneNumberId, wabaId: channel.wabaId,
-    destination, templateFingerprint: bootstrapTemplateFingerprint(template, channel.wabaId) });
+    destination, templateFingerprint: bootstrapTemplateFingerprint(template, channel.wabaId, automation ? binding : undefined) });
 
   const headerImage = await resolveAndUploadLocalTemplateHeaderImageMedia({
     companyId,
     phoneNumberId: channel.phoneNumberId,
     accessToken: channel.accessToken,
     localTemplate,
-    template
+    template,
+    ...(automation ? { preparedMedia, signal } : {})
   });
+  await beforeMessageGuard?.();
   const metaResponse = await sendMetaTemplateMessage({
     phoneNumberId: channel.phoneNumberId!,
     accessToken: channel.accessToken!,
@@ -555,15 +601,29 @@ export async function sendConversationTemplate({
   });
 }
 
-/** Reuses the existing local library; V1 intentionally accepts no dynamic/media input. */
+/** V2 capability list; mapping is still an explicit administrator choice at save/send. */
 export async function getApprovedBootstrapTemplatesForChannel(input: { channelId: string; companyId: string }) {
   const channel = await prisma.channel.findFirst({ where: { id: input.channelId, companyId: input.companyId,
     type: "whatsapp", provider: "meta", status: { in: ["ACTIVE", "CONNECTED"] } }, select: { wabaId: true } });
   if (!channel?.wabaId) return [];
   const records = await listMetaTemplatesByWaba(input.companyId, channel.wabaId, {
-    isActive: true, metaStatus: "APPROVED", operationalStatus: "READY",
+    isActive: true, metaStatus: "APPROVED",
   });
-  return records.map(deserializeMetaTemplate).filter(isUsableLocalTemplate).map(mapLocalTemplateToMetaTemplate)
-    .filter((t): t is MetaTemplate => t !== null && compatibleBootstrapTemplate(t))
-    .slice(0, 200).map(t => ({ name: t.name, language: t.language }));
+  const result: import("./opencredit-whatsapp-config.service").BootstrapTemplateChoice[] = [];
+  const rows = records.slice(0, 200).map(deserializeMetaTemplate);
+  // Bound storage reads and memory: at most four image buffers concurrently.
+  for (let start = 0; start < rows.length; start += 4) result.push(...await Promise.all(rows.slice(start, start + 4).map(async local => {
+    const template = mapLocalTemplateToMetaTemplate(local);
+    const invalid = { name: local.name, language: local.language, eligible: false, reason: "UNSUPPORTED_COMPONENT" as const,
+      requiresImage: false, mediaReady: false, bodyVariables: [], supportedVariableMappings: [] };
+    if (!template) return invalid;
+    let n: ReturnType<typeof normalizeMetaTemplate>; try { n = normalizeMetaTemplate(template); } catch { return invalid; }
+    const mapping = n.body.variables.length === 1 && n.body.variables[0] === 1 ? "CONTACT_NAME" : templateHasHeaderImage(template) ? "NONE" : null;
+    let media: BootstrapMediaBinding | null = null;
+    if (local.operationalStatus === "READY" && templateHasHeaderImage(template)) {
+      try { media = (await prepareOpenCreditTemplateMedia(input.companyId, local, template))?.binding ?? null; } catch {}
+    }
+    return { name: local.name, language: local.language, mediaReady: !templateHasHeaderImage(template) || !!media, ...analyzeOpenCreditBootstrapTemplate(template, local, mapping, media) };
+  })));
+  return result;
 }

@@ -9,7 +9,7 @@ import { before, after, test } from "node:test";
 import { PrismaClient } from "@prisma/client";
 import { NextRequest } from "next/server";
 import { assertOpenCreditCommercialOperationTestDatabase } from "./opencredit-commercial-operation-postgres.guard";
-import { createOpenCreditWhatsappConfigService } from "./opencredit-whatsapp-config.service";
+import { createOpenCreditWhatsappConfigService, type WhatsappBootstrapConfigInput } from "./opencredit-whatsapp-config.service";
 import { createConversationAuthorityService } from "./conversation-authority.service";
 import { createOutboundOperationService } from "./outbound-operation.service";
 import { bootstrapPhone } from "./opencredit-whatsapp-policy";
@@ -22,6 +22,11 @@ const oldKey = process.env.QEVORA_DATA_ENCRYPTION_KEY_V1, oldAi = process.env.OP
 let templates: typeof import("./whatsapp-template.service");
 let ai: typeof import("./ai-attendant.service");
 let assignment: typeof import("./lead-assignment");
+let mediaStorage: typeof import("./template-media-storage");
+const mediaRoot = mkdtempSync(join(tmpdir(), "qevora-whatsapp-media-"));
+const imageBytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==", "base64");
+let uploadedId = "", failUpload = false, duringUpload: (() => Promise<void>) | undefined;
+let sentParameters: Array<{ type?: string; parameters?: Array<{ type?: string; text?: string; image?: { id?: string } }> }> = [];
 let webhook: typeof import("../app/api/webhooks/whatsapp/route");
 let core: typeof import("./opencredit-domain-materializer");
 let crypto: typeof import("./opencredit-lead-materialization-payload");
@@ -29,6 +34,8 @@ let queue: ReturnType<typeof import("./opencredit-materialization-queue.service"
 let createOpenCreditWhatsappBootstrap: typeof import("./opencredit-whatsapp-bootstrap.service")["createOpenCreditWhatsappBootstrap"];
 const pendingAi: Promise<unknown>[] = [];
 const pipelineErrors: string[] = [];
+let captureLogs = false;
+const capturedLogs: unknown[][] = [];
 let holdAi: (() => Promise<void>) | undefined, failAssignmentProjection = false;
 db.$use(async (params, next) => {
   if (failAssignmentProjection && params.model === "Conversation" && params.action === "update" && params.args?.data?.agentId) throw Error("SYNTHETIC_PROJECTION_FAILURE");
@@ -40,8 +47,19 @@ before(async () => {
   process.env.QEVORA_DATA_ENCRYPTION_KEY_V1 = Buffer.alloc(32, 19).toString("base64");
   process.env.OPENAI_API_KEY = "synthetic-key-not-a-credential";
   globalThis.fetch = async (url, options) => {
+    if (String(url).startsWith("https://graph.facebook.com/") && String(url).endsWith("/media")) {
+      network.push({ type: "media" });
+      const h = await db.openCreditWhatsappHandoff.findFirstOrThrow({ where: { state: "DISPATCHING" }, orderBy: { createdAt: "desc" } });
+      assert.equal((await db.outboundOperation.findUniqueOrThrow({ where: { id: h.outboundOperationId! } })).status, "DISPATCHING");
+      assert(options?.body instanceof FormData); const file = options.body.get("file"); assert(file instanceof Blob);
+      assert.deepEqual(Buffer.from(await file.arrayBuffer()), imageBytes);
+      if (failUpload) throw Error("SYNTHETIC_MEDIA_UPLOAD_TIMEOUT");
+      await duringUpload?.(); uploadedId = "synthetic-media-" + randomUUID();
+      return Response.json({ id: uploadedId });
+    }
     if (String(url).startsWith("https://graph.facebook.com/") && String(url).endsWith("/messages")) {
       const payload = JSON.parse(String(options?.body));
+      sentParameters = payload.template?.components ?? [];
       network.push({ type: payload.type, template: payload.template?.name });
       if (payload.type === "template") {
         const dispatching = await db.openCreditWhatsappHandoff.findFirstOrThrow({ where: { state: "DISPATCHING" }, orderBy: { createdAt: "desc" } });
@@ -64,15 +82,21 @@ before(async () => {
   loader._load = (name, ...args) => {
     if (name === "server-only") return {};
     if (name === "@/lib/db") return { prisma: db };
-    if (name === "@/lib/safe-logger") return { safeLogError(_area: string, error: unknown) {
+    if (name === "@/lib/template-media-storage") {
+      const actual = original.call(loader, name, ...args) as typeof mediaStorage;
+      return { ...actual, readTemplateMedia: (input: Parameters<typeof actual.readTemplateMedia>[0]) => actual.readTemplateMedia(input, { publicRootDir: mediaRoot }) };
+    }
+    if (name === "@/lib/safe-logger") return { safeLogError(_area: string, error: unknown, ...rest: unknown[]) {
+      if (captureLogs) capturedLogs.push([_area, error, ...rest]);
       const e = error as { code?: string };
       pipelineErrors.push(["P2002", "P2034", "INVALID_CAPABILITY"].includes(e?.code ?? "") ? e.code! : "PIPELINE_ERROR");
-    }, safeLogWarn() {}, safeLogInfo() {} };
+    }, safeLogWarn(...args: unknown[]) { if (captureLogs) capturedLogs.push(args); }, safeLogInfo(...args: unknown[]) { if (captureLogs) capturedLogs.push(args); } };
     return original.call(loader, name, ...args);
   };
   try {
     ({ createOpenCreditWhatsappBootstrap } = require("./opencredit-whatsapp-bootstrap.service"));
     templates = require("./whatsapp-template.service");
+    mediaStorage = require("./template-media-storage");
     ai = require("./ai-attendant.service");
     assignment = require("./lead-assignment");
     core = require("./opencredit-domain-materializer");
@@ -96,9 +120,13 @@ after(async () => {
   if (oldKey === undefined) delete process.env.QEVORA_DATA_ENCRYPTION_KEY_V1; else process.env.QEVORA_DATA_ENCRYPTION_KEY_V1 = oldKey;
   if (oldAi === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = oldAi;
   await independent.$disconnect(); await db.$disconnect();
+  const checked = resolve(mediaRoot); assert(checked.startsWith(resolve(tmpdir()) + sep + "qevora-whatsapp-media-"));
+  rmSync(checked, { recursive: true, force: true });
 });
 async function fixture() {
   network = []; failNetwork = false; missingAck = false; rejectProvider = false; holdAi = undefined; failAssignmentProjection = false; pendingAi.length = 0; pipelineErrors.length = 0;
+  failUpload = false; duringUpload = undefined; uploadedId = ""; sentParameters = [];
+  captureLogs = false; capturedLogs.length = 0;
   const company = await db.company.create({ data: { name: "Synthetic bridge", aiMode: "HYBRID" } });
   const actor = await db.user.create({ data: { companyId: company.id, name: "Synthetic", email: randomUUID() + "@invalid.test", role: "ADMIN", passwordHash: "synthetic" } });
   const integration = await db.openCreditIntegration.create({ data: { companyId: company.id, providerScope: "synthetic-scope", publicWebhookId: randomUUID(),
@@ -119,10 +147,11 @@ async function fixture() {
   const contact = await db.contact.findUniqueOrThrow({ where: { id: completed.contactId! } });
   const source = await db.conversation.findUniqueOrThrow({ where: { id: completed.conversationId! } });
   const credential = (c: { accessToken: string | null }) => { if (!c.accessToken) throw Error("SYNTHETIC_NO_CREDENTIAL"); };
-  const config = createOpenCreditWhatsappConfigService({ db, provider: "postgresql", credential, templates: templates.getApprovedBootstrapTemplatesForChannel });
-  const input = { defaultWhatsappChannelId: channel.id, initialTemplateName: template.name, initialTemplateLanguage: template.language, autoStartEnabled: true, expectedRevision: 0 };
+  const config = createOpenCreditWhatsappConfigService({ db, provider: "postgresql", credential, templates: templates.getApprovedBootstrapTemplatesForChannel, canAutomate: ai.shouldAutoReply });
+  const input: WhatsappBootstrapConfigInput = { defaultWhatsappChannelId: channel.id, initialTemplateName: template.name, initialTemplateLanguage: template.language,
+    initialTemplateVariableMapping: null, autoStartEnabled: true, expectedRevision: 0 };
   const session = { id: actor.id, companyId: company.id, name: actor.name, email: actor.email, role: "ADMIN" as const };
-  const deps = { db, provider: "postgresql" as const, credential, template: templates.findReadyLocalMetaTemplate, sendTemplate: templates.sendConversationTemplate,
+  const deps = { db, provider: "postgresql" as const, credential, template: templates.findReadyOpenCreditBootstrapTemplate, sendTemplate: templates.sendConversationTemplate,
     canAutomate: ai.shouldAutoReply, limited: async () => false };
   const bootstrap = createOpenCreditWhatsappBootstrap(deps);
   const target = { companyId: company.id, integrationId: integration.id, jobId: job.id };
@@ -138,7 +167,18 @@ async function fixture() {
       headers: { "content-type": "application/json", "x-hub-signature-256": "sha256=" + createHmac("sha256", secret).update(raw).digest("hex") } }));
     await Promise.all(pendingAi.splice(0)); assert.equal(response.status, 200, pipelineErrors.join(";")); return response;
   };
-  return { company, actor, integration, channel, template, job, contact, source, config, input, session, deps, bootstrap, target, setup, handoff, sendInbound };
+  const v2 = async (image: boolean, name: boolean) => {
+    const stored = image ? await mediaStorage.saveTemplateImage({ fileName: "synthetic-header.png", mimeType: "image/png", bytes: imageBytes, namespace: company.id },
+      { provider: "local", publicRootDir: mediaRoot }) : null;
+    const asset = stored ? await db.mediaAsset.create({ data: { companyId: company.id, type: "TEMPLATE_HEADER_IMAGE", status: "READY", fileName: stored.originalFileName,
+      mimeType: stored.mimeType, sizeBytes: stored.sizeBytes, storageProvider: stored.storageProvider, storageKey: stored.storageKey, checksum: stored.checksum } }) : null;
+    await db.metaTemplate.update({ where: { id: template.id }, data: { requiresHeaderMedia: image, headerFormat: image ? "IMAGE" : null,
+      defaultHeaderMediaAssetId: asset?.id ?? null, components: JSON.stringify([...(image ? [{ type: "HEADER", format: "IMAGE" }] : []),
+        { type: "BODY", text: name ? "Olá, {{1}}." : "Synthetic greeting" }]) } });
+    input.initialTemplateVariableMapping = name ? "CONTACT_NAME" : image ? "NONE" : null;
+    return { stored, asset };
+  };
+  return { company, actor, integration, channel, template, job, contact, source, config, input, session, deps, bootstrap, target, setup, handoff, sendInbound, v2 };
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 function material(name: string, run: (f: Fixture) => Promise<void>) { test(name, async () => run(await fixture())); }
@@ -368,6 +408,121 @@ material("provider rejection never logs recipient, body, credential, ACK or free
   const h = await f.handoff(); assert.equal(h.state, "UNKNOWN"); assert.equal(h.providerMessageId, null);
   assert.equal(await db.message.count({ where: { conversationId: h.metaConversationId, status: "sent" } }), 0);
 });
+for (const [image, name] of [[false, true], [true, false], [true, true]] as const) material("V2 real sender/storage: image=" + image + " name=" + name, async f => {
+  await f.v2(image, name); await f.setup();
+  assert.equal((await f.bootstrap.bootstrap(f.target)).status, "SENT");
+  assert.equal(network.filter(n => n.type === "media").length, image ? 1 : 0);
+  assert.equal(network.filter(n => n.type === "template").length, 1);
+  if (image) assert.equal(sentParameters.find(c => c.type === "header")?.parameters?.[0]?.image?.id, uploadedId);
+  if (name) assert.equal(sentParameters.find(c => c.type === "body")?.parameters?.[0]?.text, "Synthetic");
+  const h = await f.handoff(), message = await db.message.findFirstOrThrow({ where: { conversationId: h.metaConversationId, type: "template" } });
+  assert.equal(message.providerMessageId, h.providerMessageId); assert.equal(message.status, "sent");
+  assert.equal((await createOpenCreditWhatsappBootstrap({ ...f.deps, db: independent }).bootstrap(f.target)).status, "ALREADY_STARTED");
+  assert.equal(network.filter(n => n.type === "template").length, 1);
+});
+for (const bad of ["missing", "foreign", "status", "mime", "storage", "checksum"] as const) material("V2 image is unavailable before any provider call: " + bad, async f => {
+  const { asset } = await f.v2(true, false); assert(asset);
+  if (bad === "missing") await db.metaTemplate.update({ where: { id: f.template.id }, data: { defaultHeaderMediaAssetId: null } });
+  else if (bad === "foreign") {
+    const foreign = await db.company.create({ data: { name: "Synthetic foreign media" } });
+    const other = await db.mediaAsset.create({ data: { companyId: foreign.id, fileName: asset.fileName, type: asset.type, status: "READY", mimeType: asset.mimeType,
+      sizeBytes: asset.sizeBytes, storageProvider: asset.storageProvider, storageKey: asset.storageKey } });
+    await assert.rejects(db.metaTemplate.update({ where: { id: f.template.id }, data: { defaultHeaderMediaAssetId: other.id } }));
+    const context = await templates.findReadyLocalMetaTemplate({ companyId: f.company.id, wabaId: f.channel.wabaId!, templateName: f.template.name, language: f.template.language }); assert(context);
+    await assert.rejects(templates.prepareOpenCreditTemplateMedia(f.company.id, { ...context.localTemplate, defaultHeaderMediaAssetId: other.id }, context.template), { message: "TEMPLATE_UNAVAILABLE" });
+    assert.equal(network.length, 0); return;
+  } else await db.mediaAsset.update({ where: { id: asset.id }, data: bad === "status" ? { status: "BROKEN" } : bad === "mime" ? { mimeType: "application/pdf" }
+    : bad === "storage" ? { storageKey: "templates/missing-image.png" } : { checksum: "0".repeat(64) } });
+  await assert.rejects(f.setup(), { message: "TEMPLATE_UNAVAILABLE" }); assert.equal(network.length, 0);
+});
+for (const bad of ["", "5511987654321", "123.456.789-09", "Cliente"] as const) material("V2 name fails closed without fallback: " + (bad ? "invalid" : "empty"), async f => {
+  await f.v2(false, true); await f.setup(); await db.contact.update({ where: { id: f.contact.id }, data: { name: bad } });
+  assert.equal((await f.bootstrap.bootstrap(f.target)).status, "IDENTITY_UNAVAILABLE"); assert.equal(network.length, 0);
+});
+material("V2 BODY requires explicit CONTACT_NAME mapping even when autoStart is disabled", async f => {
+  await f.v2(false, true);
+  await assert.rejects(f.config.save(f.session, f.integration.id, { ...f.input, initialTemplateVariableMapping: null, autoStartEnabled: false }), { message: "TEMPLATE_UNAVAILABLE" });
+  assert.equal(network.length, 0);
+});
+material("V2 migration cannot activate a legacy image config without explicit V2 opt-in", async f => {
+  await f.v2(true, false);
+  await db.openCreditWhatsappConfig.create({ data: { companyId: f.company.id, integrationId: f.integration.id, providerScope: f.integration.providerScope!,
+    configuredByUserId: f.actor.id, defaultWhatsappChannelId: f.channel.id, initialTemplateName: f.template.name, initialTemplateLanguage: f.template.language, autoStartEnabled: true } });
+  assert.equal((await f.bootstrap.bootstrap(f.target)).status, "TEMPLATE_UNAVAILABLE"); assert.equal(network.length, 0);
+  const saved = await db.openCreditWhatsappConfig.findUniqueOrThrow({ where: { integrationId: f.integration.id } });
+  assert.equal(saved.initialTemplateVariableMapping, null); assert.equal(saved.autoStartEnabled, true);
+  assert.equal((await f.config.read(f.company.id, f.integration.id)).readiness.readyIfEnabled, false);
+});
+for (const change of ["name", "mapping", "image", "asset"] as const) material("V2 change after PREPARED blocks upload and message: " + change, async f => {
+  const { asset } = await f.v2(true, true); assert(asset); await f.setup();
+  const service = createOpenCreditWhatsappBootstrap({ ...f.deps, sendTemplate: async input => {
+    if (change === "name") await db.contact.update({ where: { id: f.contact.id }, data: { name: "Changed Name" } });
+    if (change === "mapping") await db.openCreditWhatsappConfig.update({ where: { integrationId: f.integration.id }, data: { initialTemplateVariableMapping: null, revision: { increment: 1 } } });
+    if (change === "image") await db.mediaAsset.update({ where: { id: asset.id }, data: { status: "BROKEN" } });
+    if (change === "asset") await f.v2(true, true);
+    return f.deps.sendTemplate(input);
+  } });
+  assert.notEqual((await service.bootstrap(f.target)).status, "SENT"); assert.equal(network.length, 0);
+});
+material("V2 concurrent instances upload/send only once with one durable permit", async f => {
+  await f.v2(true, true); await f.setup();
+  await Promise.all([f.bootstrap.bootstrap(f.target), createOpenCreditWhatsappBootstrap({ ...f.deps, db: independent }).bootstrap(f.target)]);
+  assert.equal(network.filter(n => n.type === "media").length, 1); assert.equal(network.filter(n => n.type === "template").length, 1);
+  assert.equal((await f.handoff()).state, "SENT");
+});
+material("V2 ambiguous media upload is UNKNOWN, never sent, never uploaded again on restart", async f => {
+  await f.v2(true, true); await f.setup(); failUpload = true;
+  assert.equal((await f.bootstrap.bootstrap(f.target)).status, "UNKNOWN"); failUpload = false;
+  assert.equal((await createOpenCreditWhatsappBootstrap({ ...f.deps, db: independent }).bootstrap(f.target)).status, "UNKNOWN");
+  assert.equal(network.filter(n => n.type === "media").length, 1); assert.equal(network.filter(n => n.type === "template").length, 0);
+  assert.equal(await db.message.count({ where: { conversationId: (await f.handoff()).metaConversationId } }), 0);
+});
+for (const change of ["name", "mapping", "media", "channel", "asset"] as const) material("V2 revalidates after upload before messages: " + change, async f => {
+  const { asset } = await f.v2(true, true); assert(asset); await f.setup();
+  duringUpload = async () => {
+    if (change === "name") await db.contact.update({ where: { id: f.contact.id }, data: { name: "Changed Name" } });
+    if (change === "mapping") await db.openCreditWhatsappConfig.update({ where: { integrationId: f.integration.id }, data: { revision: { increment: 1 } } });
+    if (change === "media") await db.mediaAsset.update({ where: { id: asset.id }, data: { status: "BROKEN" } });
+    if (change === "channel") await db.channel.update({ where: { id: f.channel.id }, data: { phoneNumberId: f.channel.phoneNumberId! + "1" } });
+    if (change === "asset") await f.v2(true, true);
+  };
+  assert.equal((await f.bootstrap.bootstrap(f.target)).status, "UNKNOWN");
+  assert.equal(network.filter(n => n.type === "media").length, 1); assert.equal(network.filter(n => n.type === "template").length, 0);
+});
+for (const mode of ["timeout", "missing_ack", "history_failure"] as const) material("V2 image/name message ambiguity never resends: " + mode, async f => {
+  await f.v2(true, true); await f.setup(); failNetwork = mode === "timeout"; missingAck = mode === "missing_ack";
+  const service = mode === "history_failure" ? createOpenCreditWhatsappBootstrap({ ...f.deps, sendTemplate: input => f.deps.sendTemplate({ ...input,
+    onProviderAccepted: id => { input.onProviderAccepted?.(id); throw Error("SYNTHETIC_HISTORY_FAILURE"); } }) }) : f.bootstrap;
+  assert.equal((await service.bootstrap(f.target)).status, "UNKNOWN"); failNetwork = false; missingAck = false;
+  assert.equal((await createOpenCreditWhatsappBootstrap({ ...f.deps, db: independent }).bootstrap(f.target)).status, "UNKNOWN");
+  assert.equal(network.filter(n => n.type === "media").length, 1); assert.equal(network.filter(n => n.type === "template").length, 1);
+  assert.equal(await db.message.count({ where: { conversationId: (await f.handoff()).metaConversationId, status: "sent" } }), 0);
+});
+material("V2 readiness is derived from persisted config/media/company, independent of form channel selection", async f => {
+  const { asset } = await f.v2(true, true); assert(asset);
+  await f.config.save(f.session, f.integration.id, { ...f.input, autoStartEnabled: false });
+  const ready = await f.config.read(f.company.id, f.integration.id);
+  assert.equal(ready.readiness.media, "READY"); assert.equal(ready.readiness.variables, "READY"); assert.equal(ready.readiness.autoStart, "OFF");
+  assert.equal(ready.readiness.readyIfEnabled, true);
+  const forUnsavedChannel = await f.config.read(f.company.id, f.integration.id, "unsaved-channel");
+  assert.deepEqual(forUnsavedChannel.readiness, ready.readiness);
+  await db.mediaAsset.update({ where: { id: asset.id }, data: { status: "BROKEN" } });
+  const pending = await f.config.read(f.company.id, f.integration.id); assert.equal(pending.readiness.media, "PENDING"); assert.equal(pending.readiness.readyIfEnabled, false);
+  assert.equal(pending.templates[0].eligible, false); assert.equal(network.length, 0);
+  await db.company.update({ where: { id: f.company.id }, data: { aiMode: "COPILOT" } });
+  assert.equal((await f.config.read(f.company.id, f.integration.id)).readiness.ai, "NOT_AUTOMATIC");
+});
+material("V2 name/media values and provider rejection never enter logger arguments", async f => {
+  await f.v2(true, true); await f.setup(); rejectProvider = true; captureLogs = true;
+  try { assert.equal((await f.bootstrap.bootstrap(f.target)).status, "UNKNOWN"); } finally { captureLogs = false; }
+  assert.deepEqual(capturedLogs, []);
+});
+for (const role of ["AGENT", "SUPERVISOR"] as const) material("V2 revalidates current ADMIN role before config or provider: " + role, async f => {
+  await f.v2(true, true); await f.setup();
+  await db.user.update({ where: { id: f.actor.id }, data: { role } });
+  await assert.rejects(f.config.save(f.session, f.integration.id, { ...f.input, expectedRevision: 1 }));
+  assert.notEqual((await f.bootstrap.bootstrap(f.target)).status, "SENT"); assert.equal(network.length, 0);
+});
 test("clean migration and upgrade preserve historical rows and never backfill/enable/send", async () => {
   const directory = mkdtempSync(join(tmpdir(), "qevora-whatsapp-"));
   const name = "qevora_whatsapp_" + randomUUID().replaceAll("-", "");
@@ -397,12 +552,21 @@ test("clean migration and upgrade preserve historical rows and never backfill/en
       isolated.conversation.findMany(), isolated.openCreditIntegration.findMany(), isolated.message.count()]);
     const before = await snapshot(), networkBefore = network.length;
     copy(migration); deploy(); assert.deepEqual(await snapshot(), before);
-    assert.equal(await isolated.openCreditWhatsappConfig.count(), 0); assert.equal(await isolated.openCreditWhatsappHandoff.count(), 0);
+    assert.equal((await isolated.$queryRaw<unknown[]>`SELECT * FROM "OpenCreditWhatsappConfig"`).length, 0); assert.equal(await isolated.openCreditWhatsappHandoff.count(), 0);
     const user = await isolated.user.create({ data: { companyId: company.id, name: "Synthetic", email: randomUUID() + "@invalid.test", passwordHash: "synthetic" } });
+    await isolated.$executeRaw`INSERT INTO "OpenCreditWhatsappConfig" ("integrationId","companyId","providerScope","configuredByUserId","updatedAt")
+      VALUES (${integration.id},${company.id},${integration.providerScope},${user.id},CURRENT_TIMESTAMP)`;
+    const oldConfig = await isolated.$queryRaw`SELECT * FROM "OpenCreditWhatsappConfig"`;
+    copy("20261108230000_opencredit_whatsapp_template_mapping"); deploy();
+    const upgraded = await isolated.openCreditWhatsappConfig.findUniqueOrThrow({ where: { integrationId: integration.id } });
+    assert.equal(upgraded.initialTemplateVariableMapping, null);
+    const { initialTemplateVariableMapping: _mapping, ...unchanged } = upgraded;
+    assert.deepEqual([unchanged], oldConfig);
+    await isolated.openCreditWhatsappConfig.delete({ where: { integrationId: integration.id } });
     const config = await isolated.openCreditWhatsappConfig.create({ data: { companyId: company.id, integrationId: integration.id, providerScope: integration.providerScope!, configuredByUserId: user.id } });
     assert.equal(config.autoStartEnabled, false); assert.equal(network.length, networkBefore);
     const applied = await isolated.$queryRaw<Array<{ count: bigint }>>`SELECT count(*) AS count FROM "_prisma_migrations" WHERE finished_at IS NOT NULL`;
-    assert.equal(Number(applied[0].count), 34);
+    assert.equal(Number(applied[0].count), 35);
   } finally {
     await isolated.$disconnect(); await db.$executeRawUnsafe('DROP DATABASE "' + name + '"');
     const checked = resolve(directory); assert(checked.startsWith(resolve(tmpdir()) + sep + "qevora-whatsapp-"));
