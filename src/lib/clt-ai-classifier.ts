@@ -1,10 +1,12 @@
 import "server-only";
 import { redactAiSensitiveText } from "./ai-response-context";
-import { validateCltAiIntent, cltAiIntents } from "./clt-ai-intent";
+import { deterministicCltIntentProposal, validateCltAiIntent, cltAiIntents } from "./clt-ai-intent";
 import { readOpenCreditStrictJsonResponse } from "./opencredit-http-json-boundary";
 import { parseOpenCreditStrictJson } from "./opencredit-strict-json";
 
 export async function classifyCltCustomerIntent(text: string) {
+  const deterministic = deterministicCltIntentProposal(text);
+  if (deterministic) return deterministic;
   try {
     const response = await fetch("https://api.openai.com/v1/responses", { method: "POST", signal: AbortSignal.timeout(10000),
       headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, "Content-Type": "application/json" },

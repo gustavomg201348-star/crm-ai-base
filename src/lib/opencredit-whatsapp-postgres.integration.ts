@@ -820,7 +820,7 @@ cltMaterial("information never dispatches and human request pauses native author
 });
 for(const phase of ["before_prepare","catalog","after_dispatch","poll"] as const) cltMaterial("human takeover cancels automation at "+phase,async f=>{
   const takeover=async()=>{await assignment.assignConversationToUser({companyId:f.company.id,conversationId:(await f.handoff()).metaConversationId,assignedToUserId:f.actor.id,assignedByUserId:f.actor.id});};
-  if(phase==="before_prepare")holdAi=takeover;
+  if(phase==="before_prepare")await takeover();
   if(phase==="catalog")cltBankHook=takeover;
   if(phase==="after_dispatch")cltHook=takeover;
   if(phase==="poll"){cltOutcome="pending";cltPollHook=takeover;}
