@@ -583,8 +583,9 @@ material("manual ADMIN canary with AutoStart OFF sends once and preserves config
   const post = createCanary({ db, getSession: async () => f.session, bootstrap: f.bootstrap, enforceLimits: async () => null });
   const invoke = () => post(new NextRequest("https://synthetic.invalid/api/conversations/" + f.source.id + "/opencredit/bootstrap", {
     method: "POST", body: "{}", headers: { origin: "https://synthetic.invalid", "content-type": "application/json" } }), { params: Promise.resolve({ conversationId: f.source.id }) });
-  assert.equal((await (await invoke()).json()).status,"SENT");
-  assert.equal((await (await invoke()).json()).status,"ALREADY_STARTED");
+  const sent=await (await invoke()).json(), handoff=await f.handoff();
+  assert.deepEqual(sent,{status:"SENT",metaConversationId:handoff.metaConversationId});
+  assert.deepEqual(await (await invoke()).json(),{status:"ALREADY_STARTED",metaConversationId:handoff.metaConversationId});
   assert.equal(network.filter(n=>n.type==="template").length,1);
   assert.equal(await db.conversation.count({where:{contactId:f.contact.id,channelId:f.channel.id}}),1);
   assert.equal((await db.openCreditWhatsappConfig.findUniqueOrThrow({where:{integrationId:f.integration.id}})).autoStartEnabled,false);
@@ -667,4 +668,63 @@ material("manual trigger rejects missing actor or replaced source before prepari
   assert.equal((await f.bootstrap.bootstrap({...manualTarget(f),adminUserId:undefined} as never)).status,"AUTOMATION_NOT_ALLOWED");
   assert.equal((await f.bootstrap.bootstrap({...manualTarget(f),sourceConversationId:"wrong-source"})).status,"IDENTITY_UNAVAILABLE");
   assert.equal(network.length,0); assert.equal(await db.openCreditWhatsappHandoff.count({where:{companyId:f.company.id}}),0);
+});
+
+function navigationCanary(f: Fixture, bootstrap = f.bootstrap) {
+  const post=createCanary({db,getSession:async()=>f.session,bootstrap,enforceLimits:async()=>null});
+  return (body="{}")=>post(new NextRequest("https://synthetic.invalid/api/conversations/"+f.source.id+"/opencredit/bootstrap",{
+    method:"POST",body,headers:{origin:"https://synthetic.invalid","content-type":"application/json"}
+  }),{params:Promise.resolve({conversationId:f.source.id})});
+}
+material("navigation never resolves a foreign company handoff",async f=>{
+  const foreign=await fixture(); await manualSetup(foreign);
+  assert.equal((await foreign.bootstrap.bootstrap(manualTarget(foreign))).status,"SENT");
+  const before=network.length;
+  const invoke=navigationCanary(f,{bootstrap:async()=>({status:"SENT"})});
+  assert.deepEqual(await (await invoke()).json(),{status:"SENT"}); assert.equal(network.length,before);
+});
+material("navigation UNKNOWN never exposes Meta destination or retries",async f=>{
+  await manualSetup(f); failNetwork=true; const invoke=navigationCanary(f);
+  assert.deepEqual(await (await invoke()).json(),{status:"UNKNOWN"}); const before=network.length;
+  failNetwork=false; assert.deepEqual(await (await invoke()).json(),{status:"UNKNOWN"}); assert.equal(network.length,before);
+});
+for(const mismatch of ["meta_marker","meta_provider","meta_type","source_marker","source_provider","handoff_state"] as const) material("navigation rejects inconsistent persisted binding: "+mismatch,async f=>{
+  await manualSetup(f); assert.equal((await f.bootstrap.bootstrap(manualTarget(f))).status,"SENT");
+  const h=await f.handoff(),before=network.length;
+  const invoke=navigationCanary(f,{bootstrap:async()=>{
+    if(mismatch==="meta_marker") await db.conversation.update({where:{id:h.metaConversationId},data:{channel:"whatsapp:wrong"}});
+    if(mismatch==="meta_provider") await db.channel.update({where:{id:h.channelId},data:{provider:"other"}});
+    if(mismatch==="meta_type") await db.channel.update({where:{id:h.channelId},data:{type:"other"}});
+    if(mismatch==="source_marker") await db.conversation.update({where:{id:f.source.id},data:{channel:"whatsapp:wrong"}});
+    if(mismatch==="source_provider") await db.channel.update({where:{id:f.source.channelId!},data:{provider:"other"}});
+    if(mismatch==="handoff_state") await db.openCreditWhatsappHandoff.update({where:{id:h.id},data:{state:"UNKNOWN"}});
+    return {status:"ALREADY_STARTED"};
+  }});
+  assert.deepEqual(await (await invoke()).json(),mismatch === "source_provider" ? {error:"UNAVAILABLE"} : {status:"ALREADY_STARTED"}); assert.equal(network.length,before);
+});
+material("navigation validates Contact and persisted channel against real PostgreSQL rows",async f=>{
+  await manualSetup(f); assert.equal((await f.bootstrap.bootstrap(manualTarget(f))).status,"SENT"); const h=await f.handoff();
+  const foreign=await fixture(); await manualSetup(foreign); assert.equal((await foreign.bootstrap.bootstrap(manualTarget(foreign))).status,"SENT");
+  const foreignHandoff=await foreign.handoff(),before=network.length;
+  for(const corrupt of [{metaConversationId:foreignHandoff.metaConversationId,channelId:foreignHandoff.channelId},
+    {metaConversationId:h.metaConversationId,channelId:foreignHandoff.channelId}]) {
+    const resolverDb={user:db.user,conversation:db.conversation,openCreditLeadMaterialization:db.openCreditLeadMaterialization,
+      openCreditWhatsappHandoff:{findFirst:async()=>corrupt}} as unknown as Parameters<typeof createCanary>[0]["db"];
+    const post=createCanary({db:resolverDb,getSession:async()=>f.session,bootstrap:{bootstrap:async()=>({status:"SENT"})},enforceLimits:async()=>null});
+    const response=await post(new NextRequest("https://synthetic.invalid/api/conversations/"+f.source.id+"/opencredit/bootstrap",{
+      method:"POST",body:"{}",headers:{origin:"https://synthetic.invalid","content-type":"application/json"}}),{params:Promise.resolve({conversationId:f.source.id})});
+    assert.deepEqual(await response.json(),{status:"SENT"});
+  }
+  assert.equal(network.length,before);
+});
+material("navigation destination cannot be supplied by browser",async f=>{
+  await manualSetup(f); const r=await navigationCanary(f)('{"metaConversationId":"foreign"}');
+  assert.equal(r.status,400); assert.equal(network.length,0); assert.equal(await db.openCreditWhatsappHandoff.count({where:{companyId:f.company.id}}),0);
+});
+
+material("navigation opens exact reused legacy Meta conversation bound by persisted channelId",async f=>{
+  await manualSetup(f);
+  const legacy=await db.conversation.create({data:{contactId:f.contact.id,channelId:f.channel.id,channel:"whatsapp",status:"BOT"}});
+  assert.deepEqual(await (await navigationCanary(f)()).json(),{status:"SENT",metaConversationId:legacy.id});
+  assert.equal((await f.handoff()).metaConversationId,legacy.id);
 });

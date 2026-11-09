@@ -4976,6 +4976,10 @@ export default function Home() {
                 pageError={conversationPageError}
                 onLoadMore={() => void loadConversations(conversationFilters, { more: true })}
                 onRetryList={() => void loadConversations(conversationFilters)}
+                onCanaryStarted={async (metaConversationId) => {
+                  await loadConversations(conversationFiltersRef.current, { silent: true });
+                  await openConversationById(metaConversationId);
+                }}
                 selectedConversation={selectedConversation}
                 highlightedConversationId={highlightedConversationId}
                 onFiltersChange={setConversationFilters}
@@ -7051,7 +7055,7 @@ function Atendimento({
   canManageOpenCreditIdentity,
   isAdmin,
   loading,
-  hasMore, loadingMore, pageError, onLoadMore, onRetryList,
+  hasMore, loadingMore, pageError, onLoadMore, onRetryList, onCanaryStarted,
   selectedConversation,
   highlightedConversationId,
   onFiltersChange,
@@ -7090,6 +7094,7 @@ function Atendimento({
   isAdmin: boolean;
   loading: boolean;
   hasMore: boolean; loadingMore: boolean; pageError: string; onLoadMore: () => void; onRetryList: () => void;
+  onCanaryStarted: (metaConversationId: string) => Promise<void>;
   selectedConversation: ConversationRow | null;
   highlightedConversationId?: string | null;
   onFiltersChange: (filters: { search: string; status: string; tagIds: string[]; assignedTo: string }) => void;
@@ -8270,7 +8275,10 @@ function Atendimento({
         )}
       >
         {selectedConversation?.channel === "OPEN_CREDIT" && canAttemptOpenCreditAuthorization && (
-          <OpenCreditWhatsappCanary key={selectedConversation.id} conversationId={selectedConversation.id} onStarted={onRetryList} />
+          <OpenCreditWhatsappCanary key={selectedConversation.id} conversationId={selectedConversation.id} onStarted={async (metaConversationId, status) => {
+            await onCanaryStarted(metaConversationId);
+            showCopyToast(status === "SENT" ? "Template enviado. Atendimento WhatsApp aberto." : "Este lead já teve o atendimento WhatsApp iniciado.");
+          }} />
         )}
         {copyToast && (
           <div

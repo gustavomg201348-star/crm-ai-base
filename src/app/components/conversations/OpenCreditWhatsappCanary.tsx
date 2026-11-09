@@ -13,7 +13,16 @@ export const canaryMessages: Readonly<Record<string, string>> = {
   CHANNEL_INVALID: "Configuração OpenCredit → WhatsApp incompleta.",
   RATE_LIMITED: "Limite de tentativas atingido. Aguarde antes de tentar novamente.",
 };
-export function OpenCreditWhatsappCanary({ conversationId, onStarted }: { conversationId: string; onStarted(): void }) {
+export async function openCanaryConversation(status: unknown, metaConversationId: unknown,
+  onStarted: (metaConversationId: string, status: "SENT" | "ALREADY_STARTED") => void | Promise<void>) {
+  if ((status !== "SENT" && status !== "ALREADY_STARTED") || typeof metaConversationId !== "string"
+    || !/^[A-Za-z0-9_-]{1,128}$/.test(metaConversationId)) return false;
+  await onStarted(metaConversationId, status);
+  return true;
+}
+export function OpenCreditWhatsappCanary({ conversationId, onStarted }: {
+  conversationId: string; onStarted(metaConversationId: string, status: "SENT" | "ALREADY_STARTED"): void | Promise<void>;
+}) {
   const busy = useRef(false);
   const [confirm, setConfirm] = useState(false), [sending, setSending] = useState(false);
   const [message, setMessage] = useState(""), [locked, setLocked] = useState(false);
@@ -29,7 +38,13 @@ export function OpenCreditWhatsappCanary({ conversationId, onStarted }: { conver
       setMessage(canaryMessages[status] ?? "Não foi possível confirmar o envio. Verifique o atendimento antes de tentar novamente.");
       // Ambiguous transport/errors must not invite an automatic retry.
       if (["SENT", "ALREADY_STARTED", "UNKNOWN"].includes(status) || !canaryMessages[status]) setLocked(true);
-      if (status === "SENT") onStarted();
+      try {
+        if (await openCanaryConversation(status, response.ok ? data.metaConversationId : null, onStarted)) {
+          setMessage(status === "SENT" ? "Template enviado. Atendimento WhatsApp aberto." : canaryMessages.ALREADY_STARTED);
+        }
+      } catch {
+        setMessage(status === "SENT" ? "Template enviado. Não foi possível abrir o atendimento WhatsApp." : canaryMessages.ALREADY_STARTED);
+      }
     } catch {
       setMessage(canaryMessages.UNKNOWN); setLocked(true);
     } finally { busy.current = false; setSending(false); setConfirm(false); }

@@ -7,6 +7,7 @@ import { NextRequest } from "next/server";
 import { bootstrapPhone, analyzeOpenCreditBootstrapTemplate, resolveBootstrapVariables, bootstrapTemplateFingerprint, validBootstrapChannel } from "./opencredit-whatsapp-policy";
 import { parseWhatsappBootstrapConfig } from "./opencredit-whatsapp-config.service";
 import type { SessionUser } from "./auth";
+import { openCanaryConversation } from "../app/components/conversations/OpenCreditWhatsappCanary";
 
 const loader = Module as typeof Module & { _load(name: string, ...args: unknown[]): unknown };
 const original = loader._load, require = createRequire(import.meta.url);
@@ -149,20 +150,29 @@ test("additive schema, no default activation/backfill; UI explicitly saves and n
 
 function canaryFixture() {
   let actor: SessionUser | null = { id: "admin", companyId: "company", name: "Synthetic", email: "x@invalid.test", role: "ADMIN" };
-  let currentAdmin = true, source = true, jobs = [{ id: "job", integrationId: "integration", contactId: "contact", channelId: "source-channel" }];
+  let currentAdmin = true, source = true, jobs = [{ id: "job", integrationId: "integration", providerScope: "scope", contactId: "contact", channelId: "source-channel" }];
+  let outcome: "SENT" | "ALREADY_STARTED" | "UNKNOWN" = "SENT", meta = true;
+  let handoff: { metaConversationId: string; channelId: string } | null = { metaConversationId: "meta-conversation", channelId: "meta-channel" };
+  const destinationQueries: unknown[] = []; let failDestination = false;
   const calls: unknown[] = [];
   const db = { user: { findFirst: async () => currentAdmin ? { id: "admin" } : null },
-    conversation: { findFirst: async (query: unknown) => { calls.push(query); return source ? { id: "conversation", contactId: "contact", channelId: "source-channel" } : null; } },
+    conversation: { findFirst: async (query: unknown) => {
+      const id = (query as { where: { id: string } }).where.id;
+      if (id !== "conversation") { destinationQueries.push(query); return meta ? { id: "meta-conversation" } : null; }
+      calls.push(query); return source ? { id: "conversation", contactId: "contact", channelId: "source-channel" } : null;
+    } },
+    openCreditWhatsappHandoff: { findFirst: async (query: unknown) => { destinationQueries.push(query); if (failDestination) throw Error("SYNTHETIC_LOOKUP_FAILURE"); return handoff; } },
     openCreditLeadMaterialization: { findMany: async (query: unknown) => { calls.push(query); return jobs; } } };
   const targets: unknown[] = [];
   let limited: Response | null = null;
   const post = canary.createOpenCreditWhatsappCanary({ db: db as unknown as Parameters<typeof canary.createOpenCreditWhatsappCanary>[0]["db"],
     getSession: async () => actor, enforceLimits: async () => limited,
-    bootstrap: { bootstrap: async target => { targets.push(target); return { status: "SENT" }; } } });
+    bootstrap: { bootstrap: async target => { targets.push(target); return { status: outcome }; } } });
   const request = (body = "{}", headers: Record<string,string> = {}, search = "") => new NextRequest("https://synthetic.invalid/api/conversations/conversation/opencredit/bootstrap" + search,
     { method: "POST", body, headers: { origin: "https://synthetic.invalid", "content-type": "application/json", ...headers } });
   const run = (body?: string, headers?: Record<string,string>, search?: string) => post(request(body,headers,search), { params: Promise.resolve({ conversationId: "conversation" }) });
-  return { run, targets, calls, actor: (v: SessionUser | null) => { actor = v; }, admin: (v: boolean) => { currentAdmin = v; },
+  return { run, targets, calls, destinationQueries, failDestination: () => { failDestination=true; }, outcome: (v: typeof outcome) => { outcome=v; },
+    handoff: (v: typeof handoff) => { handoff=v; }, meta: (v: boolean) => { meta=v; }, actor: (v: SessionUser | null) => { actor = v; }, admin: (v: boolean) => { currentAdmin = v; },
     source: (v: boolean) => { source = v; }, jobs: (v: typeof jobs) => { jobs = v; }, limited: (v: Response) => { limited = v; } };
 }
 test("manual conversation route derives target only from scoped DB rows", async () => {
@@ -187,8 +197,8 @@ test("manual route rejects browser target overrides, origin, query and credentia
 test("manual route fails closed for missing/foreign/Meta source and absent or ambiguous completed bindings", async () => {
   const f=canaryFixture(); f.source(false); assert.equal((await f.run()).status,404); f.source(true);
   f.jobs([]); assert.equal((await f.run()).status,409);
-  f.jobs([{id:"a",integrationId:"i",contactId:"contact",channelId:"source-channel"},{id:"b",integrationId:"i",contactId:"contact",channelId:"source-channel"}]); assert.equal((await f.run()).status,409);
-  f.jobs([{id:"a",integrationId:"i",contactId:"wrong",channelId:"source-channel"}]); assert.equal((await f.run()).status,409); assert.equal(f.targets.length,0);
+  f.jobs([{id:"a",integrationId:"i",providerScope:"scope",contactId:"contact",channelId:"source-channel"},{id:"b",integrationId:"i",providerScope:"scope",contactId:"contact",channelId:"source-channel"}]); assert.equal((await f.run()).status,409);
+  f.jobs([{id:"a",integrationId:"i",providerScope:"scope",contactId:"wrong",channelId:"source-channel"}]); assert.equal((await f.run()).status,409); assert.equal(f.targets.length,0);
 });
 test("manual admin limiter returns only safe response with retry", async () => {
   const f=canaryFixture(); f.limited(new Response(null,{status:429,headers:{"retry-after":"40"}})); const r=await f.run();
@@ -202,4 +212,45 @@ test("manual UI stays on ADMIN OpenCredit source and never replaces the transpor
   assert.match(ui,/busy.current \|\| locked/); assert.match(ui,/body: "\{\}"/);
   assert.match(ui,/não ativa o AutoStart/); assert.match(ui,/setLocked\(true\)/);
   assert.doesNotMatch(ui,/jobId|contactId|integrationId|providerScope|phoneNumberId|autoStartEnabled/);
+});
+
+for (const status of ["SENT", "ALREADY_STARTED"] as const) test("canary resolves authenticated persisted Meta destination: " + status, async () => {
+  const f=canaryFixture(); f.outcome(status); const r=await f.run();
+  assert.deepEqual(await r.json(),{status,metaConversationId:"meta-conversation"});
+  const handoff=f.destinationQueries[0] as { where: Record<string,unknown> };
+  for (const [key,value] of Object.entries({companyId:"company",sourceConversationId:"conversation",jobId:"job",integrationId:"integration",providerScope:"scope",contactId:"contact",state:"SENT"})) assert.equal(handoff.where[key],value);
+  const meta=f.destinationQueries[1] as { where: Record<string,unknown>; select: object };
+  assert.equal(meta.where.id,"meta-conversation"); assert.equal(meta.where.contactId,"contact"); assert.equal(meta.where.channelId,"meta-channel");
+  assert.deepEqual(meta.where.contact,{companyId:"company"}); assert.deepEqual(meta.where.channelRef,{companyId:"company",type:"whatsapp",provider:"meta"});
+  assert.deepEqual(meta.select,{id:true}); assert.deepEqual(meta.where.channel,{in:["whatsapp","whatsapp:meta-channel"]});
+});
+test("unknown result and missing/inconsistent destination never disclose a navigation ID",async()=>{
+  const f=canaryFixture(); f.outcome("UNKNOWN"); assert.deepEqual(await (await f.run()).json(),{status:"UNKNOWN"}); assert.equal(f.destinationQueries.length,0);
+  f.outcome("SENT"); f.handoff(null); assert.deepEqual(await (await f.run()).json(),{status:"SENT"});
+  f.handoff({metaConversationId:"meta-conversation",channelId:"meta-channel"}); f.meta(false); assert.deepEqual(await (await f.run()).json(),{status:"SENT"});
+});
+test("browser cannot supply a destination ID",async()=>{
+  const f=canaryFixture(); assert.equal((await f.run('{"metaConversationId":"foreign"}')).status,400); assert.equal(f.targets.length,0);
+});
+test("UI navigation calls back with only the returned opaque ID for SENT and ALREADY_STARTED",async()=>{
+  const calls:string[]=[];
+  for(const status of ["SENT","ALREADY_STARTED"]) assert.equal(await openCanaryConversation(status,"meta-conversation",async id=>{calls.push(id);}),true);
+  assert.deepEqual(calls,["meta-conversation","meta-conversation"]);
+  for(const status of ["UNKNOWN","SEND_FAILED","CONFIGURATION_MISSING","RATE_LIMITED",null]) assert.equal(await openCanaryConversation(status,"meta-conversation",id=>{calls.push(id);}),false);
+  for(const id of [undefined,null,"","../foreign","https://foreign.invalid","x".repeat(129)]) assert.equal(await openCanaryConversation("SENT",id,id=>{calls.push(id);}),false);
+  assert.equal(calls.length,2);
+});
+test("navigation failure propagates separately from the confirmed provider outcome",async()=>{
+  await assert.rejects(openCanaryConversation("SENT","meta-conversation",async()=>{throw Error("SYNTHETIC_NAVIGATION_FAILURE");}));
+  const ui=readFileSync("src/app/components/conversations/OpenCreditWhatsappCanary.tsx","utf8"),page=readFileSync("src/app/page.tsx","utf8");
+  assert.match(ui,/openCanaryConversation\(status, response.ok \? data.metaConversationId : null, onStarted\)/);
+  assert.match(ui,/Template enviado\. Atendimento WhatsApp aberto\./);
+  assert.match(page,/await loadConversations\(conversationFiltersRef.current, \{ silent: true \}\);\s*await openConversationById\(metaConversationId\)/);
+  assert.match(page,/await onCanaryStarted\(metaConversationId\)/);
+  assert.match(page,/showCopyToast\(status === "SENT" \? "Template enviado\. Atendimento WhatsApp aberto\."/);
+});
+
+test("destination lookup failure preserves confirmed send without exposing diagnostics",async()=>{
+  const f=canaryFixture(); f.failDestination(); const r=await f.run();
+  assert.equal(r.status,200); assert.deepEqual(await r.json(),{status:"SENT"});
 });
