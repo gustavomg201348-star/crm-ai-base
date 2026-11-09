@@ -4,7 +4,6 @@ import { authorityStorage, type AuthorityDatabase } from "./conversation-authori
 import { conversationAuthorityTransactionCore } from "./conversation-authority.service";
 import { createOutboundOperationService } from "./outbound-operation.service";
 import { requireAuthority } from "./conversation-authority-contract";
-import { resolveConfiguredOpenCreditProviderScope } from "./opencredit-provider-scope-resolver";
 type ReplyPolicy = (input: { companyMode?: string | null; conversationMode?: string | null; aiPaused?: boolean; agentId?: string | null }) => boolean;
 export async function openCreditWhatsappCanAutoReply(db: Pick<PrismaClient, "conversation" | "company" | "conversationAuthority">, companyId: string, conversationId: string,
   policy: (input: { companyMode?: string | null; conversationMode?: string | null; aiPaused?: boolean; agentId?: string | null }) => boolean) {
@@ -100,14 +99,13 @@ export async function prepareOpenCreditWhatsappAiReply(database: AuthorityDataba
 
 
 /** Direct CRM path: a normal Meta conversation may use the guarded CLT workflow only when
- * the same contact already has an active, manually-reviewed CREDIT_SIMULATION authorization.
+ * the same contact already has one unambiguous active, manually-reviewed CREDIT_SIMULATION authorization.
  * No OpenCredit WhatsApp handoff is synthesized or required. */
 export async function openCreditCrmDirectCanAutoReply(
   db: Pick<PrismaClient, "conversation" | "company" | "conversationAuthority" | "openCreditConsumerAuthorization" | "openCreditCommercialAccess">,
   companyId: string,
   conversationId: string,
-  policy: ReplyPolicy,
-  providerScope = resolveConfiguredOpenCreditProviderScope()
+  policy: ReplyPolicy
 ) {
   const c = await db.conversation.findFirst({ where: {
     id: conversationId,
@@ -119,14 +117,16 @@ export async function openCreditCrmDirectCanAutoReply(
   if (!company || !policy({ companyMode: company.aiMode, conversationMode: c.aiMode, aiPaused: c.aiPaused, agentId: c.agentId })) return false;
   const authority = await db.conversationAuthority.findFirst({ where: { companyId, channelId: c.channelId, conversationId } });
   if (!authority || authority.state !== "AI" || authority.ownerUserId !== null) return false;
-  const auth = await db.openCreditConsumerAuthorization.findFirst({ where: {
-    companyId, providerScope, contactId: c.contactId, purpose: "CREDIT_SIMULATION", active: true,
+  const authorizations = await db.openCreditConsumerAuthorization.findMany({ where: {
+    companyId, contactId: c.contactId, purpose: "CREDIT_SIMULATION", active: true,
     remoteIdentity: { enabled: true },
     evidence: { companyId, contactId: c.contactId, conversationId, channelId: c.channelId,
       provenanceKind: "META_WEBHOOK_HMAC_SHA256_VERIFIED", provenanceVersion: 1 },
+  }, select: { providerScope: true }, take: 2 });
+  if (authorizations.length !== 1) return false;
+  return !!await db.openCreditCommercialAccess.findFirst({ where: {
+    companyId, providerScope: authorizations[0].providerScope, enabled: true
   } });
-  if (!auth) return false;
-  return !!await db.openCreditCommercialAccess.findFirst({ where: { companyId, providerScope, enabled: true } });
 }
 
 export async function prepareOpenCreditCrmDirectAiReply(
@@ -137,8 +137,6 @@ export async function prepareOpenCreditCrmDirectAiReply(
 ) {
   const storage = authorityStorage(database), core = conversationAuthorityTransactionCore(database);
   const operations = createOutboundOperationService(database);
-  let providerScope: ReturnType<typeof resolveConfiguredOpenCreditProviderScope>;
-  try { providerScope = resolveConfiguredOpenCreditProviderScope(); } catch { return null; }
   try {
     const plan = await storage.transaction(async tx => {
       const conversation = await storage.lockConversation(tx, companyId, conversationId);
@@ -153,14 +151,20 @@ export async function prepareOpenCreditCrmDirectAiReply(
         message: { direction: "inbound", type: "text" },
       }, orderBy: { sequence: "desc" }, include: { message: true } });
       if (!event || !event.message.body.trim()) return null;
-      const auth = await tx.openCreditConsumerAuthorization.findFirst({ where: {
-        companyId, providerScope, contactId: conversation.contactId, purpose: "CREDIT_SIMULATION", active: true,
+      const authorizations = await tx.openCreditConsumerAuthorization.findMany({ where: {
+        companyId, contactId: conversation.contactId, purpose: "CREDIT_SIMULATION", active: true,
         remoteIdentity: { enabled: true },
         evidence: { companyId, contactId: conversation.contactId, conversationId,
           channelId: conversation.channelId, provenanceKind: "META_WEBHOOK_HMAC_SHA256_VERIFIED", provenanceVersion: 1 },
-      }, select: { changedByUserId: true } });
-      if (!auth || !await tx.openCreditCommercialAccess.findFirst({ where: { companyId, providerScope, enabled: true } })) return null;
-      const actor = await tx.user.findFirst({ where: { id: auth.changedByUserId, companyId, role: { in: ["ADMIN", "SUPERVISOR"] } }, select: { id: true } });
+      }, select: { changedByUserId: true, providerScope: true }, take: 2 });
+      if (authorizations.length !== 1) return null;
+      const auth = authorizations[0];
+      if (!await tx.openCreditCommercialAccess.findFirst({ where: {
+        companyId, providerScope: auth.providerScope, enabled: true
+      } })) return null;
+      const actor = await tx.user.findFirst({ where: {
+        id: auth.changedByUserId, companyId, role: { in: ["ADMIN", "SUPERVISOR"] }
+      }, select: { id: true } });
       if (!actor) return null;
       const scope = { companyId, conversationId, channelId: conversation.channelId };
       let authority = await tx.conversationAuthority.findFirst({ where: scope });
@@ -209,7 +213,7 @@ export async function prepareOpenCreditCrmDirectAiReply(
           token = reserved.reservationToken; dispatchAttempted = true;
           await operations.authorizeDispatch({ ...plan.scope, operationId: operation.id,
             expectedGeneration: plan.generation, token, validate: async tx => {
-              requireAuthority(await openCreditCrmDirectCanAutoReply(tx, companyId, conversationId, policy, providerScope),
+              requireAuthority(await openCreditCrmDirectCanAutoReply(tx, companyId, conversationId, policy),
                 "AUTHORITY_DENIED");
               const latest = await tx.conversationInboundEvent.findFirst({ where: plan.scope,
                 orderBy: { sequence: "desc" }, select: { id: true } });
@@ -234,3 +238,4 @@ export async function prepareOpenCreditCrmDirectAiReply(
     };
   } catch { return null; }
 }
+
