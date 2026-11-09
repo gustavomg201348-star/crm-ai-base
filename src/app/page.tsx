@@ -20,6 +20,7 @@ import {
   Sparkles,
   Tags
 } from "@/lib/mock-data";
+import { OpenCreditWhatsappCanary } from "@/app/components/conversations/OpenCreditWhatsappCanary";
 import { ConversationList } from "@/app/components/conversations/ConversationList";
 import { ConversationPageLoader, appendConversationPage, compareConversationActivity } from "@/lib/conversation-list-pagination";
 import { TemplateVariableDialog } from "@/app/components/conversations/TemplateVariableDialog";
@@ -8268,6 +8269,9 @@ function Atendimento({
           showMobileConversationDetail ? "flex" : "hidden xl:flex"
         )}
       >
+        {selectedConversation?.channel === "OPEN_CREDIT" && canAttemptOpenCreditAuthorization && (
+          <OpenCreditWhatsappCanary key={selectedConversation.id} conversationId={selectedConversation.id} onStarted={onRetryList} />
+        )}
         {copyToast && (
           <div
             className={clsx(

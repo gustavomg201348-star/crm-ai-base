@@ -195,3 +195,29 @@ operation records, especially UNKNOWN, to preserve duplicate-send protection.
 Revert application code if required; leave the additive empty/retained tables.
 Do not delete intents, reset operations or backfill history as a rollback step.
 This document does not authorize activation or any production operation.
+
+
+## Manual single-lead canary (ADMIN)
+
+Atendimento exposes **Iniciar WhatsApp** only on an OpenCredit source conversation
+for a company ADMIN. Confirmation affects only that conversation and does not
+activate AutoStart. The normal source composer/template transport remains blocked.
+
+POST /api/conversations/[conversationId]/opencredit/bootstrap accepts only an empty
+JSON object. Session company and current DB ADMIN are required, with same-origin
+and the administrative 10/min limiter. The backend resolves exactly one COMPLETED
+materialization with matching source/contact/channel; missing, foreign, non-source
+or ambiguous bindings fail closed. No browser job/contact/integration/channel,
+phone, template or provider binding is accepted.
+
+The closed ADMIN_CANARY trigger ignores only the AutoStart switch; config revision,
+mapping/media fingerprint, destination, company AI mode, integration gates, current
+ADMIN and authority/generation remain checked before provider dispatch. The default
+AUTO_MATERIALIZATION path still requires AutoStart ON at all config checks. Neither
+trigger edits configuration. Both share the same contact-level handoff and native
+one-use permit: concurrent clicks/restarts do not resend SENT, DISPATCHING or UNKNOWN.
+Transport ambiguity locks the local button and requires investigation, never retry.
+
+Rollback: revert this application patch to remove the manual action/route. Keep
+handoff/outbound ledgers intact; disabling AutoStart alone does not disable the new
+explicit manual trigger. This patch authorizes no actual canary or production send.

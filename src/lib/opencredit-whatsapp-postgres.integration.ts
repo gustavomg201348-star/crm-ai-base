@@ -19,6 +19,7 @@ if (process.env.OPENCREDIT_WHATSAPP_POSTGRES_TEST !== "1") throw Error("DISPOSAB
 const db = new PrismaClient({ log: [] }), independent = new PrismaClient({ log: [] });
 const originalFetch = globalThis.fetch;
 const oldKey = process.env.QEVORA_DATA_ENCRYPTION_KEY_V1, oldAi = process.env.OPENAI_API_KEY;
+let createCanary: typeof import("./opencredit-whatsapp-canary-handler").createOpenCreditWhatsappCanary;
 let templates: typeof import("./whatsapp-template.service");
 let ai: typeof import("./ai-attendant.service");
 let assignment: typeof import("./lead-assignment");
@@ -95,6 +96,7 @@ before(async () => {
   };
   try {
     ({ createOpenCreditWhatsappBootstrap } = require("./opencredit-whatsapp-bootstrap.service"));
+    createCanary = require("./opencredit-whatsapp-canary-handler").createOpenCreditWhatsappCanary;
     templates = require("./whatsapp-template.service");
     mediaStorage = require("./template-media-storage");
     ai = require("./ai-attendant.service");
@@ -572,4 +574,97 @@ test("clean migration and upgrade preserve historical rows and never backfill/en
     const checked = resolve(directory); assert(checked.startsWith(resolve(tmpdir()) + sep + "qevora-whatsapp-"));
     rmSync(checked, { recursive: true, force: true });
   }
+});
+
+const manualTarget = (f: Fixture) => ({ ...f.target, trigger: "ADMIN_CANARY" as const, adminUserId: f.actor.id, sourceConversationId: f.source.id });
+async function manualSetup(f: Fixture) { f.input.autoStartEnabled = false; await f.setup(); }
+material("manual ADMIN canary with AutoStart OFF sends once and preserves configuration", async f => {
+  await manualSetup(f);
+  const post = createCanary({ db, getSession: async () => f.session, bootstrap: f.bootstrap, enforceLimits: async () => null });
+  const invoke = () => post(new NextRequest("https://synthetic.invalid/api/conversations/" + f.source.id + "/opencredit/bootstrap", {
+    method: "POST", body: "{}", headers: { origin: "https://synthetic.invalid", "content-type": "application/json" } }), { params: Promise.resolve({ conversationId: f.source.id }) });
+  assert.equal((await (await invoke()).json()).status,"SENT");
+  assert.equal((await (await invoke()).json()).status,"ALREADY_STARTED");
+  assert.equal(network.filter(n=>n.type==="template").length,1);
+  assert.equal(await db.conversation.count({where:{contactId:f.contact.id,channelId:f.channel.id}}),1);
+  assert.equal((await db.openCreditWhatsappConfig.findUniqueOrThrow({where:{integrationId:f.integration.id}})).autoStartEnabled,false);
+  assert.equal((await db.conversation.findUniqueOrThrow({where:{id:f.source.id}})).channel,"OPEN_CREDIT");
+});
+material("explicit automatic trigger remains gated OFF, manual alone may proceed", async f => {
+  await manualSetup(f);
+  assert.equal((await f.bootstrap.bootstrap({...f.target,trigger:"AUTO_MATERIALIZATION"})).status,"CONFIGURATION_MISSING");
+  assert.equal(network.length,0); assert.equal((await f.bootstrap.bootstrap(manualTarget(f))).status,"SENT");
+});
+material("manual concurrent clicks share durable one-use permit with AutoStart OFF", async f => {
+  await manualSetup(f); await Promise.all([f.bootstrap.bootstrap(manualTarget(f)),createOpenCreditWhatsappBootstrap({...f.deps,db:independent}).bootstrap(manualTarget(f))]);
+  assert.equal(network.filter(n=>n.type==="template").length,1); assert.equal(await db.conversation.count({where:{contactId:f.contact.id,channelId:f.channel.id}}),1);
+});
+material("manual UNKNOWN cannot retry even with AutoStart OFF", async f => {
+  await manualSetup(f); failNetwork=true;
+  assert.equal((await f.bootstrap.bootstrap(manualTarget(f))).status,"UNKNOWN"); failNetwork=false;
+  assert.equal((await f.bootstrap.bootstrap(manualTarget(f))).status,"UNKNOWN"); assert.equal(network.length,1);
+});
+material("manual DISPATCHING cannot obtain second provider permit", async f => {
+  await manualSetup(f); let second: string | undefined;
+  const service=createOpenCreditWhatsappBootstrap({...f.deps,sendTemplate:async input=>{
+    const guard=input.dispatchGuard!;
+    return f.deps.sendTemplate({...input,dispatchGuard:async context=>{await guard(context);
+      second=(await f.bootstrap.bootstrap(manualTarget(f))).status;}});
+  }});
+  assert.equal((await service.bootstrap(manualTarget(f))).status,"SENT"); assert.equal(second,"ALREADY_STARTED"); assert.equal(network.length,1);
+});
+for(const phase of ["prepare","dispatch","message"] as const) material("manual current ADMIN revalidated: "+phase, async f=>{
+  await manualSetup(f);
+  const demote=()=>db.user.update({where:{id:f.actor.id},data:{role:"SUPERVISOR"}});
+  if(phase==="prepare") await demote();
+  const service=createOpenCreditWhatsappBootstrap({...f.deps,sendTemplate:async input=>{
+    if(phase==="dispatch") await demote();
+    const before=input.beforeMessageGuard!;
+    return f.deps.sendTemplate({...input,beforeMessageGuard:async()=>{if(phase==="message") await demote(); await before();}});
+  }});
+  assert.notEqual((await service.bootstrap(manualTarget(f))).status,"SENT"); assert.equal(network.length,0);
+});
+for(const change of ["channel","revision","template","phone","human","authority","media"] as const) material("manual binding guard with AutoStart OFF: "+change,async f=>{
+  if(change==="media") await f.v2(true, false);
+  await manualSetup(f);
+  const service=createOpenCreditWhatsappBootstrap({...f.deps,sendTemplate:async input=>{
+    if(change==="channel") await db.openCreditWhatsappConfig.update({where:{integrationId:f.integration.id},data:{defaultWhatsappChannelId:null}});
+    if(change==="revision") await db.openCreditWhatsappConfig.update({where:{integrationId:f.integration.id},data:{revision:{increment:1}}});
+    if(change==="template") await db.metaTemplate.update({where:{id:f.template.id},data:{components:JSON.stringify([{type:"BODY",text:"Changed synthetic"}])}});
+    if(change==="phone") await db.contact.update({where:{id:f.contact.id},data:{phone:"5511976543210",normalizedPhone:"5511976543210"}});
+    if(change==="human"||change==="authority") await assignment.assignConversationToUser({companyId:f.company.id,conversationId:input.conversationId,assignedToUserId:f.actor.id,assignedByUserId:f.actor.id});
+    if(change==="media") await db.metaTemplate.update({where:{id:f.template.id},data:{defaultHeaderMediaAssetId:null}});
+    return f.deps.sendTemplate(input);
+  }});
+  assert.notEqual((await service.bootstrap(manualTarget(f))).status,"SENT"); assert.equal(network.length,0);
+});
+material("manual route uses real tenant/source/completed-job ownership, never browser targets",async f=>{
+  await manualSetup(f);
+  const post=createCanary({db,getSession:async()=>f.session,bootstrap:f.bootstrap,enforceLimits:async()=>null});
+  const invoke=(conversationId:string)=>post(new NextRequest("https://synthetic.invalid/api/conversations/"+conversationId+"/opencredit/bootstrap",{method:"POST",body:"{}",headers:{origin:"https://synthetic.invalid","content-type":"application/json"}}),{params:Promise.resolve({conversationId})});
+  const foreign=await fixture(); assert.equal((await invoke(foreign.source.id)).status,404);
+  const meta=await db.conversation.create({data:{contactId:f.contact.id,channelId:f.channel.id,channel:"whatsapp:"+f.channel.id,status:"OPEN"}});
+  assert.equal((await invoke(meta.id)).status,404);
+  await db.openCreditLeadMaterialization.update({where:{id:f.job.id},data:{state:"NEEDS_REVIEW",contactId:null,channelId:null,conversationId:null}});
+  assert.equal((await invoke(f.source.id)).status,409); assert.equal(network.length,0);
+});
+
+material("manual V2 image/name uses prepared bytes and canonical mapping with AutoStart OFF",async f=>{
+  await f.v2(true,true); await manualSetup(f);
+  assert.equal((await f.bootstrap.bootstrap(manualTarget(f))).status,"SENT");
+  assert.deepEqual(network.map(n=>n.type),["media","template"]);
+  assert.equal((await db.openCreditWhatsappConfig.findUniqueOrThrow({where:{integrationId:f.integration.id}})).autoStartEnabled,false);
+});
+for(const mode of ["AUTO_MATERIALIZATION","ADMIN_CANARY"] as const) material("trigger remains bound through post-upload revalidation: "+mode,async f=>{
+  await f.v2(true,true); await f.setup();
+  duringUpload=async()=>{await db.openCreditWhatsappConfig.update({where:{integrationId:f.integration.id},data:mode==="AUTO_MATERIALIZATION"?{autoStartEnabled:false}:{revision:{increment:1}}});};
+  assert.equal((await f.bootstrap.bootstrap(mode==="ADMIN_CANARY"?manualTarget(f):{...f.target,trigger:mode})).status,"UNKNOWN");
+  assert.deepEqual(network.map(n=>n.type),["media"]);
+});
+
+material("manual trigger rejects missing actor or replaced source before preparing any intent",async f=>{
+  await manualSetup(f);
+  assert.equal((await f.bootstrap.bootstrap({...manualTarget(f),adminUserId:undefined} as never)).status,"AUTOMATION_NOT_ALLOWED");
+  assert.equal((await f.bootstrap.bootstrap({...manualTarget(f),sourceConversationId:"wrong-source"})).status,"IDENTITY_UNAVAILABLE");
+  assert.equal(network.length,0); assert.equal(await db.openCreditWhatsappHandoff.count({where:{companyId:f.company.id}}),0);
 });
