@@ -188,14 +188,14 @@ export function createOpenCreditApiClient(options: Options = {}) {
 
   return {
     /** Paid CLT simulation: explicit fixed path, 120s provider budget + 10s network margin; never replay. */
-    async simulateJsonAfterCommit<T>(path: string, commit: () => Promise<{ body: string; committed: T }>) {
+    async simulateJsonAfterCommit<T>(path: string, commit: () => Promise<{ body: string; committed: T }>, signal?: AbortSignal) {
       validatedPath(path);
       if (!/^\/api\/tenants\/[A-Za-z0-9_-]+\/integration\/simulate$/.test(path)) throw new OpenCreditApiError("INVALID_PATH");
       const creds = configuration(); const pair = await authenticate();
       if (disposed) throw new OpenCreditApiError("DISPOSED");
       const headers = new Headers({ "Content-Type": "application/json", Authorization: `Bearer ${pair.access}` });
       const execution = await commit();
-      const response = await call(path, { method: "POST", headers, body: execution.body }, false, 130_000) as Response;
+      const response = await call(path, { method: "POST", headers, body: execution.body, signal }, false, 130_000) as Response;
       if (response.status === 401 && tokens === pair) tokens.expiresAt = 0;
       return { response, committed: execution.committed, sanitizeDiagnosticIdentifier(value: unknown) {
         const id = safeDiagnosticId(value);
@@ -221,12 +221,13 @@ export function createOpenCreditApiClient(options: Options = {}) {
       } };
     },
     /** Explicit one-shot read: reuse auth/refresh before GET, never replay GET after 401. */
-    async getOnce(path: string): Promise<{ response: Response; sanitizeDiagnosticIdentifier(value: unknown): string | null }> {
+    async getOnce(path: string, beforeRead?: () => Promise<unknown>, signal?: AbortSignal): Promise<{ response: Response; sanitizeDiagnosticIdentifier(value: unknown): string | null }> {
       validatedPath(path);
       const creds = configuration();
       const pair = await authenticate();
       if (disposed) throw new OpenCreditApiError("DISPOSED");
-      const response = await call(path, { method: "GET", headers: { Authorization: `Bearer ${pair.access}` } }) as Response;
+      await beforeRead?.();
+      const response = await call(path, { method: "GET", headers: { Authorization: `Bearer ${pair.access}` }, signal }) as Response;
       if (response.status === 401 && tokens === pair) tokens.expiresAt = 0;
       return { response, sanitizeDiagnosticIdentifier(value) {
         const id = safeDiagnosticId(value);

@@ -1159,7 +1159,8 @@ test("fluxo automatico legado permanece separado do endpoint manual", () => {
   const route = readFileSync("src/app/api/conversations/[id]/ai/route.ts", "utf8");
 
   assert.match(service, /export async function maybeSendAutomaticAiReply/);
-  assert.match(service, /const \{ suggestion \} = await generateAiSuggestion/);
+  assert.match(service, /const \{ suggestion \} = clt \?[\s\S]*?: await generateAiSuggestion/);
+  assert.match(service, /process.env.OPENCREDIT_CLT_AI_ENABLED === "true"/);
   assert.match(service, /sendMetaTextMessage/);
   assert.doesNotMatch(route, /maybeSendAutomaticAiReply|generateAiSuggestion/);
 });

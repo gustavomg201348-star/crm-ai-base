@@ -54,7 +54,7 @@ jobs:
         run: node --unhandled-rejections=strict --import tsx --test src/lib/opencredit-materialization-worker.test.ts
 
       - name: Validate OpenCredit WhatsApp configuration and security boundary
-        run: node --unhandled-rejections=strict --import tsx --test src/lib/opencredit-whatsapp.test.ts
+        run: node --unhandled-rejections=strict --import tsx --test src/lib/opencredit-whatsapp.test.ts src/lib/clt-ai-policy.test.ts src/lib/clt-ai-financial-facts.test.ts
 
       - name: Validate conversation cursor API, list state and cards
         run: node --unhandled-rejections=strict --import tsx --test --test-concurrency=1 src/lib/conversation-list.test.ts src/lib/conversation-list-pagination.test.ts src/app/components/conversations/ConversationList.test.ts src/lib/conversation-access-control.test.ts

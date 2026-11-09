@@ -620,11 +620,19 @@ export async function maybeSendAutomaticAiReply({
     provider: /^postgres(?:ql)?:/.test(process.env.DATABASE_URL ?? "") ? "postgresql" : "sqlite" }, companyId, conversationId, shouldAutoReply) : null;
   if (bridge && !attempt) return null;
   try {
-    const { suggestion } = await generateAiSuggestion({ conversationId, companyId });
+    const cltEnabled = bridge && attempt && process.env.OPENCREDIT_CLT_AI_ENABLED === "true";
+    const clt = cltEnabled ? await (await import("./opencredit-ai-simulation.service")).runOpenCreditAiSimulation(prisma, attempt.context, {
+      log: event => console.info(JSON.stringify(event)),
+    }) : undefined;
+    if (cltEnabled && !clt) return null;
+    if (clt?.handoff) { await attempt?.transferToHuman(); return null; }
+    const { suggestion } = clt ? { suggestion: { suggestedReply: clt.reply, shouldTransferToHuman: false } }
+      : await generateAiSuggestion({ conversationId, companyId });
     if (!suggestion.suggestedReply || suggestion.shouldTransferToHuman) { await attempt?.cancel(); return null; }
 
     const { channel } = await getConversationIntegration({ conversationId, companyId });
-    if (attempt && !await attempt.authorize(channel)) return null;
+    if (attempt && !await attempt.authorize(channel, clt?.validateFinancial)) return null;
+    clt?.onAuthorized?.();
     const metaResponse = await sendMetaTextMessage({
       phoneNumberId: channel.phoneNumberId!,
       accessToken: channel.accessToken!,
@@ -643,6 +651,7 @@ export async function maybeSendAutomaticAiReply({
       senderType: "ai"
     });
     await attempt?.finish("SENT", providerMessageId ?? undefined);
+    if (clt?.handoffAfterReply) { await attempt?.transferToHuman(); return sent; }
     if (bridge && await openCreditWhatsappCanAutoReply(prisma, companyId, conversationId, shouldAutoReply)) {
       const changed = await prisma.conversation.updateMany({ where: { id: conversationId, contact: { companyId }, agentId: null,
         aiPaused: false, status: { in: ["OPEN", "PENDING", "BOT"] } }, data: { status: "BOT" } });
