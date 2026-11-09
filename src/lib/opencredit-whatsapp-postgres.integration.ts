@@ -794,6 +794,16 @@ cltMaterial("signed inbound -> durable simulation -> encrypted facts -> one guar
   const reply=await db.message.findFirstOrThrow({where:{conversationId:(await f.handoff()).metaConversationId,direction:"outbound",type:"text"},orderBy:{createdAt:"desc"}});
   assert.match(reply.body,/100,00/);assert.match(reply.body,/10,00/);assert.doesNotMatch(reply.body,new RegExp(cltCpf));
 });
+cltMaterial("CRM direct Meta conversation keeps durable financial gates without OpenCredit handoff",async f=>{
+  const h=await f.handoff();
+  await db.openCreditWhatsappHandoff.delete({where:{id:h.id}});
+  await f.sendInbound(undefined,"Quero simular");
+  assert.equal(cltPosts,1);assert.equal(network.filter(n=>n.type==="text").length,1);
+  const w=await db.openCreditAiSimulation.findFirstOrThrow({where:{companyId:f.company.id}});
+  assert.equal(w.conversationId,h.metaConversationId);assert.equal(w.state,"COMPLETED");assert.match(w.protectedFacts!,/^enc:v1:/);
+  const reply=await db.message.findFirstOrThrow({where:{conversationId:h.metaConversationId,direction:"outbound",type:"text"},orderBy:{createdAt:"desc"}});
+  assert.match(reply.body,/100,00/);assert.match(reply.body,/10,00/);assert.doesNotMatch(reply.body,new RegExp(cltCpf));
+});
 for(const mode of ["timeout","invalid","waiting","refused"] as const) cltMaterial("provider outcome "+mode+" never blind-retries",async f=>{
   cltOutcome=mode;await f.sendInbound(undefined,"Quero simular");assert.equal(cltPosts,1);assert.equal(cltPolls,0);
   const w=await db.openCreditAiSimulation.findFirstOrThrow({where:{companyId:f.company.id}});
