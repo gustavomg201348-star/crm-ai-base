@@ -335,13 +335,15 @@ export async function uploadMetaMedia({
   accessToken,
   fileName,
   mimeType,
-  bytes
+  bytes,
+  signal
 }: {
   phoneNumberId: string;
   accessToken: string;
   fileName: string;
   mimeType: string;
   bytes: Buffer;
+  signal?: AbortSignal;
 }) {
   const apiVersion = process.env.META_GRAPH_VERSION || "v20.0";
   const formData = new FormData();
@@ -357,6 +359,7 @@ export async function uploadMetaMedia({
     `https://graph.facebook.com/${apiVersion}/${phoneNumberId}/media`,
     {
       method: "POST",
+      ...(signal ? { signal } : {}),
       headers: {
         Authorization: `Bearer ${accessToken}`
       },

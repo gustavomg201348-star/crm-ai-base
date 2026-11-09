@@ -1503,6 +1503,7 @@ model OpenCreditWhatsappConfig {
   defaultWhatsappChannelId String?
   initialTemplateName String?
   initialTemplateLanguage String?
+  initialTemplateVariableMapping String?
   autoStartEnabled Boolean @default(false)
   configuredByUserId String
   revision Int @default(1)
