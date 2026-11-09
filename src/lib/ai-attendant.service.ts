@@ -19,7 +19,7 @@ import {
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
 import { readMetaMessageId, sendMetaTextMessage } from "@/lib/meta-whatsapp";
-import { openCreditWhatsappCanAutoReply, prepareOpenCreditWhatsappAiReply } from "./opencredit-whatsapp-ai";
+import { openCreditWhatsappCanAutoReply, prepareOpenCreditWhatsappAiReply, prepareOpenCreditCrmDirectAiReply } from "./opencredit-whatsapp-ai";
 
 export type AiMode = "OFF" | "COPILOT" | "AUTO" | "HYBRID";
 
@@ -616,11 +616,17 @@ export async function maybeSendAutomaticAiReply({
   // Sem chave de IA, o automatico fica protegido para nao enviar resposta generica.
   if (!process.env.OPENAI_API_KEY) return null;
 
-  const attempt = bridge ? await prepareOpenCreditWhatsappAiReply({ db: prisma,
-    provider: /^postgres(?:ql)?:/.test(process.env.DATABASE_URL ?? "") ? "postgresql" : "sqlite" }, companyId, conversationId, shouldAutoReply) : null;
+  const authorityDb = { db: prisma,
+    provider: /^postgres(?:ql)?:/.test(process.env.DATABASE_URL ?? "") ? "postgresql" as const : "sqlite" as const };
+  const cltFeatureEnabled = process.env.OPENCREDIT_CLT_AI_ENABLED === "true";
+  const attempt = bridge
+    ? await prepareOpenCreditWhatsappAiReply(authorityDb, companyId, conversationId, shouldAutoReply)
+    : cltFeatureEnabled
+      ? await prepareOpenCreditCrmDirectAiReply(authorityDb, companyId, conversationId, shouldAutoReply)
+      : null;
   if (bridge && !attempt) return null;
   try {
-    const cltEnabled = bridge && attempt && process.env.OPENCREDIT_CLT_AI_ENABLED === "true";
+    const cltEnabled = !!attempt && cltFeatureEnabled;
     const clt = cltEnabled ? await (await import("./opencredit-ai-simulation.service")).runOpenCreditAiSimulation(prisma, attempt.context, {
       log: event => console.info(JSON.stringify(event)),
     }) : undefined;
