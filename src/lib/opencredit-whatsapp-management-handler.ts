@@ -10,7 +10,7 @@ import type { RateLimitRule } from "./rate-limit";
 type Context = { params: Promise<{ id: string }> };
 const response = (body: object, status = 200) => NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
 const id = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(v);
-async function readBody(request: NextRequest) {
+export async function readOpenCreditWhatsappBody(request: NextRequest) {
   if (!/^application\/json(?:;\s*charset=utf-8)?$/i.test(request.headers.get("content-type") ?? "")) return null;
   const reader = request.body?.getReader(); if (!reader) return null;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -45,7 +45,7 @@ export function createOpenCreditWhatsappManagement(deps: {
       }
       if (!sameOrigin(request)) return response({ error: "INVALID_ORIGIN" }, 403);
       if (request.nextUrl.search) return response({ error: "INVALID_REQUEST" }, 400);
-      const body = await readBody(request);
+      const body = await readOpenCreditWhatsappBody(request);
       const config = action === "save" ? parseWhatsappBootstrapConfig(body) : null;
       const jobId = action === "bootstrap" && body && typeof body === "object" && !Array.isArray(body)
         && Object.keys(body).join() === "jobId" && id(body.jobId) ? body.jobId : null;

@@ -8,7 +8,13 @@ import { BootstrapBlocked, bootstrapPhone, bootstrapTemplateFingerprint, analyze
   validBootstrapChannel, type BootstrapState, type BootstrapVariableMapping } from "./opencredit-whatsapp-policy";
 import type { sendConversationTemplate } from "./whatsapp-template.service";
 
-type Target = { companyId: string; integrationId: string; jobId: string };
+export type BootstrapTrigger = "AUTO_MATERIALIZATION" | "ADMIN_CANARY";
+export function configAllowsTrigger(config: { autoStartEnabled: boolean } | null, trigger: BootstrapTrigger) {
+  return !!config && (trigger === "ADMIN_CANARY" || (trigger === "AUTO_MATERIALIZATION" && config.autoStartEnabled === true));
+}
+type Target = { companyId: string; integrationId: string; jobId: string } & (
+  { trigger?: "AUTO_MATERIALIZATION" } | { trigger: "ADMIN_CANARY"; adminUserId: string; sourceConversationId: string }
+);
 type Dependencies = { db: PrismaClient; provider: "postgresql" | "sqlite";
   credential(channel: Channel): void;
   template: typeof import("./whatsapp-template.service").findReadyOpenCreditBootstrapTemplate;
@@ -24,10 +30,18 @@ export function createOpenCreditWhatsappBootstrap(deps: Dependencies) {
     try { deps.credential(c!); } catch { return blocked("CHANNEL_INVALID"); }
     return c!;
   }
+  async function manualAdminValid(tx: Pick<PrismaClient, "user">, target: Target) {
+    if (target.trigger === undefined || target.trigger === "AUTO_MATERIALIZATION") return true;
+    if (target.trigger !== "ADMIN_CANARY" || typeof target.adminUserId !== "string" || !target.adminUserId.trim()
+      || typeof target.sourceConversationId !== "string" || !target.sourceConversationId.trim()) return false;
+    return !!await tx.user.findFirst({ where: {
+      id: target.adminUserId, companyId: target.companyId, role: "ADMIN" }, select: { id: true } });
+  }
   async function prepare(target: Target) {
     return storage.transaction(async tx => {
+      if (!await manualAdminValid(tx, target)) return blocked("AUTOMATION_NOT_ALLOWED");
       const job = await tx.openCreditLeadMaterialization.findFirst({ where: { id: target.jobId, companyId: target.companyId,
-        integrationId: target.integrationId, state: "COMPLETED" }, include: { contact: true,
+        integrationId: target.integrationId, state: "COMPLETED", ...(target.trigger === "ADMIN_CANARY" ? { conversationId: target.sourceConversationId } : {}) }, include: { contact: true,
         conversation: { include: { channelRef: openCreditChannelRef } } } });
       if (!job?.contact || !job.conversation || !isOpenCreditConversation(job.conversation)
         || job.conversation.contactId !== job.contact.id || job.conversation.channelId !== job.channelId
@@ -39,8 +53,8 @@ export function createOpenCreditWhatsappBootstrap(deps: Dependencies) {
       const integration = await tx.openCreditIntegration.findFirst({ where: { id: job.integrationId, companyId: job.companyId,
         providerScope: job.providerScope, enabled: false, paused: false, materializationEnabled: true, passiveInboundEnabled: true } });
       const config = await tx.openCreditWhatsappConfig.findFirst({ where: { integrationId: job.integrationId, companyId: job.companyId,
-        providerScope: job.providerScope, autoStartEnabled: true } });
-      if (!integration || !config?.defaultWhatsappChannelId || !config.initialTemplateName || !config.initialTemplateLanguage) return blocked("CONFIGURATION_MISSING");
+        providerScope: job.providerScope } });
+      if (!configAllowsTrigger(config, target.trigger ?? "AUTO_MATERIALIZATION") || !integration || !config?.defaultWhatsappChannelId || !config.initialTemplateName || !config.initialTemplateLanguage) return blocked("CONFIGURATION_MISSING");
       if ((await storage.actor(tx, job.companyId, config.configuredByUserId, true)).role !== "ADMIN") return blocked("CONFIGURATION_MISSING");
       const channel = await channelAllowed(await tx.channel.findFirst({ where: { id: config.defaultWhatsappChannelId, companyId: job.companyId } }), job.companyId);
       const phone = bootstrapPhone(job.contact); if (!phone) return blocked("IDENTITY_UNAVAILABLE");
@@ -101,7 +115,7 @@ export function createOpenCreditWhatsappBootstrap(deps: Dependencies) {
             dispatchChannel = { phoneNumberId: context.phoneNumberId, wabaId: context.wabaId };
             await storage.transaction(async tx => {
               const config = await tx.openCreditWhatsappConfig.findFirst({ where: { integrationId: handoff.integrationId, companyId: handoff.companyId,
-                providerScope: handoff.providerScope, autoStartEnabled: true, revision: handoff.configRevision,
+                providerScope: handoff.providerScope, revision: handoff.configRevision,
                 defaultWhatsappChannelId: handoff.channelId, initialTemplateName: handoff.templateName, initialTemplateLanguage: handoff.templateLanguage } });
               const binding = await tx.openCreditLeadMaterialization.findFirst({ where: { id: handoff.jobId, companyId: handoff.companyId,
                 integrationId: handoff.integrationId, providerScope: handoff.providerScope, state: "COMPLETED", contactId: handoff.contactId,
@@ -114,7 +128,7 @@ export function createOpenCreditWhatsappBootstrap(deps: Dependencies) {
                 channelId: handoff.channelId, contact: { companyId: handoff.companyId, archivedAt: null } } });
               const company = await tx.company.findUniqueOrThrow({ where: { id: handoff.companyId }, select: { aiMode: true } });
               if (!await tx.user.findFirst({ where: { id: prepared.actorId, companyId: handoff.companyId, role: "ADMIN" } })) return blocked("CONFIGURATION_MISSING");
-              if (!config || !binding || !integration || !contact || !conversation || conversation.agentId || !deps.canAutomate({ companyMode: company.aiMode,
+              if (!configAllowsTrigger(config, target.trigger ?? "AUTO_MATERIALIZATION") || !await manualAdminValid(tx, target) || !config || !binding || !integration || !contact || !conversation || conversation.agentId || !deps.canAutomate({ companyMode: company.aiMode,
                 conversationMode: conversation.aiMode, aiPaused: conversation.aiPaused, agentId: conversation.agentId })) return blocked("AUTOMATION_NOT_ALLOWED");
               const current = await deps.template({ companyId: handoff.companyId, wabaId: c.wabaId!, templateName: handoff.templateName, language: handoff.templateLanguage });
               const mapping = config.initialTemplateVariableMapping as BootstrapVariableMapping, variables = resolveBootstrapVariables(contact.name, mapping);
@@ -136,13 +150,13 @@ export function createOpenCreditWhatsappBootstrap(deps: Dependencies) {
               templateName: handoff.templateName, language: handoff.templateLanguage });
             const [config, contact, conversation] = await Promise.all([
               deps.db.openCreditWhatsappConfig.findFirst({ where: { companyId: handoff.companyId, integrationId: handoff.integrationId, providerScope: handoff.providerScope,
-                autoStartEnabled: true, revision: handoff.configRevision, defaultWhatsappChannelId: handoff.channelId, initialTemplateName: handoff.templateName, initialTemplateLanguage: handoff.templateLanguage } }),
+                revision: handoff.configRevision, defaultWhatsappChannelId: handoff.channelId, initialTemplateName: handoff.templateName, initialTemplateLanguage: handoff.templateLanguage } }),
               deps.db.contact.findFirst({ where: { id: handoff.contactId, companyId: handoff.companyId, archivedAt: null } }),
               deps.db.conversation.findFirst({ where: { id: handoff.metaConversationId, contactId: handoff.contactId, channelId: handoff.channelId } }),
             ]);
             const c = await channelAllowed(await deps.db.channel.findFirst({ where: { id: handoff.channelId, companyId: handoff.companyId } }), handoff.companyId);
             const variables = contact && resolveBootstrapVariables(contact.name, config?.initialTemplateVariableMapping as BootstrapVariableMapping);
-            if (!config || !contact || !conversation || conversation.agentId || !variables || !current
+            if (!configAllowsTrigger(config, target.trigger ?? "AUTO_MATERIALIZATION") || !await manualAdminValid(deps.db, target) || !config || !contact || !conversation || conversation.agentId || !variables || !current
               || c.phoneNumberId !== dispatchChannel?.phoneNumberId || c.wabaId !== dispatchChannel?.wabaId
               || !analyzeOpenCreditBootstrapTemplate(current.template, current.localTemplate, config.initialTemplateVariableMapping as BootstrapVariableMapping, current.media).eligible
               || bootstrapPhone(contact) !== prepared.phone || bootstrapTemplateFingerprint(current.template, c.wabaId!, {
@@ -153,7 +167,7 @@ export function createOpenCreditWhatsappBootstrap(deps: Dependencies) {
               const operation = await tx.outboundOperation.findFirst({ where: { id: op.id, ...scope, status: "DISPATCHING", reservationToken: token } });
               const binding = await tx.openCreditLeadMaterialization.findFirst({ where: { id: handoff.jobId, companyId: handoff.companyId,
                 integrationId: handoff.integrationId, providerScope: handoff.providerScope, state: "COMPLETED", contactId: handoff.contactId, conversationId: handoff.sourceConversationId } });
-              if (!operation || !binding) return blocked("AUTOMATION_NOT_ALLOWED");
+              if (!operation || !binding || !await manualAdminValid(tx, target)) return blocked("AUTOMATION_NOT_ALLOWED");
               const company = await tx.company.findUniqueOrThrow({ where: { id: handoff.companyId } });
               if (!await tx.user.findFirst({ where: { id: prepared.actorId, companyId: handoff.companyId, role: "ADMIN" } })) return blocked("CONFIGURATION_MISSING");
               if (!deps.canAutomate({ companyMode: company.aiMode, conversationMode: conversation.aiMode, aiPaused: conversation.aiPaused, agentId: conversation.agentId })

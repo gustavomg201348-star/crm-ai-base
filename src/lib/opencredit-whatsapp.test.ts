@@ -10,9 +10,10 @@ import type { SessionUser } from "./auth";
 
 const loader = Module as typeof Module & { _load(name: string, ...args: unknown[]): unknown };
 const original = loader._load, require = createRequire(import.meta.url);
+let canary: typeof import("./opencredit-whatsapp-canary-handler");
 let management: typeof import("./opencredit-whatsapp-management-handler");
 loader._load = (name, ...args) => name === "server-only" ? {} : original.call(loader, name, ...args);
-try { management = require("./opencredit-whatsapp-management-handler"); } finally { loader._load = original; }
+try { management = require("./opencredit-whatsapp-management-handler"); canary = require("./opencredit-whatsapp-canary-handler"); } finally { loader._load = original; }
 const channel = { companyId: "synthetic-company", provider: "meta", type: "whatsapp", status: "ACTIVE", phoneNumberId: "1234567890", wabaId: "synthetic" } as Channel;
 const template = { name: "synthetic", language: "pt_BR", status: "APPROVED", components: [{ type: "BODY", text: "Synthetic greeting" }] };
 const config = { defaultWhatsappChannelId: "synthetic-channel", initialTemplateName: "synthetic", initialTemplateLanguage: "pt_BR", autoStartEnabled: false, expectedRevision: 0 };
@@ -144,4 +145,61 @@ test("additive schema, no default activation/backfill; UI explicitly saves and n
   const bootstrap = readFileSync("src/lib/opencredit-whatsapp-bootstrap.service.ts", "utf8");
   assert.doesNotMatch(bootstrap, /sendMetaTextMessage|\bfetch\(|createClient|console\.|safeLog/);
   assert.match(bootstrap, /authorizeDispatch/); assert.match(bootstrap, /status: "UNKNOWN"/);
+});
+
+function canaryFixture() {
+  let actor: SessionUser | null = { id: "admin", companyId: "company", name: "Synthetic", email: "x@invalid.test", role: "ADMIN" };
+  let currentAdmin = true, source = true, jobs = [{ id: "job", integrationId: "integration", contactId: "contact", channelId: "source-channel" }];
+  const calls: unknown[] = [];
+  const db = { user: { findFirst: async () => currentAdmin ? { id: "admin" } : null },
+    conversation: { findFirst: async (query: unknown) => { calls.push(query); return source ? { id: "conversation", contactId: "contact", channelId: "source-channel" } : null; } },
+    openCreditLeadMaterialization: { findMany: async (query: unknown) => { calls.push(query); return jobs; } } };
+  const targets: unknown[] = [];
+  let limited: Response | null = null;
+  const post = canary.createOpenCreditWhatsappCanary({ db: db as unknown as Parameters<typeof canary.createOpenCreditWhatsappCanary>[0]["db"],
+    getSession: async () => actor, enforceLimits: async () => limited,
+    bootstrap: { bootstrap: async target => { targets.push(target); return { status: "SENT" }; } } });
+  const request = (body = "{}", headers: Record<string,string> = {}, search = "") => new NextRequest("https://synthetic.invalid/api/conversations/conversation/opencredit/bootstrap" + search,
+    { method: "POST", body, headers: { origin: "https://synthetic.invalid", "content-type": "application/json", ...headers } });
+  const run = (body?: string, headers?: Record<string,string>, search?: string) => post(request(body,headers,search), { params: Promise.resolve({ conversationId: "conversation" }) });
+  return { run, targets, calls, actor: (v: SessionUser | null) => { actor = v; }, admin: (v: boolean) => { currentAdmin = v; },
+    source: (v: boolean) => { source = v; }, jobs: (v: typeof jobs) => { jobs = v; }, limited: (v: Response) => { limited = v; } };
+}
+test("manual conversation route derives target only from scoped DB rows", async () => {
+  const f = canaryFixture(); assert.equal((await f.run()).status, 200);
+  assert.deepEqual(f.targets, [{ companyId: "company", integrationId: "integration", jobId: "job", trigger: "ADMIN_CANARY", adminUserId: "admin", sourceConversationId: "conversation" }]);
+  const query = f.calls[0] as { where: { contact: { companyId: string }; channel: string; channelRef: { provider: string } } };
+  assert.equal(query.where.contact.companyId, "company"); assert.equal(query.where.channel, "OPEN_CREDIT"); assert.equal(query.where.channelRef.provider, "internal");
+});
+test("manual route requires session and current DB ADMIN, not AGENT/SUPERVISOR/stale session", async () => {
+  for (const role of ["AGENT", "SUPERVISOR"] as const) { const f = canaryFixture();
+    f.actor({ id: "actor", companyId: "company", name: "Synthetic", email: "x@invalid.test", role }); assert.equal((await f.run()).status, 403); assert.equal(f.targets.length,0); }
+  const f = canaryFixture(); f.admin(false); assert.equal((await f.run()).status,403); f.actor(null); assert.equal((await f.run()).status,401);
+});
+test("manual route rejects browser target overrides, origin, query and credentials", async () => {
+  const f=canaryFixture();
+  for(const body of ['{"jobId":"job"}','{"channelId":"channel"}','{"template":"t"}','{"contactId":"c"}','{"integrationId":"i"}', '[]', 'null', '{"x":1,"x":2}', ' '.repeat(2049)]) assert.equal((await f.run(body)).status,400);
+  assert.equal((await f.run("{}",{origin:"https://foreign.invalid"})).status,403);
+  assert.equal((await f.run("{}",{"sec-fetch-site":"cross-site"})).status,403);
+  assert.equal((await f.run("{}",{authorization:"Bearer synthetic"})).status,400);
+  assert.equal((await f.run("{}",{},"?jobId=job")).status,400); assert.equal(f.targets.length,0);
+});
+test("manual route fails closed for missing/foreign/Meta source and absent or ambiguous completed bindings", async () => {
+  const f=canaryFixture(); f.source(false); assert.equal((await f.run()).status,404); f.source(true);
+  f.jobs([]); assert.equal((await f.run()).status,409);
+  f.jobs([{id:"a",integrationId:"i",contactId:"contact",channelId:"source-channel"},{id:"b",integrationId:"i",contactId:"contact",channelId:"source-channel"}]); assert.equal((await f.run()).status,409);
+  f.jobs([{id:"a",integrationId:"i",contactId:"wrong",channelId:"source-channel"}]); assert.equal((await f.run()).status,409); assert.equal(f.targets.length,0);
+});
+test("manual admin limiter returns only safe response with retry", async () => {
+  const f=canaryFixture(); f.limited(new Response(null,{status:429,headers:{"retry-after":"40"}})); const r=await f.run();
+  assert.equal(r.status,429); assert.equal(r.headers.get("retry-after"),"40"); assert.deepEqual(await r.json(),{error:"RATE_LIMITED"}); assert.equal(f.targets.length,0);
+});
+
+test("manual UI stays on ADMIN OpenCredit source and never replaces the transport-blocked composer",()=>{
+  const page=readFileSync("src/app/page.tsx","utf8"),ui=readFileSync("src/app/components/conversations/OpenCreditWhatsappCanary.tsx","utf8");
+  assert.match(page,/selectedConversation\?\.channel === "OPEN_CREDIT" && canAttemptOpenCreditAuthorization/);
+  assert.match(page,/canAttemptOpenCreditAuthorization=\{session.user.role === "ADMIN"\}/);
+  assert.match(ui,/busy.current \|\| locked/); assert.match(ui,/body: "\{\}"/);
+  assert.match(ui,/não ativa o AutoStart/); assert.match(ui,/setLocked\(true\)/);
+  assert.doesNotMatch(ui,/jobId|contactId|integrationId|providerScope|phoneNumberId|autoStartEnabled/);
 });
