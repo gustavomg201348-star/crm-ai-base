@@ -98,11 +98,10 @@ export async function prepareOpenCreditWhatsappAiReply(database: AuthorityDataba
 }
 
 
-/** Direct CRM path: a normal Meta conversation may use the guarded CLT workflow only when
- * the same contact already has one unambiguous active, manually-reviewed CREDIT_SIMULATION authorization.
- * No OpenCredit WhatsApp handoff is synthesized or required. */
+/** Direct CRM path: transport proves only the Meta/authority/identity boundary.
+ * CREDIT_SIMULATION authorization is intentionally read only by the financial service/guard. */
 export async function openCreditCrmDirectCanAutoReply(
-  db: Pick<PrismaClient, "conversation" | "company" | "conversationAuthority" | "openCreditConsumerAuthorization" | "openCreditCommercialAccess">,
+  db: Pick<PrismaClient, "conversation" | "company" | "conversationAuthority" | "openCreditRemoteIdentity" | "openCreditCommercialAccess">,
   companyId: string,
   conversationId: string,
   policy: ReplyPolicy
@@ -117,15 +116,12 @@ export async function openCreditCrmDirectCanAutoReply(
   if (!company || !policy({ companyMode: company.aiMode, conversationMode: c.aiMode, aiPaused: c.aiPaused, agentId: c.agentId })) return false;
   const authority = await db.conversationAuthority.findFirst({ where: { companyId, channelId: c.channelId, conversationId } });
   if (!authority || authority.state !== "AI" || authority.ownerUserId !== null) return false;
-  const authorizations = await db.openCreditConsumerAuthorization.findMany({ where: {
-    companyId, contactId: c.contactId, purpose: "CREDIT_SIMULATION", active: true,
-    remoteIdentity: { enabled: true },
-    evidence: { companyId, contactId: c.contactId, conversationId, channelId: c.channelId,
-      provenanceKind: "META_WEBHOOK_HMAC_SHA256_VERIFIED", provenanceVersion: 1 },
+  const identities = await db.openCreditRemoteIdentity.findMany({ where: {
+    companyId, contactId: c.contactId, enabled: true,
   }, select: { providerScope: true }, take: 2 });
-  if (authorizations.length !== 1) return false;
+  if (identities.length !== 1) return false;
   return !!await db.openCreditCommercialAccess.findFirst({ where: {
-    companyId, providerScope: authorizations[0].providerScope, enabled: true
+    companyId, providerScope: identities[0].providerScope, enabled: true
   } });
 }
 
@@ -151,19 +147,16 @@ export async function prepareOpenCreditCrmDirectAiReply(
         message: { direction: "inbound", type: "text" },
       }, orderBy: { sequence: "desc" }, include: { message: true } });
       if (!event || !event.message.body.trim()) return null;
-      const authorizations = await tx.openCreditConsumerAuthorization.findMany({ where: {
-        companyId, contactId: conversation.contactId, purpose: "CREDIT_SIMULATION", active: true,
-        remoteIdentity: { enabled: true },
-        evidence: { companyId, contactId: conversation.contactId, conversationId,
-          channelId: conversation.channelId, provenanceKind: "META_WEBHOOK_HMAC_SHA256_VERIFIED", provenanceVersion: 1 },
-      }, select: { changedByUserId: true, providerScope: true }, take: 2 });
-      if (authorizations.length !== 1) return null;
-      const auth = authorizations[0];
+      const identities = await tx.openCreditRemoteIdentity.findMany({ where: {
+        companyId, contactId: conversation.contactId, enabled: true,
+      }, select: { providerScope: true, createdByUserId: true }, take: 2 });
+      if (identities.length !== 1) return null;
+      const identity = identities[0];
       if (!await tx.openCreditCommercialAccess.findFirst({ where: {
-        companyId, providerScope: auth.providerScope, enabled: true
+        companyId, providerScope: identity.providerScope, enabled: true
       } })) return null;
       const actor = await tx.user.findFirst({ where: {
-        id: auth.changedByUserId, companyId, role: { in: ["ADMIN", "SUPERVISOR"] }
+        id: identity.createdByUserId, companyId, role: { in: ["ADMIN", "SUPERVISOR"] }
       }, select: { id: true } });
       if (!actor) return null;
       const scope = { companyId, conversationId, channelId: conversation.channelId };
