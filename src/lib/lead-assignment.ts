@@ -168,11 +168,12 @@ export async function updateLeadAssignmentSettings({
   }
 }
 
-async function getAvailabilityMap(companyId: string) {
+async function getAvailabilityMap(companyId: string, database: Pick<AuthorityTx, "userAvailability"> = prisma) {
   try {
-    const rows = await prisma.userAvailability.findMany({ where: { companyId } });
+    const rows = await database.userAvailability.findMany({ where: { companyId } });
     return new Map(rows.map((row) => [row.userId, row]));
-  } catch {
+  } catch (error) {
+    if (database !== prisma) throw error; // Never assign from stale in-memory presence after a database failure.
     return new Map(
       Array.from(memoryAvailability.values())
         .filter((row) => row.companyId === companyId)
@@ -181,15 +182,15 @@ async function getAvailabilityMap(companyId: string) {
   }
 }
 
-export async function listAttendants(companyId: string) {
+export async function listAttendants(companyId: string, database: Pick<AuthorityTx, "user" | "userAvailability" | "conversation"> = prisma) {
   const [users, availabilityMap, workloads] = await Promise.all([
-    prisma.user.findMany({
-      where: { companyId, role: { in: ["AGENT", "SUPERVISOR"] } },
+    database.user.findMany({
+      where: { companyId, role: { in: ["ADMIN", "SUPERVISOR", "AGENT"] } },
       orderBy: { name: "asc" },
       select: { id: true, name: true, email: true, role: true }
     }),
-    getAvailabilityMap(companyId),
-    prisma.conversation.groupBy({
+    getAvailabilityMap(companyId, database),
+    database.conversation.groupBy({
       by: ["agentId"],
       where: {
         contact: { companyId },
@@ -389,33 +390,50 @@ export async function maybeAutoAssignConversation({
   const settings = await getLeadAssignmentSettings(companyId);
   if (settings.mode !== "ROUND_ROBIN") return null;
 
-  const existing = await prisma.conversation.findFirst({
-    where: { id: conversationId, contact: { companyId } },
-    select: { agentId: true }
-  });
+  const database = assignmentDatabase();
+  const conflict = new Error("AUTO_ASSIGNMENT_CONFLICT");
+  let assigned: ReturnType<typeof mapConversation> | null;
+  try {
+    assigned = await authorityStorage(database).transaction(async tx => {
+      // Re-read mode, presence and capacity in the same serializable transaction as the assignment.
+      const current = await tx.leadAssignmentSetting.findUnique({ where: { companyId } });
+      if (current?.mode !== "ROUND_ROBIN") return null;
+      const existing = await tx.conversation.findFirst({
+        where: { id: conversationId, contact: { companyId }, status: { in: ["OPEN", "PENDING", "BOT"] } },
+        select: { id: true, agentId: true }
+      });
+      if (!existing || existing.agentId) return null;
 
-  if (existing?.agentId) return null;
+      const attendants = await listAttendants(companyId, tx);
+      const next = attendants
+        .filter(attendant => ["ADMIN", "SUPERVISOR", "AGENT"].includes(attendant.role))
+        // Explicit opt-out states never receive automatic work, even when onlineOnly is disabled.
+        .filter(attendant => !["PAUSED", "OFFLINE", "BUSY"].includes(attendant.availabilityStatus))
+        .filter(attendant => !current.onlineOnly || attendant.availabilityStatus === "ONLINE")
+        .filter(attendant => current.maxOpenPerAttendant === null || attendant.openConversations < current.maxOpenPerAttendant)
+        .sort((a, b) => a.openConversations - b.openConversations || a.name.localeCompare(b.name))[0];
+      if (!next) return null;
+      if (database.provider === "postgresql") {
+        await tx.$queryRaw`SELECT "userId" FROM "UserAvailability" WHERE "userId" = ${next.id} AND "companyId" = ${companyId} FOR SHARE`;
+      }
+      const presence = await tx.userAvailability.findFirst({ where: { companyId, userId: next.id, status: "ONLINE" }, select: { userId: true } });
+      if (!presence) return null;
 
-  const attendants = await listAttendants(companyId);
-  const candidates = attendants
-    .filter((attendant) => attendant.role === "AGENT" || attendant.role === "SUPERVISOR")
-    .filter((attendant) =>
-      settings.onlineOnly ? attendant.availabilityStatus === "ONLINE" : true
-    )
-    .filter((attendant) =>
-      settings.maxOpenPerAttendant
-        ? attendant.openConversations < settings.maxOpenPerAttendant
-        : true
-    )
-    .sort((a, b) => a.openConversations - b.openConversations || a.name.localeCompare(b.name));
-
-  const next = candidates[0];
-  if (!next) return null;
-
-  return assignConversationToUser({
-    companyId,
-    conversationId,
-    assignedToUserId: next.id,
-    mode: "ROUND_ROBIN"
-  });
+      await synchronizeAssignmentAuthority(tx, companyId, existing.id, next.id, next.id, "auto-assignment:" + randomUUID());
+      const changed = await tx.conversation.updateMany({
+        where: { id: existing.id, contact: { companyId }, agentId: null },
+        data: { agentId: next.id, updatedAt: new Date() }
+      });
+      if (changed.count !== 1) throw conflict; // Roll back authority too if another owner won.
+      return mapConversation(await tx.conversation.findFirstOrThrow({
+        where: { id: existing.id, contact: { companyId } }, include: conversationInclude
+      }));
+    });
+  } catch (error) {
+    if (error === conflict) return null;
+    throw error;
+  }
+  if (assigned) await createAssignmentHistory({ companyId, conversationId, assignedToUserId: assigned.agent!.id,
+    mode: "ROUND_ROBIN", action: "ASSIGNED" });
+  return assigned;
 }
