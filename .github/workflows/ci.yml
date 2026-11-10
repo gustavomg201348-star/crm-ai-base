@@ -51,7 +51,7 @@ jobs:
         run: node --import tsx --test scripts/run-opencredit-materialization.test.ts
 
       - name: Validate OpenCredit controlled worker rollout
-        run: node --unhandled-rejections=strict --import tsx --test src/instrumentation.test.ts src/lib/opencredit-materialization-worker.test.ts
+        run: node --unhandled-rejections=strict --import tsx --test scripts/opencredit-server-bootstrap.test.ts src/instrumentation.test.ts src/lib/opencredit-materialization-worker.test.ts
 
       - name: Validate OpenCredit WhatsApp configuration and security boundary
         run: node --unhandled-rejections=strict --import tsx --test src/lib/opencredit-whatsapp.test.ts src/lib/clt-ai-policy.test.ts src/lib/clt-ai-financial-facts.test.ts
@@ -189,6 +189,9 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Validate compiled OpenCredit server preload with worker OFF
+        run: node scripts/smoke-opencredit-server.mjs
 
       - name: Validate passive text authority shadow and legacy routes
         run: npx --yes tsx@4.20.6 --test src/lib/authority-text-shadow.test.ts src/lib/authority-text-shadow-reader.test.ts
