@@ -45,7 +45,9 @@ const pipelineErrors: string[] = [];
 let captureLogs = false;
 const capturedLogs: unknown[][] = [];
 let holdAi: (() => Promise<void>) | undefined, failAssignmentProjection = false;
+let failTransferProjection = false;
 db.$use(async (params, next) => {
+  if (failTransferProjection && params.model === "Conversation" && params.action === "updateMany" && params.args?.data?.agentId) throw Error("SYNTHETIC_TRANSFER_FAILURE");
   if (failAssignmentProjection && params.model === "Conversation" && params.action === "update" && params.args?.data?.agentId) throw Error("SYNTHETIC_PROJECTION_FAILURE");
   if(cltStorageFailure==="link"&&params.model==="OpenCreditAiSimulation"&&params.action==="update"&&params.args?.data?.operationId) {cltStorageFailure=undefined;throw Error("SYNTHETIC_LINK_FAILURE");}
   if(cltStorageFailure==="settlement"&&params.model==="OpenCreditCommercialOperationEvent"&&params.action==="create"&&params.args?.data?.action==="SIMULATION_COMPLETED") {cltStorageFailure=undefined;throw Error("SYNTHETIC_SETTLEMENT_FAILURE");}
@@ -160,6 +162,7 @@ after(async () => {
 });
 async function fixture(providerScope = "synthetic-scope") {
   network = []; failNetwork = false; missingAck = false; rejectProvider = false; holdAi = undefined; failAssignmentProjection = false; pendingAi.length = 0; pipelineErrors.length = 0;
+  failTransferProjection = false;
   failUpload = false; duringUpload = undefined; uploadedId = ""; sentParameters = [];
   captureLogs = false; capturedLogs.length = 0;
   const company = await db.company.create({ data: { name: "Synthetic bridge", aiMode: "HYBRID" } });
@@ -187,7 +190,7 @@ async function fixture(providerScope = "synthetic-scope") {
     initialTemplateVariableMapping: null, autoStartEnabled: true, expectedRevision: 0 };
   const session = { id: actor.id, companyId: company.id, name: actor.name, email: actor.email, role: "ADMIN" as const };
   const deps = { db, provider: "postgresql" as const, credential, template: templates.findReadyOpenCreditBootstrapTemplate, sendTemplate: templates.sendConversationTemplate,
-    canAutomate: ai.shouldAutoReply, limited: async () => false };
+    limited: async () => false };
   const bootstrap = createOpenCreditWhatsappBootstrap(deps);
   const target = { companyId: company.id, integrationId: integration.id, jobId: job.id };
   const setup = () => config.save(session, integration.id, input);
@@ -900,4 +903,99 @@ for(const failure of ["link","settlement"] as const) cltMaterial("post-dispatch 
   assert.equal(cltPosts,1);assert.equal(w.state,"UNKNOWN");assert(w.operationId);
   assert.equal(network.filter(n=>n.type==="text").length,0);
   await f.sendInbound(undefined,"Quero simular");assert.equal(cltPosts,1);assert.equal(cltPolls,0);
+});
+
+for (const companyMode of ["COPILOT", "OFF"]) material("initial template is independent of conversational AI: " + companyMode, async f => {
+  await db.company.update({ where: { id: f.company.id }, data: { aiMode: companyMode } });
+  await f.setup();
+  const ready = await f.config.read(f.company.id, f.integration.id);
+  assert.equal(ready.readiness.ai, "NOT_AUTOMATIC"); assert.equal(ready.readiness.readyIfEnabled, true);
+  let aiCalls = 0; holdAi = async () => { aiCalls++; };
+  assert.equal((await f.bootstrap.bootstrap(f.target)).status, "SENT");
+  await f.sendInbound();
+  assert.equal(network.filter(n => n.type === "template").length, 1);
+  assert.equal(network.filter(n => n.type === "text").length, 0); assert.equal(aiCalls, 0);
+  assert.equal((await db.company.findUniqueOrThrow({ where: { id: f.company.id } })).aiMode, companyMode);
+  const h = await f.handoff();
+  assert.equal((await db.conversationAuthority.findUniqueOrThrow({ where: { conversationId: h.metaConversationId } })).state, "HUMAN_QUEUE");
+  assert.equal((await f.bootstrap.bootstrap(f.target)).status, "ALREADY_STARTED");
+  assert.equal(network.filter(n => n.type === "template").length, 1);
+});
+material("AutoStart transfers ONLINE ADMIN after SENT at capacity one with AI off", async f => {
+  await db.company.update({ where: { id: f.company.id }, data: { aiMode: "COPILOT" } });
+  await db.leadAssignmentSetting.create({ data: { companyId: f.company.id, mode: "ROUND_ROBIN", onlineOnly: true, maxOpenPerAttendant: 1 } });
+  await assignment.setAttendantStatus({ companyId: f.company.id, userId: f.actor.id, status: "ONLINE" });
+  await db.conversation.update({ where: { id: f.source.id }, data: { agentId: f.actor.id } });
+  await f.setup(); assert.equal((await f.bootstrap.bootstrap(f.target)).status, "SENT");
+  const h = await f.handoff();
+  assert.equal((await db.conversation.findUniqueOrThrow({ where: { id: f.source.id } })).agentId, null);
+  const c = await db.conversation.findUniqueOrThrow({ where: { id: h.metaConversationId } });
+  const a = await db.conversationAuthority.findUniqueOrThrow({ where: { conversationId: c.id } });
+  assert.equal(c.agentId, f.actor.id); assert.equal(a.ownerUserId, f.actor.id); assert.equal(a.state, "HUMAN");
+  assert.equal(network.filter(n => n.type === "template").length, 1); assert.equal(network.filter(n => n.type === "text").length, 0);
+  assert.equal(await db.leadAssignmentHistory.count({ where: { conversationId: c.id } }), 1);
+  assert.equal(await db.conversation.count({ where: { agentId: f.actor.id, status: { in: ["OPEN", "PENDING", "BOT"] } } }), 1);
+  assert.equal((await f.bootstrap.bootstrap(f.target)).status, "ALREADY_STARTED");
+  await f.sendInbound(); assert.equal(await db.leadAssignmentHistory.count({ where: { conversationId: c.id } }), 1);
+});
+
+async function assignedSource(f: Fixture) {
+  await db.company.update({ where: { id: f.company.id }, data: { aiMode: "OFF" } });
+  await db.leadAssignmentSetting.create({ data: { companyId: f.company.id, mode: "ROUND_ROBIN", onlineOnly: true, maxOpenPerAttendant: 1 } });
+  await assignment.setAttendantStatus({ companyId: f.company.id, userId: f.actor.id, status: "ONLINE" });
+  await db.conversation.update({ where: { id: f.source.id }, data: { agentId: f.actor.id } });
+  await f.setup();
+}
+for (const role of ["SUPERVISOR", "AGENT"]) material("SENT transfers operational source owner: " + role, async f => {
+  await assignedSource(f);
+  const owner = await db.user.create({ data: { companyId: f.company.id, role, name: "Synthetic owner", email: randomUUID() + "@invalid.test", passwordHash: "synthetic" } });
+  await assignment.setAttendantStatus({ companyId: f.company.id, userId: owner.id, status: "ONLINE" });
+  await db.conversation.update({ where: { id: f.source.id }, data: { agentId: owner.id } });
+  assert.equal((await f.bootstrap.bootstrap(f.target)).status, "SENT");
+  const h = await f.handoff();
+  assert.equal((await db.conversation.findUniqueOrThrow({ where: { id: h.metaConversationId } })).agentId, owner.id);
+  assert.equal((await db.conversation.findUniqueOrThrow({ where: { id: f.source.id } })).agentId, null);
+});
+for (const change of ["PAUSED", "OFFLINE", "BUSY", "CLAIM_FIRST", "ADMIN_MANUAL", "capacity", "human", "generation", "source", "storage"] as const)
+  material("confirmed SENT preserves ownership on transfer race/failure: " + change, async f => {
+    await assignedSource(f);
+    const service = createOpenCreditWhatsappBootstrap({ ...f.deps, sendTemplate: async input => {
+      const result = await f.deps.sendTemplate(input);
+      const h = await f.handoff();
+      // Nothing moves before the local send outcome has been confirmed SENT.
+      assert.equal((await db.conversation.findUniqueOrThrow({ where: { id: f.source.id } })).agentId, f.actor.id);
+      assert.equal((await db.conversation.findUniqueOrThrow({ where: { id: h.metaConversationId } })).agentId, null);
+      if (["PAUSED", "OFFLINE", "BUSY"].includes(change)) await assignment.setAttendantStatus({ companyId: f.company.id, userId: f.actor.id, status: change as "PAUSED" | "OFFLINE" | "BUSY" });
+      if (["CLAIM_FIRST", "ADMIN_MANUAL"].includes(change)) await db.leadAssignmentSetting.update({ where: { companyId: f.company.id }, data: { mode: change } });
+      if (change === "capacity") await db.conversation.create({ data: { contactId: f.contact.id, channel: "synthetic", agentId: f.actor.id } });
+      if (change === "source") await db.conversation.update({ where: { id: f.source.id }, data: { agentId: null } });
+      if (change === "human") await assignment.assignConversationToUser({ companyId: f.company.id, conversationId: h.metaConversationId, assignedToUserId: f.actor.id, assignedByUserId: f.actor.id });
+      if (change === "generation") {
+        const a = await db.conversationAuthority.findUniqueOrThrow({ where: { conversationId: h.metaConversationId } });
+        await createConversationAuthorityService({ db, provider: "postgresql" }).transition({ companyId: f.company.id, channelId: f.channel.id,
+          conversationId: h.metaConversationId, actorUserId: f.actor.id, logicalKey: randomUUID(), reason: "SYNTHETIC_HUMAN_CHANGE",
+          expectedGeneration: a.generation, state: "CLOSED" });
+      }
+      if (change === "storage") failTransferProjection = true;
+      return result;
+    } });
+    assert.equal((await service.bootstrap(f.target)).status, "SENT");
+    failTransferProjection = false;
+    const h = await f.handoff(), meta = await db.conversation.findUniqueOrThrow({ where: { id: h.metaConversationId } });
+    assert.equal(h.state, "SENT");
+    assert.equal((await db.conversation.findUniqueOrThrow({ where: { id: f.source.id } })).agentId, change === "source" ? null : f.actor.id);
+    assert.equal(meta.agentId, change === "human" ? f.actor.id : null);
+    const a = await db.conversationAuthority.findUniqueOrThrow({ where: { conversationId: meta.id } });
+    assert.equal(a.state, change === "human" ? "HUMAN" : change === "generation" ? "CLOSED" : "HUMAN_QUEUE");
+    assert.equal(await db.leadAssignmentHistory.count({ where: { conversationId: f.source.id } }), 0);
+    assert.equal((await f.bootstrap.bootstrap(f.target)).status, "ALREADY_STARTED");
+    assert.equal(network.filter(n => n.type === "template").length, 1);
+  });
+for (const failure of ["rate", "unknown"] as const) material("source assignment never moves without SENT: " + failure, async f => {
+  await assignedSource(f);
+  const service = createOpenCreditWhatsappBootstrap({ ...f.deps, limited: async () => failure === "rate",
+    sendTemplate: input => f.deps.sendTemplate({ ...input, onProviderAccepted: id => { input.onProviderAccepted?.(id); throw Error("SYNTHETIC_UNCONFIRMED"); } }) });
+  assert.equal((await service.bootstrap(f.target)).status, failure === "rate" ? "RATE_LIMITED" : "UNKNOWN");
+  assert.equal((await db.conversation.findUniqueOrThrow({ where: { id: f.source.id } })).agentId, f.actor.id);
+  const h = await f.handoff(); assert.equal((await db.conversation.findUniqueOrThrow({ where: { id: h.metaConversationId } })).agentId, null);
 });

@@ -15,7 +15,7 @@ const credential = (channel: Channel) => {
 export const openCreditWhatsappConfig = createOpenCreditWhatsappConfigService({ db: prisma, provider, credential,
   templates: getApprovedBootstrapTemplatesForChannel, canAutomate: shouldAutoReply });
 export const openCreditWhatsappBootstrap = createOpenCreditWhatsappBootstrap({ db: prisma, provider, credential,
-  template: findReadyOpenCreditBootstrapTemplate, sendTemplate: sendConversationTemplate, canAutomate: shouldAutoReply,
+  template: findReadyOpenCreditBootstrapTemplate, sendTemplate: sendConversationTemplate,
   limited: async input => !!await enforceRateLimits([{ category: "message-send", identifiers: [input.companyId, input.userId], ...rateLimitPolicies.messageSend }]),
 });
 
