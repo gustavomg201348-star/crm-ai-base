@@ -4,7 +4,7 @@ import { createOpenCreditPublicWebhookId, createOpenCreditWebhookSecret, prepare
 
 export type OpenCreditStatus = "ACTIVE" | "PAUSED" | "DISABLED";
 export type SafeOpenCreditIntegration = {
-  id: string; publicWebhookId: string; enabled: boolean; status: OpenCreditStatus;
+  id: string; companyId: string; materializationEnabled: boolean; publicWebhookId: string; enabled: boolean; status: OpenCreditStatus;
   createdAt: string; updatedAt: string; hasWebhookSecret: boolean; webhookPath: string;
   passiveInboundEnabled: boolean; passiveInboundPath: string;
 };
@@ -16,7 +16,8 @@ function statusOf(row: Pick<OpenCreditIntegration, "enabled" | "paused">): OpenC
 
 export function mapOpenCreditIntegration(row: OpenCreditIntegration): SafeOpenCreditIntegration {
   return {
-    id: row.id, publicWebhookId: row.publicWebhookId, enabled: row.enabled, status: statusOf(row),
+    id: row.id, companyId: row.companyId, materializationEnabled: row.materializationEnabled,
+    publicWebhookId: row.publicWebhookId, enabled: row.enabled, status: statusOf(row),
     createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString(),
     hasWebhookSecret: Boolean(row.webhookSecret),
     webhookPath: `/api/integrations/opencredit/webhooks/${row.publicWebhookId}`,
@@ -48,7 +49,7 @@ export function createOpenCreditIntegrationService(db: Db, encryption?: SecretEn
         where: { id: row.id, companyId: row.companyId, updatedAt: row.updatedAt,
           enabled: row.enabled, paused: row.paused, webhookSecret: row.webhookSecret,
           passiveInboundEnabled: row.passiveInboundEnabled,
-          ...(data.enabled === true ? { materializationEnabled: false } : {}) }, data
+          ...(data.enabled === true || data.webhookSecret !== undefined ? { materializationEnabled: false } : {}) }, data
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
@@ -104,6 +105,7 @@ export function createOpenCreditIntegrationService(db: Db, encryption?: SecretEn
     },
     async rotate(companyId: string, id: string) {
       const row = await find(companyId, id);
+      if (row.materializationEnabled) throw new OpenCreditConfigurationError("CONFLICT", 409);
       const setupSecret = createOpenCreditWebhookSecret();
       const webhookSecret = encrypt(setupSecret);
       const integration = await change(db.openCreditIntegration, row, {

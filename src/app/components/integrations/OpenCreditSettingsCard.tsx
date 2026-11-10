@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { OpenCreditStatus, SafeOpenCreditIntegration } from "@/lib/opencredit-integration.service";
 import { OpenCreditWhatsappSettings } from "./OpenCreditWhatsappSettings";
+import { OpenCreditMaterializationSettings } from "./OpenCreditMaterializationSettings";
 
 const button = "rounded-xl border border-line px-3 py-2 text-sm font-semibold disabled:opacity-50";
 type Setup = { integration: SafeOpenCreditIntegration; setupSecret: string };
@@ -97,6 +98,8 @@ export function OpenCreditSettingsCard() {
           <p className="break-all text-sm">URL legada: {origin + row.webhookPath}</p>
           <p className="text-sm">Inbox passiva: {row.passiveInboundEnabled ? "Habilitada" : "Desabilitada"}</p>
           <OpenCreditWhatsappSettings integrationId={row.id} />
+          <OpenCreditMaterializationSettings companyId={row.companyId} integrationId={row.id} materializationEnabled={row.materializationEnabled}
+            onChanged={value => setIntegrations(current => current.map(i => i.id === row.id ? { ...i, materializationEnabled: value } : i))} />
           <p className="break-all text-sm">URL passiva: {origin + row.passiveInboundPath}</p>
           <p className="text-sm text-slate-500">Habilitação passiva requer provisionamento explícito; os controles abaixo alteram somente o legado, exceto a rotação do segredo, que desabilita ambas as rotas.</p>
 
@@ -112,14 +115,14 @@ export function OpenCreditSettingsCard() {
                 onClick={() => changeStatus(row, "ACTIVE")}>Retomar recebimento</button>
             )}
             {row.status === "DISABLED" && (
-              <button type="button" className={button} disabled={busy || Boolean(setup)}
+              <button type="button" className={button} disabled={busy || Boolean(setup) || row.materializationEnabled}
                 onClick={() => changeStatus(row, "ACTIVE")}>Ativar legado</button>
             )}
             {row.status !== "DISABLED" && (
               <button type="button" className={button} disabled={busy || Boolean(setup)}
                 onClick={() => changeStatus(row, "DISABLED")}>Desativar legado</button>
             )}
-            <button type="button" className={button} disabled={busy || Boolean(setup)} onClick={() => {
+            <button type="button" className={button} disabled={busy || Boolean(setup) || row.materializationEnabled} title="Desative a materialização antes de rotacionar o segredo" onClick={() => {
               if (!window.confirm("O segredo atual deixará de funcionar e ambas as rotas serão desativadas. Atualize o segredo no fornecedor antes de reativar. Deseja continuar?")) return;
               void mutate(`/api/integrations/opencredit/${encodeURIComponent(row.id)}/rotate-secret`, "POST");
             }}>Rotacionar segredo</button>

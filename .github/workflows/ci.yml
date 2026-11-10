@@ -53,6 +53,9 @@ jobs:
       - name: Validate OpenCredit controlled worker rollout
         run: node --unhandled-rejections=strict --import tsx --test scripts/opencredit-server-bootstrap.test.ts src/instrumentation.test.ts src/lib/opencredit-materialization-worker.test.ts
 
+      - name: Validate OpenCredit materialization configuration boundary and UI
+        run: node --unhandled-rejections=strict --import tsx --test src/lib/opencredit-materialization-configuration.test.ts src/app/components/integrations/OpenCreditMaterializationSettings.test.ts src/lib/opencredit-onboarding.test.ts
+
       - name: Validate OpenCredit WhatsApp configuration and security boundary
         run: node --unhandled-rejections=strict --import tsx --test src/lib/opencredit-whatsapp.test.ts src/lib/clt-ai-policy.test.ts src/lib/clt-ai-financial-facts.test.ts
 
@@ -383,6 +386,12 @@ jobs:
         env:
           OPENCREDIT_COMMERCIAL_OPERATION_POSTGRES_TEST: "1"
           OPENCREDIT_MATERIALIZATION_QUEUE_POSTGRES_TEST: "1"
+
+      - name: Validate OpenCredit materialization configuration gates and concurrency
+        run: node --unhandled-rejections=strict --import tsx --test src/lib/opencredit-materialization-configuration-postgres.integration.ts
+        env:
+          OPENCREDIT_COMMERCIAL_OPERATION_POSTGRES_TEST: "1"
+          OPENCREDIT_MATERIALIZATION_CONFIGURATION_POSTGRES_TEST: "1"
 
       - name: Validate OpenCredit transport isolation on disposable PostgreSQL
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-transport-isolation-postgres.integration.ts
