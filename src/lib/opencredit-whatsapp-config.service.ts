@@ -79,7 +79,8 @@ export function createOpenCreditWhatsappConfigService(deps: WhatsappConfigDepend
         if ((await storage.actor(tx, actor.companyId, actor.id, true)).role !== "ADMIN") throw new BootstrapBlocked("CONFIGURATION_MISSING");
         const current = await tx.openCreditWhatsappConfig.findUnique({ where: { integrationId } });
         const { expectedRevision, ...raw } = input;
-        const data = { ...raw, initialTemplateVariableMapping: input.initialTemplateVariableMapping ?? null };
+        const data = { ...raw, initialTemplateVariableMapping: input.initialTemplateVariableMapping ?? null,
+          ...(current && current.autoStartEnabled === input.autoStartEnabled ? { updatedAt: current.updatedAt } : {}) };
         if ((current?.revision ?? 0) !== expectedRevision) throw new BootstrapBlocked("CONFIGURATION_MISSING");
         if (input.defaultWhatsappChannelId) {
           const c = await tx.channel.findFirst({ where: { id: input.defaultWhatsappChannelId, companyId: actor.companyId } });
