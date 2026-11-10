@@ -61,11 +61,21 @@ async function fixture() {
       data: { materializationEnabled, ...(materializationEnabled ? { enabled: false } : {}) }
     });
     const operator = operators.find(user => user.companyId === target.companyId)!;
+    let channel = await db.channel.findFirst({ where: { companyId: target.companyId, name: "Synthetic AutoStart channel" } });
+    if (!channel) channel = await db.channel.create({ data: {
+      companyId: target.companyId, name: "Synthetic AutoStart channel", type: "whatsapp", provider: "meta", status: "ACTIVE",
+    } });
     await db.openCreditWhatsappConfig.upsert({
       where: { integrationId: target.id },
-      update: { autoStartEnabled: materializationEnabled, configuredByUserId: operator.id },
+      update: { autoStartEnabled: materializationEnabled, configuredByUserId: operator.id,
+        defaultWhatsappChannelId: materializationEnabled ? channel.id : null,
+        initialTemplateName: materializationEnabled ? "synthetic_template" : null,
+        initialTemplateLanguage: materializationEnabled ? "pt_BR" : null },
       create: { integrationId: target.id, companyId: target.companyId, providerScope: target.providerScope!,
-        autoStartEnabled: materializationEnabled, configuredByUserId: operator.id },
+        autoStartEnabled: materializationEnabled, configuredByUserId: operator.id,
+        defaultWhatsappChannelId: materializationEnabled ? channel.id : null,
+        initialTemplateName: materializationEnabled ? "synthetic_template" : null,
+        initialTemplateLanguage: materializationEnabled ? "pt_BR" : null },
     });
     return integration;
   };
@@ -85,6 +95,7 @@ function material(name: string, run: (f: Fixture) => Promise<void>) {
     await db.openCreditWhatsappConfig.deleteMany({ where: { companyId: { in: f.companyIds } } });
     await db.openCreditIntegration.deleteMany({ where: { companyId: { in: f.companyIds } } });
     await db.contact.deleteMany({ where: { companyId: { in: f.companyIds } } });
+    await db.channel.deleteMany({ where: { companyId: { in: f.companyIds } } });
     await db.user.deleteMany({ where: { companyId: { in: f.companyIds } } });
     await db.company.deleteMany({ where: { id: { in: f.companyIds } } });
   } });
