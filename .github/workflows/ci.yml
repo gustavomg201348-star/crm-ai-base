@@ -51,7 +51,7 @@ jobs:
         run: node --import tsx --test scripts/run-opencredit-materialization.test.ts
 
       - name: Validate OpenCredit controlled worker rollout
-        run: node --unhandled-rejections=strict --import tsx --test src/instrumentation.test.ts src/lib/opencredit-materialization-worker.test.ts
+        run: node --unhandled-rejections=strict --import tsx --test scripts/opencredit-server-bootstrap.test.ts src/instrumentation.test.ts src/lib/opencredit-materialization-worker.test.ts
 
       - name: Validate OpenCredit WhatsApp configuration and security boundary
         run: node --unhandled-rejections=strict --import tsx --test src/lib/opencredit-whatsapp.test.ts src/lib/clt-ai-policy.test.ts src/lib/clt-ai-financial-facts.test.ts
@@ -189,6 +189,24 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Validate compiled OpenCredit server preload with worker OFF
+        shell: bash
+        run: |
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const { spawnSync } = require('node:child_process');
+          const result = spawnSync(process.execPath, ['--import', './scripts/opencredit-server-preload.mjs', '-e', 'console.log("SERVER_MAIN_READY")'], {
+            encoding: 'utf8', env: { ...process.env, OPENCREDIT_MATERIALIZATION_WORKER_ENABLED: 'false' },
+          });
+          assert.equal(result.status, 0);
+          const events = result.stdout.split(/\r?\n/).filter(line => line.startsWith('{')).map(line => JSON.parse(line));
+          assert.equal(events.find(event => event.event === 'opencredit_materialization_worker_startup')?.reason, 'disabled');
+          assert.deepEqual(events.filter(event => event.event === 'opencredit_server_bootstrap').map(event => event.phase), ['worker_start', 'next_start']);
+          assert.equal(events.some(event => event.event === 'opencredit_materialization_worker_cycle'), false);
+          assert.equal(result.stdout.includes('SERVER_MAIN_READY'), true);
+          console.log('COMPILED_SERVER_PRELOAD_PASS');
+          NODE
 
       - name: Validate passive text authority shadow and legacy routes
         run: npx --yes tsx@4.20.6 --test src/lib/authority-text-shadow.test.ts src/lib/authority-text-shadow-reader.test.ts

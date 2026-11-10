@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
+    "build": "next build && node scripts/build-opencredit-worker.mjs",
+    "start": "node --import ./scripts/opencredit-server-preload.mjs node_modules/next/dist/bin/next start",
     "opencredit:materialization:pilot": "tsx --conditions=react-server scripts/run-opencredit-materialization.ts",
     "lint": "next lint",
     "lint:ci": "eslint . --ext .ts,.tsx --max-warnings=0 --no-cache",
@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1100.0",
+    "@next/env": "15.5.28",
     "@prisma/client": "^5.22.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.468.0",
@@ -40,6 +41,7 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "autoprefixer": "^10.4.20",
+    "esbuild": "0.25.12",
     "eslint": "^8.57.1",
     "eslint-config-next": "15.5.27",
     "postcss": "^8.5.23",
