@@ -299,7 +299,6 @@ export async function processInboundMessage({
     referencedMessage && referencedResolution.shouldUseReferencedConversation
       ? referencedMessage.conversation
       : null;
-  let conversationCreated = false;
 
   if (!conversation && channelId) {
     const result = await findOrCreateConversationForChannel({
@@ -316,7 +315,6 @@ export async function processInboundMessage({
       withCreated: true
     });
     conversation = result.conversation;
-    conversationCreated = result.created;
   }
 
   if (!conversation && !channelId) {
@@ -340,7 +338,6 @@ export async function processInboundMessage({
         channel: LEGACY_WHATSAPP_CHANNEL
       }
     });
-    conversationCreated = true;
   }
 
   if (!conversation) {
@@ -355,7 +352,7 @@ export async function processInboundMessage({
     channelId
   });
 
-  if (conversationCreated) {
+  if (!conversation.agentId) {
     await maybeAutoAssignConversation({
       companyId,
       conversationId: conversation.id
