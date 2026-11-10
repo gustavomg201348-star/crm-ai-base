@@ -132,7 +132,7 @@ test("GET is tenant scoped/read only and never returns plaintext or ciphertext",
 test("mapper uses an exact whitelist, including legacy dates and secret-presence boolean", async () => {
   const f = fixture(); await f.service.create(admin.companyId);
   assert.deepEqual(Object.keys(mapOpenCreditIntegration(f.rows[0])).sort(),
-    ["id", "publicWebhookId", "enabled", "status", "createdAt", "updatedAt", "hasWebhookSecret", "webhookPath", "passiveInboundEnabled", "passiveInboundPath"].sort());
+    ["id", "companyId", "materializationEnabled", "publicWebhookId", "enabled", "status", "createdAt", "updatedAt", "hasWebhookSecret", "webhookPath", "passiveInboundEnabled", "passiveInboundPath"].sort());
   const mapped = mapOpenCreditIntegration({ ...f.rows[0], webhookSecret: "" });
   assert.equal(mapped.hasWebhookSecret, false);
   assert.equal(mapped.webhookPath, `/api/integrations/opencredit/webhooks/${mapped.publicWebhookId}`);

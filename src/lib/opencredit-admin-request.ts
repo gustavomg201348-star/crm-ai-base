@@ -1,5 +1,23 @@
 import "server-only";
 import type { NextRequest } from "next/server";
+import { parseOpenCreditStrictJson } from "./opencredit-strict-json";
+
+export async function readOpenCreditAdminJson(request: NextRequest) {
+  const reader = request.body?.getReader(); if (!reader) throw Error("INVALID_BODY");
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let expired = false;
+  const cancel = () => { void reader.cancel().catch(() => {}); };
+  try {
+    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => { expired = true; cancel(); reject(Error("INVALID_BODY")); }, 1000); });
+    const chunks: Uint8Array[] = []; let bytes = 0;
+    for (;;) {
+      const part = await Promise.race([reader.read(), timeout]); if (expired) throw Error("INVALID_BODY"); if (part.done) break;
+      bytes += part.value.byteLength; if (bytes > 1024) { cancel(); throw Error("INVALID_BODY"); }
+      chunks.push(part.value);
+    }
+    return parseOpenCreditStrictJson(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Buffer.concat(chunks)));
+  } finally { if (timer) clearTimeout(timer); try { reader.releaseLock(); } catch {} }
+}
 
 export function sameOrigin(request: NextRequest) {
   const origin = request.headers.get("origin");
