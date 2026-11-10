@@ -110,6 +110,7 @@ function queueTest(name: string, run: (f: Awaited<ReturnType<typeof fixture>>) =
       await db.openCreditWhatsappConfig.deleteMany({ where: { companyId } });
       await db.openCreditIntegration.deleteMany({ where: { companyId } });
       await db.contact.deleteMany({ where: { companyId } });
+      await db.channel.deleteMany({ where: { companyId } });
       await db.user.deleteMany({ where: { companyId } });
       await db.company.delete({ where: { id: companyId } });
     }
