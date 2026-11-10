@@ -39,6 +39,9 @@ after(async () => { globalThis.fetch = originalFetch; await db.$disconnect(); })
 async function fixture() {
   const companies = await Promise.all([db.company.create({ data: { name: "Synthetic A" } }), db.company.create({ data: { name: "Synthetic B" } })]);
   const companyIds = companies.map(c => c.id), scope = "synthetic-scope";
+  const operators = await Promise.all(companies.map(company => db.user.create({ data: {
+    companyId: company.id, name: "Synthetic operator", email: randomUUID() + "@invalid.test", passwordHash: "synthetic", role: "ADMIN",
+  } })));
   const create = (companyId: string, providerScope: string | null) => db.openCreditIntegration.create({ data: { companyId, providerScope, publicWebhookId: randomUUID().replaceAll("-", "") + "a".repeat(16), webhookSecret: prepareOpenCreditWebhookSecret(secret, encryption), enabled: true, passiveInboundEnabled: true } });
   const a = await create(companies[0].id, scope), b = await create(companies[1].id, scope), other = await create(companies[0].id, "synthetic-other"), same = await create(companies[0].id, scope), legacy = await create(companies[0].id, null);
   const payload = (version: number | undefined = 2) => JSON.stringify({ event: "lead.assigned", eventId: "external-lead:partner", lead: { id: "external-lead" }, ...(version === undefined ? {} : { contractVersion: version }), client: { cpf: "00000000000", phone: "5511999999999", name: "PRIVATE_SENTINEL", email: "private@example.invalid" }, companyId: companies[1].id, providerScope: "attacker" });
@@ -52,10 +55,20 @@ async function fixture() {
   const send = (target = a, h = receiver(), raw = payload()) => h(new Request("https://crm.example.invalid/inbound", { method: "POST", headers: { "content-type": "application/json", "x-creditcore-sig": "sha256=" + createHmac("sha256", secret).update(Buffer.from(raw)).digest("hex") }, body: raw }), { params: Promise.resolve({ publicWebhookId: target.publicWebhookId }) });
   const inbox = () => db.openCreditInboundEvent.findMany({ where: { companyId: { in: companyIds } }, orderBy: { receivedAt: "asc" } });
   const jobs = () => db.openCreditLeadMaterialization.findMany({ where: { companyId: { in: companyIds } } });
-  const setOptIn = (target = a, materializationEnabled = true) => db.openCreditIntegration.update({
-    where: { id: target.id },
-    data: { materializationEnabled, ...(materializationEnabled ? { enabled: false } : {}) }
-  });
+  const setOptIn = async (target = a, materializationEnabled = true) => {
+    const integration = await db.openCreditIntegration.update({
+      where: { id: target.id },
+      data: { materializationEnabled, ...(materializationEnabled ? { enabled: false } : {}) }
+    });
+    const operator = operators.find(user => user.companyId === target.companyId)!;
+    await db.openCreditWhatsappConfig.upsert({
+      where: { integrationId: target.id },
+      update: { autoStartEnabled: materializationEnabled, configuredByUserId: operator.id },
+      create: { integrationId: target.id, companyId: target.companyId, providerScope: target.providerScope!,
+        autoStartEnabled: materializationEnabled, configuredByUserId: operator.id },
+    });
+    return integration;
+  };
   const effects = async () => ({ contacts: await db.contact.count({ where: { companyId: { in: companyIds } } }), leads: await db.openCreditLead.count({ where: { companyId: { in: companyIds } } }), legacyEvents: await db.openCreditEvent.count({ where: { companyId: { in: companyIds } } }), conversations: await db.conversation.count({ where: { contact: { companyId: { in: companyIds } } } }), operations: await db.openCreditCommercialOperation.count({ where: { companyId: { in: companyIds } } }) });
   return { a, b, other, same, legacy, send, receiver, payload, inbox, jobs, effects, companyIds, setOptIn, ingestionEvents };
 }
@@ -69,8 +82,10 @@ function material(name: string, run: (f: Fixture) => Promise<void>) {
     await db.openCreditInboundEvent.deleteMany({ where: { companyId: { in: f.companyIds } } });
     await db.openCreditEvent.deleteMany({ where: { companyId: { in: f.companyIds } } });
     await db.openCreditLead.deleteMany({ where: { companyId: { in: f.companyIds } } });
+    await db.openCreditWhatsappConfig.deleteMany({ where: { companyId: { in: f.companyIds } } });
     await db.openCreditIntegration.deleteMany({ where: { companyId: { in: f.companyIds } } });
     await db.contact.deleteMany({ where: { companyId: { in: f.companyIds } } });
+    await db.user.deleteMany({ where: { companyId: { in: f.companyIds } } });
     await db.company.deleteMany({ where: { id: { in: f.companyIds } } });
   } });
 }
@@ -186,6 +201,18 @@ function assertNoPlaintext(...values: unknown[]) {
 function distinctEvent(f: Fixture) {
   return JSON.stringify({ ...JSON.parse(f.payload()), eventId: "external-lead:another-partner", client: { ...privateIdentity, name: "Another Person" } });
 }
+material("materialization stays audit-only while AutoStart is closed and starts only for later events", async f => {
+  installMaterializationKey();
+  await db.openCreditIntegration.update({ where: { id: f.a.id }, data: { materializationEnabled: true, enabled: false } });
+  assert.equal((await f.send()).status, 200);
+  assert.equal((await f.inbox()).length, 1);
+  assert.equal((await f.jobs()).length, 0);
+  await f.setOptIn();
+  assert.equal((await f.send(f.a, f.receiver(), distinctEvent(f))).status, 200);
+  assert.equal((await f.inbox()).length, 2);
+  assert.equal((await f.jobs()).length, 1);
+});
+
 material("opt-in commits event and bound ciphertext together before 200", async f => {
   installMaterializationKey();
   const optedIn = await f.setOptIn();
