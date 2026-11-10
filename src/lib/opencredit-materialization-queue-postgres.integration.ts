@@ -62,9 +62,14 @@ async function fixture() {
   });
   const now = await databaseNow();
   const operator = await db.user.create({ data: { companyId, name: "Queue operator", email: randomUUID() + "@invalid.test", passwordHash: "synthetic", role: "ADMIN" } });
+  const channel = await db.channel.create({ data: {
+    companyId, name: "Queue AutoStart channel", type: "whatsapp", provider: "meta", status: "ACTIVE",
+  } });
   await db.openCreditWhatsappConfig.create({ data: {
     integrationId: integration.id, companyId, providerScope, configuredByUserId: operator.id,
-    autoStartEnabled: true, updatedAt: new Date(now - 120_000),
+    autoStartEnabled: true, defaultWhatsappChannelId: channel.id,
+    initialTemplateName: "synthetic_template", initialTemplateLanguage: "pt_BR",
+    updatedAt: new Date(now - 120_000),
   } });
   async function create(overrides: Partial<Prisma.OpenCreditLeadMaterializationUncheckedCreateInput> = {}) {
     const externalLeadId = "lead-" + randomUUID();
