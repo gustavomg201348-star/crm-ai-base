@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createOpenCreditMaterializationWorker, isOpenCreditMaterializationWorkerEnabled,
-  openCreditMaterializationWorkerConfig, materializationWorkerMode } from "./opencredit-materialization-worker";
+  openCreditMaterializationWorkerConfig, materializationWorkerMode,
+  startOpenCreditMaterializationWorkerFromRuntime } from "./opencredit-materialization-worker";
 
 const on = () => ({ OPENCREDIT_MATERIALIZATION_WORKER_ENABLED: "true", OPENCREDIT_MATERIALIZATION_WORKER_MODE: "NORMAL" });
 for (const config of [
@@ -10,13 +11,23 @@ for (const config of [
   { OPENCREDIT_MATERIALIZATION_WORKER_MODE: "ROLLOUT" },
   { OPENCREDIT_MATERIALIZATION_WORKER_MODE: "ROLLOUT", OPENCREDIT_MATERIALIZATION_WORKER_ROLLOUT_ID: "" },
   { OPENCREDIT_MATERIALIZATION_WORKER_MODE: "ROLLOUT", OPENCREDIT_MATERIALIZATION_WORKER_ROLLOUT_ID: "bad id" },
-  { OPENCREDIT_MATERIALIZATION_WORKER_MODE: "NORMAL", OPENCREDIT_MATERIALIZATION_WORKER_ROLLOUT_ID: "rollout" },
-  { OPENCREDIT_MATERIALIZATION_WORKER_MODE: "NORMAL", OPENCREDIT_MATERIALIZATION_WORKER_ROLLOUT_ID: "" },
 ]) test("invalid mode/ID never falls back: " + JSON.stringify(config), async () => {
   assert.equal(materializationWorkerMode(config).kind, "INVALID");
   const f = fixture({ OPENCREDIT_MATERIALIZATION_WORKER_ENABLED: "true", ...config });
   const worker = f.worker(); assert.equal(worker.start(), false); await worker.runOnce();
   assert.deepEqual(f.order, []);
+});
+
+for (const residual of [undefined, "rollout", "", "private-residual-secret budget id\n"]) test("NORMAL ignores residual rollout ID: " + String(residual === undefined ? "absent" : residual.length), async () => {
+  const f = fixture({ ...on(), OPENCREDIT_MATERIALIZATION_WORKER_ROLLOUT_ID: residual });
+  assert.deepEqual(materializationWorkerMode(f.env), { kind: "NORMAL" });
+  const worker = f.worker();
+  assert.equal(worker.start(), true); worker.stop();
+  await worker.runOnce();
+  f.env.OPENCREDIT_MATERIALIZATION_WORKER_ROLLOUT_ID = "changed-residual";
+  await worker.runOnce();
+  assert.deepEqual(f.order, ["recover:1", "expire:1", "claim:1", "process:job-0", "recover:1", "expire:1", "claim:1", "process:job-0"]);
+  assert(!JSON.stringify(f.logs).includes("residual"));
 });
 test("ROLLOUT processes through its injected guarded queue only, without recover/expire", async () => {
   const f = fixture({ ...on(), OPENCREDIT_MATERIALIZATION_WORKER_MODE: "ROLLOUT", OPENCREDIT_MATERIALIZATION_WORKER_ROLLOUT_ID: "rollout" });
@@ -202,4 +213,112 @@ test("worker has no provider/transport or alternate claim path", () => {
   const source = readFileSync("src/lib/opencredit-materialization-worker.ts", "utf8");
   for (const forbidden of ["fetch(", "createClient(", "claimPilotJob(", "sendMessage(", "opencredit-api-client"]) assert(!source.includes(forbidden));
   assert.equal((source.match(/deps\.queue\.claim\(/g) ?? []).length, 1);
+});
+
+type RuntimeDeps = NonNullable<Parameters<typeof startOpenCreditMaterializationWorkerFromRuntime>[1]>;
+type RuntimeEnv = NonNullable<Parameters<typeof startOpenCreditMaterializationWorkerFromRuntime>[0]>;
+async function runtimeFixture(env: RuntimeEnv, run: (f: Omit<ReturnType<typeof fixture>, "deps"> & {
+  startupLogs: Array<Parameters<RuntimeDeps["log"]>[0]>;
+  modes: Array<Parameters<RuntimeDeps["createWorker"]>[0]>;
+  deps: RuntimeDeps;
+}) => Promise<void>) {
+  const runtime = globalThis as typeof globalThis & { __openCreditMaterializationWorkerV1?: ReturnType<typeof createOpenCreditMaterializationWorker> };
+  const prior = runtime.__openCreditMaterializationWorkerV1;
+  delete runtime.__openCreditMaterializationWorkerV1;
+  const f = fixture(env), startupLogs: Array<Parameters<RuntimeDeps["log"]>[0]> = [];
+  const modes: Array<Parameters<RuntimeDeps["createWorker"]>[0]> = [];
+  const workers: Array<ReturnType<typeof createOpenCreditMaterializationWorker>> = [];
+  const deps: RuntimeDeps = {
+    async createWorker(mode, currentEnv) {
+      modes.push(mode);
+      const worker = createOpenCreditMaterializationWorker(f.deps, { env: currentEnv });
+      workers.push(worker); return worker;
+    },
+    log(event) { startupLogs.push(event); },
+  };
+  try { await run({ ...f, startupLogs, modes, deps }); }
+  finally {
+    workers.forEach(worker => worker.stop());
+    if (prior) runtime.__openCreditMaterializationWorkerV1 = prior;
+    else delete runtime.__openCreditMaterializationWorkerV1;
+  }
+}
+
+for (const scenario of [
+  { mode: "NORMAL", id: undefined, flag: "true", reason: "started", kind: "NORMAL" },
+  { mode: "NORMAL", id: "private-residual-id", flag: "true", reason: "started", kind: "NORMAL" },
+  { mode: "ROLLOUT", id: "synthetic-budget", flag: "true", reason: "started", kind: "ROLLOUT" },
+  { mode: "ROLLOUT", id: undefined, flag: "true", reason: "invalid_mode", kind: "INVALID" },
+  { mode: "ROLLOUT", id: "bad id", flag: "true", reason: "invalid_mode", kind: "INVALID" },
+  { mode: "NORMAL", id: undefined, flag: "false", reason: "disabled", kind: "NORMAL" },
+  { mode: "unknown-private-mode", id: undefined, flag: "true", reason: "invalid_mode", kind: "INVALID" },
+  { mode: undefined, id: undefined, flag: "false", reason: "disabled", kind: "INVALID" },
+] as const) test(`runtime startup ${scenario.mode}/${scenario.flag}/${scenario.reason}/${scenario.id !== undefined}`, async () => {
+  const env = { OPENCREDIT_MATERIALIZATION_WORKER_ENABLED: scenario.flag, OPENCREDIT_MATERIALIZATION_WORKER_MODE: scenario.mode,
+    OPENCREDIT_MATERIALIZATION_WORKER_ROLLOUT_ID: scenario.id, OPENCREDIT_MATERIALIZATION_WORKER_BATCH_LIMIT: "2",
+    OPENCREDIT_MATERIALIZATION_WORKER_INTERVAL_MS: "300000" };
+  await runtimeFixture(env, async f => {
+    const started = scenario.reason === "started";
+    assert.deepEqual(await startOpenCreditMaterializationWorkerFromRuntime(env, f.deps), { started, reason: scenario.reason });
+    assert.deepEqual(f.startupLogs, [{ event: "opencredit_materialization_worker_startup", started,
+      reason: scenario.reason, mode: scenario.kind, workerEnabled: scenario.flag === "true", batchLimit: 2, intervalMs: 300000 }]);
+    assert.equal(f.modes.length, started ? 1 : 0);
+    if (started) assert.deepEqual(f.modes[0], scenario.mode === "NORMAL" ? { kind: "NORMAL" } : { kind: "ROLLOUT", rolloutId: scenario.id });
+    assert.deepEqual(f.order, []); // Disabled/invalid startup never even constructs database dependencies.
+    const logs = JSON.stringify(f.startupLogs);
+    for (const privateValue of ["private-residual-id", "synthetic-budget", "bad id", "unknown-private-mode"]) assert(!logs.includes(privateValue));
+  });
+});
+
+test("runtime NORMAL startup emits cycles; duplicate and concurrent boot keep one singleton", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  await runtimeFixture(on(), async f => {
+    const results = await Promise.all([
+      startOpenCreditMaterializationWorkerFromRuntime(f.env, f.deps), startOpenCreditMaterializationWorkerFromRuntime(f.env, f.deps),
+    ]);
+    assert.deepEqual(results.map(result => result.reason), ["started", "already_running"]);
+    assert.equal((await startOpenCreditMaterializationWorkerFromRuntime(f.env, f.deps)).reason, "already_running");
+    assert.equal(f.modes.length, 2); // Both loaders yielded; only one worker may start.
+    t.mock.timers.tick(0); await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(f.order, ["recover:1", "expire:1", "claim:1", "process:job-0"]);
+    assert.deepEqual(f.logs.map(log => (log as { event: string; phase: string }).event), ["opencredit_materialization_worker_cycle", "opencredit_materialization_worker_cycle"]);
+    assert.deepEqual(f.logs.map(log => (log as { phase: string }).phase), ["started", "completed"]);
+  });
+});
+
+test("runtime ROLLOUT retains budget mode and skips recover/expire", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  await runtimeFixture({ ...on(), OPENCREDIT_MATERIALIZATION_WORKER_MODE: "ROLLOUT", OPENCREDIT_MATERIALIZATION_WORKER_ROLLOUT_ID: "synthetic-budget" }, async f => {
+    assert.equal((await startOpenCreditMaterializationWorkerFromRuntime(f.env, f.deps)).started, true);
+    t.mock.timers.tick(0); await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(f.order, ["claim:1", "process:job-0"]);
+    assert.deepEqual(f.modes, [{ kind: "ROLLOUT", rolloutId: "synthetic-budget" }]);
+  });
+});
+
+for (const change of ["disabled", "invalid_mode", "configuration_changed"] as const) test("startup revalidates after loading: " + change, async () => {
+  await runtimeFixture(on(), async f => {
+    const create = f.deps.createWorker;
+    f.deps.createWorker = async (mode, env) => {
+      const worker = await create(mode, env);
+      if (change === "disabled") env.OPENCREDIT_MATERIALIZATION_WORKER_ENABLED = "false";
+      else env.OPENCREDIT_MATERIALIZATION_WORKER_MODE = change === "invalid_mode" ? "private-invalid" : "ROLLOUT";
+      if (change === "configuration_changed") env.OPENCREDIT_MATERIALIZATION_WORKER_ROLLOUT_ID = "synthetic-budget";
+      return worker;
+    };
+    assert.deepEqual(await startOpenCreditMaterializationWorkerFromRuntime(f.env, f.deps), { started: false, reason: change });
+    assert.deepEqual(f.order, []); assert.equal(f.startupLogs.length, 1);
+    assert.equal(f.startupLogs[0].reason, change);
+  });
+});
+
+for (const failure of ["throw", "reject", "pending"] as const) test("startup logger cannot block or fail boot: " + failure, async () => {
+  await runtimeFixture(on(), async f => {
+    f.deps.log = () => {
+      if (failure === "throw") throw new Error("private-log-error");
+      return failure === "reject" ? Promise.reject(new Error("private-log-error")) : new Promise<void>(() => {});
+    };
+    assert.deepEqual(await startOpenCreditMaterializationWorkerFromRuntime(f.env, f.deps), { started: true, reason: "started" });
+    await new Promise(resolve => setImmediate(resolve));
+  });
 });
