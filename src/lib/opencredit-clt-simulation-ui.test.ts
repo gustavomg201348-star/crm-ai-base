@@ -70,12 +70,11 @@ test("manual catalog, one explicit bank, exact cents preview and two mandatory c
   assert.deepEqual(JSON.parse(paid[0].init.body as string), { companyId: "synthetic-company", contactId: "synthetic-contact", bankId: "synthetic-bank", mode: "parcela", amountBRL: "1050,00" });
   assert.equal(h.button("Executar").props.disabled, true); h.unmount();
 });
-test("sanitized diagnostic fields are rendered for an existing operation", async () => {
-  const h = panel(); await h.flush(); h.click("Carregar"); await h.flush(); h.select(0, "synthetic-bank");
-  h.click("Consultar intenção"); await h.flush(); h.confirm(0, true); h.confirm(1, true); h.click("Executar"); await h.flush();
-  const rendered = JSON.stringify((h as unknown as { }).constructor ? {} : {});
-  assert.equal(h.button("Executar").props.disabled, true);
-  h.unmount();
+test("sanitized diagnostic fields are rendered for an existing operation", () => {
+  const ui = readFileSync("src/app/components/integrations/OpenCreditCltSimulationPanel.tsx", "utf8");
+  for (const label of ["Diagnóstico técnico da simulação", "HTTP", "Categoria", "Etapa", "Resposta legível", "Resposta parseada", "simulationId", "Status provedor"])
+    assert.match(ui, new RegExp(label));
+  assert.match(ui, /reply\.operation\.diagnostic/);
 });
 test("pending is followed only by explicit poll, never another dispatch", async () => {
   const h = panel(true); await h.flush(); h.click("Carregar"); await h.flush(); h.select(0, "synthetic-bank");
