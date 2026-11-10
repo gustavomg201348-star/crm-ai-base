@@ -29,9 +29,10 @@ type WorkerEnvironment = {
 };
 export type MaterializationWorkerMode = { kind: "NORMAL" } | { kind: "ROLLOUT"; rolloutId: string } | { kind: "INVALID" };
 export function materializationWorkerMode(env: WorkerEnvironment): MaterializationWorkerMode {
+  if (env.OPENCREDIT_MATERIALIZATION_WORKER_MODE === "NORMAL") return { kind: "NORMAL" };
+  if (env.OPENCREDIT_MATERIALIZATION_WORKER_MODE !== "ROLLOUT") return { kind: "INVALID" };
   const id = env.OPENCREDIT_MATERIALIZATION_WORKER_ROLLOUT_ID;
-  if (env.OPENCREDIT_MATERIALIZATION_WORKER_MODE === "NORMAL" && id === undefined) return { kind: "NORMAL" };
-  if (env.OPENCREDIT_MATERIALIZATION_WORKER_MODE === "ROLLOUT" && typeof id === "string"
+  if (typeof id === "string"
     && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?![\s\S])/.test(id)) return { kind: "ROLLOUT", rolloutId: id };
   return { kind: "INVALID" };
 }
@@ -154,15 +155,22 @@ export function createOpenCreditMaterializationWorker(deps: WorkerDependencies, 
 type RuntimeWorker = ReturnType<typeof createOpenCreditMaterializationWorker>;
 type WorkerRuntimeGlobal = typeof globalThis & { __openCreditMaterializationWorkerV1?: RuntimeWorker };
 
-export async function startOpenCreditMaterializationWorkerFromRuntime(env: WorkerEnvironment = process.env as WorkerEnvironment) {
-  const mode = materializationWorkerMode(env);
-  if (!isOpenCreditMaterializationWorkerEnabled(env) || mode.kind === "INVALID") return { started: false as const, reason: "disabled" as const };
-  const runtime = globalThis as WorkerRuntimeGlobal;
-  if (runtime.__openCreditMaterializationWorkerV1?.isRunning()) return { started: false as const, reason: "already_running" as const };
+type StartupReason = "started" | "disabled" | "invalid_mode" | "already_running" | "configuration_changed";
+type StartupEvent = {
+  event: "opencredit_materialization_worker_startup";
+  started: boolean; reason: StartupReason; mode: MaterializationWorkerMode["kind"];
+  workerEnabled: boolean; batchLimit: number; intervalMs: number;
+};
+type RuntimeDependencies = {
+  createWorker(mode: Exclude<MaterializationWorkerMode, { kind: "INVALID" }>, env: WorkerEnvironment): Promise<RuntimeWorker>;
+  log(event: StartupEvent): void | Promise<void>;
+};
+
+async function createRuntimeWorker(mode: Exclude<MaterializationWorkerMode, { kind: "INVALID" }>, env: WorkerEnvironment) {
   const [{ prisma }, { createOpenCreditMaterializationQueue }, { createOpenCreditDomainMaterializer }] = await Promise.all([
     import("./db"), import("./opencredit-materialization-queue.service"), import("./opencredit-domain-materializer"),
   ]);
-  const worker = createOpenCreditMaterializationWorker({
+  return createOpenCreditMaterializationWorker({
     queue: createOpenCreditMaterializationQueue(prisma, Math.random, mode.kind === "ROLLOUT" ? mode.rolloutId : undefined),
     materializer: {
       async process(lease) {
@@ -179,6 +187,30 @@ export async function startOpenCreditMaterializationWorkerFromRuntime(env: Worke
     },
     log: event => console.info(JSON.stringify(event)),
   }, { env });
+}
+
+export async function startOpenCreditMaterializationWorkerFromRuntime(env: WorkerEnvironment = process.env as WorkerEnvironment,
+  deps: RuntimeDependencies = { createWorker: createRuntimeWorker, log: event => console.info(JSON.stringify(event)) }) {
+  const finish = (started: boolean, reason: StartupReason) => {
+    const event: StartupEvent = { event: "opencredit_materialization_worker_startup", started, reason,
+      mode: materializationWorkerMode(env).kind, workerEnabled: isOpenCreditMaterializationWorkerEnabled(env),
+      ...openCreditMaterializationWorkerConfig(env) };
+    // Startup logging must never fail boot, leak errors or block scheduling.
+    try { void Promise.resolve(deps.log(event)).catch(() => {}); } catch {}
+    return { started, reason };
+  };
+  const mode = materializationWorkerMode(env);
+  if (!isOpenCreditMaterializationWorkerEnabled(env)) return finish(false, "disabled");
+  if (mode.kind === "INVALID") return finish(false, "invalid_mode");
+  const runtime = globalThis as WorkerRuntimeGlobal;
+  if (runtime.__openCreditMaterializationWorkerV1?.isRunning()) return finish(false, "already_running");
+  const worker = await deps.createWorker(mode, env);
+  // Imports may yield to another startup or to a configuration change.
+  if (!isOpenCreditMaterializationWorkerEnabled(env)) return finish(false, "disabled");
+  if (materializationWorkerMode(env).kind === "INVALID") return finish(false, "invalid_mode");
+  if (JSON.stringify(materializationWorkerMode(env)) !== JSON.stringify(mode)) return finish(false, "configuration_changed");
+  if (runtime.__openCreditMaterializationWorkerV1?.isRunning()) return finish(false, "already_running");
   runtime.__openCreditMaterializationWorkerV1 = worker;
-  return { started: worker.start() };
+  const started = worker.start();
+  return finish(started, started ? "started" : "configuration_changed");
 }
