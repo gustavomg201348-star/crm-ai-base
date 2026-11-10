@@ -61,6 +61,11 @@ async function fixture() {
     data: { companyId, providerScope, publicWebhookId: randomUUID(), webhookSecret: "synthetic", materializationEnabled: true },
   });
   const now = await databaseNow();
+  const operator = await db.user.create({ data: { companyId, name: "Queue operator", email: randomUUID() + "@invalid.test", passwordHash: "synthetic", role: "ADMIN" } });
+  await db.openCreditWhatsappConfig.create({ data: {
+    integrationId: integration.id, companyId, providerScope, configuredByUserId: operator.id,
+    autoStartEnabled: true, updatedAt: new Date(now - 120_000),
+  } });
   async function create(overrides: Partial<Prisma.OpenCreditLeadMaterializationUncheckedCreateInput> = {}) {
     const externalLeadId = "lead-" + randomUUID();
     const binding = { companyId, providerScope, integrationId: integration.id, externalLeadId };
@@ -97,6 +102,7 @@ function queueTest(name: string, run: (f: Awaited<ReturnType<typeof fixture>>) =
     } finally {
       await db.openCreditLeadMaterialization.deleteMany({ where: { companyId } });
       await db.openCreditInboundEvent.deleteMany({ where: { companyId } });
+      await db.openCreditWhatsappConfig.deleteMany({ where: { companyId } });
       await db.openCreditIntegration.deleteMany({ where: { companyId } });
       await db.contact.deleteMany({ where: { companyId } });
       await db.user.deleteMany({ where: { companyId } });
@@ -162,6 +168,23 @@ queueTest("pilot leaves ineligible jobs and integrations untouched", async f => 
     assert.equal(await queue.claimPilotJob({ ...binding, id: job.id }), null);
     assert.deepEqual(await f.get(job.id), job);
   }
+});
+
+queueTest("AutoStart reopening ignores backlog created before the current operating window", async f => {
+  const old = await f.create({ createdAt: new Date(f.now - 60_000) });
+  await db.openCreditWhatsappConfig.update({ where: { integrationId: f.integration.id }, data: {
+    autoStartEnabled: false, updatedAt: new Date(f.now - 30_000),
+  } });
+  assert.deepEqual(await queue.claim(1), []);
+  await db.openCreditWhatsappConfig.update({ where: { integrationId: f.integration.id }, data: {
+    autoStartEnabled: true, updatedAt: new Date(f.now - 20_000),
+  } });
+  const fresh = await f.create({ createdAt: new Date(f.now - 10_000) });
+  const claimed = await queue.claim(1);
+  assert.equal(claimed.length, 1);
+  assert.equal(claimed[0].id, fresh.id);
+  assert.equal((await f.get(old.id)).state, "PENDING");
+  assert.equal((await f.get(old.id)).attempts, 0);
 });
 
 queueTest("claim orders by effective availability and ID, bounds the batch and returns no envelope", async f => {
