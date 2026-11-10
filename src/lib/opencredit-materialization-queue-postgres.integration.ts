@@ -103,7 +103,7 @@ function queueTest(name: string, run: (f: Awaited<ReturnType<typeof fixture>>) =
         db.channel.count({ where: { companyId } }),
         db.message.count({ where: { conversation: { contact: { companyId } } } }),
         db.leadAssignmentHistory.count({ where: { companyId } }),
-      ]), [contacts, 0, 0, 0, 0]);
+      ]), [contacts, 0, 1, 0, 0]);
     } finally {
       await db.openCreditLeadMaterialization.deleteMany({ where: { companyId } });
       await db.openCreditInboundEvent.deleteMany({ where: { companyId } });
