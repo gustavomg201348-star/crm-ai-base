@@ -38,6 +38,8 @@ async function fixture() {
   const scope = "synthetic-scope" as Parameters<typeof service.setMaterializationConfiguration>[1]["providerScope"];
   const integration = await db.openCreditIntegration.create({ data: { companyId: company.id, providerScope: scope,
     passiveInboundEnabled: true, publicWebhookId: randomUUID().replaceAll("-", "") + "a".repeat(16), webhookSecret: prepareOpenCreditWebhookSecret(secret, encryption) } });
+  await db.openCreditWhatsappConfig.create({ data: { integrationId: integration.id, companyId: company.id, providerScope: scope,
+    configuredByUserId: user.id, autoStartEnabled: true } });
   const binding = { companyId: company.id, integrationId: integration.id, providerScope: scope };
   const get = () => db.openCreditIntegration.findUniqueOrThrow({ where: { id: integration.id } });
   const input = async (enabled: boolean) => ({ actor, providerScope: scope, command: { action: "SET" as const, companyId: company.id,
@@ -56,7 +58,8 @@ async function fixture() {
     async cleanup() {
       const where = { companyId: company.id };
       await db.openCreditLeadMaterialization.deleteMany({ where }); await db.openCreditInboundEvent.deleteMany({ where });
-      await db.openCreditMaterializationRolloutBudget.deleteMany({ where }); await db.openCreditIntegration.deleteMany({ where });
+      await db.openCreditMaterializationRolloutBudget.deleteMany({ where }); await db.openCreditWhatsappConfig.deleteMany({ where });
+      await db.openCreditIntegration.deleteMany({ where });
       await db.user.deleteMany({ where }); await db.company.delete({ where: { id: company.id } });
     } };
 }
