@@ -116,8 +116,8 @@ export function createOpenCreditMaterializationQueue(db: QueueDb, random: () => 
         const budget = rolloutId === undefined ? null : await availableRolloutBudget(tx, rolloutId, true);
         if (rolloutId !== undefined && (!budget || pilot || !sameRolloutBinding(budget, target))) return null;
         const scopeGuard = budget ? Prisma.sql`TRUE` : unreservedScopeSql;
-        const [job] = await tx.$queryRaw<Array<ReadinessJob>>`
-          SELECT "id", "companyId", "integrationId", "providerScope", "externalLeadId", "inboundEventId", "protectedEnvelope"
+        const [job] = await tx.$queryRaw<Array<ReadinessJob & { createdAt: Date }>>`
+          SELECT "id", "companyId", "integrationId", "providerScope", "externalLeadId", "inboundEventId", "protectedEnvelope", "createdAt"
           FROM "OpenCreditLeadMaterialization" q
           WHERE "id" = ${target.id} AND "companyId" = ${target.companyId}
             AND "integrationId" = ${target.integrationId} AND "providerScope" = ${target.providerScope}
@@ -129,10 +129,12 @@ export function createOpenCreditMaterializationQueue(db: QueueDb, random: () => 
           FOR UPDATE SKIP LOCKED`;
         if (!job) return null;
         const [integration] = await tx.$queryRaw<Array<{ id: string }>>`
-          SELECT "id" FROM "OpenCreditIntegration"
-          WHERE "id" = ${job.integrationId} AND "companyId" = ${job.companyId} AND "providerScope" = ${job.providerScope}
-            AND NOT "enabled" AND NOT "paused" AND "materializationEnabled"
-          FOR SHARE SKIP LOCKED`;
+          SELECT i."id" FROM "OpenCreditIntegration" i
+          JOIN "OpenCreditWhatsappConfig" w ON w."integrationId" = i."id" AND w."companyId" = i."companyId" AND w."providerScope" = i."providerScope"
+          WHERE i."id" = ${job.integrationId} AND i."companyId" = ${job.companyId} AND i."providerScope" = ${job.providerScope}
+            AND NOT i."enabled" AND NOT i."paused" AND i."materializationEnabled"
+            AND w."autoStartEnabled" AND ${job.createdAt} >= w."updatedAt"
+          FOR SHARE OF i, w SKIP LOCKED`;
         if (!integration) return null;
         // Readiness admits a lease, not a frozen Contact identity. Contact writers remain
         // free; the materializer revalidates identity and conflicts before domain writes.
@@ -176,12 +178,17 @@ export function createOpenCreditMaterializationQueue(db: QueueDb, random: () => 
       for (let page = 0; page < 4 && claimed.length < wanted; page++) {
         if (ceiling === null) {
           const [last] = await db.$queryRaw<Array<{ ready: Date; id: string }>>`
-            SELECT COALESCE("availableAt", "createdAt") AS ready, "id"
-            FROM "OpenCreditLeadMaterialization"
-            WHERE "state" IN ('PENDING', 'RETRY') AND "attempts" < ${maxAttempts}
-              AND "expiresAt" > (statement_timestamp() AT TIME ZONE 'UTC')
-              AND ("availableAt" <= (statement_timestamp() AT TIME ZONE 'UTC') OR ("state" = 'PENDING' AND "availableAt" IS NULL))
-            ORDER BY ready DESC, "id" DESC LIMIT 1`;
+            SELECT COALESCE(q."availableAt", q."createdAt") AS ready, q."id"
+            FROM "OpenCreditLeadMaterialization" q
+            JOIN "OpenCreditIntegration" i ON i."id" = q."integrationId" AND i."companyId" = q."companyId" AND i."providerScope" = q."providerScope"
+            JOIN "OpenCreditWhatsappConfig" w ON w."integrationId" = q."integrationId" AND w."companyId" = q."companyId" AND w."providerScope" = q."providerScope"
+            WHERE q."state" IN ('PENDING', 'RETRY') AND q."attempts" < ${maxAttempts}
+              AND q."expiresAt" > (statement_timestamp() AT TIME ZONE 'UTC')
+              AND (q."availableAt" <= (statement_timestamp() AT TIME ZONE 'UTC') OR (q."state" = 'PENDING' AND q."availableAt" IS NULL))
+              AND NOT i."enabled" AND NOT i."paused" AND i."materializationEnabled"
+              AND w."autoStartEnabled" AND q."createdAt" >= w."updatedAt"
+              ${scopeGuard} AND ${blockingAdmissionSql}
+            ORDER BY ready DESC, q."id" DESC LIMIT 1`;
           if (!last) break;
           ceiling = last;
         }
@@ -192,10 +199,12 @@ export function createOpenCreditMaterializationQueue(db: QueueDb, random: () => 
           SELECT q."id", q."companyId", q."integrationId", q."providerScope", COALESCE(q."availableAt", q."createdAt") AS ready
           FROM "OpenCreditLeadMaterialization" q
           JOIN "OpenCreditIntegration" i ON i."id" = q."integrationId" AND i."companyId" = q."companyId" AND i."providerScope" = q."providerScope"
+          JOIN "OpenCreditWhatsappConfig" w ON w."integrationId" = q."integrationId" AND w."companyId" = q."companyId" AND w."providerScope" = q."providerScope"
           WHERE q."state" IN ('PENDING', 'RETRY') AND q."attempts" < ${maxAttempts}
             AND q."expiresAt" > (statement_timestamp() AT TIME ZONE 'UTC')
             AND (q."availableAt" <= (statement_timestamp() AT TIME ZONE 'UTC') OR (q."state" = 'PENDING' AND q."availableAt" IS NULL))
-            AND NOT i."enabled" AND NOT i."paused" AND i."materializationEnabled" ${after}
+            AND NOT i."enabled" AND NOT i."paused" AND i."materializationEnabled"
+            AND w."autoStartEnabled" AND q."createdAt" >= w."updatedAt" ${after}
             ${scopeGuard} AND ${blockingAdmissionSql}
             AND (COALESCE(q."availableAt", q."createdAt"), q."id") <= (${ceiling.ready}, ${ceiling.id})
           ORDER BY ready, q."id" LIMIT 25`;
