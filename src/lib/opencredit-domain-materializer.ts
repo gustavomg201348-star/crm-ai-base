@@ -150,8 +150,9 @@ async function assign(tx: Tx, companyId: string, conversation: { id: string; age
   if (settings?.mode !== "ROUND_ROBIN") return;
   await advisoryLock(tx, "opencredit-assignment", companyId);
   const users = await tx.user.findMany({
-    where: { companyId, role: { in: ["AGENT", "SUPERVISOR"] },
-      ...(settings.onlineOnly ? { availability: { is: { companyId, status: "ONLINE" } } } : {}) },
+    where: { companyId, role: { in: ["ADMIN", "SUPERVISOR", "AGENT"] },
+      // Explicit PAUSED/OFFLINE/BUSY (or missing presence) never receive automatic work.
+      availability: { is: { companyId, status: "ONLINE" } } },
     select: { id: true, name: true }
   });
   if (!users.length) return;
@@ -166,6 +167,8 @@ async function assign(tx: Tx, companyId: string, conversation: { id: string; age
     .filter(user => settings.maxOpenPerAttendant === null || load(user.id) < settings.maxOpenPerAttendant)
     .sort((a, b) => load(a.id) - load(b.id) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id))[0];
   if (!next) return;
+  await tx.$queryRaw`SELECT "userId" FROM "UserAvailability" WHERE "userId" = ${next.id} AND "companyId" = ${companyId} FOR SHARE`;
+  if (!await tx.userAvailability.findFirst({ where: { companyId, userId: next.id, status: "ONLINE" }, select: { userId: true } })) return;
   const updated = await tx.conversation.updateMany({
     where: { id: conversation.id, agentId: null, contact: { companyId } }, data: { agentId: next.id }
   });

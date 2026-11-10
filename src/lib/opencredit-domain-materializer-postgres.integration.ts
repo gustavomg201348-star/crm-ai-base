@@ -434,12 +434,12 @@ materialize("ROUND_ROBIN uses load, role and availability, preserves Contact.own
   const contact = await f.contact({ ownerId: offline.id });
   await db.conversation.create({ data: { contactId: contact.id, agentId: loaded.id, status: "BOT" } });
   const { row } = await runJob(f);
-  assert.equal((await db.conversation.findUniqueOrThrow({ where: { id: row.conversationId! } })).agentId, agent.id);
+  assert.equal((await db.conversation.findUniqueOrThrow({ where: { id: row.conversationId! } })).agentId, admin.id);
   assert.equal((await db.contact.findUniqueOrThrow({ where: { id: contact.id } })).ownerId, offline.id);
   const history = await db.leadAssignmentHistory.findMany({ where: { companyId: f.companyId } });
   assert.equal(history.length, 1);
   assert.deepEqual([history[0].conversationId, history[0].assignedToUserId, history[0].assignedByUserId, history[0].mode, history[0].action],
-    [row.conversationId, agent.id, null, "ROUND_ROBIN", "ASSIGNED"]);
+    [row.conversationId, admin.id, null, "ROUND_ROBIN", "ASSIGNED"]);
   await db.conversation.update({ where: { id: row.conversationId! }, data: { agentId: admin.id } });
   const replay = await runJob(f);
   assert.equal(replay.row.conversationId, row.conversationId);
@@ -491,7 +491,8 @@ function observeSql(beforeQuery: (tx: Prisma.TransactionClient, sql: string) => 
 }
 
 for (const failure of ["lost lease", "database failure"] as const) materialize("failure at completion rolls back Contact, Channel, Conversation and history: " + failure, async f => {
-  await f.user();
+  const attendant = await f.user();
+  await db.userAvailability.create({ data: { companyId: f.companyId, userId: attendant.id, status: "ONLINE" } });
   await f.settings("ROUND_ROBIN");
   const { job } = await f.createJob();
   const lease = await f.claim(job.id);
@@ -527,7 +528,9 @@ async function finishAfterRetry(f: Fixture, id: string) {
 for (const scenario of ["same identity", "different contacts", "same existing Contact", "capacity"] as const) {
   materialize("concurrent jobs converge: " + scenario, async f => {
     if (scenario === "same existing Contact") { await f.contact(); await f.channel(); }
-    if (scenario === "capacity") { await f.channel(); await f.user(); await f.settings("ROUND_ROBIN", false, 1); }
+    if (scenario === "capacity") { await f.channel(); const attendant = await f.user();
+      await db.userAvailability.create({ data: { companyId: f.companyId, userId: attendant.id, status: "ONLINE" } });
+      await f.settings("ROUND_ROBIN", false, 1); }
     const second = await f.makeIntegration();
     const same = scenario === "same identity" || scenario === "same existing Contact";
     const { job: a } = await f.createJob();
@@ -688,4 +691,29 @@ test("upgrade from 31 migrations preserves historical jobs, inbox, legacy and do
     assert(directory.startsWith(resolve(tmpdir()) + sep + "qevora-materializer-"));
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+for (const role of ["ADMIN", "SUPERVISOR", "AGENT"]) materialize("operational ONLINE assignment includes " + role, async f => {
+  const user = await f.user("Online", role);
+  await db.userAvailability.create({ data: { companyId: f.companyId, userId: user.id, status: "ONLINE" } });
+  await f.settings("ROUND_ROBIN", true);
+  const { row } = await runJob(f); assert.equal(row.state, "COMPLETED");
+  assert.equal((await db.conversation.findUniqueOrThrow({ where: { id: row.conversationId! } })).agentId, user.id);
+  assert.equal(await db.leadAssignmentHistory.count({ where: { companyId: f.companyId } }), 1);
+});
+for (const status of ["PAUSED", "OFFLINE", "BUSY"]) for (const onlineOnly of [true, false]) materialize("no automatic assignment to " + status + "; onlineOnly=" + onlineOnly, async f => {
+  const user = await f.user("Unavailable", "ADMIN");
+  await db.userAvailability.create({ data: { companyId: f.companyId, userId: user.id, status } });
+  await f.settings("ROUND_ROBIN", onlineOnly);
+  const { row } = await runJob(f); assert.equal(row.state, "COMPLETED");
+  assert.equal((await db.conversation.findUniqueOrThrow({ where: { id: row.conversationId! } })).agentId, null);
+  assert.equal(await db.leadAssignmentHistory.count({ where: { companyId: f.companyId } }), 0);
+});
+for (const mode of ["CLAIM_FIRST", "ADMIN_MANUAL"]) materialize("ONLINE cannot bypass assignment mode " + mode, async f => {
+  const user = await f.user("Online", "ADMIN");
+  await db.userAvailability.create({ data: { companyId: f.companyId, userId: user.id, status: "ONLINE" } });
+  await f.settings(mode);
+  const { row } = await runJob(f);
+  assert.equal((await db.conversation.findUniqueOrThrow({ where: { id: row.conversationId! } })).agentId, null);
+  assert.equal(await db.leadAssignmentHistory.count({ where: { companyId: f.companyId } }), 0);
 });

@@ -61,7 +61,7 @@ export function createOpenCreditWhatsappConfigService(deps: WhatsappConfigDepend
       const readiness = { channel: channelReady ? "READY" : "NOT_CONFIGURED", template: !config?.initialTemplateName ? "NOT_CONFIGURED" : saved?.eligible ? "READY" : "PENDING",
         media: !saved?.requiresImage ? "NOT_REQUIRED" : saved.mediaReady ? "READY" : "PENDING", variables: mappingReady ? "READY" : "PENDING",
         ai: automatic ? company!.aiMode.toUpperCase() : "NOT_AUTOMATIC", autoStart: config?.autoStartEnabled ? "ON" : "OFF", reason: saved?.reason ?? null,
-        readyIfEnabled: channelReady && !!saved?.eligible && mappingReady && automatic && gateValid };
+        readyIfEnabled: channelReady && !!saved?.eligible && mappingReady && !!company && gateValid };
       return { config: config ?? { defaultWhatsappChannelId: null, initialTemplateName: null, initialTemplateLanguage: null,
         initialTemplateVariableMapping: null, autoStartEnabled: false, revision: 0 }, channels, templates, readiness };
     },
