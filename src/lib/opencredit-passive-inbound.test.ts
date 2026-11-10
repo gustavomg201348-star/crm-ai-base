@@ -529,7 +529,7 @@ for (const [target, recovers] of [
     const db = { $transaction: async (run: (tx: unknown) => Promise<unknown>) => {
       attempts++;
       return run({
-        $queryRaw: async () => [{ ...binding, materializationEnabled: true }],
+        $queryRaw: async () => [{ ...binding, materializationEnabled: true, autoStartEnabled: true }],
         openCreditInboundEvent: { findUnique: async () => null, create: async () => ({ id: "event", receivedAt: new Date() }) },
         openCreditLeadMaterialization: {
           findUnique: async () => attempts === 1 ? null : { id: "winner" },
@@ -549,7 +549,7 @@ test("handler receipt is accepted by the real persistence boundary in the same m
   const started = new Promise<void>(r => { entered = r; }), gate = new Promise<void>(r => { release = r; });
   let committed = false, returned = false;
   const rows: Record<string, unknown>[] = [];
-  const tx = { $queryRaw: async () => [{providerScope:binding.providerScope,webhookSecret:binding.webhookSecret,passiveInboundEnabled:true}], openCreditInboundEvent: {
+  const tx = { $queryRaw: async () => [{providerScope:binding.providerScope,webhookSecret:binding.webhookSecret,passiveInboundEnabled:true,materializationEnabled:false,autoStartEnabled:false}], openCreditInboundEvent: {
     findUnique: async () => null,
     create: async ({data}: {data: Record<string, unknown>}) => { rows.push(data); return data; },
   } };
