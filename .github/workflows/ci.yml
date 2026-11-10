@@ -51,7 +51,7 @@ jobs:
         run: node --import tsx --test scripts/run-opencredit-materialization.test.ts
 
       - name: Validate OpenCredit controlled worker rollout
-        run: node --unhandled-rejections=strict --import tsx --test src/lib/opencredit-materialization-worker.test.ts
+        run: node --unhandled-rejections=strict --import tsx --test src/instrumentation.test.ts src/lib/opencredit-materialization-worker.test.ts
 
       - name: Validate OpenCredit WhatsApp configuration and security boundary
         run: node --unhandled-rejections=strict --import tsx --test src/lib/opencredit-whatsapp.test.ts src/lib/clt-ai-policy.test.ts src/lib/clt-ai-financial-facts.test.ts
