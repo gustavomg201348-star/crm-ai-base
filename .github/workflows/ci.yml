@@ -191,22 +191,7 @@ jobs:
         run: npm run build
 
       - name: Validate compiled OpenCredit server preload with worker OFF
-        shell: bash
-        run: |
-          node <<'NODE'
-          const assert = require('node:assert/strict');
-          const { spawnSync } = require('node:child_process');
-          const result = spawnSync(process.execPath, ['--import', './scripts/opencredit-server-preload.mjs', '-e', 'console.log("SERVER_MAIN_READY")'], {
-            encoding: 'utf8', env: { ...process.env, OPENCREDIT_MATERIALIZATION_WORKER_ENABLED: 'false' },
-          });
-          assert.equal(result.status, 0);
-          const events = result.stdout.split(/\r?\n/).filter(line => line.startsWith('{')).map(line => JSON.parse(line));
-          assert.equal(events.find(event => event.event === 'opencredit_materialization_worker_startup')?.reason, 'disabled');
-          assert.deepEqual(events.filter(event => event.event === 'opencredit_server_bootstrap').map(event => event.phase), ['worker_start', 'next_start']);
-          assert.equal(events.some(event => event.event === 'opencredit_materialization_worker_cycle'), false);
-          assert.equal(result.stdout.includes('SERVER_MAIN_READY'), true);
-          console.log('COMPILED_SERVER_PRELOAD_PASS');
-          NODE
+        run: node scripts/smoke-opencredit-server.mjs
 
       - name: Validate passive text authority shadow and legacy routes
         run: npx --yes tsx@4.20.6 --test src/lib/authority-text-shadow.test.ts src/lib/authority-text-shadow-reader.test.ts

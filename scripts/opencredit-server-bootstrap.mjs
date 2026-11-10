@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const reasons = new Set(["started", "disabled", "invalid_mode", "already_running", "configuration_changed"]);
+const reasons = new Set(["started", "disabled", "invalid_mode", "already_running", "configuration_changed", "startup_error"]);
 
 export async function bootstrapOpenCreditServer({
   loadWorker = async () => require("../.next/opencredit-worker.cjs"),

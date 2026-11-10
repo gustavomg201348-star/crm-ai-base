@@ -78,13 +78,41 @@ for (const mode of ["disabled", "invalid_mode"]) test("actual runtime gate preve
   assert.equal(result.workerResultReason, mode);
 });
 
-test("real Node preloader permits the server main module with worker OFF, including a missing artifact", async () => {
+test("factory failure stays nonfatal in BOTH preload and instrumentation and never logs the exception", async () => {
+  const env = { OPENCREDIT_MATERIALIZATION_WORKER_ENABLED: "true", OPENCREDIT_MATERIALIZATION_WORKER_MODE: "NORMAL" };
+  const logs: unknown[] = []; let calls = 0;
+  const start = () => startOpenCreditMaterializationWorkerFromRuntime(env, {
+    async createWorker() { calls++; throw Error("PRIVATE_SECRET_CUSTOMER_SQL_STACK"); }, log(event) { logs.push(event); },
+  });
+  assert.equal((await boot({ loadWorker: async () => ({ startOpenCreditMaterializationWorkerFromRuntime: start }), log(event) { logs.push(event); } })).workerResultReason, "startup_error");
+  const source = ts.transpileModule(readFileSync("src/instrumentation.ts", "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
+  const exports = {} as { register(): Promise<void> };
+  runInNewContext(source, { exports, process: { env: { NEXT_RUNTIME: "nodejs" } }, console: { info() {} },
+    require(name: string) { assert.equal(name, "./lib/opencredit-materialization-worker"); return { startOpenCreditMaterializationWorkerFromRuntime: start }; } });
+  await exports.register(); assert.equal(calls, 2);
+  assert.equal(logs.filter(event => (event as { reason?: string }).reason === "startup_error").length, 2);
+  assert(!JSON.stringify(logs).includes("PRIVATE"));
+});
+test("a throwing worker start is stopped and never left as a running singleton", async () => {
+  const runtime = globalThis as typeof globalThis & { __openCreditMaterializationWorkerV1?: ReturnType<typeof createOpenCreditMaterializationWorker> };
+  const prior = runtime.__openCreditMaterializationWorkerV1; delete runtime.__openCreditMaterializationWorkerV1;
+  let stopped = 0;
+  try {
+    const result = await startOpenCreditMaterializationWorkerFromRuntime({ OPENCREDIT_MATERIALIZATION_WORKER_ENABLED: "true", OPENCREDIT_MATERIALIZATION_WORKER_MODE: "NORMAL" }, {
+      async createWorker() { return { async runOnce() { return { skipped: true as const }; }, start() { throw Error("PRIVATE"); }, stop() { stopped++; }, isRunning() { return false; } }; }, log() {},
+    });
+    assert.deepEqual(result, { started: false, reason: "startup_error" }); assert.equal(stopped, 1);
+    assert.equal((runtime.__openCreditMaterializationWorkerV1 as ReturnType<typeof createOpenCreditMaterializationWorker> | undefined)?.isRunning(), false);
+  } finally { if (prior) runtime.__openCreditMaterializationWorkerV1 = prior; else delete runtime.__openCreditMaterializationWorkerV1; }
+});
+
+test("inherited preloader ignores a non-serving Node helper", async () => {
   const child = spawn(process.execPath, ["--import", "./scripts/opencredit-server-preload.mjs", "-e", "console.log('SERVER_MAIN_REACHED')"], {
     env: { ...process.env, NODE_ENV: "production", OPENCREDIT_MATERIALIZATION_WORKER_ENABLED: "false" }, stdio: ["ignore", "pipe", "pipe"],
   });
   let output = ""; child.stdout.on("data", data => { output += String(data); }); child.stderr.resume();
   const code = await new Promise<number | null>((resolve, reject) => { child.once("error", reject); child.once("exit", resolve); });
-  assert.equal(code, 0); assert.match(output, /SERVER_MAIN_REACHED/); assert.match(output, /opencredit_server_bootstrap/);
+  assert.equal(code, 0); assert.equal(output.trim(), "SERVER_MAIN_REACHED");
   assert(!output.includes("opencredit_materialization_worker_cycle"));
 });
 
