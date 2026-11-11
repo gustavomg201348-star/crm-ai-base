@@ -23,6 +23,60 @@ const fail = (code: ConstructorParameters<typeof MaterializationConfigurationErr
   throw new MaterializationConfigurationError(code);
 };
 
+
+export async function finalizeOpenCreditSingleAdmission(db: Db, input: Input,
+  env: Parameters<typeof materializationWorkerMode>[0] = {
+    OPENCREDIT_MATERIALIZATION_WORKER_ENABLED: process.env.OPENCREDIT_MATERIALIZATION_WORKER_ENABLED,
+    OPENCREDIT_MATERIALIZATION_WORKER_MODE: process.env.OPENCREDIT_MATERIALIZATION_WORKER_MODE,
+    OPENCREDIT_MATERIALIZATION_WORKER_ROLLOUT_ID: process.env.OPENCREDIT_MATERIALIZATION_WORKER_ROLLOUT_ID,
+  }) {
+  const { actor, companyId, integrationId, providerScope } = input;
+  if (!isPlatformAdmin(actor)) return fail("NOT_AUTHORIZED");
+  if (isOpenCreditMaterializationWorkerEnabled(env)) return fail("GATES_INVALID");
+  return db.$transaction(async tx => {
+    const [currentActor] = await tx.$queryRaw<Array<SessionUser>>`
+      SELECT "id","companyId","name","email","role" FROM "User" WHERE "id"=${actor.id} FOR SHARE`;
+    if (!currentActor || !isPlatformAdmin(currentActor) || currentActor.companyId !== actor.companyId
+      || currentActor.email.trim().toLowerCase() !== actor.email.trim().toLowerCase()) return fail("NOT_AUTHORIZED");
+    const [gate] = await tx.$queryRaw<Array<{ valid: boolean }>>`
+      SELECT (i."passiveInboundEnabled" AND i."materializationEnabled" AND NOT i."enabled" AND NOT i."paused"
+        AND w."autoStartEnabled" AND c."aiMode"='OFF') AS valid
+      FROM "OpenCreditIntegration" i
+      JOIN "OpenCreditWhatsappConfig" w ON w."integrationId"=i."id" AND w."companyId"=i."companyId" AND w."providerScope"=i."providerScope"
+      JOIN "Company" c ON c."id"=i."companyId"
+      WHERE i."id"=${integrationId} AND i."companyId"=${companyId} AND i."providerScope"=${providerScope}
+      FOR UPDATE OF i, w`;
+    if (!gate?.valid) return fail("GATES_INVALID");
+    const budgets = await tx.openCreditMaterializationRolloutBudget.findMany({
+      where: { companyId, integrationId, providerScope, releasedAt: null }, take: 2,
+      select: { id: true, state: true, admittedCount: true },
+    });
+    if (budgets.length !== 1 || budgets[0].state !== "CLOSED" || budgets[0].admittedCount !== 1) return fail("CONFLICT");
+    const budget = budgets[0];
+    const admissions = await tx.openCreditMaterializationRolloutAdmission.findMany({
+      where: { rolloutId: budget.id },
+      select: { admissionAttempt: true, job: { select: { state: true, attempts: true, leaseToken: true, leaseUntil: true } } },
+    });
+    if (admissions.length !== 1 || admissions[0].job.leaseToken || admissions[0].job.leaseUntil
+      || admissions[0].job.attempts !== admissions[0].admissionAttempt
+      || !["COMPLETED","NEEDS_REVIEW","EXPIRED"].includes(admissions[0].job.state)) return fail("CONFLICT");
+    const active = await tx.openCreditLeadMaterialization.count({ where: {
+      companyId, integrationId, providerScope,
+      OR: [{ state: "PROCESSING" }, { leaseToken: { not: null } }, { leaseUntil: { not: null } }],
+    } });
+    if (active !== 0) return fail("CONFLICT");
+    const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AT TIME ZONE 'UTC' AS now`;
+    if (!clock?.now) return fail("CONFLICT");
+    await tx.openCreditMaterializationRolloutAdmission.updateMany({
+      where: { rolloutId: budget.id, reconciledAt: null }, data: { reconciledAt: clock.now },
+    });
+    await tx.openCreditMaterializationRolloutBudget.update({
+      where: { id: budget.id }, data: { releasedAt: clock.now },
+    });
+    return { status: "RELEASED" as const, admittedCount: 1 };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 1000, timeout: 5000 });
+}
+
 export async function runOpenCreditSingleAdmission(db: Db, input: Input, deps: Dependencies) {
   const { actor, companyId, integrationId, providerScope } = input;
   function validateWorker(rolloutId?: string) {
