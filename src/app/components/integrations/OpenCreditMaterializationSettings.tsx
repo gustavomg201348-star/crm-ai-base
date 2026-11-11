@@ -119,6 +119,20 @@ export function OpenCreditMaterializationSettings({ companyId, integrationId, ma
       <div>Claimable agora: {data.queue.claimableNow}{data.queue.complete ? "" : " (preflight parcial)"}</div>
       <div>PENDING: {data.queue.counts.PENDING} · RETRY: {data.queue.counts.RETRY} · NEEDS_REVIEW: {data.queue.counts.NEEDS_REVIEW}</div>
     </dl>}
+    {data?.lastAdmission && <div className="rounded-lg border border-line bg-white p-3 text-xs text-slate-700">
+      <p className="font-semibold text-slate-900">Última admissão OpenCredit</p>
+      <div>Horário: {new Date(data.lastAdmission.admittedAt).toLocaleString("pt-BR")}</div>
+      <div>Job: {data.lastAdmission.jobState}{data.lastAdmission.reviewCode ? " · revisão " + data.lastAdmission.reviewCode : ""}
+        {data.lastAdmission.lastErrorCode ? " · erro " + data.lastAdmission.lastErrorCode : ""}</div>
+      <div>Contato criado: {data.lastAdmission.contactCreated ? "SIM" : "NÃO"}</div>
+      <div>Conversa OpenCredit: {data.lastAdmission.sourceConversationCreated ? "SIM" : "NÃO"}
+        {data.lastAdmission.sourceConversationStatus ? " · " + data.lastAdmission.sourceConversationStatus : ""}</div>
+      <div>Handoff WhatsApp: {data.lastAdmission.handoffState ?? "NÃO INICIADO"}</div>
+      <div>Conversa WhatsApp: {data.lastAdmission.whatsappConversationCreated ? "SIM" : "NÃO"}
+        {data.lastAdmission.whatsappConversationStatus ? " · " + data.lastAdmission.whatsappConversationStatus : ""}</div>
+      <div>Operação de envio: {data.lastAdmission.outboundStatus ?? "NÃO INICIADA"}</div>
+      <div>Meta aceitou mensagem: {data.lastAdmission.providerAccepted ? "SIM" : "NÃO"}</div>
+    </div>}
     {data?.bindingReserved && <p role="status" className="text-sm text-amber-800">O rollout ainda reservado protege a fila.</p>}
     {gatesInvalid && !enabled && <p className="text-sm">{errors.GATES_INVALID}</p>}
     {forbidden ? <p className="text-sm">Apenas o Platform Admin pode ativar/desativar materialização.</p> : <div className="flex gap-2">
