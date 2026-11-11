@@ -111,6 +111,42 @@ for (const stale of ["CLOSED", "EXPIRED"] as const) pg("single admission atomica
   assert.equal(active[0].admittedCount, 0);
   assert.equal(await db.openCreditMaterializationRolloutAdmission.count({ where: f.binding }), 0);
 });
+pg("single admission rotates settled rollout history but never a RETRY admission", async f => {
+  await enablePilot(f);
+  async function seeded(state: "COMPLETED" | "RETRY") {
+    const externalLeadId = "settled-" + state.toLowerCase();
+    const event = await db.openCreditInboundEvent.create({ data: { ...f.binding, externalLeadId,
+      eventId: externalLeadId + ":synthetic-partner", eventType: "lead.assigned",
+      provenanceKind: "OPENCREDIT_HMAC_SHA256_VERIFIED", provenanceVersion: 1 } });
+    const job = await db.openCreditLeadMaterialization.create({ data: { ...f.binding, externalLeadId,
+      inboundEventId: event.id, state, attempts: 1, expiresAt: new Date(Date.now() + 60000),
+      availableAt: state === "RETRY" ? new Date(Date.now() + 60000) : null } });
+    const budget = await startBudget(f, 1, { state: "CLOSED", admittedCount: 1, closedAt: new Date() });
+    await db.openCreditMaterializationRolloutAdmission.create({ data: { ...f.binding, rolloutId: budget.id, slot: 1,
+      jobId: job.id, admissionAttempt: 1, leaseTokenHash: "a".repeat(64) } });
+    return { job, budget };
+  }
+
+  const completed = await seeded("COMPLETED");
+  assert.equal((await pilot.runOpenCreditSingleAdmission(db, target(f), quietPilot)).status, "NO_ELIGIBLE_JOB");
+  const old = await db.openCreditMaterializationRolloutBudget.findUniqueOrThrow({ where: { id: completed.budget.id } });
+  assert(old.releasedAt);
+  const reconciled = await db.openCreditMaterializationRolloutAdmission.findUniqueOrThrow({
+    where: { rolloutId_slot: { rolloutId: completed.budget.id, slot: 1 } },
+  });
+  assert(reconciled.reconciledAt);
+  const fresh = await db.openCreditMaterializationRolloutBudget.findMany({ where: { ...f.binding, releasedAt: null } });
+  assert.equal(fresh.length, 1); assert.equal(fresh[0].maxAdmitted, 1); assert.equal(fresh[0].admittedCount, 0);
+
+  await db.openCreditMaterializationRolloutBudget.update({ where: { id: fresh[0].id },
+    data: { state: "CLOSED", closedAt: new Date(), releasedAt: new Date() } });
+  const retry = await seeded("RETRY");
+  await assert.rejects(pilot.runOpenCreditSingleAdmission(db, target(f), quietPilot), e => code(e) === "CONFLICT");
+  assert.equal((await db.openCreditMaterializationRolloutBudget.findUniqueOrThrow({ where: { id: retry.budget.id } })).releasedAt, null);
+  assert.equal((await db.openCreditMaterializationRolloutAdmission.findUniqueOrThrow({
+    where: { rolloutId_slot: { rolloutId: retry.budget.id, slot: 1 } },
+  })).reconciledAt, null);
+});
 pg("single admission checks persisted Platform Admin, AutoStart, AI OFF and worker mode", async f => {
   await enablePilot(f);
   const budget = await startBudget(f);
@@ -168,7 +204,21 @@ pg("single admission excludes old jobs and preserves a closed reservation after 
   assert.equal(await db.openCreditLeadMaterialization.count({ where: { ...f.binding, externalLeadId: "old-pilot", state: "PENDING", attempts: 0 } }), 1);
   assert.equal(await db.message.count({ where: { conversation: { contact: { companyId: f.company.id } } } }), 0);
   assert.equal((await db.company.findUniqueOrThrow({ where: { id: f.company.id } })).aiMode, "OFF");
-  await assert.rejects(pilot.runOpenCreditSingleAdmission(db, target(f), deps), e => code(e) === "CONFLICT");
+
+  const second = await pilot.runOpenCreditSingleAdmission(db, target(f), deps);
+  assert.equal(second.status, "PROCESSED"); assert.equal(second.outcome, "COMPLETED");
+  assert.equal(bootstraps, 2);
+  assert.equal(await db.openCreditLeadMaterialization.count({ where: { ...f.binding, state: "COMPLETED" } }), 2);
+  assert.equal(await db.openCreditLeadMaterialization.count({ where: { ...f.binding, externalLeadId: "old-pilot", state: "PENDING", attempts: 0 } }), 1);
+
+  const third = await pilot.runOpenCreditSingleAdmission(db, target(f), deps);
+  assert.equal(third.status, "NO_ELIGIBLE_JOB");
+  const rotated = await db.openCreditMaterializationRolloutBudget.findMany({ where: { ...f.binding, releasedAt: null } });
+  assert.equal(rotated.length, 1); assert.equal(rotated[0].state, "ACTIVE");
+  assert.equal(rotated[0].maxAdmitted, 1); assert.equal(rotated[0].admittedCount, 0);
+  const prior = await db.openCreditMaterializationRolloutBudget.findUniqueOrThrow({ where: { id: budget.id } });
+  assert(prior.releasedAt);
+  assert.equal(await db.openCreditLeadMaterialization.count({ where: { ...f.binding, externalLeadId: "old-pilot", state: "PENDING", attempts: 0 } }), 1);
 });
 
 pg("enable/disable is one-column, idempotent, auditable and never creates domain data", async f => {
