@@ -92,14 +92,23 @@ async function enablePilot(f: F) {
   await f.set(true);
   await db.company.update({ where: { id: f.company.id }, data: { aiMode: "OFF" } });
 }
-pg("single admission fails closed on missing, closed, or expired reservation", async f => {
+pg("single admission fails closed when no reservation exists", async f => {
   await enablePilot(f);
   await assert.rejects(pilot.runOpenCreditSingleAdmission(db, target(f), quietPilot), e => code(e) === "CONFLICT");
-  const budget = await startBudget(f, 1, { state: "CLOSED", closedAt: new Date() });
-  await assert.rejects(pilot.runOpenCreditSingleAdmission(db, target(f), quietPilot), e => code(e) === "CONFLICT");
-  await db.openCreditMaterializationRolloutBudget.update({ where: { id: budget.id },
-    data: { state: "ACTIVE", closedAt: null, createdAt: new Date(Date.now() - 120000), expiresAt: new Date(Date.now() - 60000) } });
-  await assert.rejects(pilot.runOpenCreditSingleAdmission(db, target(f), quietPilot), e => code(e) === "CONFLICT");
+});
+
+for (const stale of ["CLOSED", "EXPIRED"] as const) pg("single admission atomically refreshes an empty stale reservation: " + stale, async f => {
+  await enablePilot(f);
+  const budget = stale === "CLOSED"
+    ? await startBudget(f, 1, { state: "CLOSED", closedAt: new Date() })
+    : await startBudget(f, 1, { createdAt: new Date(Date.now() - 120000), expiresAt: new Date(Date.now() - 60000) });
+  const result = await pilot.runOpenCreditSingleAdmission(db, target(f), quietPilot);
+  assert.equal(result.status, "NO_ELIGIBLE_JOB");
+  const oldBudget = await db.openCreditMaterializationRolloutBudget.findUniqueOrThrow({ where: { id: budget.id } });
+  assert.equal(oldBudget.state, "CLOSED"); assert(oldBudget.closedAt); assert(oldBudget.releasedAt);
+  const active = await db.openCreditMaterializationRolloutBudget.findMany({ where: { ...f.binding, releasedAt: null } });
+  assert.equal(active.length, 1); assert.equal(active[0].state, "ACTIVE"); assert.equal(active[0].maxAdmitted, 1);
+  assert.equal(active[0].admittedCount, 0);
   assert.equal(await db.openCreditMaterializationRolloutAdmission.count({ where: f.binding }), 0);
 });
 pg("single admission checks persisted Platform Admin, AutoStart, AI OFF and worker mode", async f => {
