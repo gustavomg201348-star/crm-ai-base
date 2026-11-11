@@ -58,11 +58,6 @@ after(async () => {
 
 async function fixture() {
   const { id: companyId } = await db.company.create({ data: { name: "Synthetic materializer" } });
-  const makeIntegration = () => db.openCreditIntegration.create({ data: {
-    companyId, providerScope: "synthetic-scope", publicWebhookId: randomUUID(),
-    webhookSecret: "synthetic", passiveInboundEnabled: true, materializationEnabled: true
-  } });
-  const integration = await makeIntegration();
   const operator = await db.user.create({ data: {
     companyId, name: "Materializer operator", role: "ADMIN",
     email: randomUUID() + "@example.invalid", passwordHash: "synthetic"
@@ -70,13 +65,21 @@ async function fixture() {
   const whatsappChannel = await db.channel.create({ data: {
     companyId, name: "Materializer AutoStart channel", type: "whatsapp", provider: "meta", status: "ACTIVE"
   } });
-  await db.openCreditWhatsappConfig.create({ data: {
-    integrationId: integration.id, companyId, providerScope: integration.providerScope!,
-    configuredByUserId: operator.id, autoStartEnabled: true,
-    defaultWhatsappChannelId: whatsappChannel.id,
-    initialTemplateName: "synthetic_template", initialTemplateLanguage: "pt_BR",
-    updatedAt: new Date(Date.now() - 60_000)
-  } });
+  const makeIntegration = async () => {
+    const created = await db.openCreditIntegration.create({ data: {
+      companyId, providerScope: "synthetic-scope", publicWebhookId: randomUUID(),
+      webhookSecret: "synthetic", passiveInboundEnabled: true, materializationEnabled: true
+    } });
+    await db.openCreditWhatsappConfig.create({ data: {
+      integrationId: created.id, companyId, providerScope: created.providerScope!,
+      configuredByUserId: operator.id, autoStartEnabled: true,
+      defaultWhatsappChannelId: whatsappChannel.id,
+      initialTemplateName: "synthetic_template", initialTemplateLanguage: "pt_BR",
+      updatedAt: new Date(Date.now() - 60_000)
+    } });
+    return created;
+  };
+  const integration = await makeIntegration();
   const where = { companyId };
   const conversationWhere = { contact: where };
   const process = (lease: MaterializationLease) => core.createOpenCreditDomainMaterializer(db).process(lease);
