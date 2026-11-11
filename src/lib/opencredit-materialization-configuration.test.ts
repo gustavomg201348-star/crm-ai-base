@@ -86,6 +86,23 @@ test("an unrecognized typed error cannot disclose private text", async () => {
   const r = await f.run(req(JSON.stringify(change))); assert.equal(r.status, 503); assert.deepEqual(await r.json(), { error: "UNAVAILABLE" });
 });
 
+test("pilot finalizer requires closed command and dispatches only FINALIZE_PILOT", async () => {
+  const command = { ...read, action: "FINALIZE_PILOT" };
+  let calls = 0;
+  const finalizer: NonNullable<Parameters<typeof handler>[0]>["finalizer"] = async input => {
+    calls++; assert.deepEqual(input, { actor, companyId: read.companyId, integrationId: read.integrationId, providerScope: scope });
+    return { status: "RELEASED", admittedCount: 1 };
+  };
+  const f = handler({ finalizer });
+  for (const value of [read, change, { ...command, rolloutId: "private" }, { ...command, providerScope: "private" }]) {
+    assert.equal((await f.run(req(JSON.stringify(value)))).status, 400);
+  }
+  const response = await f.run(req(JSON.stringify(command)));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { status: "RELEASED", admittedCount: 1 });
+  assert.equal(calls, 1); assert.deepEqual(f.counts(), [0, 0]);
+});
+
 test("single admission requires authenticated Platform Admin, same-origin and a closed JSON command", async () => {
   const command = { ...read, action: "PILOT" };
   let calls = 0;

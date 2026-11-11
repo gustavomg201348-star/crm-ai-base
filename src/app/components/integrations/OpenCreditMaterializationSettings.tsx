@@ -5,6 +5,7 @@ import type { readMaterializationConfiguration } from "@/lib/opencredit-material
 type State = Awaited<ReturnType<typeof readMaterializationConfiguration>>;
 const path = "/api/admin/integrations/opencredit/materialization/configuration";
 const pilotPath = "/api/admin/integrations/opencredit/materialization/single-admission";
+const finalizePath = "/api/admin/integrations/opencredit/materialization/finalize-pilot";
 const pilotMessages: Record<string, string> = {
   COMPLETED: "Lead processado.",
   RETRY: "O job ficou em RETRY.",
@@ -73,6 +74,22 @@ export function OpenCreditMaterializationSettings({ companyId, integrationId, ma
   const gatesInvalid = !!data && (data.enabled || data.paused || !data.passiveInboundEnabled);
   const pilotReady = !!data && data.companyId === companyId && data.integrationId === integrationId
     && enabled && !gatesInvalid && data.interlockReady && data.bindingReserved && data.autoStartOperational;
+  async function finalizePilot() {
+    if (!data?.bindingReserved || busy || uncertain || pilotInFlight.current) return;
+    if (!window.confirm("Concluir o piloto e liberar a reserva da fila? Esta ação só será aceita se a única admissão estiver totalmente encerrada e reconciliável. O worker NORMAL continuará desligado até ser ativado separadamente.")) return;
+    setBusy(true); setError(""); setPilotFeedback("");
+    try {
+      const response = await fetch(finalizePath, { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "FINALIZE_PILOT", companyId, integrationId }) });
+      const result = await response.json() as { status?: string };
+      if (!response.ok || result.status !== "RELEASED") throw Error("FINALIZE_FAILED");
+      setPilotFeedback("Piloto concluído e reserva liberada. A fila NORMAL ainda está desligada.");
+      await refresh();
+    } catch {
+      setError("Não foi possível concluir o piloto com segurança. A reserva foi mantida.");
+    } finally { setBusy(false); }
+  }
+
   async function pilot() {
     if (!pilotReady || busy || uncertain || pilotInFlight.current) return;
     if (!window.confirm("Será processado no máximo 1 lead novo elegível da janela atual. A reserva da fila será mantida e nenhum backlog antigo será liberado.")) return;
@@ -143,6 +160,8 @@ export function OpenCreditMaterializationSettings({ companyId, integrationId, ma
       </button>
       <button type="button" className="rounded-lg border border-line px-3 py-2 text-sm disabled:opacity-50"
         disabled={!pilotReady || busy || uncertain} onClick={() => void pilot()}>Processar 1 lead teste</button>
+      <button type="button" className="rounded-lg border border-line px-3 py-2 text-sm disabled:opacity-50"
+        disabled={!data?.bindingReserved || busy || uncertain} onClick={() => void finalizePilot()}>Concluir piloto e liberar fila normal</button>
       <button type="button" disabled={busy} className="rounded-lg border border-line px-3 py-2 text-sm" onClick={() => {
         setBusy(true); setError(""); void refresh().catch(() => setError("Estado não confirmado. Recarregue novamente.")).finally(() => setBusy(false));
       }}>Recarregar estado</button>

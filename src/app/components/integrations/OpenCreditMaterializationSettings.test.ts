@@ -25,6 +25,7 @@ function fixture(options: { reserved?: boolean; denied?: boolean; paused?: boole
       if (options.denied) return { ok: false, status: 403 };
       if (command.action === "PILOT") return { ok: true, json: async () => options.ambiguousPilot
         ? { status: "RESULT_UNCONFIRMED" } : { status: "PROCESSED", outcome: "COMPLETED", bootstrapAttempted: true, bootstrapResult: "SENT" } };
+      if (command.action === "FINALIZE_PILOT") { saved = true; return { ok: true, json: async () => ({ status: "RELEASED", admittedCount: 1 }) }; }
       if (command.action === "SET") {
         if (options.refuseWrite) return { ok: false, status: 409, json: async () => ({ error: "CONFLICT" }) };
         if (!options.staleRead) saved = command.materializationEnabled;
@@ -71,6 +72,18 @@ test("pilot requires the operating window and reservation and never retries an a
     assert.equal(f.button(tree, "Processar 1 lead teste").props.disabled, ambiguousPilot);
   }
 });
+test("finalizer sends one closed command and refreshes server state", async () => {
+  const f = fixture({ active: true, reserved: true, autoStart: true });
+  f.render(); await f.flush();
+  const tree = f.render();
+  const button = f.button(tree, "Concluir piloto e liberar fila normal");
+  assert.equal(button.props.disabled, false);
+  (button.props.onClick as () => void)();
+  await f.flush();
+  assert.deepEqual(f.calls.map(c => c.action), ["READ", "FINALIZE_PILOT", "READ"]);
+  assert(f.text(f.render()).includes("Piloto concluído e reserva liberada"));
+});
+
 test("successful write response cannot fabricate an optimistic active state", async () => {
   const f = fixture({ staleRead: true }); f.render(); await f.flush(); (f.button(f.render(), "Ativar materialização").props.onClick as () => void)();
   await f.flush(); assert(f.text(f.render()).includes("DESATIVADA")); assert.deepEqual(f.changes, [false]);
