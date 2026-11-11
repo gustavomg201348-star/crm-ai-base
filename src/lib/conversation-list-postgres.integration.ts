@@ -70,6 +70,20 @@ pg("250 rows paginate 100/100/50; new message-free conversation beats 249 older 
   assert(result.pages.every(p => p.statusCounts.OPEN === 250));
   assert.equal(result.pages[2].nextCursor, null); assert.deepEqual(await f.snapshot(), before);
 });
+pg("internal OpenCredit conversation stays hidden while WhatsApp conversation remains visible", async f => {
+  const contact = f.contacts[0];
+  const internal = await db.conversation.create({ data: {
+    contactId: contact.id, channel: "OPEN_CREDIT", status: "OPEN", summary: "Lead recebido via OpenCredit",
+    createdAt: new Date("2027-02-01T00:00:00Z"),
+  } });
+  const result = await all(f.actor, "status=OPEN");
+  assert(!result.rows.some(x => x.id === internal.id));
+  assert(result.rows.some(x => x.id === f.rows[0].id));
+  assert(result.pages.every(p => p.statusCounts.OPEN === 250));
+  const persisted = await db.conversation.findUnique({ where: { id: internal.id } });
+  assert.equal(persisted?.channel, "OPEN_CREDIT");
+});
+
 pg("A recent message, B newer created-only and C old follow exact effective activity; ties cross page boundaries", async f => {
   const [a,b,c] = f.rows;
   await db.conversation.update({ where: { id: a.id }, data: { lastMessageAt: new Date("2027-01-02T00:00:00Z") } });
