@@ -204,7 +204,15 @@ pg("single admission excludes old jobs and preserves a closed reservation after 
   assert.equal(await db.openCreditLeadMaterialization.count({ where: { ...f.binding, externalLeadId: "old-pilot", state: "PENDING", attempts: 0 } }), 1);
   assert.equal(await db.message.count({ where: { conversation: { contact: { companyId: f.company.id } } } }), 0);
   assert.equal((await db.company.findUniqueOrThrow({ where: { id: f.company.id } })).aiMode, "OFF");
-  await assert.rejects(pilot.runOpenCreditSingleAdmission(db, target(f), deps), e => code(e) === "CONFLICT");
+
+  const second = await pilot.runOpenCreditSingleAdmission(db, target(f), deps);
+  assert.equal(second.status, "NO_ELIGIBLE_JOB");
+  const rotated = await db.openCreditMaterializationRolloutBudget.findMany({ where: { ...f.binding, releasedAt: null } });
+  assert.equal(rotated.length, 1); assert.equal(rotated[0].state, "ACTIVE");
+  assert.equal(rotated[0].maxAdmitted, 1); assert.equal(rotated[0].admittedCount, 0);
+  const prior = await db.openCreditMaterializationRolloutBudget.findUniqueOrThrow({ where: { id: budget.id } });
+  assert(prior.releasedAt);
+  assert.equal(await db.openCreditLeadMaterialization.count({ where: { ...f.binding, externalLeadId: "old-pilot", state: "PENDING", attempts: 0 } }), 1);
 });
 
 pg("enable/disable is one-column, idempotent, auditable and never creates domain data", async f => {
