@@ -23,7 +23,7 @@ const change = { ...read, action: "SET", materializationEnabled: true, expectedU
 const scope = "synthetic-scope" as Parameters<typeof service.setMaterializationConfiguration>[1]["providerScope"];
 const state = { ok: true as const, companyId: "company", integrationId: "integration", enabled: false, paused: false,
   passiveInboundEnabled: true, materializationEnabled: false, interlockReady: false, bindingReserved: false, autoStartOperational: false, updatedAt: change.expectedUpdatedAt,
-  queue: { claimableNow: 0, counts: { PENDING: 0, RETRY: 0, NEEDS_REVIEW: 0 }, complete: true } };
+  queue: { claimableNow: 0, counts: { PENDING: 0, RETRY: 0, NEEDS_REVIEW: 0 }, complete: true }, lastAdmission: null };
 function req(body = JSON.stringify(read), headers: Record<string, string> = {}, url = "https://crm.example.invalid/api/admin/integrations/opencredit/materialization/configuration") {
   return new NextRequest(url, { method: "POST", headers: { origin: "https://crm.example.invalid", "content-type": "application/json", ...headers }, body });
 }

@@ -38,11 +38,47 @@ export async function readMaterializationConfiguration(db: Db, input: Input) {
   });
   const i = result.integrations.find(row => row.integrationId === input.command.integrationId);
   if (!i) return fail("NOT_FOUND");
+  const [lastAdmission] = await db.$transaction(tx => tx.$queryRaw<Array<{
+    admittedAt: Date; jobState: string; reviewCode: string | null; lastErrorCode: string | null;
+    contactCreated: boolean; sourceConversationCreated: boolean; sourceConversationStatus: string | null;
+    handoffState: string | null; whatsappConversationCreated: boolean; whatsappConversationStatus: string | null;
+    outboundStatus: string | null; providerAccepted: boolean;
+  }>>`
+    SELECT a."admittedAt",
+      j."state" AS "jobState", j."reviewCode", j."lastErrorCode",
+      (j."contactId" IS NOT NULL) AS "contactCreated",
+      (j."conversationId" IS NOT NULL) AS "sourceConversationCreated",
+      src."status" AS "sourceConversationStatus",
+      h."state" AS "handoffState",
+      (h."metaConversationId" IS NOT NULL) AS "whatsappConversationCreated",
+      meta."status" AS "whatsappConversationStatus",
+      o."status" AS "outboundStatus",
+      (COALESCE(h."providerMessageId", o."providerMessageId") IS NOT NULL) AS "providerAccepted"
+    FROM "OpenCreditMaterializationRolloutAdmission" a
+    JOIN "OpenCreditLeadMaterialization" j ON j."id"=a."jobId"
+      AND j."companyId"=a."companyId" AND j."integrationId"=a."integrationId" AND j."providerScope"=a."providerScope"
+    LEFT JOIN "Conversation" src ON src."id"=j."conversationId"
+    LEFT JOIN "OpenCreditWhatsappHandoff" h ON h."jobId"=j."id"
+    LEFT JOIN "Conversation" meta ON meta."id"=h."metaConversationId"
+    LEFT JOIN "OutboundOperation" o ON o."id"=h."outboundOperationId"
+    WHERE a."companyId"=${input.command.companyId} AND a."integrationId"=${input.command.integrationId}
+      AND a."providerScope"=${input.providerScope}
+    ORDER BY a."admittedAt" DESC LIMIT 1`
+  );
   return { ok: true as const, companyId: result.companyId, integrationId: i.integrationId,
     enabled: i.enabled, paused: i.paused, passiveInboundEnabled: i.passiveInboundEnabled,
     materializationEnabled: i.materializationEnabled, interlockReady: i.interlockReady,
     bindingReserved: i.rollouts.bindingReserved, updatedAt: i.updatedAt, autoStartOperational: i.autoStartOperational,
-    queue: { claimableNow: i.queue.claimableNow, counts: i.queue.counts, complete: i.queue.readiness.complete } };
+    queue: { claimableNow: i.queue.claimableNow, counts: i.queue.counts, complete: i.queue.readiness.complete },
+    lastAdmission: lastAdmission ? {
+      admittedAt: lastAdmission.admittedAt.toISOString(), jobState: lastAdmission.jobState,
+      reviewCode: lastAdmission.reviewCode, lastErrorCode: lastAdmission.lastErrorCode,
+      contactCreated: lastAdmission.contactCreated, sourceConversationCreated: lastAdmission.sourceConversationCreated,
+      sourceConversationStatus: lastAdmission.sourceConversationStatus, handoffState: lastAdmission.handoffState,
+      whatsappConversationCreated: lastAdmission.whatsappConversationCreated,
+      whatsappConversationStatus: lastAdmission.whatsappConversationStatus,
+      outboundStatus: lastAdmission.outboundStatus, providerAccepted: lastAdmission.providerAccepted,
+    } : null };
 }
 
 export async function setMaterializationConfiguration(db: Db, input: Input) {
