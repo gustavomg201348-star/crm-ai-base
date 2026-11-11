@@ -69,7 +69,18 @@ export async function readMaterializationConfiguration(db: Db, input: Input) {
     enabled: i.enabled, paused: i.paused, passiveInboundEnabled: i.passiveInboundEnabled,
     materializationEnabled: i.materializationEnabled, interlockReady: i.interlockReady,
     bindingReserved: i.rollouts.bindingReserved, updatedAt: i.updatedAt, autoStartOperational: i.autoStartOperational,
-    queue: { claimableNow: i.queue.claimableNow, counts: i.queue.counts, complete: i.queue.readiness.complete },
+    queue: {
+      claimableNow: i.queue.claimableNow,
+      counts: i.queue.counts,
+      complete: i.queue.readiness.complete,
+      readiness: {
+        readyNewContact: i.queue.readiness.readyNewContact,
+        readyExistingContact: i.queue.readiness.readyExistingContact,
+        waitingIdentity: i.queue.readiness.waitingIdentity,
+        reviewRisk: i.queue.readiness.reviewRisk,
+        evaluated: i.queue.readiness.evaluated,
+      },
+    },
     lastAdmission: lastAdmission ? {
       admittedAt: lastAdmission.admittedAt.toISOString(), jobState: lastAdmission.jobState,
       reviewCode: lastAdmission.reviewCode, lastErrorCode: lastAdmission.lastErrorCode,
