@@ -147,6 +147,31 @@ pg("single admission rotates settled rollout history but never a RETRY admission
     where: { rolloutId_slot: { rolloutId: retry.budget.id, slot: 1 } },
   })).reconciledAt, null);
 });
+pg("pilot finalizer releases exactly one settled admission and blocks unsafe state", async f => {
+  await enablePilot(f);
+  const event = await db.openCreditInboundEvent.create({ data: { ...f.binding, externalLeadId: "finalize-completed",
+    eventId: "finalize-completed:synthetic-partner", eventType: "lead.assigned",
+    provenanceKind: "OPENCREDIT_HMAC_SHA256_VERIFIED", provenanceVersion: 1 } });
+  const job = await db.openCreditLeadMaterialization.create({ data: { ...f.binding, externalLeadId: "finalize-completed",
+    inboundEventId: event.id, state: "COMPLETED", attempts: 1, expiresAt: new Date(Date.now() + 60000) } });
+  const budget = await startBudget(f, 1, { state: "CLOSED", admittedCount: 1, closedAt: new Date() });
+  await db.openCreditMaterializationRolloutAdmission.create({ data: { ...f.binding, rolloutId: budget.id, slot: 1,
+    jobId: job.id, admissionAttempt: 1, leaseTokenHash: "b".repeat(64) } });
+
+  const result = await pilot.finalizeOpenCreditSingleAdmission(db, target(f), {});
+  assert.deepEqual(result, { status: "RELEASED", admittedCount: 1 });
+  const released = await db.openCreditMaterializationRolloutBudget.findUniqueOrThrow({ where: { id: budget.id } });
+  assert(released.releasedAt);
+  const admission = await db.openCreditMaterializationRolloutAdmission.findUniqueOrThrow({
+    where: { rolloutId_slot: { rolloutId: budget.id, slot: 1 } },
+  });
+  assert(admission.reconciledAt);
+
+  await assert.rejects(pilot.finalizeOpenCreditSingleAdmission(db, target(f), {
+    OPENCREDIT_MATERIALIZATION_WORKER_ENABLED: "true", OPENCREDIT_MATERIALIZATION_WORKER_MODE: "NORMAL",
+  }), e => code(e) === "GATES_INVALID");
+});
+
 pg("single admission checks persisted Platform Admin, AutoStart, AI OFF and worker mode", async f => {
   await enablePilot(f);
   const budget = await startBudget(f);
