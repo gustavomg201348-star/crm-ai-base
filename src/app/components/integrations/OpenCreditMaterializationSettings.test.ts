@@ -32,7 +32,7 @@ function fixture(options: { reserved?: boolean; denied?: boolean; paused?: boole
       }
       return { ok: true, json: async () => ({ ok: true, companyId: "company", integrationId: "integration", materializationEnabled: saved,
         enabled: false, paused: !!options.paused, passiveInboundEnabled: true, interlockReady: saved, bindingReserved: !!options.reserved, autoStartOperational: !!options.autoStart,
-        updatedAt: new Date(version).toISOString(), queue: { claimableNow: 0, complete: true, counts: { PENDING: 2, RETRY: 0, NEEDS_REVIEW: 1 } } }) };
+        updatedAt: new Date(version).toISOString(), queue: { claimableNow: 0, complete: true, counts: { PENDING: 2, RETRY: 0, NEEDS_REVIEW: 1 }, readiness: { readyNewContact: 0, readyExistingContact: 0, waitingIdentity: 0, reviewRisk: 0, evaluated: 0 } } }) };
     },
   });
   const render = () => { cursor = 0; const tree = exports.OpenCreditMaterializationSettings({ companyId: "company", integrationId: "integration", materializationEnabled: false, onChanged: (v: boolean) => changes.push(v) }); effects.splice(0).forEach(effect => effect()); return tree; };
