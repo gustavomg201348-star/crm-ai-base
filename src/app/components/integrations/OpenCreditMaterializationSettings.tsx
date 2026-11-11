@@ -118,6 +118,7 @@ export function OpenCreditMaterializationSettings({ companyId, integrationId, ma
       <div>AutoStart operacional: {data.autoStartOperational ? "SIM" : "NÃO"}</div>
       <div>Claimable agora: {data.queue.claimableNow}{data.queue.complete ? "" : " (preflight parcial)"}</div>
       <div>PENDING: {data.queue.counts.PENDING} · RETRY: {data.queue.counts.RETRY} · NEEDS_REVIEW: {data.queue.counts.NEEDS_REVIEW}</div>
+      <div>Janela atual: novo {data.queue.readiness.readyNewContact} · existente {data.queue.readiness.readyExistingContact} · aguardando identidade {data.queue.readiness.waitingIdentity} · risco revisão {data.queue.readiness.reviewRisk} · avaliados {data.queue.readiness.evaluated}</div>
     </dl>}
     {data?.lastAdmission && <div className="rounded-lg border border-line bg-white p-3 text-xs text-slate-700">
       <p className="font-semibold text-slate-900">Última admissão OpenCredit</p>
