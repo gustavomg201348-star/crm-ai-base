@@ -126,7 +126,10 @@ export async function runOpenCreditSingleAdmission(db: Db, input: Input, deps: D
   let outcome;
   let jobId;
   try {
-    const leases = await queue.claim(1);
+    let leases = await queue.claim(1);
+    // claim(1) scans at most 100 waiting candidates per call. A second scan is safe
+    // only after the first admitted nothing, so the pilot still cannot admit >1 lead.
+    if (leases.length === 0) leases = await queue.claim(1);
     if (leases.length === 0) return empty("NO_ELIGIBLE_JOB");
     if (leases.length !== 1 || leases[0].rolloutId !== rolloutId) return empty("RESULT_UNCONFIRMED");
     jobId = leases[0].id;
