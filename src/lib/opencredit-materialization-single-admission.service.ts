@@ -57,12 +57,44 @@ export async function runOpenCreditSingleAdmission(db: Db, input: Input, deps: D
   if (!isPlatformAdmin(actor)) return fail("NOT_AUTHORIZED");
   const rolloutId = await db.$transaction(async tx => {
     await validate(tx);
+    await tx.$queryRaw`
+      SELECT "id" FROM "OpenCreditIntegration"
+      WHERE "id"=${integrationId} AND "companyId"=${companyId} AND "providerScope"=${providerScope}
+      FOR UPDATE`;
     const budgets = await tx.openCreditMaterializationRolloutBudget.findMany({
-      where: { companyId, integrationId, providerScope, releasedAt: null }, take: 2, select: { id: true },
+      where: { companyId, integrationId, providerScope, releasedAt: null }, take: 2,
+      select: { id: true, state: true, admittedCount: true, closedAt: true },
     });
-    if (budgets.length !== 1 || !await availableRolloutBudget(tx, budgets[0].id)) return fail("CONFLICT");
-    validateWorker(budgets[0].id);
-    return budgets[0].id;
+    if (budgets.length !== 1) return fail("CONFLICT");
+    const current = budgets[0];
+    if (await availableRolloutBudget(tx, current.id)) {
+      validateWorker(current.id);
+      return current.id;
+    }
+
+    // A stale empty reservation may be rotated atomically for this one-shot pilot.
+    // Never touch a rollout that admitted anything or a binding with an active lease.
+    const admissionCount = await tx.openCreditMaterializationRolloutAdmission.count({ where: { rolloutId: current.id } });
+    if (current.admittedCount !== 0 || admissionCount !== 0) return fail("CONFLICT");
+    const activeLeases = await tx.openCreditLeadMaterialization.count({ where: {
+      companyId, integrationId, providerScope,
+      OR: [{ state: "PROCESSING" }, { leaseToken: { not: null } }, { leaseUntil: { not: null } }],
+    } });
+    if (activeLeases !== 0) return fail("CONFLICT");
+    const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`
+      SELECT clock_timestamp() AT TIME ZONE 'UTC' AS now`;
+    if (!clock?.now) return fail("CONFLICT");
+    await tx.openCreditMaterializationRolloutBudget.update({
+      where: { id: current.id },
+      data: { state: "CLOSED", closedAt: current.closedAt ?? clock.now, releasedAt: clock.now },
+    });
+    const fresh = await tx.openCreditMaterializationRolloutBudget.create({
+      data: { companyId, integrationId, providerScope, maxAdmitted: 1,
+        expiresAt: new Date(clock.now.getTime() + 15 * 60 * 1000) },
+      select: { id: true },
+    });
+    validateWorker(fresh.id);
+    return fresh.id;
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 500, timeout: 2000 });
   const queue = (deps.queue ?? createOpenCreditMaterializationQueue)(db, Math.random, rolloutId, async (tx, binding) => {
     if (binding.companyId !== companyId || binding.integrationId !== integrationId || binding.providerScope !== providerScope) throw new RolloutClaimDenied();
