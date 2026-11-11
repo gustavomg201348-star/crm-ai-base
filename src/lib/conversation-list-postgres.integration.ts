@@ -39,6 +39,7 @@ async function fixture(size = 250) {
       await db.tag.deleteMany({ where: { companyId: company.id } });
       await db.conversation.deleteMany({ where: { contact: { companyId: company.id } } });
       await db.contact.deleteMany({ where: { companyId: company.id } });
+      await db.channel.deleteMany({ where: { companyId: company.id } });
       await db.user.deleteMany({ where: { companyId: company.id } });
       await db.company.delete({ where: { id: company.id } });
     } };
