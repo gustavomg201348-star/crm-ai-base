@@ -6,13 +6,14 @@ import { readFileSync } from "node:fs";
 import type { SessionUser } from "./auth";
 let service: typeof import("./opencredit-materialization-configuration.service");
 let boundary: typeof import("./opencredit-materialization-configuration-handler");
+let pilotService: typeof import("./opencredit-materialization-single-admission.service");
 let requireAdmin: typeof import("./permissions").requirePlatformAdmin;
 const old = process.env.PLATFORM_COMPANY_ID;
 before(() => {
   process.env.PLATFORM_COMPANY_ID = "platform";
   const loader = Module as typeof Module & { _load(s: string, ...args: unknown[]): unknown }, original = loader._load;
   loader._load = (s, ...args) => s === "server-only" ? {} : original.call(loader, s, ...args);
-  try { const require = createRequire(import.meta.url); service = require("./opencredit-materialization-configuration.service"); boundary = require("./opencredit-materialization-configuration-handler"); requireAdmin = require("./permissions").requirePlatformAdmin; }
+  try { const require = createRequire(import.meta.url); service = require("./opencredit-materialization-configuration.service"); boundary = require("./opencredit-materialization-configuration-handler"); requireAdmin = require("./permissions").requirePlatformAdmin; pilotService = require("./opencredit-materialization-single-admission.service"); }
   finally { loader._load = original; }
 });
 after(() => { if (old === undefined) delete process.env.PLATFORM_COMPANY_ID; else process.env.PLATFORM_COMPANY_ID = old; });
@@ -21,7 +22,7 @@ const read = { action: "READ", companyId: "company", integrationId: "integration
 const change = { ...read, action: "SET", materializationEnabled: true, expectedUpdatedAt: "2026-01-01T00:00:00.000Z" };
 const scope = "synthetic-scope" as Parameters<typeof service.setMaterializationConfiguration>[1]["providerScope"];
 const state = { ok: true as const, companyId: "company", integrationId: "integration", enabled: false, paused: false,
-  passiveInboundEnabled: true, materializationEnabled: false, interlockReady: false, bindingReserved: false, updatedAt: change.expectedUpdatedAt,
+  passiveInboundEnabled: true, materializationEnabled: false, interlockReady: false, bindingReserved: false, autoStartOperational: false, updatedAt: change.expectedUpdatedAt,
   queue: { claimableNow: 0, counts: { PENDING: 0, RETRY: 0, NEEDS_REVIEW: 0 }, complete: true } };
 function req(body = JSON.stringify(read), headers: Record<string, string> = {}, url = "https://crm.example.invalid/api/admin/integrations/opencredit/materialization/configuration") {
   return new NextRequest(url, { method: "POST", headers: { origin: "https://crm.example.invalid", "content-type": "application/json", ...headers }, body });
@@ -84,6 +85,74 @@ test("an unrecognized typed error cannot disclose private text", async () => {
   const f = handler({ write: async () => { throw new service.MaterializationConfigurationError("PRIVATE_SENTINEL" as never); } });
   const r = await f.run(req(JSON.stringify(change))); assert.equal(r.status, 503); assert.deepEqual(await r.json(), { error: "UNAVAILABLE" });
 });
+
+test("single admission requires authenticated Platform Admin, same-origin and a closed JSON command", async () => {
+  const command = { ...read, action: "PILOT" };
+  let calls = 0;
+  const pilot: NonNullable<Parameters<typeof handler>[0]>["pilot"] = async input => {
+    calls++;
+    assert.deepEqual(input, { actor, companyId: read.companyId, integrationId: read.integrationId, providerScope: scope });
+    return { status: "NO_ELIGIBLE_JOB", outcome: null, bootstrapAttempted: false, bootstrapResult: null };
+  };
+  assert.equal((await handler({ pilot, getSession: async () => null }).run(req(JSON.stringify(command)))).status, 401);
+  assert.equal((await handler({ pilot, getSession: async () => ({ ...actor, role: "AGENT" }) }).run(req(JSON.stringify(command)))).status, 403);
+  const f = handler({ pilot });
+  assert.equal((await f.run(req(JSON.stringify(command), { origin: "https://wrong.invalid" }))).status, 403);
+  for (const value of [read, change, { ...command, jobId: "job" }, { ...command, rolloutId: "budget" }, { ...command, providerScope: "scope" }]) {
+    assert.equal((await f.run(req(JSON.stringify(value)))).status, 400);
+  }
+  assert.equal((await f.run(req(JSON.stringify(command), { authorization: "Bearer private" }))).status, 400);
+  assert.equal((await f.run(req(JSON.stringify(command), {}, "https://crm.example.invalid/path?x=1"))).status, 400);
+  assert.equal((await handler({ pilot, enforceLimits: async rules => {
+    assert.deepEqual(rules.map(r => r.category), ["opencredit-single-admission-actor", "opencredit-single-admission-binding"]);
+    return new Response(null, { status: 429 });
+  } }).run(req(JSON.stringify(command)))).status, 429);
+  assert.equal(calls, 0);
+  const response = await f.run(req(JSON.stringify(command)));
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.deepEqual(await response.json(), { status: "NO_ELIGIBLE_JOB", outcome: null, bootstrapAttempted: false, bootstrapResult: null });
+  assert.equal(calls, 1);
+  assert.deepEqual(f.counts(), [0, 0]);
+});
+
+for (const outcome of ["RETRY", "NEEDS_REVIEW", "EXPIRED", "COMPLETED", null, "throw"] as const) {
+  test("one claim and one process with sanitized result: " + outcome, async () => {
+    const tx = {
+      async $queryRaw(strings: TemplateStringsArray) {
+        const sql = strings.join("?");
+        if (sql.includes('FROM "User"')) return [actor];
+        if (sql.includes('FROM "OpenCreditIntegration"')) return [{ valid: true }];
+        if (sql.includes('FROM "OpenCreditMaterializationRolloutBudget"')) return [{ admittedCount: 0, ledgerCount: 0 }];
+        throw Error("unexpected query");
+      },
+      openCreditMaterializationRolloutBudget: { findMany: async () => [{ id: "private-rollout" }] },
+    };
+    const db = { $transaction: async (fn: (value: typeof tx) => unknown) => fn(tx) } as never;
+    const lease = { id: "private-job", leaseToken: "private-lease", rolloutId: "private-rollout", admissionAttempt: 1 };
+    let claims = 0, processed = 0, bootstraps = 0;
+    const result = await pilotService.runOpenCreditSingleAdmission(db, { actor, companyId: "company", integrationId: "integration", providerScope: scope }, {
+      env: {},
+      queue: ((_: unknown, _random: unknown, rolloutId: string) => ({
+        async claim(count: number) { claims++; assert.equal(count, 1); assert.equal(rolloutId, lease.rolloutId); return [lease]; },
+      })) as never,
+      materializer: () => ({
+        async process(value) {
+          processed++; assert.deepEqual(value, lease);
+          if (outcome === "throw") throw Error("private-error");
+          return outcome ? { id: lease.id, state: outcome } : null;
+        },
+      }),
+      async bootstrap(id) { bootstraps++; assert.equal(id, lease.id); return { status: "private-provider-detail" }; },
+    });
+    assert.deepEqual([claims, processed, bootstraps], [1, 1, outcome === "COMPLETED" ? 1 : 0]);
+    assert.deepEqual(result, {
+      status: outcome === null || outcome === "throw" ? "RESULT_UNCONFIRMED" : "PROCESSED",
+      outcome: outcome === "throw" ? null : outcome, bootstrapAttempted: outcome === "COMPLETED",
+      bootstrapResult: outcome === "COMPLETED" ? "UNKNOWN" : null,
+    });
+  });
+}
 test("configuration writer never creates jobs, claims, releases rollouts or reads secret columns", () => {
   const source = readFileSync("src/lib/opencredit-materialization-configuration.service.ts", "utf8");
   for (const forbidden of ["webhookSecret", "protectedEnvelope", "createClient(", "openCreditLeadMaterialization.create", "claim("]) {

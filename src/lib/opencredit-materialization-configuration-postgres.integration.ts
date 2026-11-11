@@ -14,6 +14,8 @@ const db = new PrismaClient({ log: [] }), other = new PrismaClient({ log: [] });
 let service: typeof import("./opencredit-materialization-configuration.service");
 let inbound: typeof import("./opencredit-passive-inbound-handler");
 let persistence: typeof import("./opencredit-passive-inbound.service");
+let pilot: typeof import("./opencredit-materialization-single-admission.service");
+let protectIdentity: typeof import("./opencredit-lead-materialization-payload").protectMaterializationIdentity;
 const oldPlatform = process.env.PLATFORM_COMPANY_ID, oldKey = process.env.QEVORA_DATA_ENCRYPTION_KEY_V1, oldFetch = globalThis.fetch;
 const encryption = { activeKeyId: "v1", keys: { v1: Buffer.alloc(32, 7) } }, secret = "PRIVATE_SYNTHETIC_WEBHOOK_SECRET";
 before(() => {
@@ -21,7 +23,14 @@ before(() => {
   process.env.QEVORA_DATA_ENCRYPTION_KEY_V1 = Buffer.alloc(32, 19).toString("base64");
   const loader = Module as typeof Module & { _load(s: string, ...args: unknown[]): unknown }, original = loader._load;
   loader._load = (s, ...args) => s === "server-only" ? {} : original.call(loader, s, ...args);
-  try { const require = createRequire(import.meta.url); service = require("./opencredit-materialization-configuration.service"); inbound = require("./opencredit-passive-inbound-handler"); persistence = require("./opencredit-passive-inbound.service"); }
+  try {
+    const require = createRequire(import.meta.url);
+    service = require("./opencredit-materialization-configuration.service");
+    inbound = require("./opencredit-passive-inbound-handler");
+    persistence = require("./opencredit-passive-inbound.service");
+    pilot = require("./opencredit-materialization-single-admission.service");
+    protectIdentity = require("./opencredit-lead-materialization-payload").protectMaterializationIdentity;
+  }
   finally { loader._load = original; }
 });
 after(async () => {
@@ -61,15 +70,97 @@ async function fixture() {
   return { company, user, actor, scope, integration, binding, get, set, input, send,
     async cleanup() {
       const where = { companyId: company.id };
+      await db.openCreditMaterializationRolloutAdmission.deleteMany({ where });
       await db.openCreditLeadMaterialization.deleteMany({ where }); await db.openCreditInboundEvent.deleteMany({ where });
       await db.openCreditMaterializationRolloutBudget.deleteMany({ where }); await db.openCreditWhatsappConfig.deleteMany({ where });
       await db.openCreditIntegration.deleteMany({ where });
+      await db.conversation.deleteMany({ where: { contact: where } });
+      await db.contact.deleteMany({ where });
       await db.channel.deleteMany({ where }); await db.user.deleteMany({ where }); await db.company.delete({ where: { id: company.id } });
     } };
 }
 type F = Awaited<ReturnType<typeof fixture>>;
 const pg = (name: string, run: (f: F) => Promise<void>) => test(name, async () => { const f = await fixture(); try { await run(f); } finally { await f.cleanup(); } });
 const code = (value: unknown) => (value as { code?: string }).code;
+
+const quietPilot = { env: {}, bootstrap: async () => { throw Error("UNEXPECTED_BOOTSTRAP"); } };
+const target = (f: F) => ({ ...f.binding, actor: f.actor });
+const startBudget = (f: F, maxAdmitted = 1, data = {}) => db.openCreditMaterializationRolloutBudget.create({
+  data: { ...f.binding, maxAdmitted, expiresAt: new Date(Date.now() + 60000), ...data },
+});
+async function enablePilot(f: F) {
+  await f.set(true);
+  await db.company.update({ where: { id: f.company.id }, data: { aiMode: "OFF" } });
+}
+pg("single admission fails closed on missing, closed, or expired reservation", async f => {
+  await enablePilot(f);
+  await assert.rejects(pilot.runOpenCreditSingleAdmission(db, target(f), quietPilot), e => code(e) === "CONFLICT");
+  const budget = await startBudget(f, 1, { state: "CLOSED", closedAt: new Date() });
+  await assert.rejects(pilot.runOpenCreditSingleAdmission(db, target(f), quietPilot), e => code(e) === "CONFLICT");
+  await db.openCreditMaterializationRolloutBudget.update({ where: { id: budget.id },
+    data: { state: "ACTIVE", closedAt: null, createdAt: new Date(Date.now() - 120000), expiresAt: new Date(Date.now() - 60000) } });
+  await assert.rejects(pilot.runOpenCreditSingleAdmission(db, target(f), quietPilot), e => code(e) === "CONFLICT");
+  assert.equal(await db.openCreditMaterializationRolloutAdmission.count({ where: f.binding }), 0);
+});
+pg("single admission checks persisted Platform Admin, AutoStart, AI OFF and worker mode", async f => {
+  await enablePilot(f);
+  const budget = await startBudget(f);
+  const run = () => pilot.runOpenCreditSingleAdmission(db, target(f), quietPilot);
+  await assert.rejects(pilot.runOpenCreditSingleAdmission(db, target(f), { ...quietPilot, env: {
+    OPENCREDIT_MATERIALIZATION_WORKER_ENABLED: "true", OPENCREDIT_MATERIALIZATION_WORKER_MODE: "NORMAL",
+  } }), e => code(e) === "GATES_INVALID");
+  await assert.rejects(pilot.runOpenCreditSingleAdmission(db, target(f), { ...quietPilot, env: {
+    OPENCREDIT_MATERIALIZATION_WORKER_ENABLED: "true", OPENCREDIT_MATERIALIZATION_WORKER_MODE: "ROLLOUT",
+    OPENCREDIT_MATERIALIZATION_WORKER_ROLLOUT_ID: budget.id,
+  } }), e => code(e) === "GATES_INVALID");
+  await assert.rejects(pilot.runOpenCreditSingleAdmission(db, { ...target(f), providerScope: "wrong-scope" }, quietPilot),
+    e => code(e) === "GATES_INVALID");
+  await db.company.update({ where: { id: f.company.id }, data: { aiMode: "AUTO" } });
+  await assert.rejects(run(), e => code(e) === "GATES_INVALID");
+  await db.company.update({ where: { id: f.company.id }, data: { aiMode: "OFF" } });
+  await db.openCreditWhatsappConfig.update({ where: { integrationId: f.integration.id }, data: { autoStartEnabled: false } });
+  await assert.rejects(run(), e => code(e) === "GATES_INVALID");
+  await db.user.update({ where: { id: f.actor.id }, data: { role: "AGENT" } });
+  await assert.rejects(run(), e => code(e) === "NOT_AUTHORIZED");
+});
+pg("single admission excludes old jobs and preserves a closed reservation after real completion", async f => {
+  await enablePilot(f);
+  const window = await db.openCreditWhatsappConfig.findUniqueOrThrow({ where: { integrationId: f.integration.id }, select: { updatedAt: true } });
+  async function createJob(externalLeadId: string, createdAt: Date) {
+    const binding = { ...f.binding, externalLeadId };
+    const eventId = externalLeadId + ":synthetic-partner";
+    const event = await db.openCreditInboundEvent.create({ data: { ...binding, eventId, eventType: "lead.assigned",
+      provenanceKind: "OPENCREDIT_HMAC_SHA256_VERIFIED", provenanceVersion: 1 } });
+    await db.openCreditLeadMaterialization.create({ data: { ...binding, inboundEventId: event.id, state: "PENDING",
+      createdAt, expiresAt: new Date(Date.now() + 60000),
+      protectedEnvelope: protectIdentity({ ...binding, eventId }, { cpf: null, phone: "5511987654321", name: null, email: null }) } });
+  }
+  await createJob("old-pilot", new Date(window.updatedAt.getTime() - 60000));
+  const budget = await startBudget(f);
+  let bootstraps = 0;
+  const deps = { ...quietPilot, bootstrap: async (jobId: string) => {
+    bootstraps++;
+    assert.equal((await db.openCreditLeadMaterialization.findUniqueOrThrow({ where: { id: jobId } })).state, "COMPLETED");
+    return { status: "SENT" };
+  } };
+  assert.equal((await pilot.runOpenCreditSingleAdmission(db, target(f), deps)).status, "NO_ELIGIBLE_JOB");
+  await createJob("new-pilot", window.updatedAt);
+  await createJob("neighbor-pilot", window.updatedAt);
+  const results = await Promise.allSettled([pilot.runOpenCreditSingleAdmission(db, target(f), deps),
+    pilot.runOpenCreditSingleAdmission(other, target(f), deps)]);
+  const completed = results.filter(r => r.status === "fulfilled" && r.value.outcome === "COMPLETED");
+  assert.equal(completed.length, 1, JSON.stringify(results));
+  assert.deepEqual(completed[0], { status: "fulfilled", value: { status: "PROCESSED", outcome: "COMPLETED", bootstrapAttempted: true, bootstrapResult: "SENT" } });
+  assert.equal(bootstraps, 1);
+  const final = await db.openCreditMaterializationRolloutBudget.findUniqueOrThrow({ where: { id: budget.id }, include: { admissions: true } });
+  assert.equal(final.state, "CLOSED"); assert.equal(final.releasedAt, null);
+  assert.equal(final.admittedCount, 1); assert.equal(final.admissions.length, 1); assert.equal(final.admissions[0].reconciledAt, null);
+  assert.equal(await db.openCreditLeadMaterialization.count({ where: { ...f.binding, state: "PENDING", attempts: 0 } }), 2);
+  assert.equal(await db.openCreditLeadMaterialization.count({ where: { ...f.binding, externalLeadId: "old-pilot", state: "PENDING", attempts: 0 } }), 1);
+  assert.equal(await db.message.count({ where: { conversation: { contact: { companyId: f.company.id } } } }), 0);
+  assert.equal((await db.company.findUniqueOrThrow({ where: { id: f.company.id } })).aiMode, "OFF");
+  await assert.rejects(pilot.runOpenCreditSingleAdmission(db, target(f), deps), e => code(e) === "CONFLICT");
+});
 
 pg("enable/disable is one-column, idempotent, auditable and never creates domain data", async f => {
   const before = await f.get(), logs: unknown[][] = [], original = console.info;
