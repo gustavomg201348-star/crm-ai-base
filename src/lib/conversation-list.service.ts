@@ -2,6 +2,7 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { NextResponse, type NextRequest } from "next/server";
 import type { SessionUser } from "./auth";
+import { OPEN_CREDIT_CONVERSATION_CHANNEL } from "./conversation-channel.service";
 import { conversationVisibilityWhere, isAdmin } from "./permissions";
 import { conversationListSelect, mapConversationListItem } from "./conversations";
 
@@ -51,12 +52,14 @@ export function conversationListQuery(session: SessionUser, params: URLSearchPar
         : isAdmin(session) ? Prisma.sql`1=1` : Prisma.sql`(c."agentId"=${session.id} OR c."agentId" IS NULL)`;
   const baseWhere: Prisma.ConversationWhereInput = {
     ...assignmentWhere,
+    channel: { not: OPEN_CREDIT_CONVERSATION_CHANNEL },
     contact: { companyId: session.companyId, archivedAt: null,
       ...(search ? { OR: [{ name: { contains: search } }, { phone: { contains: search } }, { cpf: { contains: search } }] } : {}) },
     ...(tagIds.length ? { tags: { some: { tagId: { in: tagIds }, companyId: session.companyId,
       tag: { companyId: session.companyId, isActive: true } } } } : {}),
   };
-  const baseSql = Prisma.sql`p."companyId"=${session.companyId} AND p."archivedAt" IS NULL AND ${assignmentSql}
+  const baseSql = Prisma.sql`p."companyId"=${session.companyId} AND p."archivedAt" IS NULL
+    AND c."channel" <> ${OPEN_CREDIT_CONVERSATION_CHANNEL} AND ${assignmentSql}
     ${search ? Prisma.sql`AND (p."name" LIKE ${"%" + search + "%"} OR p."phone" LIKE ${"%" + search + "%"} OR p."cpf" LIKE ${"%" + search + "%"})` : Prisma.empty}
     ${tagIds.length ? Prisma.sql`AND EXISTS (SELECT 1 FROM "ConversationTag" ct JOIN "Tag" t ON t."id"=ct."tagId"
       WHERE ct."conversationId"=c."id" AND ct."companyId"=${session.companyId} AND t."companyId"=${session.companyId}
