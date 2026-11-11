@@ -72,21 +72,37 @@ export async function runOpenCreditSingleAdmission(db: Db, input: Input, deps: D
       return current.id;
     }
 
-    // A stale empty reservation may be rotated atomically for this one-shot pilot.
-    // Never touch a rollout that admitted anything or a binding with an active lease.
-    const admissionCount = await tx.openCreditMaterializationRolloutAdmission.count({ where: { rolloutId: current.id } });
-    if (current.admittedCount !== 0 || admissionCount !== 0) return fail("CONFLICT");
+    // A stale reservation may be rotated atomically only when every prior admission
+    // is fully settled. RETRY/PROCESSING or any lease marker stays fail-closed so this
+    // one-shot pilot can never resurrect partially processed work.
+    const admissions = await tx.openCreditMaterializationRolloutAdmission.findMany({
+      where: { rolloutId: current.id },
+      select: {
+        reconciledAt: true, admissionAttempt: true,
+        job: { select: { state: true, attempts: true, leaseToken: true, leaseUntil: true } },
+      },
+    });
+    if (current.admittedCount !== admissions.length) return fail("CONFLICT");
     const activeLeases = await tx.openCreditLeadMaterialization.count({ where: {
       companyId, integrationId, providerScope,
       OR: [{ state: "PROCESSING" }, { leaseToken: { not: null } }, { leaseUntil: { not: null } }],
     } });
-    if (activeLeases !== 0) return fail("CONFLICT");
+    if (activeLeases !== 0 || admissions.some(a =>
+      a.job.leaseToken || a.job.leaseUntil || a.job.attempts !== a.admissionAttempt
+      || !["COMPLETED", "NEEDS_REVIEW", "EXPIRED"].includes(a.job.state))) return fail("CONFLICT");
     const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`
       SELECT clock_timestamp() AT TIME ZONE 'UTC' AS now`;
     if (!clock?.now) return fail("CONFLICT");
+    if (current.state !== "CLOSED") {
+      await tx.openCreditMaterializationRolloutBudget.update({
+        where: { id: current.id }, data: { state: "CLOSED", closedAt: current.closedAt ?? clock.now },
+      });
+    }
+    await tx.openCreditMaterializationRolloutAdmission.updateMany({
+      where: { rolloutId: current.id, reconciledAt: null }, data: { reconciledAt: clock.now },
+    });
     await tx.openCreditMaterializationRolloutBudget.update({
-      where: { id: current.id },
-      data: { state: "CLOSED", closedAt: current.closedAt ?? clock.now, releasedAt: clock.now },
+      where: { id: current.id }, data: { releasedAt: clock.now },
     });
     const fresh = await tx.openCreditMaterializationRolloutBudget.create({
       data: { companyId, integrationId, providerScope, maxAdmitted: 1,
