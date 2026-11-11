@@ -153,6 +153,35 @@ for (const outcome of ["RETRY", "NEEDS_REVIEW", "EXPIRED", "COMPLETED", null, "t
     });
   });
 }
+test("single admission performs one bounded second scan only when the first scan admits nothing", async () => {
+  const tx = {
+    async $queryRaw(strings: TemplateStringsArray) {
+      const sql = strings.join("?");
+      if (sql.includes('FROM "User"')) return [actor];
+      if (sql.includes('FROM "OpenCreditIntegration"')) return [{ valid: true }];
+      if (sql.includes('FROM "OpenCreditMaterializationRolloutBudget"')) return [{ admittedCount: 0, ledgerCount: 0 }];
+      throw Error("unexpected query");
+    },
+    openCreditMaterializationRolloutBudget: { findMany: async () => [{ id: "private-rollout" }] },
+  };
+  const db = { $transaction: async (fn: (value: typeof tx) => unknown) => fn(tx) } as never;
+  const lease = { id: "private-job", leaseToken: "private-lease", rolloutId: "private-rollout", admissionAttempt: 1 };
+  let claims = 0, processed = 0, bootstraps = 0;
+  const result = await pilotService.runOpenCreditSingleAdmission(db, { actor, companyId: "company", integrationId: "integration", providerScope: scope }, {
+    env: {},
+    queue: (() => ({
+      async claim(count: number) {
+        claims++; assert.equal(count, 1);
+        return claims === 1 ? [] : [lease];
+      },
+    })) as never,
+    materializer: () => ({ async process(value) { processed++; assert.deepEqual(value, lease); return { id: lease.id, state: "COMPLETED" as const }; } }),
+    async bootstrap(id) { bootstraps++; assert.equal(id, lease.id); return { status: "SENT" }; },
+  });
+  assert.deepEqual([claims, processed, bootstraps], [2, 1, 1]);
+  assert.deepEqual(result, { status: "PROCESSED", outcome: "COMPLETED", bootstrapAttempted: true, bootstrapResult: "SENT" });
+});
+
 test("configuration writer never creates jobs, claims, releases rollouts or reads secret columns", () => {
   const source = readFileSync("src/lib/opencredit-materialization-configuration.service.ts", "utf8");
   for (const forbidden of ["webhookSecret", "protectedEnvelope", "createClient(", "openCreditLeadMaterialization.create", "claim("]) {
