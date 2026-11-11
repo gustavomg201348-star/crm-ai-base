@@ -206,7 +206,13 @@ pg("single admission excludes old jobs and preserves a closed reservation after 
   assert.equal((await db.company.findUniqueOrThrow({ where: { id: f.company.id } })).aiMode, "OFF");
 
   const second = await pilot.runOpenCreditSingleAdmission(db, target(f), deps);
-  assert.equal(second.status, "NO_ELIGIBLE_JOB");
+  assert.equal(second.status, "PROCESSED"); assert.equal(second.outcome, "COMPLETED");
+  assert.equal(bootstraps, 2);
+  assert.equal(await db.openCreditLeadMaterialization.count({ where: { ...f.binding, state: "COMPLETED" } }), 2);
+  assert.equal(await db.openCreditLeadMaterialization.count({ where: { ...f.binding, externalLeadId: "old-pilot", state: "PENDING", attempts: 0 } }), 1);
+
+  const third = await pilot.runOpenCreditSingleAdmission(db, target(f), deps);
+  assert.equal(third.status, "NO_ELIGIBLE_JOB");
   const rotated = await db.openCreditMaterializationRolloutBudget.findMany({ where: { ...f.binding, releasedAt: null } });
   assert.equal(rotated.length, 1); assert.equal(rotated[0].state, "ACTIVE");
   assert.equal(rotated[0].maxAdmitted, 1); assert.equal(rotated[0].admittedCount, 0);
