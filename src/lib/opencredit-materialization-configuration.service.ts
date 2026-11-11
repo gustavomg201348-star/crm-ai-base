@@ -64,7 +64,7 @@ export async function readMaterializationConfiguration(db: Db, input: Input) {
     WHERE a."companyId"=${input.command.companyId} AND a."integrationId"=${input.command.integrationId}
       AND a."providerScope"=${input.providerScope}
     ORDER BY a."admittedAt" DESC LIMIT 1`
-  ));
+  );
   return { ok: true as const, companyId: result.companyId, integrationId: i.integrationId,
     enabled: i.enabled, paused: i.paused, passiveInboundEnabled: i.passiveInboundEnabled,
     materializationEnabled: i.materializationEnabled, interlockReady: i.interlockReady,
