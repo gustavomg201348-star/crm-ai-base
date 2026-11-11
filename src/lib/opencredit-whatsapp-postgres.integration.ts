@@ -173,6 +173,13 @@ async function fixture(providerScope = "synthetic-scope") {
     phoneNumberId: String(Date.now()) + String(Math.floor(Math.random() * 100000)), wabaId: randomUUID(), appSecret: secret, accessToken: "synthetic-token" } });
   const template = await db.metaTemplate.create({ data: { companyId: company.id, wabaId: channel.wabaId!, name: "synthetic_welcome", language: "pt_BR",
     metaStatus: "APPROVED", operationalStatus: "READY", components: JSON.stringify([{ type: "BODY", text: "Synthetic welcome" }]) } });
+  await db.openCreditWhatsappConfig.create({ data: {
+    integrationId: integration.id, companyId: company.id, providerScope: integration.providerScope!,
+    configuredByUserId: actor.id, autoStartEnabled: true,
+    defaultWhatsappChannelId: channel.id,
+    initialTemplateName: template.name, initialTemplateLanguage: template.language,
+    updatedAt: new Date(Date.now() - 60_000),
+  } });
   const binding = { companyId: company.id, integrationId: integration.id, providerScope: integration.providerScope!, externalLeadId: randomUUID(), eventId: randomUUID() };
   const { eventId, ...origin } = binding;
   const inbound = await db.openCreditInboundEvent.create({ data: { ...origin, eventId, eventType: "lead.assigned", provenanceKind: "OPENCREDIT_HMAC_SHA256_VERIFIED", provenanceVersion: 1 } });
@@ -182,6 +189,7 @@ async function fixture(providerScope = "synthetic-scope") {
   const lease = await queue.claimPilotJob({ id: job.id, companyId: company.id, integrationId: integration.id, providerScope: integration.providerScope! });
   assert(lease); assert.equal((await core.createOpenCreditDomainMaterializer(db).process(lease))?.state, "COMPLETED");
   const completed = await db.openCreditLeadMaterialization.findUniqueOrThrow({ where: { id: job.id } });
+  await db.openCreditWhatsappConfig.deleteMany({ where: { integrationId: integration.id } });
   const contact = await db.contact.findUniqueOrThrow({ where: { id: completed.contactId! } });
   const source = await db.conversation.findUniqueOrThrow({ where: { id: completed.conversationId! } });
   const credential = (c: { accessToken: string | null }) => { if (!c.accessToken) throw Error("SYNTHETIC_NO_CREDENTIAL"); };
@@ -224,6 +232,17 @@ material("missing configuration is OFF; no handoff, Meta conversation or send", 
   assert.equal((await f.config.read(f.company.id, f.integration.id)).config.autoStartEnabled, false);
   assert.equal((await f.bootstrap.bootstrap(f.target)).status, "CONFIGURATION_MISSING");
   assert.equal(await db.openCreditWhatsappHandoff.count({ where: { companyId: f.company.id } }), 0); assert.equal(network.length, 0);
+});
+material("AutoStart operating marker is stable for same-state edits and moves on state change", async f => {
+  await f.setup();
+  const marker = new Date("2020-01-01T00:00:00.000Z");
+  await db.openCreditWhatsappConfig.update({ where: { integrationId: f.integration.id }, data: { updatedAt: marker } });
+  await f.config.save(f.session, f.integration.id, { ...f.input, expectedRevision: 1 });
+  const unchanged = await db.openCreditWhatsappConfig.findUniqueOrThrow({ where: { integrationId: f.integration.id } });
+  assert.equal(unchanged.updatedAt.getTime(), marker.getTime());
+  await f.config.save(f.session, f.integration.id, { ...f.input, autoStartEnabled: false, expectedRevision: 2 });
+  const toggled = await db.openCreditWhatsappConfig.findUniqueOrThrow({ where: { integrationId: f.integration.id } });
+  assert(toggled.updatedAt.getTime() > marker.getTime());
 });
 material("real template sender, durable permit, retry and restart send exactly once; provenance unchanged", async f => {
   await f.setup(); assert.equal((await f.bootstrap.bootstrap(f.target)).status, "SENT");

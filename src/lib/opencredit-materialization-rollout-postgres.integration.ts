@@ -54,6 +54,16 @@ async function fixture() {
   } });
   const user = await db.user.create({ data: { companyId: company.id, email: randomUUID() + "@example.invalid",
     name: "Synthetic", role: "ADMIN", passwordHash: "synthetic" } });
+  const whatsappChannel = await db.channel.create({ data: {
+    companyId: company.id, name: "Rollout AutoStart channel", type: "whatsapp", provider: "meta", status: "ACTIVE",
+  } });
+  await db.openCreditWhatsappConfig.create({ data: {
+    integrationId: integration.id, companyId: company.id, providerScope,
+    configuredByUserId: user.id, autoStartEnabled: true,
+    defaultWhatsappChannelId: whatsappChannel.id,
+    initialTemplateName: "synthetic_template", initialTemplateLanguage: "pt_BR",
+    updatedAt: new Date(Date.now() - 60_000),
+  } });
   // Match the configured platform identity without colliding across fixtures.
   const old = process.env.PLATFORM_COMPANY_ID; process.env.PLATFORM_COMPANY_ID = company.id;
   const actor: SessionUser = { ...user, role: "ADMIN" };
@@ -97,6 +107,7 @@ async function fixture() {
       await db.openCreditMaterializationRolloutBudget.deleteMany({ where });
       await db.openCreditLeadMaterialization.deleteMany({ where });
       await db.openCreditInboundEvent.deleteMany({ where });
+      await db.openCreditWhatsappConfig.deleteMany({ where });
       await db.conversation.deleteMany({ where: { contact: where } });
       await db.channel.deleteMany({ where }); await db.contact.deleteMany({ where });
       await db.openCreditIntegration.deleteMany({ where }); await db.user.deleteMany({ where });

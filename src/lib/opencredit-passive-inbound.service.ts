@@ -14,7 +14,11 @@ async function current(tx: Prisma.TransactionClient, b: PassiveBinding) {
   const rows = await tx.$queryRaw<Array<{ providerScope: string | null; webhookSecret: string; passiveInboundEnabled: boolean; materializationEnabled: boolean }>>`SELECT "providerScope", "webhookSecret", "passiveInboundEnabled", "materializationEnabled" FROM "OpenCreditIntegration" WHERE "id" = ${b.id} AND "companyId" = ${b.companyId} FOR SHARE`;
   const row = rows[0];
   if (rows.length !== 1 || row.passiveInboundEnabled !== true || row.providerScope !== b.providerScope || row.webhookSecret !== b.webhookSecret) throw new PassiveInboundError("UNAVAILABLE", 403);
-  return row.materializationEnabled === true;
+  const configs = await tx.$queryRaw<Array<{ autoStartEnabled: boolean }>>`
+    SELECT "autoStartEnabled" FROM "OpenCreditWhatsappConfig"
+    WHERE "integrationId" = ${b.id} AND "companyId" = ${b.companyId} AND "providerScope" = ${b.providerScope}
+    FOR SHARE`;
+  return row.materializationEnabled === true && configs.length === 1 && configs[0].autoStartEnabled === true;
 }
 
 function isUniqueTarget(target: unknown, name: string, fields: readonly string[]) {

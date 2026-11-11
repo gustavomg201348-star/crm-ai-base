@@ -75,11 +75,17 @@ export async function getOpenCreditMaterializationPreflight(db: Db, input: Input
         const total = await tx.openCreditLeadMaterialization.count({ where: baseWhere });
         counts.UNKNOWN = Math.max(0, total - known);
 
+        const operatingWindow = await tx.openCreditWhatsappConfig.findFirst({
+          where: { integrationId: integration.id, companyId: input.companyId, providerScope: input.providerScope },
+          select: { autoStartEnabled: true, updatedAt: true },
+        });
+        const operating = operatingWindow?.autoStartEnabled === true;
         const readyWhere: Prisma.OpenCreditLeadMaterializationWhereInput = {
           ...baseWhere,
           state: { in: ["PENDING", "RETRY"] },
           expiresAt: { gt: now },
           attempts: { lt: 10 },
+          createdAt: { gte: operating ? operatingWindow!.updatedAt : new Date("9999-12-31T23:59:59.999Z") },
           OR: [
             { availableAt: { lte: now } },
             { state: "PENDING", availableAt: null },
@@ -169,7 +175,7 @@ export async function getOpenCreditMaterializationPreflight(db: Db, input: Input
             readiness,
             pendingTotal: counts.PENDING,
             expiredOrIneligible: Math.max(0, counts.PENDING + counts.RETRY - readyIfEnabled),
-            claimableNow: !bindingReserved && !integration.enabled && !integration.paused && integration.materializationEnabled ? identityReady : 0,
+            claimableNow: operating && !bindingReserved && !integration.enabled && !integration.paused && integration.materializationEnabled ? identityReady : 0,
             staleProcessing,
             expiredActive,
             candidates: candidates.map(candidate => ({
