@@ -165,6 +165,7 @@ export async function getOpenCreditMaterializationPreflight(db: Db, input: Input
           passiveInboundEnabled: integration.passiveInboundEnabled,
           materializationEnabled: integration.materializationEnabled,
           interlockReady: !integration.enabled && integration.materializationEnabled,
+          autoStartOperational: operating,
           createdAt: integration.createdAt.toISOString(),
           updatedAt: integration.updatedAt.toISOString(),
           rollouts: { items: rollouts, total: budgetTotal, complete: budgets.length === budgetTotal, bindingReserved },

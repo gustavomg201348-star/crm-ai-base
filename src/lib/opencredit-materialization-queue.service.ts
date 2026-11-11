@@ -15,6 +15,7 @@ type RetryError = typeof retryErrors[number];
 export type MaterializationReviewReason = typeof reviewReasons[number];
 type QueueDb = Pick<PrismaClient, "$queryRaw" | "$transaction">;
 export type MaterializationLease = { id: string; leaseToken: string; rolloutId?: string; admissionAttempt?: number };
+export class RolloutClaimDenied extends Error {}
 type Lease = MaterializationLease;
 type ClaimedJob = Lease & { attempts: number; leaseUntil: Date };
 export type MaterializationPilotTarget = {
@@ -89,7 +90,8 @@ async function transitionLease(tx: Prisma.TransactionClient, lease: Lease, next:
 }
 
 export function createOpenCreditMaterializationQueue(db: QueueDb, random: () => number = Math.random,
-  rolloutId?: string) {
+  rolloutId?: string, authorizeRolloutClaim?: (tx: Prisma.TransactionClient, binding: MaterializationPilotTarget) => Promise<void>) {
+  if (authorizeRolloutClaim && rolloutId === undefined) throw new Error("ROLLOUT_REQUIRED");
   function retryTransition(attempts: number, error: RetryError): Transition {
     return attempts >= maxAttempts
       ? { state: "NEEDS_REVIEW", delayMs: 0, error, review: "RETRY_EXHAUSTED" }
@@ -136,6 +138,7 @@ export function createOpenCreditMaterializationQueue(db: QueueDb, random: () => 
             AND w."autoStartEnabled" AND ${job.createdAt} >= w."updatedAt"
           FOR SHARE OF i, w SKIP LOCKED`;
         if (!integration) return null;
+        if (authorizeRolloutClaim) await authorizeRolloutClaim(tx, target);
         // Readiness admits a lease, not a frozen Contact identity. Contact writers remain
         // free; the materializer revalidates identity and conflicts before domain writes.
         const readiness = await evaluateMaterializationReadiness(tx, job);
@@ -157,6 +160,7 @@ export function createOpenCreditMaterializationQueue(db: QueueDb, random: () => 
         return lease ?? null;
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 150, timeout: 2000 });
     } catch (error) {
+      if (authorizeRolloutClaim && error instanceof RolloutClaimDenied) throw error;
       if (error instanceof Prisma.PrismaClientKnownRequestError &&
           (error.code === "P2034" || error.code === "P2010" &&
             ["40001", "40P01"].includes(String(error.meta?.code)))) return null;

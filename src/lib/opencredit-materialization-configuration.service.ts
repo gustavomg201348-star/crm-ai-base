@@ -41,7 +41,7 @@ export async function readMaterializationConfiguration(db: Db, input: Input) {
   return { ok: true as const, companyId: result.companyId, integrationId: i.integrationId,
     enabled: i.enabled, paused: i.paused, passiveInboundEnabled: i.passiveInboundEnabled,
     materializationEnabled: i.materializationEnabled, interlockReady: i.interlockReady,
-    bindingReserved: i.rollouts.bindingReserved, updatedAt: i.updatedAt,
+    bindingReserved: i.rollouts.bindingReserved, updatedAt: i.updatedAt, autoStartOperational: i.autoStartOperational,
     queue: { claimableNow: i.queue.claimableNow, counts: i.queue.counts, complete: i.queue.readiness.complete } };
 }
 
