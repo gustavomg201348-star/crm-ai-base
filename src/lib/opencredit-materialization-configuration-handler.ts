@@ -16,6 +16,7 @@ type Dependencies = {
   resolveScope?: typeof resolveConfiguredOpenCreditProviderScope;
   read?: typeof readMaterializationConfiguration; write?: typeof setMaterializationConfiguration;
   pilot?: (input: { actor: SessionUser; companyId: string; integrationId: string; providerScope: string }) => Promise<object>;
+  finalizer?: (input: { actor: SessionUser; companyId: string; integrationId: string; providerScope: string }) => Promise<object>;
 };
 const reply = (body: object, status = 200) => NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
 const status = { NOT_AUTHORIZED: 403, NOT_FOUND: 404, INVALID_REQUEST: 400, UNAVAILABLE: 503,
@@ -32,8 +33,9 @@ export function createMaterializationConfigurationHandler(deps: Dependencies) {
       let command;
       try {
         const body = await readOpenCreditAdminJson(request);
-        if (deps.pilot) {
-          if (!body || typeof body !== "object" || Array.isArray(body) || !("action" in body) || body.action !== "PILOT") {
+        if (deps.pilot || deps.finalizer) {
+          const expected = deps.pilot ? "PILOT" : "FINALIZE_PILOT";
+          if (!body || typeof body !== "object" || Array.isArray(body) || !("action" in body) || body.action !== expected) {
             return reply({ error: "INVALID_REQUEST" }, 400);
           }
           command = parseMaterializationConfiguration({ ...body, action: "READ" });
@@ -41,8 +43,8 @@ export function createMaterializationConfigurationHandler(deps: Dependencies) {
       } catch { return reply({ error: "INVALID_REQUEST" }, 400); }
       if (!command) return reply({ error: "INVALID_REQUEST" }, 400);
       const limited = await deps.enforceLimits([
-        { category: deps.pilot ? "opencredit-single-admission-actor" : "opencredit-materialization-config-actor", identifiers: [actor.companyId, actor.id], limit: deps.pilot ? 3 : 20, windowMs: 60000 },
-        { category: deps.pilot ? "opencredit-single-admission-binding" : "opencredit-materialization-config-binding", identifiers: [command.companyId, command.integrationId], limit: deps.pilot ? 3 : 10, windowMs: 60000 },
+        { category: deps.pilot ? "opencredit-single-admission-actor" : deps.finalizer ? "opencredit-finalize-pilot-actor" : "opencredit-materialization-config-actor", identifiers: [actor.companyId, actor.id], limit: deps.pilot || deps.finalizer ? 3 : 20, windowMs: 60000 },
+        { category: deps.pilot ? "opencredit-single-admission-binding" : deps.finalizer ? "opencredit-finalize-pilot-binding" : "opencredit-materialization-config-binding", identifiers: [command.companyId, command.integrationId], limit: deps.pilot || deps.finalizer ? 3 : 10, windowMs: 60000 },
       ]);
       if (limited) {
         const r = reply({ error: limited.status === 429 ? "RATE_LIMITED" : "UNAVAILABLE" }, limited.status === 429 ? 429 : 503);
@@ -51,6 +53,7 @@ export function createMaterializationConfigurationHandler(deps: Dependencies) {
       }
       const providerScope = (deps.resolveScope ?? resolveConfiguredOpenCreditProviderScope)();
       if (deps.pilot) return reply(await deps.pilot({ actor, companyId: command.companyId, integrationId: command.integrationId, providerScope }));
+      if (deps.finalizer) return reply(await deps.finalizer({ actor, companyId: command.companyId, integrationId: command.integrationId, providerScope }));
       return reply(await (command.action === "READ" ? deps.read ?? readMaterializationConfiguration : deps.write ?? setMaterializationConfiguration)(deps.db, { actor, providerScope, command }));
     } catch (error) {
       if (error instanceof MaterializationConfigurationError && Object.hasOwn(status, error.code)) return reply({ error: error.code }, status[error.code]);
