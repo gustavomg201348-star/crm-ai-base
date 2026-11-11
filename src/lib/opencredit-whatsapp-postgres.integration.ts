@@ -233,6 +233,17 @@ material("missing configuration is OFF; no handoff, Meta conversation or send", 
   assert.equal((await f.bootstrap.bootstrap(f.target)).status, "CONFIGURATION_MISSING");
   assert.equal(await db.openCreditWhatsappHandoff.count({ where: { companyId: f.company.id } }), 0); assert.equal(network.length, 0);
 });
+material("AutoStart operating marker is stable for same-state edits and moves on state change", async f => {
+  await f.setup();
+  const marker = new Date("2020-01-01T00:00:00.000Z");
+  await db.openCreditWhatsappConfig.update({ where: { integrationId: f.integration.id }, data: { updatedAt: marker } });
+  await f.config.save(f.session, f.integration.id, { ...f.input, expectedRevision: 1 });
+  const unchanged = await db.openCreditWhatsappConfig.findUniqueOrThrow({ where: { integrationId: f.integration.id } });
+  assert.equal(unchanged.updatedAt.getTime(), marker.getTime());
+  await f.config.save(f.session, f.integration.id, { ...f.input, autoStartEnabled: false, expectedRevision: 2 });
+  const toggled = await db.openCreditWhatsappConfig.findUniqueOrThrow({ where: { integrationId: f.integration.id } });
+  assert(toggled.updatedAt.getTime() > marker.getTime());
+});
 material("real template sender, durable permit, retry and restart send exactly once; provenance unchanged", async f => {
   await f.setup(); assert.equal((await f.bootstrap.bootstrap(f.target)).status, "SENT");
   assert.equal((await createOpenCreditWhatsappBootstrap({ ...f.deps, db: independent }).bootstrap(f.target)).status, "ALREADY_STARTED");
