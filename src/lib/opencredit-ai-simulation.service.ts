@@ -20,6 +20,11 @@ type Options = { classify?: typeof classifyCltCustomerIntent; resolve?: typeof r
 export type CltAiResponse = { reply: string; handoff?: boolean; handoffAfterReply?: boolean; onAuthorized?(): void; validateFinancial?(tx: Prisma.TransactionClient): Promise<void> };
 const settings = { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2000, timeout: 5000 } as const;
 const human = "Para realizar a simulação, precisamos que um atendente valide sua autorização e o cadastro. Não vou consultar crédito sem essa validação.";
+const intakeCpfPrompt = "Para continuar, me informe seu CPF, por favor. Depois disso, um atendente dará sequência ao seu atendimento.";
+const intakeHandoffReply = "Perfeito! Já recebi as informações iniciais. Vou encaminhar seu atendimento para um especialista continuar por aqui.";
+function intakeOnlyMode() {
+  return process.env.OPENCREDIT_CLT_AI_MODE === "INTAKE_ONLY";
+}
 export async function runOpenCreditAiSimulation(db: PrismaClient, ctx: CltAiInboundContext, options: Options = {}): Promise<CltAiResponse | null> {
   const log = (stage: Telemetry["stage"], state: Telemetry["state"]) => { try { const result = options.log?.({ event: "clt_ai_simulation", stage, state });
     if (result && typeof (result as Promise<unknown>).then === "function") void Promise.resolve(result).catch(() => {}); } catch {} };
@@ -52,6 +57,18 @@ export async function runOpenCreditAiSimulation(db: PrismaClient, ctx: CltAiInbo
     conversationOpen: true, contactCpf: c.contact.cpf, commercialAccess: !!access, remoteIdentity: !!identity,
     simulationAuthorization: !!auth, explicitBankConfigured: !!bankId, existingOperation: prior ? "COMPLETED" : "NONE", persistedOfferFactsReady: !!prior?.protectedFacts });
   log("GATE", decision.nextAction);
+  if (intakeOnlyMode()) {
+    if (decision.nextAction === "TRANSFER_HUMAN") {
+      log("CANCELLATION", intent.intent);
+      return { reply: "", handoff: true };
+    }
+    const priorCpfPrompt = !c.contact.cpf && await db.message.findFirst({
+      where: { conversationId: c.id, direction: "outbound", senderType: "ai", body: intakeCpfPrompt },
+      orderBy: { createdAt: "desc" }, select: { id: true }
+    });
+    if (!c.contact.cpf && !priorCpfPrompt) return { reply: intakeCpfPrompt };
+    return { reply: intakeHandoffReply, handoffAfterReply: true };
+  }
   if (decision.nextAction === "STOP" || decision.nextAction === "TRANSFER_HUMAN") { log("CANCELLATION",intent.intent); return { reply: "", handoff: true }; }
   if (decision.nextAction === "ASK_CPF") return { reply: "Consigo verificar para você. Me informe seu CPF, por favor. Um atendente fará a validação do cadastro." };
   if (decision.nextAction === "NEED_HUMAN_AUTHORIZATION") return { reply: human, handoffAfterReply: true };
