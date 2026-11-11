@@ -63,6 +63,20 @@ async function fixture() {
     webhookSecret: "synthetic", passiveInboundEnabled: true, materializationEnabled: true
   } });
   const integration = await makeIntegration();
+  const operator = await db.user.create({ data: {
+    companyId, name: "Materializer operator", role: "ADMIN",
+    email: randomUUID() + "@example.invalid", passwordHash: "synthetic"
+  } });
+  const whatsappChannel = await db.channel.create({ data: {
+    companyId, name: "Materializer AutoStart channel", type: "whatsapp", provider: "meta", status: "ACTIVE"
+  } });
+  await db.openCreditWhatsappConfig.create({ data: {
+    integrationId: integration.id, companyId, providerScope: integration.providerScope!,
+    configuredByUserId: operator.id, autoStartEnabled: true,
+    defaultWhatsappChannelId: whatsappChannel.id,
+    initialTemplateName: "synthetic_template", initialTemplateLanguage: "pt_BR",
+    updatedAt: new Date(Date.now() - 60_000)
+  } });
   const where = { companyId };
   const conversationWhere = { contact: where };
   const process = (lease: MaterializationLease) => core.createOpenCreditDomainMaterializer(db).process(lease);
@@ -98,12 +112,13 @@ async function fixture() {
     },
     get: (id: string) => db.openCreditLeadMaterialization.findUniqueOrThrow({ where: { id } }),
     counts: () => Promise.all([
-      db.contact.count({ where }), db.channel.count({ where }), db.conversation.count({ where: conversationWhere }),
+      db.contact.count({ where }), db.channel.count({ where: { ...where, type: "OPEN_CREDIT" } }), db.conversation.count({ where: conversationWhere }),
       db.leadAssignmentHistory.count({ where }), db.message.count({ where: { conversation: conversationWhere } })
     ]),
     async cleanup() {
       await db.openCreditLeadMaterialization.deleteMany({ where });
       await db.openCreditInboundEvent.deleteMany({ where });
+      await db.openCreditWhatsappConfig.deleteMany({ where });
       await db.openCreditIntegration.deleteMany({ where });
       await db.leadAssignmentHistory.deleteMany({ where });
       await db.conversation.deleteMany({ where: conversationWhere });
