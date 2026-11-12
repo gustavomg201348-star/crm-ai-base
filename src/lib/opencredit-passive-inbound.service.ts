@@ -4,10 +4,12 @@ import { readPassiveReceipt, readPassiveMaterializationInput, PassiveInboundErro
 import { protectMaterializationIdentity } from "./opencredit-lead-materialization-payload";
 import { OpenCreditDeadline } from "./opencredit-webhook-contract";
 type Db = Pick<PrismaClient, "$transaction">;
+export type PassiveInboundOutcome = "NEW_MATERIALIZATION" | "DUPLICATE_EVENT" | "EXISTING_LEAD" | "IDENTITY_INSUFFICIENT";
+export type PassiveInboundPersistResult = { duplicate: boolean; outcome: PassiveInboundOutcome | null };
 const materializationTtlMs = 7 * 24 * 60 * 60 * 1000;
 function duplicate(row: { externalLeadId: string; eventType: string; contractVersion: number | null }, metadata: PassiveMetadata) {
   if (row.externalLeadId !== metadata.externalLeadId || row.eventType !== metadata.eventType || row.contractVersion !== metadata.contractVersion) throw new PassiveInboundError("EVENT_CONFLICT", 409);
-  return { duplicate: true };
+  return { duplicate: true, outcome: "DUPLICATE_EVENT" as const };
 }
 async function current(tx: Prisma.TransactionClient, b: PassiveBinding) {
   // Compare ciphertext in memory, never in query arguments that Prisma error logging could render.
@@ -59,9 +61,11 @@ export async function persistPassiveInbound(db: Db, receipt: PassiveReceipt, dea
       data: { ...scope, integrationId: b.id, ...metadata, provenanceKind: "OPENCREDIT_HMAC_SHA256_VERIFIED", provenanceVersion: 1, processingState: "RECEIVED" },
       select: { id: true, receivedAt: true },
     });
+    let outcome: PassiveInboundOutcome | null = enabled && existingLead ? "EXISTING_LEAD" : null;
     if (enabled && !existingLead) {
       const identity = readPassiveMaterializationInput(receipt);
       const usable = Boolean(identity.cpf || identity.phone);
+      outcome = usable ? "NEW_MATERIALIZATION" : "IDENTITY_INSUFFICIENT";
       const binding = { ...lead, integrationId: b.id, eventId: metadata.eventId };
       const protectedEnvelope = Object.values(identity).some(Boolean) ? protectMaterializationIdentity(binding, identity) : null;
       deadline.assertRemaining();
@@ -77,7 +81,7 @@ export async function persistPassiveInbound(db: Db, receipt: PassiveReceipt, dea
         },
       });
     }
-    return { duplicate: false };
+    return { duplicate: false, outcome };
   }
 
   try {
