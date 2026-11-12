@@ -129,6 +129,7 @@ test("shape telemetry emits only allowed keys and types after authentication, wi
   const raw = Buffer.from(JSON.stringify({
     ...fixture, [unknownKey]: secret,
     client: { ...fixture.client, [unknownKey]: binding.webhookSecret, cellphone: 123, whatsapp: false,
+      realProviderPhoneField: fixture.client.phone,
       mobile: null, phones: [{ phone: fixture.client.phone }], contact: { email: fixture.client.email,
         contact: { phone: fixture.client.phone }, [unknownKey]: fixture.client.name } }
   }));
@@ -146,9 +147,9 @@ test("shape telemetry emits only allowed keys and types after authentication, wi
   assert.deepEqual(events, [{
     event: "opencredit_inbound_shape_diagnostic", eventType: "lead.assigned", contractVersion: 2,
     topLevelKeys: ["client", "contractVersion", "event", "eventId", "lead"], unknownTopLevelKeys: true,
-    clientShape: { type: "object", unknownKeys: true, fields: {
+    clientShape: { type: "object", unknownKeys: true, unknownSafeKeys: ["realProviderPhoneField"], fields: {
       cellphone: { type: "number" },
-      contact: { type: "object", unknownKeys: true, fields: { contact: { type: "object" }, email: { type: "string" } } },
+      contact: { type: "object", unknownKeys: true, unknownSafeKeys: [], fields: { contact: { type: "object" }, email: { type: "string" } } },
       cpf: { type: "string" }, email: { type: "string" }, mobile: { type: "null" },
       name: { type: "string" }, phone: { type: "string" }, phones: { type: "array" }, whatsapp: { type: "boolean" }
     }},

@@ -11,7 +11,7 @@ const clientKeys = [...phoneCandidates, "cellPhone", "contacts", "cpf", "email",
   "mobilePhone", "name", "number", "phoneNumber", "value"].sort();
 const topLevelKeys = [...clientKeys, "client", "contractVersion", "customer", "data", "event", "eventId", "lead"].sort();
 type ShapeType = "string" | "number" | "boolean" | "object" | "array" | "null";
-type Shape = { type: ShapeType; fields?: Record<string, Shape>; unknownKeys?: boolean };
+type Shape = { type: ShapeType; fields?: Record<string, Shape>; unknownKeys?: boolean; unknownSafeKeys?: string[] };
 export type PassiveInboundShapeDiagnostic = {
   event: "opencredit_inbound_shape_diagnostic";
   eventType: "lead.assigned";
@@ -26,16 +26,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+const safeDiagnosticKey = (key: string) => /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(key);
 function describeShape(value: unknown, depth: number): Shape {
   if (value === null) return { type: "null" };
   if (Array.isArray(value)) return { type: "array" };
   if (isRecord(value)) {
     if (depth === 0) return { type: "object" };
     const keys = clientKeys.filter(key => Object.hasOwn(value, key));
+    const unknownKeys = Object.keys(value).filter(key => !clientKeys.includes(key as typeof clientKeys[number]));
     return {
       type: "object",
       fields: Object.fromEntries(keys.map(key => [key, describeShape(value[key], depth - 1)])),
-      unknownKeys: Object.keys(value).length > keys.length
+      unknownKeys: unknownKeys.length > 0,
+      ...(unknownKeys.length ? { unknownSafeKeys: unknownKeys.filter(safeDiagnosticKey).sort().slice(0, 20) } : {})
     };
   }
   if (typeof value === "string") return { type: "string" };
