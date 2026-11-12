@@ -541,7 +541,7 @@ test("later signed event can enrich an untouched pending materialization with a 
   }, previousIdentity);
 
   const raw = Buffer.from(JSON.stringify({
-    event: "lead.assigned", eventId: "new-event", lead: { id: externalLeadId }, contractVersion: 2,
+    event: "lead.assigned", eventId: "synthetic-lead:later-partner", lead: { id: externalLeadId }, contractVersion: 2,
     client: { cpf: "12345678909", phone: "(11) 98765-4321", name: "Replacement Name", email: "new@example.invalid" },
   }));
   const receipt = contract.authenticatePassiveInbound(raw, sign(raw), secret, binding);
@@ -576,7 +576,7 @@ test("later signed event can enrich an untouched pending materialization with a 
   assert.ok(updated?.protectedEnvelope);
   assert.deepEqual(materializationPayload.openMaterializationIdentity(updated!.protectedEnvelope!, {
     companyId: binding.companyId, providerScope: binding.providerScope, integrationId: binding.id,
-    eventId: "new-event", externalLeadId,
+    eventId: "synthetic-lead:later-partner", externalLeadId,
   }), { cpf: "12345678909", phone: "5511987654321", name: "Synthetic Person", email: "new@example.invalid" });
 });
 
