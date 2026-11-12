@@ -194,7 +194,10 @@ test("the real route emits shape telemetry only for the exact opt-in", async t =
   routeIntegrations.clear();
   routeIntegrations.set(publicId, { ...binding, webhookSecret: prepareSecret(secret) });
   const events: unknown[] = [];
-  t.mock.method(console, "info", (line: string) => { events.push(JSON.parse(line)); });
+  t.mock.method(console, "info", (marker: string, line: string) => {
+    assert.equal(marker, "opencredit_inbound_shape_diagnostic");
+    events.push(JSON.parse(line));
+  });
   for (const value of [undefined, "false", "TRUE", "true"]) {
     if (value === undefined) delete process.env[flag];
     else process.env[flag] = value;
