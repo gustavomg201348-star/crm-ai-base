@@ -50,7 +50,18 @@ function Simulation({ companyId, contactId, authorizationActive }: Props) {
     </fieldset>
     <button type="button" disabled={busy || !authorizationActive} onClick={() => void request("context")}>Consultar intenção atual — sem simular</button>
     <button type="button" disabled={busy || attempted || !authorizationActive || !contextReady || !!reply?.operation || !eligible || !valid || !review || !risk} onClick={() => void request("dispatch")}>Executar simulação CLT</button>
-    {reply?.operation && <p role="status">{reply.operation.displayState} — intenção {reply.operation.operationId}. UNKNOWN: DO NOT RETRY.</p>}
+    {reply?.operation && <div role="status">
+      <p>{reply.operation.displayState} — intenção {reply.operation.operationId}. UNKNOWN: DO NOT RETRY.</p>
+      {reply.operation.diagnostic && <dl aria-label="Diagnóstico técnico da simulação">
+        <div><dt>HTTP</dt><dd>{String(reply.operation.diagnostic.httpStatus ?? "não informado")}</dd></div>
+        <div><dt>Categoria</dt><dd>{String(reply.operation.diagnostic.category ?? "não informada")}</dd></div>
+        <div><dt>Etapa</dt><dd>{String(reply.operation.diagnostic.stage ?? "não informada")}</dd></div>
+        <div><dt>Resposta legível</dt><dd>{String(reply.operation.diagnostic.responseReadable ?? "não informado")}</dd></div>
+        <div><dt>Resposta parseada</dt><dd>{String(reply.operation.diagnostic.responseParsed ?? "não informado")}</dd></div>
+        <div><dt>simulationId</dt><dd>{String(reply.operation.diagnostic.simulationId ?? "não informado")}</dd></div>
+        <div><dt>Status provedor</dt><dd>{String(reply.operation.diagnostic.providerStatus ?? "não informado")}</dd></div>
+      </dl>}
+    </div>}
     {["PENDING", "SUCCEEDED"].includes(reply?.operation?.displayState ?? "") && <button type="button" disabled={busy} onClick={() => void request("poll")}>Consultar resultado por GET — sem novo POST de simulação</button>}
     {reply?.result && <div><p>Banco: {reply.result.bankId}; simulationId: {reply.result.simulationId}; status: {reply.result.status}; modo efetivo: {reply.result.simulationType ?? "não informado"}.</p><p>SUCCEEDED é conclusão técnica, não aprovação de crédito. Confira o modo efetivo retornado: o banco pode ignorar um valor específico.</p>{reply.result.offers.map(o => <div key={o.offerId}><p>Prazo: {o.installments}; parcela R$ {o.installmentAmount.toFixed(2)}; liberado: {o.liquidAmount === null ? "não informado" : "R$ " + o.liquidAmount.toFixed(2)}; taxa mensal: {o.interestRate === null ? "não informada" : o.interestRate + "%"}.</p></div>)}</div>}
     {error && <p role="alert">{error}</p>}
