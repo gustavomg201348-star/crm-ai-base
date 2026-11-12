@@ -1,10 +1,10 @@
 import "server-only";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { readPassiveReceipt, readPassiveMaterializationInput, PassiveInboundError, type PassiveReceipt, type PassiveBinding, type PassiveMetadata } from "./opencredit-passive-inbound-contract";
-import { protectMaterializationIdentity } from "./opencredit-lead-materialization-payload";
+import { openMaterializationIdentity, protectMaterializationIdentity } from "./opencredit-lead-materialization-payload";
 import { OpenCreditDeadline } from "./opencredit-webhook-contract";
 type Db = Pick<PrismaClient, "$transaction">;
-export type PassiveInboundOutcome = "NEW_MATERIALIZATION" | "DUPLICATE_EVENT" | "EXISTING_LEAD" | "IDENTITY_INSUFFICIENT";
+export type PassiveInboundOutcome = "NEW_MATERIALIZATION" | "DUPLICATE_EVENT" | "EXISTING_LEAD" | "IDENTITY_INSUFFICIENT" | "IDENTITY_ENRICHED";
 export type PassiveInboundPersistResult = { duplicate: boolean; outcome: PassiveInboundOutcome | null };
 const materializationTtlMs = 7 * 24 * 60 * 60 * 1000;
 function duplicate(row: { externalLeadId: string; eventType: string; contractVersion: number | null }, metadata: PassiveMetadata) {
@@ -52,7 +52,10 @@ export async function persistPassiveInbound(db: Db, receipt: PassiveReceipt, dea
     if (enabled && !recovering) attemptedMaterialization = true;
     const existingLead = enabled || recovering ? await tx.openCreditLeadMaterialization.findUnique({
       where: { companyId_providerScope_externalLeadId: lead },
-      select: { id: true },
+      select: {
+        id: true, state: true, attempts: true, contactId: true, channelId: true, conversationId: true,
+        inboundEventId: true, protectedEnvelope: true,
+      },
     }) : null;
     // A distinct event can survive a lead-unique race only after verifying its committed winner.
     if (recovering && !existingLead) throw new PassiveInboundError("UNAVAILABLE", 503);
@@ -62,6 +65,47 @@ export async function persistPassiveInbound(db: Db, receipt: PassiveReceipt, dea
       select: { id: true, receivedAt: true },
     });
     let outcome: PassiveInboundOutcome | null = enabled && existingLead ? "EXISTING_LEAD" : null;
+    if (enabled && existingLead && !recovering && existingLead.state === "PENDING" && existingLead.attempts === 0
+        && !existingLead.contactId && !existingLead.channelId && !existingLead.conversationId && existingLead.protectedEnvelope) {
+      const incoming = readPassiveMaterializationInput(receipt);
+      if (incoming.phone) {
+        const previousEvent = await tx.openCreditInboundEvent.findUnique({
+          where: { id: existingLead.inboundEventId },
+          select: { eventId: true, companyId: true, integrationId: true, providerScope: true, externalLeadId: true },
+        });
+        if (previousEvent && previousEvent.companyId === b.companyId && previousEvent.integrationId === b.id
+            && previousEvent.providerScope === b.providerScope && previousEvent.externalLeadId === metadata.externalLeadId) {
+          try {
+            const previous = openMaterializationIdentity(existingLead.protectedEnvelope, previousEvent);
+            const conflict = Boolean(
+              previous.cpf && incoming.cpf && previous.cpf !== incoming.cpf
+              || previous.phone && incoming.phone && previous.phone !== incoming.phone
+            );
+            if (!conflict && !previous.phone) {
+              const merged = {
+                cpf: previous.cpf ?? incoming.cpf,
+                phone: incoming.phone,
+                name: previous.name ?? incoming.name,
+                email: previous.email ?? incoming.email,
+              };
+              const binding = { ...lead, integrationId: b.id, eventId: metadata.eventId };
+              const protectedEnvelope = protectMaterializationIdentity(binding, merged);
+              deadline.assertRemaining();
+              const changed = await tx.openCreditLeadMaterialization.updateMany({
+                where: {
+                  id: existingLead.id, state: "PENDING", attempts: 0, contactId: null, channelId: null,
+                  conversationId: null, inboundEventId: existingLead.inboundEventId,
+                },
+                data: { inboundEventId: event.id, protectedEnvelope },
+              });
+              if (changed.count === 1) outcome = "IDENTITY_ENRICHED";
+            }
+          } catch {
+            // Keep the original job untouched if its authenticated identity cannot be reopened.
+          }
+        }
+      }
+    }
     if (enabled && !existingLead) {
       const identity = readPassiveMaterializationInput(receipt);
       const usable = Boolean(identity.cpf || identity.phone);
