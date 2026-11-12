@@ -148,7 +148,7 @@ test("shape telemetry emits only allowed keys and types after authentication, wi
   assert.deepEqual(events, [{
     event: "opencredit_inbound_shape_diagnostic", eventType: "lead.assigned", contractVersion: 2,
     topLevelKeys: ["client", "contractVersion", "customer", "data", "event", "eventId", "lead"], unknownTopLevelKeys: true,
-    unknownSafeTopLevelKeys: ["providerEnvelope"],
+    unknownSafeTopLevelKeys: ["companyId", "providerEnvelope", "providerScope"],
     clientShape: { type: "object", unknownKeys: true, unknownSafeKeys: ["realProviderPhoneField"], fields: {
       cellphone: { type: "number" },
       contact: { type: "object", unknownKeys: true, unknownSafeKeys: [], fields: { contact: { type: "object" }, email: { type: "string" } } },
