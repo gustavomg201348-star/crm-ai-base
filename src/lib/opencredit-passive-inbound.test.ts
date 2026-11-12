@@ -127,7 +127,8 @@ test("shape telemetry emits only allowed keys and types after authentication, wi
   const fixture = payload();
   const unknownKey = "sensitive-dynamic-key@example.invalid";
   const raw = Buffer.from(JSON.stringify({
-    ...fixture, [unknownKey]: secret,
+    ...fixture, [unknownKey]: secret, providerEnvelope: { phone: fixture.client.phone },
+    customer: { mobilePhone: fixture.client.phone }, data: { phoneNumber: fixture.client.phone },
     client: { ...fixture.client, [unknownKey]: binding.webhookSecret, cellphone: 123, whatsapp: false,
       realProviderPhoneField: fixture.client.phone,
       mobile: null, phones: [{ phone: fixture.client.phone }], contact: { email: fixture.client.email,
@@ -146,13 +147,16 @@ test("shape telemetry emits only allowed keys and types after authentication, wi
   await nextTurn();
   assert.deepEqual(events, [{
     event: "opencredit_inbound_shape_diagnostic", eventType: "lead.assigned", contractVersion: 2,
-    topLevelKeys: ["client", "contractVersion", "event", "eventId", "lead"], unknownTopLevelKeys: true,
+    topLevelKeys: ["client", "contractVersion", "customer", "data", "event", "eventId", "lead"], unknownTopLevelKeys: true,
+    unknownSafeTopLevelKeys: ["providerEnvelope"],
     clientShape: { type: "object", unknownKeys: true, unknownSafeKeys: ["realProviderPhoneField"], fields: {
       cellphone: { type: "number" },
       contact: { type: "object", unknownKeys: true, unknownSafeKeys: [], fields: { contact: { type: "object" }, email: { type: "string" } } },
       cpf: { type: "string" }, email: { type: "string" }, mobile: { type: "null" },
       name: { type: "string" }, phone: { type: "string" }, phones: { type: "array" }, whatsapp: { type: "boolean" }
     }},
+    customerShape: { type: "object", unknownKeys: false, fields: { mobilePhone: { type: "string" } } },
+    dataShape: { type: "object", unknownKeys: false, fields: { phoneNumber: { type: "string" } } },
     phoneCandidates: { cellphone: true, contact: true, mobile: true, phone: true, phones: true, telephone: false, whatsapp: true }
   }]);
   const log = JSON.stringify(events);
