@@ -99,7 +99,7 @@ function setup(options: { binding?: unknown; secret?: string; hold?: () => Promi
     secret: () => options.secret ?? secret,
     limit: async () => ({ status: "allowed" }),
     logRateLimit: event => { events.push(event); },
-    persist: async receipt => { writes++; captured = contract.readPassiveReceipt(receipt); if (options.hold) await options.hold(); complete = true; return { duplicate: false }; },
+    persist: async receipt => { writes++; captured = contract.readPassiveReceipt(receipt); if (options.hold) await options.hold(); complete = true; return { duplicate: false, outcome: null }; },
     ...overrides,
     logIngestionUnavailable: event => {
       ingestionEvents.push(event);
@@ -174,6 +174,26 @@ test("shape telemetry failures are best-effort", async () => {
     await nextTurn();
     assert.equal(f.writes(), 1);
   }
+});
+
+test("inbound outcome telemetry is post-persistence, bounded and best-effort", async () => {
+  const events: unknown[] = [];
+  const outcomes = ["NEW_MATERIALIZATION", "DUPLICATE_EVENT", "EXISTING_LEAD", "IDENTITY_INSUFFICIENT"] as const;
+  for (const outcome of outcomes) {
+    const f = setup({}, {
+      persist: async () => ({ duplicate: outcome === "DUPLICATE_EVENT", outcome }),
+      logInboundOutcome: event => { events.push(event); },
+    });
+    assert.equal((await f.send()).status, 200);
+    await nextTurn();
+  }
+  assert.deepEqual(events, outcomes.map(outcome => ({ event: "opencredit_passive_inbound_outcome", outcome })));
+  assert.equal(JSON.stringify(events).includes("synthetic-lead"), false);
+  const f = setup({}, {
+    persist: async () => ({ duplicate: false, outcome: "NEW_MATERIALIZATION" }),
+    logInboundOutcome: () => { throw Error(secret); },
+  });
+  assert.equal((await f.send()).status, 200);
 });
 
 test("the real route emits shape telemetry only for the exact opt-in", async t => {
@@ -307,7 +327,7 @@ for (const stage of ["public_rate_limit", "lookup", "authenticated_rate_limit", 
         if (stage === "lookup") await expire();
         return binding;
       },
-      persist: async () => { await expire(); return { duplicate: false }; },
+      persist: async () => { await expire(); return { duplicate: false, outcome: null }; },
     });
     await assertIngestionUnavailable(await f.send(), f.ingestionEvents, { stage: "deadline", waitingStage: stage, errorClass: "deadline_exceeded" });
   });

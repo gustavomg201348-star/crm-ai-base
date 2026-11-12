@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { authenticatePassiveInbound, validatePassiveBinding, PassiveInboundError, type PassiveBinding, type PassiveInboundShapeDiagnostic, type PassiveReceipt } from "./opencredit-passive-inbound-contract";
 import { OpenCreditDeadline, OpenCreditInputError, OPENCREDIT_MAX_BODY_BYTES } from "./opencredit-webhook-contract";
 import type { RateLimitDecision } from "./rate-limit";
+import type { PassiveInboundOutcome, PassiveInboundPersistResult } from "./opencredit-passive-inbound.service";
 
 type LimitedDecision = Extract<RateLimitDecision, { status: "limited" }>;
 type RateLimitEvent = Omit<LimitedDecision, "status" | "windowStart" | "expiresAt"> & {
@@ -26,6 +27,7 @@ type IngestionUnavailableEvent = {
   waitingStage?: Exclude<IngestionStage, "internal">;
 };
 
+type InboundOutcomeEvent = { event: "opencredit_passive_inbound_outcome"; outcome: PassiveInboundOutcome };
 type Dependencies = {
   lookup(publicId: string): Promise<PassiveBinding | null>;
   secret(encrypted: string): string;
@@ -33,7 +35,8 @@ type Dependencies = {
   logRateLimit?(event: RateLimitEvent): void;
   logIngestionUnavailable?(event: IngestionUnavailableEvent): void | Promise<void>;
   logShapeDiagnostic?(event: PassiveInboundShapeDiagnostic): void | Promise<void>;
-  persist(receipt: PassiveReceipt, deadline: OpenCreditDeadline, onTransactionEntry: (entered: boolean) => void): Promise<{ duplicate: boolean }>;
+  logInboundOutcome?(event: InboundOutcomeEvent): void | Promise<void>;
+  persist(receipt: PassiveReceipt, deadline: OpenCreditDeadline, onTransactionEntry: (entered: boolean) => void): Promise<PassiveInboundPersistResult>;
   deadline?(): OpenCreditDeadline;
 };
 const reply = (status: number, code: string, retryAfterSeconds?: number) => {
@@ -137,7 +140,11 @@ export function createPassiveInboundHandler(deps: Dependencies) {
       if (authenticatedLimit.status === "unavailable") return unavailable("limiter_unavailable");
       if (authenticatedLimit.status === "limited") return rateLimitReply(authenticatedLimit, "authenticated");
       stage = "persistence";
-      await budget.wait(() => deps.persist(receipt, budget, entered => { enteredTransaction = entered; }));
+      const persisted = await budget.wait(() => deps.persist(receipt, budget, entered => { enteredTransaction = entered; }));
+      if (persisted.outcome && deps.logInboundOutcome) {
+        const event: InboundOutcomeEvent = { event: "opencredit_passive_inbound_outcome", outcome: persisted.outcome };
+        setImmediate(() => { void Promise.resolve().then(() => deps.logInboundOutcome!(event)).catch(() => {}); });
+      }
       return reply(200, "OK");
     } catch (error) {
       if (error instanceof PassiveInboundError && error.status !== 503) {
