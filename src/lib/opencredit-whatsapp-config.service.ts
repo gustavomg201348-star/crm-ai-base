@@ -41,7 +41,7 @@ export function createOpenCreditWhatsappConfigService(deps: WhatsappConfigDepend
     async read(companyId: string, integrationId: string, requestedChannelId?: string) {
       const i = await integration(companyId, integrationId);
       const [config, rows] = await Promise.all([
-        deps.db.openCreditWhatsappConfig.findFirst({ where: { integrationId, companyId, providerScope: i.providerScope }, select: {
+        deps.db.openCreditWhatsappConfig.findFirst({ where: { integrationId, companyId, providerScope: i.providerScope! }, select: {
           defaultWhatsappChannelId: true, initialTemplateName: true, initialTemplateLanguage: true, initialTemplateVariableMapping: true, autoStartEnabled: true, revision: true,
         } }),
         deps.db.channel.findMany({ where: { companyId, provider: "meta", type: "whatsapp", status: { in: ["ACTIVE", "CONNECTED"] } }, orderBy: { id: "asc" } }),
