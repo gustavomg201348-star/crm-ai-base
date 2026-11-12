@@ -11,7 +11,7 @@ import {
   InvalidAiReplyResponseError,
   parseAiReplyResponse
 } from "@/lib/ai-response-schema";
-import { safeLogWarn } from "@/lib/safe-logger";
+import { safeLogInfo, safeLogWarn } from "@/lib/safe-logger";
 import {
   getConversationIntegration,
   saveOutboundMessage
@@ -589,19 +589,31 @@ export async function maybeSendAutomaticAiReply({
   conversationId: string;
   companyId: string;
 }) {
+  const gate = (reason: string, details: Record<string, unknown> = {}) => {
+    safeLogInfo("ai-auto-reply", "gate", {
+      event: "ai_auto_reply_gate",
+      companyId,
+      conversationId,
+      reason,
+      ...details
+    });
+  };
   const conversation = await prisma.conversation.findFirst({
     where: { id: conversationId, contact: { companyId } },
     include: { contact: true, channelRef: openCreditChannelRef, openCreditWhatsappMetas: { select: { state: true } } }
   });
-  if (!conversation || isOpenCreditConversation(conversation)) return null;
+  if (!conversation) { gate("CONVERSATION_NOT_FOUND"); return null; }
+  if (isOpenCreditConversation(conversation)) { gate("INTERNAL_OPENCREDIT_CONVERSATION"); return null; }
   const bridge = Boolean(conversation.openCreditWhatsappMetas?.length);
-  if (bridge && !await openCreditWhatsappCanAutoReply(prisma, companyId, conversationId, shouldAutoReply)) return null;
+  if (bridge && !await openCreditWhatsappCanAutoReply(prisma, companyId, conversationId, shouldAutoReply)) {
+    gate("OPENCREDIT_BRIDGE_NOT_ELIGIBLE"); return null;
+  }
   const company = await prisma.company.findUnique({
     where: { id: companyId },
     select: { aiMode: true }
   });
 
-  if (!company) return null;
+  if (!company) { gate("COMPANY_NOT_FOUND"); return null; }
   if (
     !shouldAutoReply({
       companyMode: company.aiMode,
@@ -610,11 +622,17 @@ export async function maybeSendAutomaticAiReply({
       agentId: conversation.agentId
     })
   ) {
+    gate("AUTO_REPLY_POLICY_DENIED", {
+      companyMode: normalizeAiMode(company.aiMode),
+      conversationMode: conversation.aiMode ? normalizeAiMode(conversation.aiMode) : null,
+      aiPaused: conversation.aiPaused,
+      hasAgent: Boolean(conversation.agentId)
+    });
     return null;
   }
 
   // Sem chave de IA, o automatico fica protegido para nao enviar resposta generica.
-  if (!process.env.OPENAI_API_KEY) return null;
+  if (!process.env.OPENAI_API_KEY) { gate("OPENAI_KEY_MISSING"); return null; }
 
   const authorityDb = { db: prisma,
     provider: /^postgres(?:ql)?:/.test(process.env.DATABASE_URL ?? "") ? "postgresql" as const : "sqlite" as const };
@@ -624,17 +642,20 @@ export async function maybeSendAutomaticAiReply({
     : cltFeatureEnabled
       ? await prepareOpenCreditCrmDirectAiReply(authorityDb, companyId, conversationId, shouldAutoReply)
       : null;
-  if (bridge && !attempt) return null;
+  if (bridge && !attempt) { gate("OPENCREDIT_BRIDGE_PREPARE_DENIED"); return null; }
   try {
     const cltEnabled = !!attempt && cltFeatureEnabled;
     const clt = cltEnabled ? await (await import("./opencredit-ai-simulation.service")).runOpenCreditAiSimulation(prisma, attempt.context, {
       log: event => console.info(JSON.stringify(event)),
     }) : undefined;
-    if (cltEnabled && !clt) return null;
-    if (clt?.handoff) { await attempt?.transferToHuman(); return null; }
+    if (cltEnabled && !clt) { gate("CLT_ENGINE_NO_RESPONSE"); return null; }
+    if (clt?.handoff) { gate("CLT_HANDOFF"); await attempt?.transferToHuman(); return null; }
     const { suggestion } = clt ? { suggestion: { suggestedReply: clt.reply, shouldTransferToHuman: false } }
       : await generateAiSuggestion({ conversationId, companyId });
-    if (!suggestion.suggestedReply || suggestion.shouldTransferToHuman) { await attempt?.cancel(); return null; }
+    if (!suggestion.suggestedReply || suggestion.shouldTransferToHuman) {
+      gate(!suggestion.suggestedReply ? "EMPTY_SUGGESTION" : "SUGGESTION_REQUESTED_HUMAN");
+      await attempt?.cancel(); return null;
+    }
 
     const { channel } = await getConversationIntegration({ conversationId, companyId });
     if (attempt && !await attempt.authorize(channel, clt?.validateFinancial)) return null;
