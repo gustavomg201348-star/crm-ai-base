@@ -89,7 +89,7 @@ export async function prepareOpenCreditWhatsappAiReply(database: AuthorityDataba
           await core.transition({ ...plan.scope, actorUserId: (await tx.openCreditWhatsappConfig.findFirstOrThrow({ where: {
             companyId, integrationId: (await tx.openCreditWhatsappHandoff.findFirstOrThrow({ where: { companyId, metaConversationId: conversationId } })).integrationId } })).configuredByUserId,
             logicalKey: "clt-human:" + plan.eventId, reason: "CLT_CUSTOMER_HANDOFF", expectedGeneration: plan.generation, state: "HUMAN_QUEUE", ownerUserId: null })(tx);
-          await tx.conversation.update({ where: { id: conversationId }, data: { aiPaused: true } });
+          await tx.conversation.update({ where: { id: conversationId }, data: { aiPaused: true, status: "OPEN" } });
         });
       },
       finish,
@@ -224,7 +224,7 @@ export async function prepareOpenCreditCrmDirectAiReply(
           await core.transition({ ...plan.scope, actorUserId: plan.actorUserId,
             logicalKey: "clt-direct-human:" + plan.eventId, reason: "CLT_CUSTOMER_HANDOFF",
             expectedGeneration: plan.generation, state: "HUMAN_QUEUE", ownerUserId: null })(tx);
-          await tx.conversation.update({ where: { id: conversationId }, data: { aiPaused: true } });
+          await tx.conversation.update({ where: { id: conversationId }, data: { aiPaused: true, status: "OPEN" } });
         });
       },
       finish,

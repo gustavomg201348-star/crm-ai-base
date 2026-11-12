@@ -788,7 +788,7 @@ material("navigation opens exact reused legacy Meta conversation bound by persis
 });
 
 function cltMaterial(name:string,run:(f:Fixture)=>Promise<void>) {test("CLT AI: "+name,async()=>{
-  const keys=["OPENCREDIT_CLT_AI_ENABLED","OPENCREDIT_CLT_AI_BANK_ID","OPENCREDIT_TENANT_ID","OPENCREDIT_PARTNER_ID","OPENCREDIT_API_EMAIL","OPENCREDIT_API_PASSWORD","PLATFORM_COMPANY_ID"] as const;
+  const keys=["OPENCREDIT_CLT_AI_ENABLED","OPENCREDIT_CLT_AI_MODE","OPENCREDIT_CLT_AI_BANK_ID","OPENCREDIT_TENANT_ID","OPENCREDIT_PARTNER_ID","OPENCREDIT_API_EMAIL","OPENCREDIT_API_PASSWORD","PLATFORM_COMPANY_ID"] as const;
   const old=keys.map(k=>process.env[k]);
   try {
     cltStorageFailure=undefined;cltActive=true;cltPosts=0;cltPolls=0;cltOutcome="approved";cltHook=undefined;cltBankHook=undefined;cltPollHook=undefined;cltSettlementHook=undefined;cltOfferCount=1;
@@ -809,6 +809,35 @@ function cltMaterial(name:string,run:(f:Fixture)=>Promise<void>) {test("CLT AI: 
     await run(f);
   } finally {cltActive=false;keys.forEach((k,i)=>{if(old[i]===undefined)delete process.env[k];else process.env[k]=old[i];});}
 });}
+cltMaterial("INTAKE_ONLY never dispatches simulation and hands existing-CPF lead to human",async f=>{
+  process.env.OPENCREDIT_CLT_AI_MODE="INTAKE_ONLY";
+  await f.sendInbound(undefined,"Quero simular");
+  assert.equal(cltPosts,0);assert.equal(cltPolls,0);
+  assert.equal(await db.openCreditAiSimulation.count({where:{companyId:f.company.id}}),0);
+  const h=await f.handoff();
+  const c=await db.conversation.findUniqueOrThrow({where:{id:h.metaConversationId}});
+  assert.equal(c.aiPaused,true);assert.equal(c.status,"OPEN");
+  const reply=await db.message.findFirstOrThrow({where:{conversationId:h.metaConversationId,direction:"outbound",senderType:"ai"},orderBy:{createdAt:"desc"}});
+  assert.match(reply.body,/informações iniciais/i);
+});
+cltMaterial("INTAKE_ONLY asks CPF once, then hands next reply to human without simulation",async f=>{
+  process.env.OPENCREDIT_CLT_AI_MODE="INTAKE_ONLY";
+  await db.contact.update({where:{id:f.contact.id},data:{cpf:null}});
+  await f.sendInbound(undefined,"Quero simular");
+  assert.equal(cltPosts,0);assert.equal(cltPolls,0);
+  const h=await f.handoff();
+  let c=await db.conversation.findUniqueOrThrow({where:{id:h.metaConversationId}});
+  assert.equal(c.aiPaused,false);assert.equal(c.status,"BOT");
+  let reply=await db.message.findFirstOrThrow({where:{conversationId:h.metaConversationId,direction:"outbound",senderType:"ai"},orderBy:{createdAt:"desc"}});
+  assert.match(reply.body,/informe seu CPF/i);
+  await f.sendInbound(undefined,"12345678909");
+  assert.equal(cltPosts,0);assert.equal(cltPolls,0);
+  assert.equal(await db.openCreditAiSimulation.count({where:{companyId:f.company.id}}),0);
+  c=await db.conversation.findUniqueOrThrow({where:{id:h.metaConversationId}});
+  assert.equal(c.aiPaused,true);assert.equal(c.status,"OPEN");
+  reply=await db.message.findFirstOrThrow({where:{conversationId:h.metaConversationId,direction:"outbound",senderType:"ai"},orderBy:{createdAt:"desc"}});
+  assert.match(reply.body,/especialista/i);
+});
 cltMaterial("signed inbound -> durable simulation -> encrypted facts -> one guarded Meta response",async f=>{
   const id="synthetic-clt-"+randomUUID();await f.sendInbound(id,"Quero simular");await f.sendInbound(id,"Quero simular");
   assert.equal(cltPosts,1);assert.equal(network.filter(n=>n.type==="text").length,1);
