@@ -18,7 +18,10 @@ export type PassiveInboundShapeDiagnostic = {
   contractVersion: 2 | null;
   topLevelKeys: string[];
   unknownTopLevelKeys: boolean;
+  unknownSafeTopLevelKeys: string[];
   clientShape: Shape | null;
+  customerShape: Shape | null;
+  dataShape: Shape | null;
   phoneCandidates: Record<typeof phoneCandidates[number], boolean>;
 };
 
@@ -48,14 +51,18 @@ function describeShape(value: unknown, depth: number): Shape {
 
 function describeInboundShape(value: Record<string, unknown>, contractVersion: 2 | null): PassiveInboundShapeDiagnostic {
   const keys = topLevelKeys.filter(key => Object.hasOwn(value, key));
+  const unknownKeys = Object.keys(value).filter(key => !topLevelKeys.includes(key as typeof topLevelKeys[number]));
   const client = value.client;
   return {
     event: "opencredit_inbound_shape_diagnostic",
     eventType: "lead.assigned",
     contractVersion,
     topLevelKeys: keys,
-    unknownTopLevelKeys: Object.keys(value).length > keys.length,
+    unknownTopLevelKeys: unknownKeys.length > 0,
+    unknownSafeTopLevelKeys: unknownKeys.filter(safeDiagnosticKey).sort().slice(0, 20),
     clientShape: Object.hasOwn(value, "client") ? describeShape(client, 2) : null,
+    customerShape: Object.hasOwn(value, "customer") ? describeShape(value.customer, 2) : null,
+    dataShape: Object.hasOwn(value, "data") ? describeShape(value.data, 2) : null,
     phoneCandidates: Object.fromEntries(phoneCandidates.map(key => [
       key, isRecord(client) && Object.hasOwn(client, key)
     ])) as PassiveInboundShapeDiagnostic["phoneCandidates"]
