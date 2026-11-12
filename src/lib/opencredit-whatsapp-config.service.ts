@@ -41,7 +41,7 @@ export function createOpenCreditWhatsappConfigService(deps: WhatsappConfigDepend
     async read(companyId: string, integrationId: string, requestedChannelId?: string) {
       const i = await integration(companyId, integrationId);
       const [config, rows] = await Promise.all([
-        deps.db.openCreditWhatsappConfig.findFirst({ where: { integrationId, companyId }, select: {
+        deps.db.openCreditWhatsappConfig.findFirst({ where: { integrationId, companyId, providerScope: i.providerScope! }, select: {
           defaultWhatsappChannelId: true, initialTemplateName: true, initialTemplateLanguage: true, initialTemplateVariableMapping: true, autoStartEnabled: true, revision: true,
         } }),
         deps.db.channel.findMany({ where: { companyId, provider: "meta", type: "whatsapp", status: { in: ["ACTIVE", "CONNECTED"] } }, orderBy: { id: "asc" } }),
@@ -79,7 +79,7 @@ export function createOpenCreditWhatsappConfigService(deps: WhatsappConfigDepend
         if ((await storage.actor(tx, actor.companyId, actor.id, true)).role !== "ADMIN") throw new BootstrapBlocked("CONFIGURATION_MISSING");
         const current = await tx.openCreditWhatsappConfig.findUnique({ where: { integrationId } });
         const { expectedRevision, ...raw } = input;
-        const data = { ...raw, initialTemplateVariableMapping: input.initialTemplateVariableMapping ?? null,
+        const data = { ...raw, providerScope: i.providerScope!, initialTemplateVariableMapping: input.initialTemplateVariableMapping ?? null,
           ...(current && current.autoStartEnabled === input.autoStartEnabled ? { updatedAt: current.updatedAt } : {}) };
         if ((current?.revision ?? 0) !== expectedRevision) throw new BootstrapBlocked("CONFIGURATION_MISSING");
         if (input.defaultWhatsappChannelId) {
