@@ -19,7 +19,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pu
     logRateLimit: event => console.warn(JSON.stringify(event)),
     logIngestionUnavailable: event => console.warn(JSON.stringify(event)),
     logShapeDiagnostic: process.env.OPENCREDIT_INBOUND_SHAPE_DIAGNOSTIC === "true"
-      ? event => console.info(JSON.stringify(event))
+      ? event => console.info("opencredit_inbound_shape_diagnostic", JSON.stringify(event))
       : undefined,
     persist: (receipt, deadline, onTransactionEntry) => persistPassiveInbound(prisma, receipt, deadline, onTransactionEntry),
   })(request, context);
