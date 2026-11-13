@@ -32,6 +32,7 @@ import { OpenCreditCommercialAccessPanel } from "@/app/components/integrations/O
 import { OpenCreditConsumerAuthorizationPanel } from "@/app/components/integrations/OpenCreditConsumerAuthorizationPanel";
 import { OpenCreditRemoteIdentityPanel } from "@/app/components/integrations/OpenCreditRemoteIdentityPanel";
 import { useNewMessageSound } from "@/app/hooks/use-new-message-sound";
+import { useTaskPages } from "@/app/hooks/use-task-pages";
 import { createRecordedAudioFile, preferredRecordingMimeTypes } from "@/lib/recorded-audio";
 import { resolveConversationChannelId } from "@/lib/conversation-channel.service";
 import { serializeCsvCell } from "@/lib/csv-export";
@@ -5015,6 +5016,7 @@ export default function Home() {
           )}
           {active === "contatos" && (
             <Contatos
+              taskAssigneeId={session.user.role === "AGENT" ? session.user.id : undefined}
               contacts={contacts}
               loading={contactsLoading}
               filters={contactFilters}
@@ -5980,6 +5982,10 @@ function ScheduledReturnsModal({
   tasks,
   loading,
   error,
+  hasMore,
+  legacy,
+  loadingMore,
+  onLoadMore,
   onClose,
   onRefresh,
   onTaskCompleted,
@@ -5988,6 +5994,10 @@ function ScheduledReturnsModal({
   tasks: TaskRow[];
   loading: boolean;
   error: string;
+  hasMore: boolean;
+  legacy: boolean;
+  loadingMore: boolean;
+  onLoadMore: () => void;
   onClose: () => void;
   onRefresh: () => void;
   onTaskCompleted: (taskId: string) => void;
@@ -6095,13 +6105,14 @@ function ScheduledReturnsModal({
             </p>
             <h3 className="mt-1 text-xl font-bold text-slate-950">Retornos</h3>
             <p className="mt-1 text-sm text-slate-500">
-              {loading ? "Carregando retornos..." : `${totalTasks} retorno(s) pendente(s)`}
+              {loading && !totalTasks ? "Carregando retornos..." : `${totalTasks} retorno(s) carregado(s)`}
+              {loading && totalTasks > 0 && " · Atualizando..."}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <button
               className="h-9 rounded-full border border-line bg-white px-3 text-xs font-bold text-slate-600 hover:bg-slate-50"
-              disabled={loading}
+              disabled={loading || loadingMore}
               onClick={onRefresh}
               type="button"
             >
@@ -6172,7 +6183,7 @@ function ScheduledReturnsModal({
             </form>
           )}
 
-          {loading && (
+          {loading && totalTasks === 0 && (
             <div className="space-y-3">
               {[0, 1, 2].map((item) => (
                 <div key={item} className="h-20 animate-pulse rounded-2xl bg-slate-100" />
@@ -6186,8 +6197,7 @@ function ScheduledReturnsModal({
             </div>
           )}
 
-          {!loading &&
-            !error &&
+          {totalTasks > 0 &&
             groups.map((group) => (
               <section key={group.key} className="space-y-2">
                 <div className="flex items-center justify-between">
@@ -6280,6 +6290,18 @@ function ScheduledReturnsModal({
                 )}
               </section>
             ))}
+          {!loading && hasMore && (
+            <div className="flex items-center justify-between gap-3 border-t border-line pt-3">
+              <span className="text-xs text-slate-500">Mais resultados disponiveis</span>
+              <button type="button" className="inline-flex h-9 items-center gap-2 rounded border border-line px-3 text-sm font-semibold"
+                disabled={loadingMore} onClick={onLoadMore}>
+                {loadingMore && <Loader2 className="h-4 w-4 animate-spin" />}
+                {loadingMore ? "Carregando..." : "Carregar mais"}
+              </button>
+            </div>
+          )}
+          {legacy && <p className="text-xs text-slate-500">API sem paginacao. O total de retornos e desconhecido.</p>}
+          {!loading && !legacy && !hasMore && totalTasks > 0 && <p className="text-xs text-slate-500">Fim da lista.</p>}
         </div>
       </div>
     </div>
@@ -7180,9 +7202,10 @@ function Atendimento({
   const [followUpError, setFollowUpError] = useState("");
   const [followUpSuccess, setFollowUpSuccess] = useState("");
   const [scheduledReturnsOpen, setScheduledReturnsOpen] = useState(false);
-  const [scheduledReturns, setScheduledReturns] = useState<TaskRow[]>([]);
-  const [scheduledReturnsLoading, setScheduledReturnsLoading] = useState(false);
-  const [scheduledReturnsError, setScheduledReturnsError] = useState("");
+  const scheduledPages = useTaskPages<TaskRow>(isAdmin
+    ? "status=PENDING"
+    : `assigneeId=${encodeURIComponent(currentUserId)}&status=PENDING`, scheduledReturnsOpen);
+  const { items: scheduledReturns, loading: scheduledReturnsLoading, error: scheduledReturnsError } = scheduledPages;
   const [recording, setRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [aiSidebarCollapsed, setAiSidebarCollapsed] = useState(false);
@@ -7892,37 +7915,8 @@ function Atendimento({
     setFollowUpOpen(true);
   }
 
-  async function loadScheduledReturns() {
-    setScheduledReturnsLoading(true);
-    setScheduledReturnsError("");
-
-    try {
-      const query = isAdmin
-        ? "status=PENDING"
-        : `assigneeId=${encodeURIComponent(currentUserId)}&status=PENDING`;
-      const response = await fetch(`/api/tasks?${query}`);
-
-      if (!response.ok) {
-        const data = (await response.json().catch(() => null)) as
-          | { error?: string }
-          | null;
-        throw new Error(data?.error ?? "Nao foi possivel carregar retornos.");
-      }
-
-      const data = (await response.json()) as { tasks?: TaskRow[] };
-      setScheduledReturns(data.tasks ?? []);
-    } catch (error) {
-      setScheduledReturnsError(
-        error instanceof Error ? error.message : "Nao foi possivel carregar retornos."
-      );
-    } finally {
-      setScheduledReturnsLoading(false);
-    }
-  }
-
   function openScheduledReturns() {
     setScheduledReturnsOpen(true);
-    void loadScheduledReturns();
   }
 
   async function submitContactEdit() {
@@ -8237,17 +8231,15 @@ function Atendimento({
         <ScheduledReturnsModal
           error={scheduledReturnsError}
           loading={scheduledReturnsLoading}
+          hasMore={scheduledPages.hasMore}
+          legacy={scheduledPages.legacy}
+          loadingMore={scheduledPages.loadingMore}
+          onLoadMore={() => void scheduledPages.loadMore()}
           tasks={scheduledReturns}
           onClose={() => setScheduledReturnsOpen(false)}
-          onRefresh={() => void loadScheduledReturns()}
-          onTaskCompleted={(taskId) =>
-            setScheduledReturns((current) => current.filter((task) => task.id !== taskId))
-          }
-          onTaskUpdated={(updatedTask) =>
-            setScheduledReturns((current) =>
-              current.map((task) => (task.id === updatedTask.id ? updatedTask : task))
-            )
-          }
+          onRefresh={() => void scheduledPages.refresh()}
+          onTaskCompleted={scheduledPages.remove}
+          onTaskUpdated={scheduledPages.replace}
         />
       )}
       <div className={clsx(showMobileConversationDetail ? "hidden xl:contents" : "contents")}>
@@ -10411,6 +10403,7 @@ function Kanban({
 }
 
 function Contatos({
+  taskAssigneeId,
   contacts,
   loading,
   filters,
@@ -10425,6 +10418,7 @@ function Contatos({
   onUpdateContact,
   onArchiveContact
 }: {
+  taskAssigneeId?: string;
   contacts: ContactRow[];
   loading: boolean;
   filters: {
@@ -11026,6 +11020,7 @@ function Contatos({
       </section>
 
       <ContactDrawer
+        taskAssigneeId={taskAssigneeId}
         contact={selectedContact}
         editingContact={editingContact}
         reference={reference}
@@ -11096,6 +11091,7 @@ function ReferenceSelect({
 }
 
 function ContactDrawer({
+  taskAssigneeId,
   contact,
   editingContact,
   reference,
@@ -11107,6 +11103,7 @@ function ContactDrawer({
   onCompleteTask,
   onSave
 }: {
+  taskAssigneeId?: string;
   contact: ContactRow | null;
   editingContact: ContactRow | null;
   reference: ReferenceData;
@@ -11143,8 +11140,10 @@ function ContactDrawer({
 }) {
   const [activities, setActivities] = useState<ContactActivityRow[]>([]);
   const [activitiesLoading, setActivitiesLoading] = useState(false);
-  const [tasks, setTasks] = useState<TaskRow[]>([]);
-  const [tasksLoading, setTasksLoading] = useState(false);
+  const taskPages = useTaskPages<TaskRow>(contact
+    ? `contactId=${encodeURIComponent(contact.id)}&status=ALL${taskAssigneeId ? `&assigneeId=${encodeURIComponent(taskAssigneeId)}` : ""}`
+    : null);
+  const { items: tasks, loading: tasksLoading } = taskPages;
   const [note, setNote] = useState("");
   const [taskForm, setTaskForm] = useState({
     title: "",
@@ -11204,31 +11203,12 @@ function ContactDrawer({
   }, [contact]);
 
   useEffect(() => {
-    if (!contact) {
-      setTasks([]);
-      return;
-    }
-
-    let active = true;
-    setTasksLoading(true);
-    fetch(`/api/tasks?contactId=${contact.id}&status=ALL`)
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data: { tasks?: TaskRow[] } | null) => {
-        if (active) setTasks(data?.tasks ?? []);
-      })
-      .finally(() => {
-        if (active) setTasksLoading(false);
-      });
-
+    if (!contact) return;
     setTaskForm((current) => ({
       ...current,
       assigneeId: contact.ownerId ?? "",
       dueAt: current.dueAt || new Date(Date.now() + 1000 * 60 * 60 * 24).toISOString().slice(0, 16)
     }));
-
-    return () => {
-      active = false;
-    };
   }, [contact]);
 
   if (!contact) {
@@ -11425,7 +11405,7 @@ function ContactDrawer({
               });
 
               if (task) {
-                setTasks((current) => [task, ...current]);
+                if (!taskAssigneeId || task.assigneeId === taskAssigneeId) taskPages.prepend(task);
                 setTaskForm((current) => ({ ...current, title: "", note: "" }));
               }
             }}
@@ -11473,7 +11453,13 @@ function ContactDrawer({
 
           <div className="mt-4 space-y-2">
             {tasksLoading && <p className="text-sm text-slate-500">Carregando tarefas...</p>}
-            {!tasksLoading && tasks.length === 0 && (
+            {taskPages.error && <p role="alert" className="text-sm text-rose-600">{taskPages.error}</p>}
+            <div className="flex items-center justify-between gap-2 text-xs text-slate-500">
+              <span>{tasks.length} tarefa(s) carregada(s)</span>
+              <button type="button" disabled={tasksLoading || taskPages.loadingMore} onClick={() => void taskPages.refresh()}
+                className="rounded border border-line px-2 py-1 font-semibold">Atualizar</button>
+            </div>
+            {!tasksLoading && !taskPages.error && tasks.length === 0 && (
               <p className="text-sm text-slate-500">Nenhuma tarefa registrada.</p>
             )}
             {tasks.map((task) => {
@@ -11501,9 +11487,7 @@ function ContactDrawer({
                         onClick={async () => {
                           const updated = await onCompleteTask(task.id);
                           if (updated) {
-                            setTasks((current) =>
-                              current.map((item) => (item.id === updated.id ? updated : item))
-                            );
+                            taskPages.replace(updated);
                           }
                         }}
                         title="Concluir tarefa"
@@ -11520,6 +11504,13 @@ function ContactDrawer({
                 </div>
               );
             })}
+            {!tasksLoading && taskPages.hasMore && <button type="button" disabled={taskPages.loadingMore}
+              onClick={() => void taskPages.loadMore()} className="inline-flex h-9 items-center gap-2 rounded border border-line px-3 text-sm font-semibold">
+              {taskPages.loadingMore && <Loader2 className="h-4 w-4 animate-spin" />}
+              {taskPages.loadingMore ? "Carregando..." : "Carregar mais"}
+            </button>}
+            {taskPages.legacy && <p className="text-xs text-slate-500">API sem paginacao. O total de tarefas e desconhecido.</p>}
+            {!tasksLoading && !taskPages.legacy && !taskPages.hasMore && tasks.length > 0 && <p className="text-xs text-slate-500">Fim da lista.</p>}
           </div>
         </div>
 

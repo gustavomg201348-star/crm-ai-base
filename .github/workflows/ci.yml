@@ -44,6 +44,9 @@ jobs:
       - name: Lint
         run: npm run lint:ci
 
+      - name: Validate task pagination, scope and incremental clients
+        run: npx --yes tsx@4.20.6 --test src/lib/tasks-pagination.test.ts src/lib/tasks-page-state.test.ts
+
       - name: Validate OpenCredit Foundation A unit tests
         run: npx --yes tsx@4.20.6 src/lib/opencredit-webhook.test.ts
 
