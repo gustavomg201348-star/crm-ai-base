@@ -178,7 +178,7 @@ test("shape telemetry failures are best-effort", async () => {
 
 test("inbound outcome telemetry is post-persistence, bounded and best-effort", async () => {
   const events: unknown[] = [];
-  const outcomes = ["NEW_MATERIALIZATION", "DUPLICATE_EVENT", "EXISTING_LEAD", "IDENTITY_INSUFFICIENT"] as const;
+  const outcomes = ["NEW_MATERIALIZATION", "DUPLICATE_EVENT", "EXISTING_LEAD", "IDENTITY_INSUFFICIENT", "IDENTITY_ENRICHED"] as const;
   for (const outcome of outcomes) {
     const f = setup({}, {
       persist: async () => ({ duplicate: outcome === "DUPLICATE_EVENT", outcome }),
@@ -519,6 +519,65 @@ test("signed receipt isolates minimal normalized identity from its metadata read
   const partial = contract.authenticatePassiveInbound(invalid, sign(invalid), secret, binding);
   assert.deepEqual(contract.readPassiveMaterializationInput(partial), { cpf: null, phone: null, name: null, email: null });
   assert.equal((await setup().send(invalid)).status, 200);
+});
+
+test("later signed event can enrich an untouched pending materialization with a newly supplied phone", async t => {
+  const oldKey = process.env.QEVORA_DATA_ENCRYPTION_KEY_V1;
+  process.env.QEVORA_DATA_ENCRYPTION_KEY_V1 = Buffer.alloc(32, 17).toString("base64");
+  t.after(() => {
+    if (oldKey === undefined) delete process.env.QEVORA_DATA_ENCRYPTION_KEY_V1;
+    else process.env.QEVORA_DATA_ENCRYPTION_KEY_V1 = oldKey;
+  });
+
+  const externalLeadId = "synthetic-lead";
+  const previousEvent = {
+    id: "previous-event-row", eventId: "previous-event", companyId: binding.companyId,
+    integrationId: binding.id, providerScope: binding.providerScope, externalLeadId,
+  };
+  const previousIdentity = { cpf: "12345678909", phone: null, name: "Synthetic Person", email: null };
+  const previousEnvelope = materializationPayload.protectMaterializationIdentity({
+    companyId: binding.companyId, providerScope: binding.providerScope, integrationId: binding.id,
+    eventId: previousEvent.eventId, externalLeadId,
+  }, previousIdentity);
+
+  const raw = Buffer.from(JSON.stringify({
+    event: "lead.assigned", eventId: "synthetic-lead:later-partner", lead: { id: externalLeadId }, contractVersion: 2,
+    client: { cpf: "12345678909", phone: "(11) 98765-4321", name: "Replacement Name", email: "new@example.invalid" },
+  }));
+  const receipt = contract.authenticatePassiveInbound(raw, sign(raw), secret, binding);
+  let updated: { inboundEventId?: string; protectedEnvelope?: string } | undefined;
+  let rawCalls = 0;
+  const tx = {
+    $queryRaw: async () => {
+      rawCalls++;
+      return rawCalls === 1
+        ? [{ providerScope: binding.providerScope, webhookSecret: binding.webhookSecret, passiveInboundEnabled: true, materializationEnabled: true }]
+        : [{ autoStartEnabled: true }];
+    },
+    openCreditInboundEvent: {
+      findUnique: async ({ where }: { where: Record<string, unknown> }) =>
+        Object.hasOwn(where, "id") ? previousEvent : null,
+      create: async () => ({ id: "new-event-row", receivedAt: new Date("2026-11-12T18:54:00.000Z") }),
+    },
+    openCreditLeadMaterialization: {
+      findUnique: async () => ({
+        id: "pending-job", state: "PENDING", attempts: 0, contactId: null, channelId: null, conversationId: null,
+        inboundEventId: previousEvent.id, protectedEnvelope: previousEnvelope,
+      }),
+      updateMany: async ({ data }: { data: { inboundEventId?: string; protectedEnvelope?: string } }) => {
+        updated = data; return { count: 1 };
+      },
+    },
+  };
+  const db = { $transaction: async (run: (inner: typeof tx) => Promise<unknown>) => run(tx) };
+  const result = await service.persistPassiveInbound(db as never, receipt, new OpenCreditDeadline());
+  assert.deepEqual(result, { duplicate: false, outcome: "IDENTITY_ENRICHED" });
+  assert.equal(updated?.inboundEventId, "new-event-row");
+  assert.ok(updated?.protectedEnvelope);
+  assert.deepEqual(materializationPayload.openMaterializationIdentity(updated!.protectedEnvelope!, {
+    companyId: binding.companyId, providerScope: binding.providerScope, integrationId: binding.id,
+    eventId: "synthetic-lead:later-partner", externalLeadId,
+  }), { cpf: "12345678909", phone: "5511987654321", name: "Synthetic Person", email: "new@example.invalid" });
 });
 
 test("materialization envelope is authenticated and bound to all five origin values", () => {
