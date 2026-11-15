@@ -5,7 +5,6 @@ import { prisma } from "@/lib/db";
 import { requirePlatformAdmin } from "@/lib/permissions";
 import { enforceRateLimits } from "@/lib/rate-limit";
 import { sameOrigin, readOpenCreditAdminJson } from "@/lib/opencredit-admin-request";
-import { resolveConfiguredOpenCreditProviderScope } from "@/lib/opencredit-provider-scope-resolver";
 import { readOpenCreditMaterializationExport } from "@/lib/opencredit-materialization-export.service";
 import { neutralizeSpreadsheetFormula } from "@/lib/csv-export";
 
@@ -42,9 +41,8 @@ export async function POST(request: NextRequest) {
   ]);
   if (limited) return NextResponse.json({ error: limited.status === 429 ? "RATE_LIMITED" : "UNAVAILABLE" }, { status: limited.status === 429 ? 429 : 503 });
 
-  const providerScope = resolveConfiguredOpenCreditProviderScope();
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-  const rows = await readOpenCreditMaterializationExport(prisma, { companyId, integrationId, providerScope, since });
+  const rows = await readOpenCreditMaterializationExport(prisma, { companyId, integrationId, since });
 
   const worksheet = XLSX.utils.json_to_sheet(rows.map(row => ({
     "Recebido em": row.receivedAt,
