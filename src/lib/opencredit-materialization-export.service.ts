@@ -67,9 +67,16 @@ function identityFrom(row: ExportRow): MaterializationIdentity {
 
 export async function readOpenCreditMaterializationExport(
   db: Db,
-  input: { companyId: string; integrationId: string; providerScope: string; since: Date; limit?: number }
+  input: { companyId: string; integrationId: string; since: Date; limit?: number }
 ): Promise<OpenCreditMaterializationExportRow[]> {
   const limit = Math.min(Math.max(input.limit ?? 5000, 1), 5000);
+  const [integration] = await db.$queryRaw<Array<{ providerScope: string }>>(Prisma.sql`
+    SELECT "providerScope" FROM "OpenCreditIntegration"
+    WHERE "id" = ${input.integrationId} AND "companyId" = ${input.companyId}
+      AND "providerScope" IS NOT NULL
+    LIMIT 1
+  `);
+  if (!integration) return [];
   const rows = await db.$queryRaw<ExportRow[]>(Prisma.sql`
     SELECT q."companyId", q."integrationId", q."providerScope", q."externalLeadId",
       q."state", q."reviewCode", q."lastErrorCode", q."attempts", q."createdAt", q."updatedAt",
@@ -86,7 +93,7 @@ export async function readOpenCreditMaterializationExport(
       AND h."providerScope" = q."providerScope"
     WHERE q."companyId" = ${input.companyId}
       AND q."integrationId" = ${input.integrationId}
-      AND q."providerScope" = ${input.providerScope}
+      AND q."providerScope" = ${integration.providerScope}
       AND q."createdAt" >= ${input.since}
     ORDER BY q."createdAt" DESC, q."id" DESC
     LIMIT ${limit}
