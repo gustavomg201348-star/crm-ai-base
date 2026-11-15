@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, "OpenCredit");
   const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx", compression: true }) as Buffer;
-  const bytes = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  const bytes = Uint8Array.from(buffer).buffer;
   const date = new Date().toISOString().slice(0, 10);
   return new NextResponse(bytes, {
     status: 200,
