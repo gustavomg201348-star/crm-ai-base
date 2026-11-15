@@ -6,6 +6,7 @@ type State = Awaited<ReturnType<typeof readMaterializationConfiguration>>;
 const path = "/api/admin/integrations/opencredit/materialization/configuration";
 const pilotPath = "/api/admin/integrations/opencredit/materialization/single-admission";
 const finalizePath = "/api/admin/integrations/opencredit/materialization/finalize-pilot";
+const exportPath = "/api/admin/integrations/opencredit/materialization/export";
 const pilotMessages: Record<string, string> = {
   COMPLETED: "Lead processado.",
   RETRY: "O job ficou em RETRY.",
@@ -29,6 +30,8 @@ export function OpenCreditMaterializationSettings({ companyId, integrationId, ma
   const [data, setData] = useState<State | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [forbidden, setForbidden] = useState(false), [uncertain, setUncertain] = useState(false);
   const [pilotFeedback, setPilotFeedback] = useState("");
+  const [exportDays, setExportDays] = useState<1 | 7 | 30>(7);
+  const [exportBusy, setExportBusy] = useState(false);
   const pilotInFlight = useRef(false);
   const sequence = useRef(0);
   useEffect(() => {
@@ -74,6 +77,30 @@ export function OpenCreditMaterializationSettings({ companyId, integrationId, ma
   const gatesInvalid = !!data && (data.enabled || data.paused || !data.passiveInboundEnabled);
   const pilotReady = !!data && data.companyId === companyId && data.integrationId === integrationId
     && enabled && !gatesInvalid && data.interlockReady && data.bindingReserved && data.autoStartOperational;
+  async function exportMaterializations() {
+    if (exportBusy) return;
+    setExportBusy(true); setError("");
+    try {
+      const response = await fetch(exportPath, {
+        method: "POST", cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyId, integrationId, days: exportDays }),
+      });
+      if (!response.ok) throw Error("EXPORT_FAILED");
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") ?? "";
+      const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? "opencredit-materializados.xlsx";
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url; anchor.download = filename; document.body.appendChild(anchor); anchor.click(); anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError("Não foi possível exportar os materializados OpenCredit.");
+    } finally {
+      setExportBusy(false);
+    }
+  }
+
   async function finalizePilot() {
     if (!data?.bindingReserved || busy || uncertain || pilotInFlight.current) return;
     if (!window.confirm("Concluir o piloto e liberar a reserva da fila? Esta ação só será aceita se a única admissão estiver totalmente encerrada e reconciliável. O worker NORMAL continuará desligado até ser ativado separadamente.")) return;
@@ -165,6 +192,18 @@ export function OpenCreditMaterializationSettings({ companyId, integrationId, ma
       <button type="button" disabled={busy} className="rounded-lg border border-line px-3 py-2 text-sm" onClick={() => {
         setBusy(true); setError(""); void refresh().catch(() => setError("Estado não confirmado. Recarregue novamente.")).finally(() => setBusy(false));
       }}>Recarregar estado</button>
+      <select aria-label="Período da exportação OpenCredit" value={exportDays}
+        onChange={event => setExportDays(Number(event.target.value) as 1 | 7 | 30)}
+        className="rounded-lg border border-line bg-white px-3 py-2 text-sm">
+        <option value={1}>Hoje / 1 dia</option>
+        <option value={7}>Últimos 7 dias</option>
+        <option value={30}>Últimos 30 dias</option>
+      </select>
+      <button type="button" disabled={exportBusy}
+        className="rounded-lg border border-line bg-white px-3 py-2 text-sm disabled:opacity-50"
+        onClick={() => void exportMaterializations()}>
+        {exportBusy ? "Exportando..." : "Exportar materializados XLSX"}
+      </button>
     </div>}
     {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
     {pilotFeedback && <p role="status" className="text-sm">{pilotFeedback}</p>}
