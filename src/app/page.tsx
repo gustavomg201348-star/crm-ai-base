@@ -21,6 +21,7 @@ import {
   Tags
 } from "@/lib/mock-data";
 import { OpenCreditWhatsappCanary } from "@/app/components/conversations/OpenCreditWhatsappCanary";
+import { TaskTurnoverExportPanel } from "@/app/components/tasks/TaskTurnoverExportPanel";
 import { ConversationList } from "@/app/components/conversations/ConversationList";
 import { ConversationPageLoader, appendConversationPage, compareConversationActivity } from "@/lib/conversation-list-pagination";
 import { TemplateVariableDialog } from "@/app/components/conversations/TemplateVariableDialog";
@@ -4969,6 +4970,7 @@ export default function Home() {
                 companyId={session.company.id}
                 canAttemptOpenCreditAuthorization={session.user.role === "ADMIN"}
                 canManageOpenCreditIdentity={userIsPlatformAdmin(session)}
+                canExportReturns={userIsAdmin(session)}
                 isAdmin={userCanManageOperation(session)}
                 loading={conversationLoading}
                 hasMore={conversationHasMore}
@@ -5978,6 +5980,8 @@ function ScheduleFollowUpModal({
 
 function ScheduledReturnsModal({
   tasks,
+  attendants,
+  canExportReturns,
   loading,
   error,
   onClose,
@@ -5986,6 +5990,8 @@ function ScheduledReturnsModal({
   onTaskUpdated
 }: {
   tasks: TaskRow[];
+  attendants: AttendantRow[];
+  canExportReturns: boolean;
   loading: boolean;
   error: string;
   onClose: () => void;
@@ -6118,6 +6124,7 @@ function ScheduledReturnsModal({
         </div>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
+          {canExportReturns && <TaskTurnoverExportPanel attendants={attendants} />}
           {error && (
             <div className="rounded-2xl border border-rose-100 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
               {error}
@@ -7053,6 +7060,7 @@ function Atendimento({
   companyId,
   canAttemptOpenCreditAuthorization,
   canManageOpenCreditIdentity,
+  canExportReturns,
   isAdmin,
   loading,
   hasMore, loadingMore, pageError, onLoadMore, onRetryList, onCanaryStarted,
@@ -7091,6 +7099,7 @@ function Atendimento({
   companyId: string;
   canAttemptOpenCreditAuthorization: boolean;
   canManageOpenCreditIdentity: boolean;
+  canExportReturns: boolean;
   isAdmin: boolean;
   loading: boolean;
   hasMore: boolean; loadingMore: boolean; pageError: string; onLoadMore: () => void; onRetryList: () => void;
@@ -8238,6 +8247,8 @@ function Atendimento({
           error={scheduledReturnsError}
           loading={scheduledReturnsLoading}
           tasks={scheduledReturns}
+          attendants={attendants}
+          canExportReturns={canExportReturns}
           onClose={() => setScheduledReturnsOpen(false)}
           onRefresh={() => void loadScheduledReturns()}
           onTaskCompleted={(taskId) =>
