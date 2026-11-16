@@ -261,6 +261,9 @@ test("OpenCredit template button policy keeps block silent and check determinist
   assert.equal(classifyOpenCreditTemplateButton({ type: "button", body: "Conferir" }), "CHECK");
   assert.equal(classifyOpenCreditTemplateButton({ type: "button", body: "Verificar agora" }), "CHECK");
   assert.equal(classifyOpenCreditTemplateButton({ type: "interactive", body: "Resposta interativa: Conferir" }), "CHECK");
+  assert.equal(classifyOpenCreditTemplateButton({ type: "text", body: "Conferir" }), "CHECK");
+  assert.equal(classifyOpenCreditTemplateButton({ type: "text", body: "Verificar" }), "CHECK");
+  assert.equal(classifyOpenCreditTemplateButton({ type: "text", body: "Bloquear" }), "BLOCK");
   assert.equal(classifyOpenCreditTemplateButton({ type: "text", body: "quero conferir" }), null);
   assert.equal(classifyOpenCreditTemplateButton({ type: "button", body: "Outro" }), null);
   assert.equal(OPEN_CREDIT_CHECK_FIRST_REPLY,

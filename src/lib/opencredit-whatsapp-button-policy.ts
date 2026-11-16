@@ -16,9 +16,19 @@ function normalizeButtonText(value: string) {
 export function classifyOpenCreditTemplateButton(
   input: { type?: string | null; body?: string | null }
 ): OpenCreditTemplateButtonAction {
-  if (!["button", "interactive"].includes(input.type ?? "")) return null;
+  const type = input.type ?? "";
   const text = normalizeButtonText(input.body ?? "");
   if (!text) return null;
+
+  // Some Meta template quick replies arrive as plain text. In that case, accept
+  // only the exact configured command words so ordinary customer sentences are untouched.
+  if (type === "text") {
+    if (text === "bloquear") return "BLOCK";
+    if (text === "conferir" || text === "verificar") return "CHECK";
+    return null;
+  }
+
+  if (!["button", "interactive"].includes(type)) return null;
   if (/\bbloquear\b/.test(text)) return "BLOCK";
   if (/\b(?:conferir|verificar)\b/.test(text)) return "CHECK";
   return null;
