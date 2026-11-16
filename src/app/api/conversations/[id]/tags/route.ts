@@ -3,6 +3,7 @@ import { getSessionFromRequest } from "@/lib/auth";
 import { resolveConversationAccess } from "@/lib/conversation-access-control";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
+import { isSemMargemTagName, nextSemMargemReturnWindow, semMargemAutomaticTaskId } from "@/lib/sem-margem-return";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -50,11 +51,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
             companyId: session.companyId,
             isActive: true
           },
-          select: { id: true }
+          select: { id: true, name: true }
         })
       : [];
 
     const validTagIds = tags.map((tag) => tag.id);
+    const shouldScheduleSemMargem = tags.some((tag) => isSemMargemTagName(tag.name));
 
     const updated = await prisma.$transaction(async (tx) => {
       if (body?.mode === "replace") {
@@ -82,6 +84,54 @@ export async function POST(request: NextRequest, context: RouteContext) {
           })
         )
       );
+
+      if (shouldScheduleSemMargem) {
+        const scopedConversation = await tx.conversation.findFirstOrThrow({
+          where: { id: conversation.id, contact: { companyId: session.companyId } },
+          select: {
+            id: true,
+            agentId: true,
+            contactId: true,
+            contact: { select: { ownerId: true } }
+          }
+        });
+        const assigneeId =
+          scopedConversation.agentId ??
+          scopedConversation.contact.ownerId ??
+          session.id;
+        const { dueAt, dayStart, nextDay } = nextSemMargemReturnWindow();
+        const existing = await tx.task.findFirst({
+          where: {
+            companyId: session.companyId,
+            contactId: scopedConversation.contactId,
+            title: "Retorno: Sem margem",
+            status: "PENDING",
+            dueAt: { gte: dayStart, lt: nextDay }
+          },
+          select: { id: true }
+        });
+        if (!existing) {
+          const id = semMargemAutomaticTaskId(
+            session.companyId,
+            scopedConversation.contactId,
+            dueAt
+          );
+          await tx.task.upsert({
+            where: { id },
+            update: {},
+            create: {
+              id,
+              companyId: session.companyId,
+              contactId: scopedConversation.contactId,
+              assigneeId,
+              title: "Retorno: Sem margem",
+              note: "Agendado automaticamente pela tag Sem margem.",
+              dueAt,
+              status: "PENDING"
+            }
+          });
+        }
+      }
 
       return tx.conversation.findFirstOrThrow({
         where: { id: conversation.id },
