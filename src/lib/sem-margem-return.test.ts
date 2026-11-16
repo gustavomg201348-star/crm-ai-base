@@ -21,7 +21,7 @@ test("on day 23 schedules next month", () => {
   assert.equal(result.dueAt.toISOString(), "2026-12-23T11:00:00.000Z");
 });
 
-test("after day 24 crosses year boundary", () => {
+test("after day 23 crosses year boundary", () => {
   const result = nextSemMargemReturnWindow(new Date("2026-12-30T12:00:00Z"));
   assert.equal(result.dueAt.toISOString(), "2027-01-23T11:00:00.000Z");
 });
