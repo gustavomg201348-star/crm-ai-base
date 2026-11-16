@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 const SHEET_TURNOVER_TIMEZONE_OFFSET = "-03:00";
 const SHEET_TURNOVER_HOUR = "09:00:00";
 
@@ -41,4 +43,11 @@ export function nextSemMargemReturnWindow(now = new Date()) {
   const nextDay = new Date(dayStart);
   nextDay.setUTCDate(nextDay.getUTCDate() + 1);
   return { dueAt, dayStart, nextDay };
+}
+
+export function semMargemAutomaticTaskId(companyId: string, contactId: string, dueAt: Date) {
+  return "sem-margem-" + createHash("sha256")
+    .update([companyId, contactId, dueAt.toISOString().slice(0, 10)].join("|"))
+    .digest("hex")
+    .slice(0, 32);
 }
