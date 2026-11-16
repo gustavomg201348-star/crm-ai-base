@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isSemMargemTagName, nextSemMargemReturnWindow } from "./sem-margem-return";
+import { isSemMargemTagName, nextSemMargemReturnWindow, semMargemAutomaticTaskId } from "./sem-margem-return";
 
 test("recognizes only exact Sem margem tag name", () => {
   assert.equal(isSemMargemTagName("Sem margem"), true);
@@ -24,4 +24,12 @@ test("on day 24 schedules next month", () => {
 test("after day 24 crosses year boundary", () => {
   const result = nextSemMargemReturnWindow(new Date("2026-12-30T12:00:00Z"));
   assert.equal(result.dueAt.toISOString(), "2027-01-24T12:00:00.000Z");
+});
+
+test("automatic task id is stable for the same client and turnover", () => {
+  const dueAt = new Date("2026-11-24T12:00:00.000Z");
+  const first = semMargemAutomaticTaskId("company-a", "contact-a", dueAt);
+  const second = semMargemAutomaticTaskId("company-a", "contact-a", dueAt);
+  assert.equal(first, second);
+  assert.notEqual(first, semMargemAutomaticTaskId("company-a", "contact-b", dueAt));
 });
