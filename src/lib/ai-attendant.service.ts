@@ -20,6 +20,7 @@ import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
 import { readMetaMessageId, sendMetaTextMessage } from "@/lib/meta-whatsapp";
 import { openCreditWhatsappCanAutoReply, prepareOpenCreditWhatsappAiReply, prepareOpenCreditCrmDirectAiReply } from "./opencredit-whatsapp-ai";
+import { classifyOpenCreditTemplateButton, OPEN_CREDIT_CHECK_FIRST_REPLY } from "./opencredit-whatsapp-button-policy";
 
 export type AiMode = "OFF" | "COPILOT" | "AUTO" | "HYBRID";
 
@@ -631,8 +632,29 @@ export async function maybeSendAutomaticAiReply({
     return null;
   }
 
-  // Sem chave de IA, o automatico fica protegido para nao enviar resposta generica.
-  if (!process.env.OPENAI_API_KEY) { gate("OPENAI_KEY_MISSING"); return null; }
+  const latestVerifiedInbound = bridge ? await prisma.conversationInboundEvent.findFirst({
+    where: {
+      companyId,
+      conversationId,
+      channelId: conversation.channelId,
+      contactId: conversation.contactId,
+      provenanceKind: "META_WEBHOOK_HMAC_SHA256_VERIFIED",
+      provenanceVersion: 1,
+    },
+    orderBy: { sequence: "desc" },
+    include: { message: { select: { type: true, body: true } } },
+  }) : null;
+  const buttonAction = latestVerifiedInbound
+    ? classifyOpenCreditTemplateButton(latestVerifiedInbound.message)
+    : null;
+  if (buttonAction === "BLOCK") {
+    gate("OPENCREDIT_BUTTON_BLOCK_SILENT");
+    return null;
+  }
+  const fixedButtonReply = buttonAction === "CHECK" ? OPEN_CREDIT_CHECK_FIRST_REPLY : null;
+
+  // The verified OpenCredit CHECK button uses a fixed safe reply and does not depend on OpenAI.
+  if (!fixedButtonReply && !process.env.OPENAI_API_KEY) { gate("OPENAI_KEY_MISSING"); return null; }
 
   const authorityDb = { db: prisma,
     provider: /^postgres(?:ql)?:/.test(process.env.DATABASE_URL ?? "") ? "postgresql" as const : "sqlite" as const };
@@ -644,13 +666,15 @@ export async function maybeSendAutomaticAiReply({
       : null;
   if (bridge && !attempt) { gate("OPENCREDIT_BRIDGE_PREPARE_DENIED"); return null; }
   try {
-    const cltEnabled = !!attempt && cltFeatureEnabled;
+    const cltEnabled = !!attempt && cltFeatureEnabled && !fixedButtonReply;
     const clt = cltEnabled ? await (await import("./opencredit-ai-simulation.service")).runOpenCreditAiSimulation(prisma, attempt.context, {
       log: event => console.info(JSON.stringify(event)),
     }) : undefined;
     if (cltEnabled && !clt) { gate("CLT_ENGINE_NO_RESPONSE"); return null; }
     if (clt?.handoff) { gate("CLT_HANDOFF"); await attempt?.transferToHuman(); return null; }
-    const { suggestion } = clt ? { suggestion: { suggestedReply: clt.reply, shouldTransferToHuman: false } }
+    const { suggestion } = fixedButtonReply
+      ? { suggestion: { suggestedReply: fixedButtonReply, shouldTransferToHuman: false } }
+      : clt ? { suggestion: { suggestedReply: clt.reply, shouldTransferToHuman: false } }
       : await generateAiSuggestion({ conversationId, companyId });
     if (!suggestion.suggestedReply || suggestion.shouldTransferToHuman) {
       gate(!suggestion.suggestedReply ? "EMPTY_SUGGESTION" : "SUGGESTION_REQUESTED_HUMAN");
