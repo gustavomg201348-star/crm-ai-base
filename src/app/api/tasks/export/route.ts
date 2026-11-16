@@ -92,11 +92,11 @@ export async function GET(request: NextRequest) {
     safeLogError("http-api", error, {
       route: "/api/tasks/export",
       method: "GET",
-      publicErrorCode: "TASK_EXPORT_FAILED",
+      publicErrorCode: "CONTACT_EXPORT_FAILED",
       status: 500
     });
     return publicErrorResponse({
-      code: "TASK_EXPORT_FAILED",
+      code: "CONTACT_EXPORT_FAILED",
       status: 500,
       message: "Nao foi possivel exportar os retornos."
     });
