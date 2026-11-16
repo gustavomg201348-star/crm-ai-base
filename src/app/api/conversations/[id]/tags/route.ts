@@ -3,7 +3,7 @@ import { getSessionFromRequest } from "@/lib/auth";
 import { resolveConversationAccess } from "@/lib/conversation-access-control";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
-import { isSemMargemTagName, nextSemMargemReturnWindow } from "@/lib/sem-margem-return";
+import { isSemMargemTagName, nextSemMargemReturnWindow, semMargemAutomaticTaskId } from "@/lib/sem-margem-return";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -111,8 +111,16 @@ export async function POST(request: NextRequest, context: RouteContext) {
           select: { id: true }
         });
         if (!existing) {
-          await tx.task.create({
-            data: {
+          const id = semMargemAutomaticTaskId(
+            session.companyId,
+            scopedConversation.contactId,
+            dueAt
+          );
+          await tx.task.upsert({
+            where: { id },
+            update: {},
+            create: {
+              id,
               companyId: session.companyId,
               contactId: scopedConversation.contactId,
               assigneeId,
