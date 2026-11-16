@@ -8,6 +8,7 @@ import { bootstrapPhone, analyzeOpenCreditBootstrapTemplate, resolveBootstrapVar
 import { parseWhatsappBootstrapConfig } from "./opencredit-whatsapp-config.service";
 import type { SessionUser } from "./auth";
 import { openCanaryConversation } from "../app/components/conversations/OpenCreditWhatsappCanary";
+import { classifyOpenCreditTemplateButton, OPEN_CREDIT_CHECK_FIRST_REPLY } from "./opencredit-whatsapp-button-policy";
 
 const loader = Module as typeof Module & { _load(name: string, ...args: unknown[]): unknown };
 const original = loader._load, require = createRequire(import.meta.url);
@@ -253,4 +254,15 @@ test("navigation failure propagates separately from the confirmed provider outco
 test("destination lookup failure preserves confirmed send without exposing diagnostics",async()=>{
   const f=canaryFixture(); f.failDestination(); const r=await f.run();
   assert.equal(r.status,200); assert.deepEqual(await r.json(),{status:"SENT"});
+});
+
+test("OpenCredit template button policy keeps block silent and check deterministic", () => {
+  assert.equal(classifyOpenCreditTemplateButton({ type: "button", body: "Bloquear" }), "BLOCK");
+  assert.equal(classifyOpenCreditTemplateButton({ type: "button", body: "Conferir" }), "CHECK");
+  assert.equal(classifyOpenCreditTemplateButton({ type: "button", body: "Verificar agora" }), "CHECK");
+  assert.equal(classifyOpenCreditTemplateButton({ type: "interactive", body: "Resposta interativa: Conferir" }), "CHECK");
+  assert.equal(classifyOpenCreditTemplateButton({ type: "text", body: "quero conferir" }), null);
+  assert.equal(classifyOpenCreditTemplateButton({ type: "button", body: "Outro" }), null);
+  assert.equal(OPEN_CREDIT_CHECK_FIRST_REPLY,
+    "Perfeito! Vamos verificar agora mesmo.\nAntes me conta: Você tem algum valor de parcela ou liberado que gostaria em específico?");
 });
