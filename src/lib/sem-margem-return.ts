@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 const SHEET_TURNOVER_TIMEZONE_OFFSET = "-03:00";
-const SHEET_TURNOVER_HOUR = "09:00:00";
+const SHEET_TURNOVER_HOUR = "08:00:00";
 
 export function isSemMargemTagName(name: string) {
   return name.trim().toLocaleLowerCase("pt-BR") === "sem margem";
@@ -24,7 +24,7 @@ function saoPauloCalendarDate(now: Date) {
 
 function targetYearMonth(now: Date) {
   const local = saoPauloCalendarDate(now);
-  if (local.day < 24) return { year: local.year, month: local.month };
+  if (local.day < 23) return { year: local.year, month: local.month };
   return local.month === 12
     ? { year: local.year + 1, month: 1 }
     : { year: local.year, month: local.month + 1 };
@@ -38,8 +38,8 @@ function isoDate(year: number, month: number, day: number, time: string) {
 
 export function nextSemMargemReturnWindow(now = new Date()) {
   const target = targetYearMonth(now);
-  const dueAt = isoDate(target.year, target.month, 24, SHEET_TURNOVER_HOUR);
-  const dayStart = isoDate(target.year, target.month, 24, "00:00:00");
+  const dueAt = isoDate(target.year, target.month, 23, SHEET_TURNOVER_HOUR);
+  const dayStart = isoDate(target.year, target.month, 23, "00:00:00");
   const nextDay = new Date(dayStart);
   nextDay.setUTCDate(nextDay.getUTCDate() + 1);
   return { dueAt, dayStart, nextDay };
