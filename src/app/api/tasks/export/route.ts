@@ -53,7 +53,7 @@ export async function GET(request: NextRequest) {
         ...(assigneeId ? { assigneeId } : {})
       },
       include: {
-        contact: { select: { id: true, name: true, cpf: true, phone: true } },
+        contact: { select: { name: true, cpf: true, phone: true } },
         assignee: { select: { name: true } }
       },
       orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
@@ -64,7 +64,6 @@ export async function GET(request: NextRequest) {
       Nome: clean(task.contact.name),
       CPF: clean(task.contact.cpf),
       Telefone: clean(task.contact.phone),
-      "Numero do contato": clean(task.contact.id),
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(rows);
@@ -72,7 +71,6 @@ export async function GET(request: NextRequest) {
       { wch: 34 },
       { wch: 16 },
       { wch: 18 },
-      { wch: 40 },
     ];
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Virada de folha");
