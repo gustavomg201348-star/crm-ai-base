@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Loader2, RefreshCcw } from "lucide-react";
+import { parseAuthorizationContext } from "@/lib/opencredit-consumer-authorization-ui";
 import {
   parseSimulationReply,
   simulationParameters,
@@ -42,6 +43,7 @@ export function CltSidebarSimulationPanel({
   const [authorizationActive, setAuthorizationActive] = useState(false);
   const [contextReady, setContextReady] = useState(false);
   const [reply, setReply] = useState<SimulationReply | null>(null);
+  const [attempted, setAttempted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -52,6 +54,7 @@ export function CltSidebarSimulationPanel({
     setMode("maximum");
     setAmountBRL("");
     setReply(null);
+    setAttempted(false);
     setContextReady(false);
     setAuthorizationActive(false);
     setMessage("");
@@ -88,11 +91,11 @@ export function CltSidebarSimulationPanel({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ companyId, contactId, conversationId })
     });
-    const raw = (await response.json().catch(() => null)) as {
-      authorization?: { active?: boolean };
-    } | null;
-    setAuthorizationActive(response.ok && raw?.authorization?.active === true);
-    return response.ok && raw?.authorization?.active === true;
+    const raw: unknown = await response.json().catch(() => null);
+    const parsed = response.ok ? parseAuthorizationContext(raw) : null;
+    const active = parsed?.authorization.active === true;
+    setAuthorizationActive(active);
+    return active;
   }
 
   async function request(action: "banks" | "context" | "dispatch" | "poll") {
@@ -101,6 +104,8 @@ export function CltSidebarSimulationPanel({
     setMessage("");
     try {
       if (action === "dispatch") {
+        if (attempted) return;
+        setAttempted(true);
         const digits = cpfInput.replace(/\D/g, "");
         if (digits !== (cpf ?? "").replace(/\D/g, "")) {
           const saved = await onSaveCpf(digits);
@@ -261,13 +266,13 @@ export function CltSidebarSimulationPanel({
             <button
               type="button"
               className="h-10 w-full rounded-xl bg-brand px-3 text-sm font-bold text-white disabled:opacity-50"
-              disabled={busy || !validCpf || !eligible || !validParameters}
+              disabled={busy || attempted || !validCpf || !eligible || !validParameters}
               onClick={async () => {
                 if (!contextReady) await request("context");
                 await request("dispatch");
               }}
             >
-              {busy ? "Consultando..." : "Simular"}
+              {busy ? "Consultando..." : attempted ? "Simulacao enviada" : "Simular"}
             </button>
           </>
         )}
