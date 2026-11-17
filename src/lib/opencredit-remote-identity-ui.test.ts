@@ -99,8 +99,8 @@ test("static UI authority and only approved local endpoints", () => {
   while (p && !ts.isJsxAttribute(p)) p = p.parent; assert(p); assert.equal(p.name.getText(ast), "onClick");
   assert.match(source, /window.confirm/); assert.match(source, /key=\{JSON\.stringify\(\[props.companyId, props.contactId\]\)\}/); assert.match(source, /if \(response.ok\) \{ await load\(\)/);
   assert.match(page, /canManageOpenCreditIdentity=\{userIsPlatformAdmin\(session\)\}/);
-  assert.equal((page.match(/<OpenCreditRemoteIdentityPanel/g) ?? []).length, 1);
-  assert.match(page, /enabled=\{canManageOpenCreditIdentity\}/);
+  assert.equal((page.match(/<OpenCreditRemoteIdentityPanel/g) ?? []).length, 0);
+  assert.doesNotMatch(page, /enabled=\{canManageOpenCreditIdentity\}[\s\S]{0,300}<OpenCreditRemoteIdentityPanel/);
   for (const dir of ["src", "scripts"]) for (const file of readdirSync(dir, { recursive: true, encoding: "utf8" })) {
     const p = dir + "/" + file.replace(/\\/g, "/");
     if (!/\.[cm]?[jt]sx?$/.test(p) || /\.(test|integration)\./.test(p) || p === path) continue;
