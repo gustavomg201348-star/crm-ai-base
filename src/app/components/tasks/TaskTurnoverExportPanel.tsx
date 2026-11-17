@@ -79,7 +79,7 @@ export function TaskTurnoverExportPanel({ attendants }: { attendants: AttendantO
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand">Virada de folha CLT</p>
           <p className="mt-1 text-sm font-semibold text-slate-900">Exportar retornos em XLSX</p>
-          <p className="mt-1 text-xs text-slate-500">Exporte a lista para consulta apos a virada com nome, CPF, telefone e numero do contato no CRM.</p>
+          <p className="mt-1 text-xs text-slate-500">Exporte a lista para consulta apos a virada com nome, CPF e telefone.</p>
         </div>
         <button
           type="button"
