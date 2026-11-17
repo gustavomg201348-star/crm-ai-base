@@ -9,7 +9,7 @@ on:
 jobs:
   verify:
     name: Verify
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       AUTH_SECRET: ci-auth-secret-change-me
       META_VERIFY_TOKEN: ci-meta-verify-token

@@ -601,7 +601,7 @@ export async function maybeSendAutomaticAiReply({
   };
   const conversation = await prisma.conversation.findFirst({
     where: { id: conversationId, contact: { companyId } },
-    include: { contact: true, channelRef: openCreditChannelRef, openCreditWhatsappMetas: { select: { state: true } } }
+    include: { contact: { include: { origin: { select: { name: true } } } }, channelRef: openCreditChannelRef, openCreditWhatsappMetas: { select: { state: true } } }
   });
   if (!conversation) { gate("CONVERSATION_NOT_FOUND"); return null; }
   if (isOpenCreditConversation(conversation)) { gate("INTERNAL_OPENCREDIT_CONVERSATION"); return null; }
@@ -652,6 +652,40 @@ export async function maybeSendAutomaticAiReply({
     return null;
   }
   const fixedButtonReply = buttonAction === "CHECK" ? OPEN_CREDIT_CHECK_FIRST_REPLY : null;
+
+  if (
+    buttonAction === "CHECK" &&
+    conversation.contact.origin?.name.trim().toLocaleLowerCase("pt-BR") === "prospecta"
+  ) {
+    const cltTag = await prisma.tag.findFirst({
+      where: {
+        companyId,
+        isActive: true,
+        name: { equals: "CLT" }
+      },
+      select: { id: true }
+    });
+    if (cltTag) {
+      await prisma.conversationTag.upsert({
+        where: {
+          conversationId_tagId: {
+            conversationId,
+            tagId: cltTag.id
+          }
+        },
+        update: {},
+        create: {
+          companyId,
+          conversationId,
+          tagId: cltTag.id,
+          createdByUserId: null
+        }
+      });
+      gate("PROSPECTA_CLT_TAG_APPLIED");
+    } else {
+      gate("PROSPECTA_CLT_TAG_NOT_FOUND");
+    }
+  }
 
   // The verified OpenCredit CHECK button uses a fixed safe reply and does not depend on OpenAI.
   if (!fixedButtonReply && !process.env.OPENAI_API_KEY) { gate("OPENAI_KEY_MISSING"); return null; }
