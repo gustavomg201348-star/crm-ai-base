@@ -54,9 +54,9 @@ test("UI guard: exactly three local endpoints, human-only actions, no automatic 
   for (const tag of Array.from(source.matchAll(/<button\b([^>]+)>/g))) assert.match(tag[1], /type="button"/);
   assert.match(source, /role="status"/); assert.match(source, /role="alert"/);
 });
-test("page only mounts shared detail panel; general conversation mapper/types remain private", () => {
+test("page keeps authorization capability private while Atendimento hides the technical panel", () => {
   const page = readFileSync("src/app/page.tsx", "utf8"); assert.match(page, /canAttemptOpenCreditAuthorization=\{session.user.role === "ADMIN"\}/);
-  assert.equal((page.match(/<OpenCreditConsumerAuthorizationPanel/g) ?? []).length, 1);
+  assert.equal((page.match(/<OpenCreditConsumerAuthorizationPanel/g) ?? []).length, 0);
   assert.match(page, /renderDetailsPanelContent\(\{ allowCollapse: false \}\)/); assert.match(page, /renderDetailsPanelContent\(\{ allowCollapse: true \}\)/);
   assert.doesNotMatch(page, /inboundEventId/);
   const mapper = readFileSync("src/lib/conversations.ts", "utf8"); assert.doesNotMatch(mapper, /inboundEventId/);

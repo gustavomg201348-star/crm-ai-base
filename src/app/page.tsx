@@ -23,6 +23,7 @@ import {
 import { OpenCreditWhatsappCanary } from "@/app/components/conversations/OpenCreditWhatsappCanary";
 import { TaskTurnoverExportPanel } from "@/app/components/tasks/TaskTurnoverExportPanel";
 import { ConversationList } from "@/app/components/conversations/ConversationList";
+import { CltSidebarSimulationPanel } from "@/app/components/conversations/CltSidebarSimulationPanel";
 import { ConversationPageLoader, appendConversationPage, compareConversationActivity } from "@/lib/conversation-list-pagination";
 import { TemplateVariableDialog } from "@/app/components/conversations/TemplateVariableDialog";
 import { MotorCommercialPage } from "@/app/components/opportunities/MotorCommercialPage";
@@ -8044,99 +8045,19 @@ function Atendimento({
   function renderDetailsPanelContent({ allowCollapse }: { allowCollapse: boolean }) {
     return (
       <>
-        <AiPanel
-          compact
-          analysis={aiAnalysis}
-          error={aiError}
-          companyMode={aiSettings.mode}
-          conversation={selectedConversation}
-          loading={aiLoading}
-          disabled={!selectedConversation}
-          onAnalyze={() =>
-            selectedConversation
-              ? void onAnalyzeConversation(selectedConversation.id, replyingTo?.id)
-              : undefined
-          }
-          onModeChange={(mode) =>
-            selectedConversation
-              ? void onUpdateConversationAiMode(selectedConversation.id, { mode })
-              : undefined
-          }
-          onPauseChange={(paused) =>
-            selectedConversation
-              ? void onUpdateConversationAiMode(selectedConversation.id, { paused })
-              : undefined
-          }
-          onCollapse={allowCollapse ? () => setAiSidebarCollapsed(true) : undefined}
-        />
-        {aiAnalysis && (
-          <button
-            className="flex h-10 w-full items-center justify-center gap-2 rounded bg-brand px-3 text-sm font-semibold text-white"
-            disabled={!selectedConversation}
-            onClick={() => {
-              if (message.trim() && !window.confirm("Substituir seu texto pela sugestao da IA?")) return;
-              updateComposerMessage(aiAnalysis.suggestedReply);
+        {selectedConversation && (
+          <CltSidebarSimulationPanel
+            companyId={companyId}
+            contactId={selectedConversation.contact.id}
+            conversationId={selectedConversation.id}
+            cpf={selectedConversation.contact.cpf}
+            enabled={canManageOpenCreditIdentity}
+            onSaveCpf={async (cpf) => {
+              const updated = await onUpdateContact(selectedConversation.contact.id, { cpf });
+              return Boolean(updated);
             }}
-          >
-            <Send className="h-4 w-4" />
-            Usar sugestao
-          </button>
+          />
         )}
-        <button
-          type="button"
-          className="flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-blue-100 bg-blue-50 px-3 text-sm font-bold text-primary hover:bg-blue-100 disabled:opacity-50"
-          disabled={!selectedConversation}
-          onClick={() =>
-            selectedConversation
-              ? onOpenCltSimulation(selectedConversation)
-              : undefined
-          }
-        >
-          <BriefcaseBusiness className="h-4 w-4" />
-          Simular CLT deste lead
-        </button>
-        <div className="rounded border border-line bg-white p-4 shadow-soft">
-          <h3 className="font-bold">Ficha rapida</h3>
-          <dl className="mt-4 space-y-3 text-sm">
-            <Info label="Origem" value={selectedConversation?.contact.origin ?? "-"} />
-            <Info label="Etapa" value={selectedConversation?.contact.stage ?? "-"} />
-            <Info label="Responsavel" value={selectedConversation?.contact.owner ?? "-"} />
-            <Info
-              label="Temperatura"
-              value={
-                selectedConversation?.contact.temperature
-                  ? temperatureLabels[
-                      selectedConversation.contact
-                        .temperature as keyof typeof temperatureLabels
-                    ]
-                  : "-"
-              }
-            />
-          </dl>
-        </div>
-        {selectedConversation && <OpenCreditRemoteIdentityPanel
-          enabled={canManageOpenCreditIdentity}
-          companyId={companyId}
-          contactId={selectedConversation.contact.id}
-        />}
-        {selectedConversation && <OpenCreditConsumerAuthorizationPanel
-          enabled={canAttemptOpenCreditAuthorization}
-          companyId={companyId}
-          contactId={selectedConversation.contact.id}
-          conversationId={selectedConversation.id}
-          messages={selectedConversation.messages.map(({ id, direction, body, createdAt, type }) => ({ id, direction, body, createdAt, type }))}
-        />}
-        <OpportunitySummaryCard
-          error={opportunityError}
-          loading={opportunityLoading}
-          summary={opportunitySummary}
-          onFollowUp={openFollowUp}
-          onFocusComposer={focusComposerInput}
-          onOpenCltSimulation={() =>
-            selectedConversation ? onOpenCltSimulation(selectedConversation) : undefined
-          }
-          onOpenTemplates={() => void openTemplates()}
-        />
         <div className="rounded border border-line bg-white p-4 shadow-soft">
           <div className="flex items-center justify-between gap-3">
             <h3 className="font-bold">Observacao interna</h3>
