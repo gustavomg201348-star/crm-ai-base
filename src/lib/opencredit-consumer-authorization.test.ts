@@ -364,6 +364,7 @@ test("only approved human admin mutation boundary; reservation only reads author
           "src/lib/opencredit-client-correction-postgres.integration.ts",
           "src/lib/opencredit-clt-simulation.test.ts", "src/lib/opencredit-clt-simulation-postgres.integration.ts",
           "src/lib/opencredit-whatsapp-postgres.integration.ts",
+          "src/app/components/conversations/CltSidebarSimulationPanel.tsx",
           "src/app/components/integrations/OpenCreditSimulationAuthorizationPanel.tsx",
           "src/app/api/admin/integrations/opencredit/clt-simulation/authorization/context/route.ts",
           "src/app/api/admin/integrations/opencredit/clt-simulation/authorization/grant/route.ts",
