@@ -105,7 +105,6 @@ export function CltSidebarSimulationPanel({
     try {
       if (action === "dispatch") {
         if (attempted) return;
-        setAttempted(true);
         const digits = cpfInput.replace(/\D/g, "");
         if (digits !== (cpf ?? "").replace(/\D/g, "")) {
           const saved = await onSaveCpf(digits);
@@ -119,6 +118,7 @@ export function CltSidebarSimulationPanel({
           setMessage("Este cliente ainda nao possui autorizacao ativa para consulta/simulacao.");
           return;
         }
+        setAttempted(true);
       }
 
       const response = await fetch(base + "/" + action, {
