@@ -13,6 +13,7 @@ import {
 type Props = {
   companyId: string;
   contactId: string;
+  conversationId: string;
   cpf?: string | null;
   enabled: boolean;
   onSaveCpf: (cpf: string) => Promise<boolean>;
@@ -28,6 +29,7 @@ function money(value: number | null) {
 export function CltSidebarSimulationPanel({
   companyId,
   contactId,
+  conversationId,
   cpf,
   enabled,
   onSaveCpf
@@ -84,7 +86,7 @@ export function CltSidebarSimulationPanel({
       credentials: "same-origin",
       cache: "no-store",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ companyId, contactId, conversationId: undefined })
+      body: JSON.stringify({ companyId, contactId, conversationId })
     });
     const raw = (await response.json().catch(() => null)) as {
       authorization?: { active?: boolean };
