@@ -34,7 +34,38 @@ export function TaskTurnoverExportPanel({ attendants }: { attendants: AttendantO
   const [reason, setReason] = useState("Sem margem");
   const [assigneeId, setAssigneeId] = useState("");
   const [busy, setBusy] = useState(false);
+  const [backfillBusy, setBackfillBusy] = useState(false);
+  const [backfillResult, setBackfillResult] = useState("");
   const [error, setError] = useState("");
+
+  async function backfillExistingSemMargem() {
+    setError("");
+    setBackfillResult("");
+    if (!window.confirm("Agendar todos os clientes que ja possuem a tag Sem margem para a proxima virada?")) {
+      return;
+    }
+    setBackfillBusy(true);
+    try {
+      const response = await fetch("/api/tasks/sem-margem/backfill", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}"
+      });
+      const data = (await response.json().catch(() => null)) as
+        | { candidates?: number; created?: number; alreadyScheduled?: number; error?: string }
+        | null;
+      if (!response.ok) {
+        throw new Error(data?.error ?? "Nao foi possivel agendar os clientes existentes.");
+      }
+      setBackfillResult(
+        `${data?.created ?? 0} agendado(s); ${data?.alreadyScheduled ?? 0} ja estavam agendados; ${data?.candidates ?? 0} cliente(s) Sem margem encontrados.`
+      );
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Nao foi possivel agendar os clientes existentes.");
+    } finally {
+      setBackfillBusy(false);
+    }
+  }
 
   async function exportSheet() {
     setError("");
@@ -81,15 +112,26 @@ export function TaskTurnoverExportPanel({ attendants }: { attendants: AttendantO
           <p className="mt-1 text-sm font-semibold text-slate-900">Exportar retornos em XLSX</p>
           <p className="mt-1 text-xs text-slate-500">Exporte a lista para consulta apos a virada com nome, CPF e telefone.</p>
         </div>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void exportSheet()}
-          className="inline-flex h-10 items-center gap-2 rounded-full bg-brand px-4 text-sm font-bold text-white disabled:opacity-60"
-        >
-          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-          {busy ? "Gerando..." : "Exportar XLSX"}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={backfillBusy}
+            onClick={() => void backfillExistingSemMargem()}
+            className="inline-flex h-10 items-center gap-2 rounded-full border border-blue-200 bg-white px-4 text-sm font-bold text-brand disabled:opacity-60"
+          >
+            {backfillBusy && <Loader2 className="h-4 w-4 animate-spin" />}
+            {backfillBusy ? "Agendando..." : "Agendar Sem margem existentes"}
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void exportSheet()}
+            className="inline-flex h-10 items-center gap-2 rounded-full bg-brand px-4 text-sm font-bold text-white disabled:opacity-60"
+          >
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            {busy ? "Gerando..." : "Exportar XLSX"}
+          </button>
+        </div>
       </div>
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -117,6 +159,7 @@ export function TaskTurnoverExportPanel({ attendants }: { attendants: AttendantO
         </label>
       </div>
 
+      {backfillResult && <p className="mt-3 text-xs font-semibold text-emerald-700">{backfillResult}</p>}
       {error && <p className="mt-3 text-xs font-semibold text-rose-700">{error}</p>}
     </div>
   );
