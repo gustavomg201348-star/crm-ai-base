@@ -1283,3 +1283,13 @@ test("verified Prospecta CHECK prequalification is evaluated before AI reply pol
   assert.ok(enqueue < bridgeGate, "prequalification must not depend on OpenCredit auto-reply eligibility");
   assert.ok(enqueue < aiGate, "prequalification must not depend on conversation AI pause/mode policy");
 });
+
+
+test("verified CHECK prequalification is not restricted to Prospecta origin", () => {
+  const aiSource = readFileSync("src/lib/ai-attendant.service.ts", "utf8");
+  const queueSource = readFileSync("src/lib/opencredit-clt-prequalification-queue.service.ts", "utf8");
+  assert.doesNotMatch(aiSource, /contact\.origin\?\.name[\s\S]{0,120}prospecta/i);
+  assert.doesNotMatch(queueSource, /contact\.origin\?\.name[\s\S]{0,120}prospecta/i);
+  assert.match(aiSource, /if \(buttonAction === "CHECK"\)/);
+  assert.match(queueSource, /classifyOpenCreditTemplateButton\(evidence\.message\) !== "CHECK"/);
+});
