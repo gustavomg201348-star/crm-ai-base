@@ -60,6 +60,7 @@ model OpenCreditConsumerAuthorizationEvent {
 
 model ConversationInboundEvent {
   cltAiSimulations OpenCreditAiSimulation[]
+  openCreditCltPrequalifications OpenCreditCltPrequalification[]
   provenanceKind String?
   provenanceVersion Int?
   id             String @id @default(cuid())
@@ -340,6 +341,7 @@ model ChatbotOutbox {
 
 model Company {
   openCreditConsumerAuthorizations OpenCreditConsumerAuthorization[]
+  openCreditCltPrequalifications OpenCreditCltPrequalification[]
   id            String          @id @default(cuid())
   name          String
   email         String?
@@ -906,6 +908,7 @@ model NextBestActionEvent {
 
 model Contact {
   cltAiSimulations OpenCreditAiSimulation[]
+  openCreditCltPrequalifications OpenCreditCltPrequalification[]
   openCreditWhatsappHandoffs OpenCreditWhatsappHandoff[]
   openCreditMaterializations OpenCreditLeadMaterialization[]
   openCreditConsumerAuthorizations OpenCreditConsumerAuthorization[]
@@ -1186,6 +1189,7 @@ model PipelineStage {
 
 model Conversation {
   cltAiSimulations OpenCreditAiSimulation[]
+  openCreditCltPrequalifications OpenCreditCltPrequalification[]
   openCreditWhatsappSources OpenCreditWhatsappHandoff[] @relation("OpenCreditWhatsappSource")
   openCreditWhatsappMetas OpenCreditWhatsappHandoff[] @relation("OpenCreditWhatsappMeta")
   openCreditMaterializations OpenCreditLeadMaterialization[]
@@ -1546,6 +1550,35 @@ model OpenCreditWhatsappHandoff {
   outboundOperation OutboundOperation? @relation(fields: [companyId, channelId, metaConversationId, outboundOperationId], references: [companyId, channelId, conversationId, id], onDelete: Restrict, onUpdate: NoAction)
   @@unique([companyId, contactId])
   @@index([companyId, integrationId, state])
+}
+
+model OpenCreditCltPrequalification {
+  id              String   @id @default(cuid())
+  companyId       String
+  contactId       String
+  conversationId  String
+  channelId       String
+  inboundEventId  String
+  providerScope   String
+  state           String   @default("PENDING")
+  attempts        Int      @default(0)
+  availableAt     DateTime @default(now())
+  leaseToken      String?
+  leaseUntil      DateTime?
+  protectedResult String?
+  errorCode       String?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  company         Company @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  contact         Contact @relation(fields: [companyId, contactId], references: [companyId, id], onDelete: Restrict, onUpdate: NoAction, map: "CltPrequal_contact")
+  conversation    Conversation @relation(fields: [conversationId, contactId, channelId], references: [id, contactId, channelId], onDelete: Restrict, onUpdate: NoAction, map: "CltPrequal_conversation")
+  evidence        ConversationInboundEvent @relation(fields: [inboundEventId, companyId, contactId], references: [id, companyId, contactId], onDelete: Restrict, onUpdate: NoAction, map: "CltPrequal_evidence")
+
+  @@unique([companyId, conversationId, inboundEventId], map: "CltPrequal_inbound_key")
+  @@index([state, availableAt, id], map: "CltPrequal_state_available_idx")
+  @@index([companyId, conversationId, createdAt, id], map: "CltPrequal_conversation_created_idx")
 }
 
 model OpenCreditAiSimulation {
