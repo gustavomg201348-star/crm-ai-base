@@ -113,6 +113,13 @@ export function createCltPrequalificationQueue(db: PrismaClient) {
         return updated.count === 1;
       }, settings);
     },
+    async fail(lease: CltPrequalificationLease, errorCode: "PROVIDER_UNAVAILABLE" | "INVALID_RESPONSE" | "CONFIGURATION") {
+      const updated = await db.openCreditCltPrequalification.updateMany({
+        where: { id: lease.id, state: "PROCESSING", leaseToken: lease.leaseToken },
+        data: { state: "FAILED", errorCode, leaseToken: null, leaseUntil: null, completedAt: new Date() }
+      });
+      return updated.count === 1;
+    },
     async retryOrFail(lease: CltPrequalificationLease, errorCode: "PROVIDER_UNAVAILABLE" | "INVALID_RESPONSE" | "CONFIGURATION") {
       return db.$transaction(async tx => {
         const current = await tx.openCreditCltPrequalification.findFirst({
