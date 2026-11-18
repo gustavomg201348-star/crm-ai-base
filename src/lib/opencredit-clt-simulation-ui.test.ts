@@ -101,7 +101,11 @@ test("source limits paid consumer, auth evidence and UI; no background requests 
     "src/lib/opencredit-clt-prequalification.service.ts",
     "src/lib/opencredit-clt-simulation.service.ts"
   ]);
-  assert.deepEqual(consumers.sort(), ["src/lib/opencredit-ai-simulation.service.ts", "src/lib/opencredit-clt-simulation-admin-handler.ts"]);
+  assert.deepEqual(consumers.sort(), [
+    "src/lib/opencredit-ai-simulation.service.ts",
+    "src/lib/opencredit-clt-prequalification.service.ts",
+    "src/lib/opencredit-clt-simulation-admin-handler.ts"
+  ]);
   const prequalification = readFileSync("src/lib/opencredit-clt-prequalification.service.ts", "utf8");
   assert.doesNotMatch(prequalification, /CREDIT_SIMULATION|OpenCreditConsumerAuthorization|grantOpenCreditSimulationAuthorization/);
   assert.match(prequalification, /simulateJsonAfterCommit/);
