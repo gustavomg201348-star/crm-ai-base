@@ -8045,6 +8045,31 @@ function Atendimento({
   function renderDetailsPanelContent({ allowCollapse }: { allowCollapse: boolean }) {
     return (
       <>
+        <AiPanel
+          compact
+          analysis={aiAnalysis}
+          error={aiError}
+          companyMode={aiSettings.mode}
+          conversation={selectedConversation}
+          loading={aiLoading}
+          disabled={!selectedConversation}
+          onAnalyze={() =>
+            selectedConversation
+              ? void onAnalyzeConversation(selectedConversation.id, replyingTo?.id)
+              : undefined
+          }
+          onModeChange={(mode) =>
+            selectedConversation
+              ? void onUpdateConversationAiMode(selectedConversation.id, { mode })
+              : undefined
+          }
+          onPauseChange={(paused) =>
+            selectedConversation
+              ? void onUpdateConversationAiMode(selectedConversation.id, { paused })
+              : undefined
+          }
+          onCollapse={allowCollapse ? () => setAiSidebarCollapsed(true) : undefined}
+        />
         {selectedConversation && (
           <CltSidebarSimulationPanel
             companyId={companyId}
