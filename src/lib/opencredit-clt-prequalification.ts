@@ -14,6 +14,7 @@ export type PrequalificationOffer = Readonly<{
 }>;
 export type PrequalificationBankResult = Readonly<{
   bankId: string;
+  bankName: string;
   simulationId: string;
   status: "aprovado" | "recusado" | "pendente" | "waiting_authorization";
   reasonType: PrequalificationReasonType;
@@ -74,10 +75,16 @@ export function buildPrequalificationPayload(cpf: string, bankIds: readonly stri
 
 export function parsePrequalificationProviderResponse(
   raw: unknown,
-  expected: { cpf: string; bankIds: readonly string[]; observedAt?: string }
+  expected: { cpf: string; banks: readonly { bankId: string; bankName: string }[]; observedAt?: string }
 ): PrequalificationResult {
   const root = object(raw), data = object(root.data), client = object(data.client);
-  const expectedBanks = new Set(expected.bankIds.map(safeId));
+  const names = new Map<string, string>();
+  for (const entry of expected.banks) {
+    const bankId = safeId(entry.bankId);
+    if (typeof entry.bankName !== "string" || !entry.bankName.trim() || entry.bankName.length > 200 || /[\u0000-\u001f\u007f]/.test(entry.bankName) || names.has(bankId)) return invalid();
+    names.set(bankId, entry.bankName.trim());
+  }
+  const expectedBanks = new Set(names.keys());
   if (!/^\d{11}$/.test(expected.cpf) || client.cpf !== expected.cpf
     || typeof data.fromCache !== "boolean" || data.blocked !== false
     || !Array.isArray(data.barriers) || data.barriers.length !== 0
@@ -100,6 +107,7 @@ export function parsePrequalificationProviderResponse(
     if ([simulationId, ...parsedOffers.map(o => o.offerId)].some(value => value.includes(expected.cpf))) return invalid();
     return {
       bankId,
+      bankName: names.get(bankId)!,
       simulationId,
       status,
       reasonType,
@@ -131,9 +139,11 @@ export function parsePrequalificationView(raw: unknown): PrequalificationView {
     if (!["aprovado", "recusado", "pendente", "waiting_authorization"].includes(bank.status as string)
       || bank.reasonType !== null && !(prequalificationReasonTypes as readonly unknown[]).includes(bank.reasonType)
       || ![null, "margem_maxima", "valor_parcela", "valor_liberado"].includes(bank.simulationType as never)
-      || Object.keys(bank).some(k => !["bankId", "simulationId", "status", "reasonType", "simulationType", "offers"].includes(k))) return invalid();
+      || typeof bank.bankName !== "string" || !bank.bankName.trim() || bank.bankName.length > 200 || /[\u0000-\u001f\u007f]/.test(bank.bankName)
+      || Object.keys(bank).some(k => !["bankId", "bankName", "simulationId", "status", "reasonType", "simulationType", "offers"].includes(k))) return invalid();
     return {
       bankId: safeId(bank.bankId),
+      bankName: bank.bankName.trim(),
       simulationId: safeId(bank.simulationId),
       status: bank.status as PrequalificationBankResult["status"],
       reasonType: bank.reasonType as PrequalificationReasonType,
