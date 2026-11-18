@@ -11,7 +11,11 @@ export async function register() {
   try { void Promise.resolve(console.info(JSON.stringify(event))).catch(() => {}); } catch {}
   // Keep the explicit runtime guard here, before importing any Node/Prisma dependencies.
   if (process.env.NEXT_RUNTIME === "edge") return;
-  const { startOpenCreditMaterializationWorkerFromRuntime } =
-    await import("./lib/opencredit-materialization-worker");
+  const [{ startOpenCreditMaterializationWorkerFromRuntime }, { startCltPrequalificationWorkerFromRuntime }] =
+    await Promise.all([
+      import("./lib/opencredit-materialization-worker"),
+      import("./lib/opencredit-clt-prequalification-worker")
+    ]);
   await startOpenCreditMaterializationWorkerFromRuntime();
+  await startCltPrequalificationWorkerFromRuntime();
 }
