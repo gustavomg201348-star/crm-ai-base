@@ -21,9 +21,9 @@ export async function enqueueCltPrequalification(db: PrismaClient, input: Enqueu
     return await db.$transaction(async tx => {
       const conversation = await tx.conversation.findFirst({
         where: { id: input.conversationId, contact: { companyId: input.companyId } },
-        include: { contact: { include: { origin: { select: { name: true } } } } }
+        include: { contact: true }
       });
-      if (!conversation?.channelId || conversation.contact.origin?.name.trim().toLocaleLowerCase("pt-BR") !== "prospecta") return null;
+      if (!conversation?.channelId) return null;
       const evidence = await tx.conversationInboundEvent.findFirst({
         where: {
           id: input.inboundEventId,
