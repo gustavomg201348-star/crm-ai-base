@@ -97,7 +97,17 @@ test("source limits paid consumer, auth evidence and UI; no background requests 
     const source = readFileSync(path, "utf8"); if (/\.simulateJsonAfterCommit\(/.test(source)) paid.push(path);
     if (/from ["'](?:.*\/)opencredit-clt-simulation.service["']/.test(source)) consumers.push(path);
   }
-  assert.deepEqual(paid, ["src/lib/opencredit-clt-simulation.service.ts"]);
-  assert.deepEqual(consumers.sort(), ["src/lib/opencredit-ai-simulation.service.ts", "src/lib/opencredit-clt-simulation-admin-handler.ts"]);
+  assert.deepEqual(paid.sort(), [
+    "src/lib/opencredit-clt-prequalification.service.ts",
+    "src/lib/opencredit-clt-simulation.service.ts"
+  ]);
+  assert.deepEqual(consumers.sort(), [
+    "src/lib/opencredit-ai-simulation.service.ts",
+    "src/lib/opencredit-clt-prequalification.service.ts",
+    "src/lib/opencredit-clt-simulation-admin-handler.ts"
+  ]);
+  const prequalification = readFileSync("src/lib/opencredit-clt-prequalification.service.ts", "utf8");
+  assert.doesNotMatch(prequalification, /CREDIT_SIMULATION|OpenCreditConsumerAuthorization|grantOpenCreditSimulationAuthorization/);
+  assert.match(prequalification, /simulateJsonAfterCommit/);
   const auth = readFileSync("src/app/components/integrations/OpenCreditSimulationAuthorizationPanel.tsx", "utf8"); assert.match(auth, /CREDIT_SIMULATION/); assert.doesNotMatch(auth, /CLIENT_PROFILE_UPSERT|CLIENT_PROFILE_CORRECTION/);
 });

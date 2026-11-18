@@ -61,8 +61,11 @@ test("entrypoint and real instrumentation share the existing worker singleton", 
     const exports = {} as { register(): Promise<void> };
     const results: string[] = [];
     runInNewContext(source, { exports, process: { env: { NEXT_RUNTIME: "nodejs" } }, console: { info() {} }, require(name: string) {
-      assert.equal(name, "./lib/opencredit-materialization-worker");
-      return { async startOpenCreditMaterializationWorkerFromRuntime() { const result = await start(); results.push(result.reason); } };
+      if (name === "./lib/opencredit-materialization-worker") {
+        return { async startOpenCreditMaterializationWorkerFromRuntime() { const result = await start(); results.push(result.reason); } };
+      }
+      assert.equal(name, "./lib/opencredit-clt-prequalification-worker");
+      return { async startCltPrequalificationWorkerFromRuntime() { return { started: false, reason: "disabled" }; } };
     } });
     await exports.register(); assert.deepEqual(results, ["already_running"]); assert.equal(factories, 1);
     await worker.runOnce(); assert.equal(claims, 1); assert.equal(worker.isRunning(), true);
@@ -88,7 +91,11 @@ test("factory failure stays nonfatal in BOTH preload and instrumentation and nev
   const source = ts.transpileModule(readFileSync("src/instrumentation.ts", "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
   const exports = {} as { register(): Promise<void> };
   runInNewContext(source, { exports, process: { env: { NEXT_RUNTIME: "nodejs" } }, console: { info() {} },
-    require(name: string) { assert.equal(name, "./lib/opencredit-materialization-worker"); return { startOpenCreditMaterializationWorkerFromRuntime: start }; } });
+    require(name: string) {
+      if (name === "./lib/opencredit-materialization-worker") return { startOpenCreditMaterializationWorkerFromRuntime: start };
+      assert.equal(name, "./lib/opencredit-clt-prequalification-worker");
+      return { async startCltPrequalificationWorkerFromRuntime() { return { started: false, reason: "disabled" }; } };
+    } });
   await exports.register(); assert.equal(calls, 2);
   assert.equal(logs.filter(event => (event as { reason?: string }).reason === "startup_error").length, 2);
   assert(!JSON.stringify(logs).includes("PRIVATE"));
