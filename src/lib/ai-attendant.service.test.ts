@@ -1270,3 +1270,16 @@ test("contexto real envia current exatamente uma vez ao modelo", async () => {
   assert.match(prompt, /DRAFT significa somente proposta registrada em rascunho/);
   assert.doesNotMatch(prompt, /rascunho\/simulacao-like/);
 });
+
+
+test("verified Prospecta CHECK prequalification is evaluated before AI reply policy gates", () => {
+  const source = readFileSync("src/lib/ai-attendant.service.ts", "utf8");
+  const enqueue = source.indexOf("enqueueCltPrequalification");
+  const bridgeGate = source.indexOf('gate("OPENCREDIT_BRIDGE_NOT_ELIGIBLE")');
+  const aiGate = source.indexOf('gate("AUTO_REPLY_POLICY_DENIED"');
+  assert.ok(enqueue >= 0);
+  assert.ok(bridgeGate >= 0);
+  assert.ok(aiGate >= 0);
+  assert.ok(enqueue < bridgeGate, "prequalification must not depend on OpenCredit auto-reply eligibility");
+  assert.ok(enqueue < aiGate, "prequalification must not depend on conversation AI pause/mode policy");
+});

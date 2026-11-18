@@ -606,32 +606,6 @@ export async function maybeSendAutomaticAiReply({
   if (!conversation) { gate("CONVERSATION_NOT_FOUND"); return null; }
   if (isOpenCreditConversation(conversation)) { gate("INTERNAL_OPENCREDIT_CONVERSATION"); return null; }
   const bridge = Boolean(conversation.openCreditWhatsappMetas?.length);
-  if (bridge && !await openCreditWhatsappCanAutoReply(prisma, companyId, conversationId, shouldAutoReply)) {
-    gate("OPENCREDIT_BRIDGE_NOT_ELIGIBLE"); return null;
-  }
-  const company = await prisma.company.findUnique({
-    where: { id: companyId },
-    select: { aiMode: true }
-  });
-
-  if (!company) { gate("COMPANY_NOT_FOUND"); return null; }
-  if (
-    !shouldAutoReply({
-      companyMode: company.aiMode,
-      conversationMode: conversation.aiMode,
-      aiPaused: conversation.aiPaused,
-      agentId: conversation.agentId
-    })
-  ) {
-    gate("AUTO_REPLY_POLICY_DENIED", {
-      companyMode: normalizeAiMode(company.aiMode),
-      conversationMode: conversation.aiMode ? normalizeAiMode(conversation.aiMode) : null,
-      aiPaused: conversation.aiPaused,
-      hasAgent: Boolean(conversation.agentId)
-    });
-    return null;
-  }
-
   const latestVerifiedInbound = bridge ? await prisma.conversationInboundEvent.findFirst({
     where: {
       companyId,
@@ -696,6 +670,32 @@ export async function maybeSendAutomaticAiReply({
     } catch {
       gate("PROSPECTA_CLT_PREQUALIFICATION_QUEUE_FAILED");
     }
+  }
+
+  if (bridge && !await openCreditWhatsappCanAutoReply(prisma, companyId, conversationId, shouldAutoReply)) {
+    gate("OPENCREDIT_BRIDGE_NOT_ELIGIBLE"); return null;
+  }
+  const company = await prisma.company.findUnique({
+    where: { id: companyId },
+    select: { aiMode: true }
+  });
+
+  if (!company) { gate("COMPANY_NOT_FOUND"); return null; }
+  if (
+    !shouldAutoReply({
+      companyMode: company.aiMode,
+      conversationMode: conversation.aiMode,
+      aiPaused: conversation.aiPaused,
+      agentId: conversation.agentId
+    })
+  ) {
+    gate("AUTO_REPLY_POLICY_DENIED", {
+      companyMode: normalizeAiMode(company.aiMode),
+      conversationMode: conversation.aiMode ? normalizeAiMode(conversation.aiMode) : null,
+      aiPaused: conversation.aiPaused,
+      hasAgent: Boolean(conversation.agentId)
+    });
+    return null;
   }
 
   // The verified OpenCredit CHECK button uses a fixed safe reply and does not depend on OpenAI.
