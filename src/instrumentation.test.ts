@@ -26,8 +26,11 @@ function fixture(runtime: string | undefined, log?: (value: string) => unknown) 
     console: { info(value: string) { logs.push(value); order.push("log"); return log?.(value); } },
     require(name: string) {
       imports.push(name); order.push("import");
-      assert.equal(name, "./lib/opencredit-materialization-worker");
-      return { async startOpenCreditMaterializationWorkerFromRuntime() {
+      assert(["./lib/opencredit-materialization-worker", "./lib/opencredit-clt-prequalification-worker"].includes(name));
+      if (name === "./lib/opencredit-materialization-worker") return { async startOpenCreditMaterializationWorkerFromRuntime() {
+        starts++; order.push("start"); return { started: false, reason: "disabled" };
+      } };
+      return { async startCltPrequalificationWorkerFromRuntime() {
         starts++; order.push("start"); return { started: false, reason: "disabled" };
       } };
     },
@@ -64,8 +67,8 @@ for (const runtime of [undefined, "nodejs", "edge"]) for (const failure of ["thr
     });
     await f.register();
     await new Promise(resolve => setImmediate(resolve));
-    assert.equal(f.starts(), runtime === "edge" ? 0 : 1);
-    assert.equal(f.imports.length, runtime === "edge" ? 0 : 1);
+    assert.equal(f.starts(), runtime === "edge" ? 0 : 2);
+    assert.equal(f.imports.length, runtime === "edge" ? 0 : 2);
     assert(!f.logs.join("").includes("synthetic-private-error"));
   });
 
