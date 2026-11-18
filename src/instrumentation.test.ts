@@ -42,9 +42,12 @@ for (const runtime of ["nodejs", undefined, "node", "synthetic-private-unknown-r
   test("server instrumentation attempts startup: " + (runtime === undefined ? "absent" : runtime === "node" || runtime === "nodejs" ? runtime : "unknown"), async () => {
     const f = fixture(runtime);
     await f.register();
-    assert.equal(f.starts(), 1);
-    assert.deepEqual(f.imports, ["./lib/opencredit-materialization-worker"]);
-    assert.deepEqual(f.order, ["log", "import", "start"]);
+    assert.equal(f.starts(), 2);
+    assert.deepEqual(f.imports, [
+      "./lib/opencredit-materialization-worker",
+      "./lib/opencredit-clt-prequalification-worker"
+    ]);
+    assert.deepEqual(f.order, ["log", "import", "import", "start", "start"]);
     assert.deepEqual(f.logs.map(value => JSON.parse(value)), [{ event: "opencredit_instrumentation_bootstrap",
       runtime: runtime === "nodejs" || runtime === "node" ? "nodejs" : "unknown", attempted: true, skippedReason: null }]);
     assert(!f.logs.join("").includes("synthetic-private-unknown-runtime"));
