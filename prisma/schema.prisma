@@ -1572,9 +1572,9 @@ model OpenCreditCltPrequalification {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   company         Company @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  contact         Contact @relation(fields: [companyId, contactId], references: [companyId, id], onDelete: Restrict, onUpdate: NoAction, map: "CltPrequal_contact")
-  conversation    Conversation @relation(fields: [conversationId, contactId, channelId], references: [id, contactId, channelId], onDelete: Restrict, onUpdate: NoAction, map: "CltPrequal_conversation")
-  evidence        ConversationInboundEvent @relation(fields: [inboundEventId, companyId, contactId], references: [id, companyId, contactId], onDelete: Restrict, onUpdate: NoAction, map: "CltPrequal_evidence")
+  contact         Contact @relation(fields: [companyId, contactId], references: [companyId, id], onDelete: Restrict, onUpdate: NoAction)
+  conversation    Conversation @relation(fields: [conversationId, contactId, channelId], references: [id, contactId, channelId], onDelete: Restrict, onUpdate: NoAction)
+  evidence        ConversationInboundEvent @relation(fields: [inboundEventId, companyId, contactId], references: [id, companyId, contactId], onDelete: Restrict, onUpdate: NoAction)
 
   @@unique([companyId, conversationId, inboundEventId], map: "CltPrequal_inbound_key")
   @@index([state, availableAt, id], map: "CltPrequal_state_available_idx")
