@@ -687,11 +687,11 @@ export async function maybeSendAutomaticAiReply({
     }
     try {
       const { enqueueCltPrequalification } = await import("./opencredit-clt-prequalification-queue.service");
-      const queued = await enqueueCltPrequalification(prisma, {
+      const queued = latestVerifiedInbound ? await enqueueCltPrequalification(prisma, {
         companyId,
         conversationId,
         inboundEventId: latestVerifiedInbound.id
-      });
+      }) : null;
       gate(queued ? "PROSPECTA_CLT_PREQUALIFICATION_QUEUED" : "PROSPECTA_CLT_PREQUALIFICATION_NOT_QUEUED");
     } catch {
       gate("PROSPECTA_CLT_PREQUALIFICATION_QUEUE_FAILED");
