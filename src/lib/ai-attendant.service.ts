@@ -685,6 +685,17 @@ export async function maybeSendAutomaticAiReply({
     } else {
       gate("PROSPECTA_CLT_TAG_NOT_FOUND");
     }
+    try {
+      const { enqueueCltPrequalification } = await import("./opencredit-clt-prequalification-queue.service");
+      const queued = await enqueueCltPrequalification(prisma, {
+        companyId,
+        conversationId,
+        inboundEventId: latestVerifiedInbound.id
+      });
+      gate(queued ? "PROSPECTA_CLT_PREQUALIFICATION_QUEUED" : "PROSPECTA_CLT_PREQUALIFICATION_NOT_QUEUED");
+    } catch {
+      gate("PROSPECTA_CLT_PREQUALIFICATION_QUEUE_FAILED");
+    }
   }
 
   // The verified OpenCredit CHECK button uses a fixed safe reply and does not depend on OpenAI.
