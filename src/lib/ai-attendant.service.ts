@@ -627,10 +627,7 @@ export async function maybeSendAutomaticAiReply({
   }
   const fixedButtonReply = buttonAction === "CHECK" ? OPEN_CREDIT_CHECK_FIRST_REPLY : null;
 
-  if (
-    buttonAction === "CHECK" &&
-    conversation.contact.origin?.name.trim().toLocaleLowerCase("pt-BR") === "prospecta"
-  ) {
+  if (buttonAction === "CHECK") {
     const cltTag = await prisma.tag.findFirst({
       where: {
         companyId,
