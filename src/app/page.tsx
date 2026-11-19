@@ -24,6 +24,7 @@ import { OpenCreditWhatsappCanary } from "@/app/components/conversations/OpenCre
 import { TaskTurnoverExportPanel } from "@/app/components/tasks/TaskTurnoverExportPanel";
 import { ConversationList } from "@/app/components/conversations/ConversationList";
 import { CltSidebarSimulationPanel } from "@/app/components/conversations/CltSidebarSimulationPanel";
+import { QuickRepliesPanel } from "@/app/components/conversations/QuickRepliesPanel";
 import { ConversationPageLoader, appendConversationPage, compareConversationActivity } from "@/lib/conversation-list-pagination";
 import { TemplateVariableDialog } from "@/app/components/conversations/TemplateVariableDialog";
 import { MotorCommercialPage } from "@/app/components/opportunities/MotorCommercialPage";
@@ -403,39 +404,6 @@ const emptyConversationStatusCounts: ConversationStatusCounts = {
   SOLD: 0,
   RESOLVED: 0
 };
-
-const quickReplyTemplates = [
-  {
-    id: "cpf",
-    title: "Pedir CPF",
-    body: "Pode me informar seu CPF para eu consultar sua margem com seguranca?"
-  },
-  {
-    id: "authorization",
-    title: "Pedir autorizacao",
-    body: "Para seguir com a consulta, preciso da sua autorizacao para verificar as opcoes disponiveis para voce."
-  },
-  {
-    id: "document",
-    title: "Pedir comprovante",
-    body: "Pode me enviar um comprovante ou documento atualizado para eu conferir os dados da proposta?"
-  },
-  {
-    id: "simulation",
-    title: "Explicar simulacao CLT/INSS",
-    body: "Vou fazer uma simulacao sem compromisso para verificar valor liberado, prazo e parcela. Assim que tiver o resultado, te envio as melhores opcoes."
-  },
-  {
-    id: "no-margin",
-    title: "Retorno sem margem",
-    body: "No momento nao apareceu margem disponivel para essa consulta. Vou deixar seu atendimento salvo e te aviso se surgir uma nova possibilidade."
-  },
-  {
-    id: "approved",
-    title: "Proposta aprovada",
-    body: "Sua proposta foi aprovada. Vou te orientar nos proximos passos para concluir com seguranca."
-  }
-];
 
 const followUpReasons = [
   "Juros alto",
@@ -9098,36 +9066,13 @@ function Atendimento({
               </button>
 
               {quickRepliesOpen && (
-                <div className="absolute bottom-10 left-0 z-30 w-[min(520px,calc(100vw-2rem))] min-w-0 rounded-2xl border border-line bg-white p-3 shadow-lift">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-black text-slate-900">Respostas rapidas</p>
-                      <p className="text-xs text-slate-500">Clique para inserir no campo e revisar antes de enviar.</p>
-                    </div>
-                    <button
-                      type="button"
-                      className="rounded-full px-2 py-1 text-xs font-bold text-slate-500 hover:bg-slate-100"
-                      onClick={() => setQuickRepliesOpen(false)}
-                    >
-                      Fechar
-                    </button>
-                  </div>
-                  <div className="grid max-h-72 gap-2 overflow-y-auto pr-1 md:grid-cols-2">
-                    {quickReplyTemplates.map((reply) => (
-                      <button
-                        key={reply.id}
-                        type="button"
-                        className="rounded-2xl border border-slate-200 bg-white p-3 text-left transition hover:border-blue-200 hover:bg-blue-50"
-                        onClick={() => insertQuickReply(reply.body)}
-                      >
-                        <span className="text-xs font-black text-slate-900">{reply.title}</span>
-                        <span className="mt-1 block line-clamp-2 text-xs leading-5 text-slate-500">
-                          {reply.body}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                <QuickRepliesPanel
+                  open
+                  isAdmin={isAdmin}
+                  className="absolute bottom-10 left-0"
+                  onClose={() => setQuickRepliesOpen(false)}
+                  onInsert={insertQuickReply}
+                />
               )}
             </div>
           </div>
@@ -9168,36 +9113,13 @@ function Atendimento({
             )}
 
             {quickRepliesOpen && (
-              <div className="absolute bottom-14 left-2 z-30 w-[min(520px,calc(100vw-2rem))] min-w-0 rounded-2xl border border-line bg-white p-3 shadow-lift">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-black text-slate-900">Respostas rapidas</p>
-                    <p className="text-xs text-slate-500">Clique para inserir no campo e revisar antes de enviar.</p>
-                  </div>
-                  <button
-                    type="button"
-                    className="rounded-full px-2 py-1 text-xs font-bold text-slate-500 hover:bg-slate-100"
-                    onClick={() => setQuickRepliesOpen(false)}
-                  >
-                    Fechar
-                  </button>
-                </div>
-                <div className="grid max-h-72 gap-2 overflow-y-auto pr-1 md:grid-cols-2">
-                  {quickReplyTemplates.map((reply) => (
-                    <button
-                      key={reply.id}
-                      type="button"
-                      className="rounded-2xl border border-slate-200 bg-white p-3 text-left transition hover:border-blue-200 hover:bg-blue-50"
-                      onClick={() => insertQuickReply(reply.body)}
-                    >
-                      <span className="text-xs font-black text-slate-900">{reply.title}</span>
-                      <span className="mt-1 block line-clamp-2 text-xs leading-5 text-slate-500">
-                        {reply.body}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <QuickRepliesPanel
+                open
+                isAdmin={isAdmin}
+                className="absolute bottom-14 left-2"
+                onClose={() => setQuickRepliesOpen(false)}
+                onInsert={insertQuickReply}
+              />
             )}
 
             <textarea
