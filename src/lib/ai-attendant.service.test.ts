@@ -1293,3 +1293,11 @@ test("verified CHECK prequalification is not restricted to Prospecta origin", ()
   assert.match(aiSource, /if \(buttonAction === "CHECK"\)/);
   assert.match(queueSource, /classifyOpenCreditTemplateButton\(evidence\.message\) !== "CHECK"/);
 });
+
+
+test("CLT prequalification queue does not require remote identity enablement", () => {
+  const queueSource = readFileSync("src/lib/opencredit-clt-prequalification-queue.service.ts", "utf8");
+  assert.doesNotMatch(queueSource, /openCreditRemoteIdentity\.findUnique/);
+  assert.doesNotMatch(queueSource, /identity\?\.enabled|identity\.normalizedCpf/);
+  assert.match(queueSource, /access\?\.enabled !== true/);
+});
