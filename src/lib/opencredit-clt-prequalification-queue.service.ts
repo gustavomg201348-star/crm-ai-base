@@ -44,11 +44,7 @@ export async function enqueueCltPrequalification(db: PrismaClient, input: Enqueu
         where: { companyId_providerScope: { companyId: input.companyId, providerScope: config.providerScope } },
         select: { enabled: true }
       });
-      const identity = await tx.openCreditRemoteIdentity.findUnique({
-        where: { companyId_providerScope_contactId: { companyId: input.companyId, providerScope: config.providerScope, contactId: conversation.contactId } },
-        select: { id: true, normalizedCpf: true, enabled: true }
-      });
-      if (access?.enabled !== true || identity?.enabled !== true || identity.normalizedCpf !== cpf) return null;
+      if (access?.enabled !== true) return null;
       return tx.openCreditCltPrequalification.upsert({
         where: { companyId_conversationId_inboundEventId: {
           companyId: input.companyId, conversationId: conversation.id, inboundEventId: evidence.id
