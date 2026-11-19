@@ -45,11 +45,11 @@ export async function GET(request: NextRequest, context: RouteContext) {
     safeLogError("http-api", error, {
       operation: "contact-internal-notes-read",
       route: "/api/contacts/[id]/notes",
-      publicErrorCode: "INTERNAL_NOTES_READ_FAILED",
+      publicErrorCode: "INTERNAL_ERROR",
       status: 500
     });
     return publicErrorResponse({
-      code: "INTERNAL_NOTES_READ_FAILED",
+      code: "INTERNAL_ERROR",
       status: 500,
       message: "Nao foi possivel carregar as observacoes."
     });
@@ -108,11 +108,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
     safeLogError("http-api", error, {
       operation: "contact-internal-note-create",
       route: "/api/contacts/[id]/notes",
-      publicErrorCode: "INTERNAL_NOTE_CREATE_FAILED",
+      publicErrorCode: "INTERNAL_ERROR",
       status: 500
     });
     return publicErrorResponse({
-      code: "INTERNAL_NOTE_CREATE_FAILED",
+      code: "INTERNAL_ERROR",
       status: 500,
       message: "Nao foi possivel salvar a observacao."
     });
