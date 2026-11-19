@@ -8,7 +8,7 @@ import { bootstrapPhone, analyzeOpenCreditBootstrapTemplate, resolveBootstrapVar
 import { parseWhatsappBootstrapConfig } from "./opencredit-whatsapp-config.service";
 import type { SessionUser } from "./auth";
 import { openCanaryConversation } from "../app/components/conversations/OpenCreditWhatsappCanary";
-import { classifyOpenCreditTemplateButton, OPEN_CREDIT_CHECK_FIRST_REPLY } from "./opencredit-whatsapp-button-policy";
+import { classifyOpenCreditTemplateButton, OPEN_CREDIT_BLOCK_FIRST_REPLY, OPEN_CREDIT_CHECK_FIRST_REPLY } from "./opencredit-whatsapp-button-policy";
 
 const loader = Module as typeof Module & { _load(name: string, ...args: unknown[]): unknown };
 const original = loader._load, require = createRequire(import.meta.url);
@@ -256,7 +256,7 @@ test("destination lookup failure preserves confirmed send without exposing diagn
   assert.equal(r.status,200); assert.deepEqual(await r.json(),{status:"SENT"});
 });
 
-test("OpenCredit template button policy keeps block silent and check deterministic", () => {
+test("OpenCredit template button policy gives deterministic replies for check and block", () => {
   assert.equal(classifyOpenCreditTemplateButton({ type: "button", body: "Bloquear" }), "BLOCK");
   assert.equal(classifyOpenCreditTemplateButton({ type: "button", body: "Conferir" }), "CHECK");
   assert.equal(classifyOpenCreditTemplateButton({ type: "button", body: "Verificar agora" }), "CHECK");
@@ -268,4 +268,6 @@ test("OpenCredit template button policy keeps block silent and check determinist
   assert.equal(classifyOpenCreditTemplateButton({ type: "button", body: "Outro" }), null);
   assert.equal(OPEN_CREDIT_CHECK_FIRST_REPLY,
     "Perfeito! Vamos verificar agora mesmo.\nAntes me conta: Você tem algum valor de parcela ou liberado que gostaria em específico?");
+  assert.equal(OPEN_CREDIT_BLOCK_FIRST_REPLY,
+    "Tudo bem! Não vamos prosseguir com a consulta. Se mudar de ideia depois, é só me chamar.");
 });

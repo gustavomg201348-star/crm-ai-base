@@ -20,7 +20,7 @@ import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
 import { readMetaMessageId, sendMetaTextMessage } from "@/lib/meta-whatsapp";
 import { openCreditWhatsappCanAutoReply, prepareOpenCreditWhatsappAiReply, prepareOpenCreditCrmDirectAiReply } from "./opencredit-whatsapp-ai";
-import { classifyOpenCreditTemplateButton, OPEN_CREDIT_CHECK_FIRST_REPLY } from "./opencredit-whatsapp-button-policy";
+import { classifyOpenCreditTemplateButton, OPEN_CREDIT_BLOCK_FIRST_REPLY, OPEN_CREDIT_CHECK_FIRST_REPLY } from "./opencredit-whatsapp-button-policy";
 
 export type AiMode = "OFF" | "COPILOT" | "AUTO" | "HYBRID";
 
@@ -621,11 +621,17 @@ export async function maybeSendAutomaticAiReply({
   const buttonAction = latestVerifiedInbound
     ? classifyOpenCreditTemplateButton(latestVerifiedInbound.message)
     : null;
-  if (buttonAction === "BLOCK") {
-    gate("OPENCREDIT_BUTTON_BLOCK_SILENT");
-    return null;
-  }
-  const fixedButtonReply = buttonAction === "CHECK" ? OPEN_CREDIT_CHECK_FIRST_REPLY : null;
+  const fixedButtonReply = buttonAction === "CHECK"
+    ? OPEN_CREDIT_CHECK_FIRST_REPLY
+    : buttonAction === "BLOCK"
+      ? OPEN_CREDIT_BLOCK_FIRST_REPLY
+      : null;
+  const fixedButtonPolicy = ({ companyMode, conversationMode, aiPaused }: {
+    companyMode?: string | null;
+    conversationMode?: string | null;
+    aiPaused?: boolean | null;
+    agentId?: string | null;
+  }) => !aiPaused && normalizeAiMode(conversationMode || companyMode) !== "OFF";
 
   if (buttonAction === "CHECK") {
     const cltTag = await prisma.tag.findFirst({
@@ -669,7 +675,9 @@ export async function maybeSendAutomaticAiReply({
     }
   }
 
-  if (bridge && !await openCreditWhatsappCanAutoReply(prisma, companyId, conversationId, shouldAutoReply)) {
+  const replyPolicy = fixedButtonReply ? fixedButtonPolicy : shouldAutoReply;
+  const allowAssignedAgent = Boolean(fixedButtonReply);
+  if (bridge && !await openCreditWhatsappCanAutoReply(prisma, companyId, conversationId, replyPolicy, { allowAssignedAgent })) {
     gate("OPENCREDIT_BRIDGE_NOT_ELIGIBLE"); return null;
   }
   const company = await prisma.company.findUnique({
@@ -679,7 +687,7 @@ export async function maybeSendAutomaticAiReply({
 
   if (!company) { gate("COMPANY_NOT_FOUND"); return null; }
   if (
-    !shouldAutoReply({
+    !replyPolicy({
       companyMode: company.aiMode,
       conversationMode: conversation.aiMode,
       aiPaused: conversation.aiPaused,
@@ -702,7 +710,7 @@ export async function maybeSendAutomaticAiReply({
     provider: /^postgres(?:ql)?:/.test(process.env.DATABASE_URL ?? "") ? "postgresql" as const : "sqlite" as const };
   const cltFeatureEnabled = process.env.OPENCREDIT_CLT_AI_ENABLED === "true";
   const attempt = bridge
-    ? await prepareOpenCreditWhatsappAiReply(authorityDb, companyId, conversationId, shouldAutoReply)
+    ? await prepareOpenCreditWhatsappAiReply(authorityDb, companyId, conversationId, replyPolicy, { allowAssignedAgent })
     : cltFeatureEnabled
       ? await prepareOpenCreditCrmDirectAiReply(authorityDb, companyId, conversationId, shouldAutoReply)
       : null;
@@ -745,7 +753,7 @@ export async function maybeSendAutomaticAiReply({
     });
     await attempt?.finish("SENT", providerMessageId ?? undefined);
     if (clt?.handoffAfterReply) { await attempt?.transferToHuman(); return sent; }
-    if (bridge && await openCreditWhatsappCanAutoReply(prisma, companyId, conversationId, shouldAutoReply)) {
+    if (!fixedButtonReply && bridge && await openCreditWhatsappCanAutoReply(prisma, companyId, conversationId, shouldAutoReply)) {
       const changed = await prisma.conversation.updateMany({ where: { id: conversationId, contact: { companyId }, agentId: null,
         aiPaused: false, status: { in: ["OPEN", "PENDING", "BOT"] } }, data: { status: "BOT" } });
       if (changed.count === 1) return { ...sent, status: "BOT" as const };

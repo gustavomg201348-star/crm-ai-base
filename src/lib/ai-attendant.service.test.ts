@@ -1310,3 +1310,21 @@ test("CLT prequalification worker stays independent from origin and remote ident
   assert.doesNotMatch(source, /identity\?\.enabled|identity\.normalizedCpf/);
   assert.match(source, /access\?\.enabled !== true/);
 });
+
+
+test("verified button replies bypass only the HYBRID assigned-agent gate", () => {
+  const source = readFileSync("src/lib/ai-attendant.service.ts", "utf8");
+  assert.match(source, /const fixedButtonReply = buttonAction === "CHECK"/);
+  assert.match(source, /buttonAction === "BLOCK"[\s\S]{0,160}OPEN_CREDIT_BLOCK_FIRST_REPLY/);
+  assert.match(source, /const replyPolicy = fixedButtonReply \? fixedButtonPolicy : shouldAutoReply/);
+  assert.match(source, /allowAssignedAgent = Boolean\(fixedButtonReply\)/);
+  assert.match(source, /prepareOpenCreditWhatsappAiReply\([\s\S]{0,220}\{ allowAssignedAgent \}\)/);
+  assert.match(source, /!fixedButtonReply && bridge && await openCreditWhatsappCanAutoReply/);
+});
+
+test("OpenCredit button reply transport still requires unowned authority", () => {
+  const source = readFileSync("src/lib/opencredit-whatsapp-ai.ts", "utf8");
+  assert.match(source, /options\.allowAssignedAgent \|\| conversation\.agentId === null/);
+  assert.match(source, /authority\.ownerUserId === null/);
+  assert.match(source, /openCreditWhatsappCanAutoReply\(tx, companyId, conversationId, policy, options\)/);
+});
