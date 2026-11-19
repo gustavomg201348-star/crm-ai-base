@@ -1021,6 +1021,13 @@ type TaskRow = {
   assignee: { id: string; name: string; email: string } | null;
 };
 
+type InternalNoteRow = {
+  id: string;
+  detail: string | null;
+  createdAt: string;
+  user: { id: string; name: string; email: string } | null;
+};
+
 type OpportunitySummaryResponse = {
   summary?: OpportunitySummary;
   error?: string;
@@ -7176,6 +7183,8 @@ function Atendimento({
   const [contactEditSaving, setContactEditSaving] = useState(false);
   const [contactEditError, setContactEditError] = useState("");
   const [internalNote, setInternalNote] = useState("");
+  const [internalNotes, setInternalNotes] = useState<InternalNoteRow[]>([]);
+  const [internalNotesLoading, setInternalNotesLoading] = useState(false);
   const [internalNoteSaving, setInternalNoteSaving] = useState(false);
   const [internalNoteStatus, setInternalNoteStatus] = useState("");
   const [internalNoteError, setInternalNoteError] = useState("");
@@ -7297,10 +7306,35 @@ function Atendimento({
   }, [selectedConversation?.id]);
 
   useEffect(() => {
-    setInternalNote(selectedConversation?.contact.internalNote ?? "");
+    setInternalNote("");
+    setInternalNotes([]);
     setInternalNoteStatus("");
     setInternalNoteError("");
-  }, [selectedConversation?.contact.internalNote, selectedConversation?.id]);
+
+    const contactId = selectedConversation?.contact.id;
+    if (!contactId) return;
+
+    const controller = new AbortController();
+    setInternalNotesLoading(true);
+    void fetch("/api/contacts/" + encodeURIComponent(contactId) + "/notes", {
+      credentials: "same-origin",
+      cache: "no-store",
+      signal: controller.signal
+    })
+      .then(async response => {
+        const data = await response.json().catch(() => null) as { notes?: InternalNoteRow[] } | null;
+        if (!response.ok) throw new Error();
+        if (!controller.signal.aborted) setInternalNotes(data?.notes ?? []);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setInternalNoteError("Nao foi possivel carregar as observacoes.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setInternalNotesLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [selectedConversation?.contact.id]);
 
   useEffect(() => {
     if (!activeConversationId) {
@@ -7962,22 +7996,34 @@ function Atendimento({
   }
 
   async function submitInternalNote() {
-    if (!selectedConversation) return;
+    if (!selectedConversation || !internalNote.trim()) return;
 
     setInternalNoteSaving(true);
     setInternalNoteStatus("");
     setInternalNoteError("");
 
     try {
-      const updated = await onUpdateContact(selectedConversation.contact.id, {
-        internalNote
-      });
+      const response = await fetch(
+        "/api/contacts/" + encodeURIComponent(selectedConversation.contact.id) + "/notes",
+        {
+          method: "POST",
+          credentials: "same-origin",
+          cache: "no-store",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ note: internalNote.trim() })
+        }
+      );
+      const data = await response.json().catch(() => null) as
+        | { note?: InternalNoteRow; error?: string }
+        | null;
 
-      if (updated) {
-        setInternalNoteStatus("Observacao salva.");
-      } else {
-        setInternalNoteError("Nao foi possivel salvar a observacao.");
+      if (!response.ok || !data?.note) {
+        throw new Error(data?.error ?? "Nao foi possivel salvar a observacao.");
       }
+
+      setInternalNotes(current => [data.note!, ...current]);
+      setInternalNote("");
+      setInternalNoteStatus("Observacao salva.");
     } catch (error) {
       setInternalNoteError(
         error instanceof Error ? error.message : "Nao foi possivel salvar a observacao."
@@ -8085,18 +8131,51 @@ function Atendimento({
         )}
         <div className="rounded border border-line bg-white p-4 shadow-soft">
           <div className="flex items-center justify-between gap-3">
-            <h3 className="font-bold">Observacao interna</h3>
+            <h3 className="font-bold">Observacoes internas</h3>
             {internalNoteStatus && (
               <span className="text-xs font-semibold text-emerald-600">
                 {internalNoteStatus}
               </span>
             )}
           </div>
+
+          <div className="mt-3 space-y-2">
+            {internalNotesLoading ? (
+              <div className="rounded-xl bg-slate-50 px-3 py-3 text-xs font-semibold text-slate-500">
+                Carregando observacoes...
+              </div>
+            ) : internalNotes.length ? (
+              <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+                {internalNotes.map((note) => (
+                  <div key={note.id} className="rounded-xl border border-line bg-slate-50 px-3 py-2.5">
+                    <p className="whitespace-pre-wrap text-sm text-slate-800">{note.detail}</p>
+                    <div className="mt-2 flex items-center justify-between gap-2 text-[10px] font-semibold text-slate-400">
+                      <span>{note.user?.name ?? "Observacao anterior"}</span>
+                      <span>
+                        {new Date(note.createdAt).toLocaleString("pt-BR", {
+                          day: "2-digit",
+                          month: "2-digit",
+                          year: "2-digit",
+                          hour: "2-digit",
+                          minute: "2-digit"
+                        })}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="rounded-xl bg-slate-50 px-3 py-3 text-xs text-slate-500">
+                Nenhuma observacao registrada ainda.
+              </p>
+            )}
+          </div>
+
           <textarea
-            className="mt-3 min-h-[104px] w-full resize-y rounded-2xl border border-line bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-brand focus:bg-white focus:ring-2 focus:ring-blue-100"
+            className="mt-3 min-h-[88px] w-full resize-y rounded-2xl border border-line bg-white px-3 py-2 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-brand focus:ring-2 focus:ring-blue-100"
             disabled={!selectedConversation || internalNoteSaving}
             maxLength={2000}
-            placeholder="Anotacoes internas sobre este cliente."
+            placeholder="Ex.: V8 liberou R$ 4.350; cliente ainda nao foi informado sobre o banco."
             value={internalNote}
             onChange={(event) => {
               setInternalNote(event.target.value);
@@ -8112,10 +8191,10 @@ function Atendimento({
           <button
             type="button"
             className="mt-3 flex h-10 w-full items-center justify-center rounded-2xl bg-brand px-3 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={!selectedConversation || internalNoteSaving}
+            disabled={!selectedConversation || internalNoteSaving || !internalNote.trim()}
             onClick={() => void submitInternalNote()}
           >
-            {internalNoteSaving ? "Salvando..." : "Salvar"}
+            {internalNoteSaving ? "Salvando..." : "Adicionar observacao"}
           </button>
         </div>
         {selectedConversation?.summary && (
