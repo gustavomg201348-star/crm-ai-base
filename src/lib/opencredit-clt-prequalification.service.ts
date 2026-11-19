@@ -25,14 +25,14 @@ async function target(db: PrismaClient, lease: CltPrequalificationLease, provide
   const job = await db.openCreditCltPrequalification.findUnique({
     where: { id: lease.id },
     include: {
-      contact: { include: { origin: { select: { name: true } } } },
+      contact: true,
       evidence: { include: { message: { select: { direction: true, type: true, body: true, providerMessageId: true } } } },
       conversation: { select: { id: true, contactId: true, channelId: true } },
     }
   });
   if (!job || job.state !== "PROCESSING" || job.leaseToken !== lease.leaseToken || !job.leaseUntil || job.leaseUntil <= new Date()
     || job.providerScope !== providerScope || job.conversation.id !== job.conversationId || job.conversation.contactId !== job.contactId
-    || job.conversation.channelId !== job.channelId || job.contact.origin?.name.trim().toLocaleLowerCase("pt-BR") !== "prospecta"
+    || job.conversation.channelId !== job.channelId
     || job.evidence.provenanceKind !== "META_WEBHOOK_HMAC_SHA256_VERIFIED" || job.evidence.provenanceVersion !== 1
     || job.evidence.companyId !== job.companyId || job.evidence.contactId !== job.contactId || job.evidence.conversationId !== job.conversationId
     || job.evidence.channelId !== job.channelId || job.evidence.message.direction !== "inbound"
@@ -42,11 +42,7 @@ async function target(db: PrismaClient, lease: CltPrequalificationLease, provide
   const access = await db.openCreditCommercialAccess.findUnique({
     where: { companyId_providerScope: { companyId: job.companyId, providerScope } }, select: { enabled: true }
   });
-  const identity = await db.openCreditRemoteIdentity.findUnique({
-    where: { companyId_providerScope_contactId: { companyId: job.companyId, providerScope, contactId: job.contactId } },
-    select: { id: true, normalizedCpf: true, enabled: true }
-  });
-  if (access?.enabled !== true || identity?.enabled !== true || identity.normalizedCpf !== cpf) throw Error("PREQUALIFICATION_TARGET_NOT_READY");
+  if (access?.enabled !== true) throw Error("PREQUALIFICATION_TARGET_NOT_READY");
   return { job, cpf };
 }
 
