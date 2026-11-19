@@ -3,6 +3,9 @@ export type OpenCreditTemplateButtonAction = "CHECK" | "BLOCK" | null;
 export const OPEN_CREDIT_CHECK_FIRST_REPLY =
   "Perfeito! Vamos verificar agora mesmo.\nAntes me conta: Você tem algum valor de parcela ou liberado que gostaria em específico?";
 
+export const OPEN_CREDIT_BLOCK_FIRST_REPLY =
+  "Tudo bem! Não vamos prosseguir com a consulta. Se mudar de ideia depois, é só me chamar.";
+
 function normalizeButtonText(value: string) {
   return value
     .normalize("NFD")
