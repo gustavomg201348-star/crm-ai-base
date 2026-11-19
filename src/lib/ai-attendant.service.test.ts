@@ -1301,3 +1301,12 @@ test("CLT prequalification queue does not require remote identity enablement", (
   assert.doesNotMatch(queueSource, /identity\?\.enabled|identity\.normalizedCpf/);
   assert.match(queueSource, /access\?\.enabled !== true/);
 });
+
+
+test("CLT prequalification worker stays independent from origin and remote identity enablement", () => {
+  const source = readFileSync("src/lib/opencredit-clt-prequalification.service.ts", "utf8");
+  assert.doesNotMatch(source, /origin\?\.name[\s\S]{0,120}prospecta/i);
+  assert.doesNotMatch(source, /openCreditRemoteIdentity\.findUnique/);
+  assert.doesNotMatch(source, /identity\?\.enabled|identity\.normalizedCpf/);
+  assert.match(source, /access\?\.enabled !== true/);
+});
