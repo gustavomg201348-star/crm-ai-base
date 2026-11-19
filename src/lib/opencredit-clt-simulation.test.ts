@@ -62,7 +62,14 @@ function fixture(scope = "synthetic-scope" as never) {
     conversationInboundEvent: { findUnique: async () => ({ id: "synthetic-evidence", companyId: "synthetic-company", contactId: "synthetic-contact", channelId: "synthetic-channel", conversationId: "synthetic-conversation", messageId: "synthetic-message", provenanceKind: "META_WEBHOOK_HMAC_SHA256_VERIFIED", provenanceVersion: 1,
       channel: { id: "synthetic-channel", companyId: "synthetic-company" }, conversation: { channelId: "synthetic-channel", contactId: "synthetic-contact", contact: { companyId: "synthetic-company" } }, message: { id: "synthetic-message", conversationId: "synthetic-conversation", direction: "inbound", type: "text", body: "Synthetic correction attestation", providerMessageId: "synthetic-provider" } }) },
     openCreditCommercialOperation: {
-      findUnique: async () => operation,
+      findUnique: async (arg?: { where?: Record<string, unknown> }) => {
+        const where = arg?.where ?? {};
+        if ("companyId_providerScope_intentKey" in where) {
+          const composite = where.companyId_providerScope_intentKey as { intentKey?: unknown };
+          return operation?.intentKey === composite.intentKey ? operation : null;
+        }
+        return operation;
+      },
       findFirst: async () => operation && ["IN_FLIGHT", "UNKNOWN"].includes(operation.state as string) ? operation : null,
       create: async ({ data }: { data: Record<string, unknown> }) => operation = { id: "synthetic-operation-" + (++operationSequence), ...data },
       updateMany: async ({ where, data }: { where: { state: string; revision: number }; data: Record<string, unknown> }) => {
