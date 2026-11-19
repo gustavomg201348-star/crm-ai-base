@@ -151,8 +151,11 @@ for (const [http, status, expected] of [[200, "aprovado", "SUCCEEDED"], [200, "r
     const again = await service.dispatchCltSimulation(f.db, f.input, { client: t.client, resolve: f.resolve, banks: async () => catalog() });
     assert.notEqual(again.operation.operationId, r.operation.operationId); assert.equal(t.posts(), 2);
   } else {
-    const again = await service.dispatchCltSimulation(f.db, { ...f.input, amountBRL: "999,00" }, { client: t.client, resolve: f.resolve, banks: async () => catalog() });
-    assert.equal(again.operation.operationId, r.operation.operationId); assert.equal(t.posts(), 1);
+    await assert.rejects(
+      () => service.dispatchCltSimulation(f.db, { ...f.input, amountBRL: "999,00" }, { client: t.client, resolve: f.resolve, banks: async () => catalog() }),
+      e => e instanceof service.CltSimulationError && e.code === "UNRESOLVED_SIMULATION"
+    );
+    assert.equal(t.posts(), 1);
   }
   assert.match(String(f.current()?.intentKey), /^manual-simulation-[a-f0-9]{32}$/);
   assert.equal(f.events.some(e => e.dispatchAuthorizationEventId), false);
@@ -178,7 +181,11 @@ for (const error of ["TIMEOUT", "NETWORK"] as const) test(error + " never replay
   const client: typeof t.client = { ...t.client, async simulateJsonAfterCommit(_path, commit) { await commit(); posts++; throw new api.OpenCreditApiError(error); } };
   const r = await service.dispatchCltSimulation(f.db, f.input, { client, resolve: f.resolve, banks: async () => catalog() }); assert.equal(r.operation.state, "UNKNOWN");
   await assert.rejects(() => service.pollCltSimulation(f.db, f.input, { client, resolve: f.resolve })); assert.equal(t.gets(), 0); assert.equal(posts, 1);
-  await service.dispatchCltSimulation(f.db, f.input, { client, resolve: f.resolve }); assert.equal(posts, 1);
+  await assert.rejects(
+    () => service.dispatchCltSimulation(f.db, f.input, { client, resolve: f.resolve }),
+    e => e instanceof service.CltSimulationError && e.code === "UNRESOLVED_SIMULATION"
+  );
+  assert.equal(posts, 1);
 });
 for (const purpose of ["CLIENT_PROFILE_UPSERT", "CLIENT_PROFILE_CORRECTION"]) test(purpose + " authorization does not gate manual simulation", async () => {
   const f = fixture(); f.state.purpose = purpose; const t = transport();
