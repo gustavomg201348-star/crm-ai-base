@@ -21,6 +21,40 @@ type Options = {
   resolve?: typeof resolveConfiguredOpenCreditProviderContext;
 };
 
+function safeProviderShape(raw: unknown) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { rootType: Array.isArray(raw) ? "array" : typeof raw };
+  const root = raw as Record<string, unknown>;
+  const data = root.data && typeof root.data === "object" && !Array.isArray(root.data)
+    ? root.data as Record<string, unknown>
+    : null;
+  const banks = Array.isArray(data?.banks) ? data!.banks : [];
+  return {
+    rootKeys: Object.keys(root).sort().slice(0, 30),
+    dataKeys: data ? Object.keys(data).sort().slice(0, 50) : [],
+    blockedType: data ? typeof data.blocked : "missing",
+    fromCacheType: data ? typeof data.fromCache : "missing",
+    barriersType: Array.isArray(data?.barriers) ? "array" : data && Object.hasOwn(data, "barriers") ? typeof data.barriers : "missing",
+    banksCount: banks.length,
+    bankShapes: banks.slice(0, 20).map(value => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return { type: Array.isArray(value) ? "array" : typeof value };
+      const bank = value as Record<string, unknown>;
+      return {
+        keys: Object.keys(bank).sort().slice(0, 40),
+        status: typeof bank.status === "string" ? bank.status : typeof bank.status,
+        reasonType: bank.reasonType === null ? null : typeof bank.reasonType === "string" ? bank.reasonType : typeof bank.reasonType,
+        simulationType: bank.simulationType === null ? null : typeof bank.simulationType === "string" ? bank.simulationType : typeof bank.simulationType,
+        offersType: Array.isArray(bank.offers) ? "array" : typeof bank.offers,
+        offersCount: Array.isArray(bank.offers) ? bank.offers.length : null,
+        simulationIdType: bank.simulationId === null ? "null" : typeof bank.simulationId
+      };
+    })
+  };
+}
+
+function logPrequalificationOutcome(event: Record<string, unknown>) {
+  console.info(JSON.stringify({ event: "opencredit_clt_prequalification_result", ...event }));
+}
+
 async function target(db: PrismaClient, lease: CltPrequalificationLease, providerScope: string) {
   const job = await db.openCreditCltPrequalification.findUnique({
     where: { id: lease.id },
@@ -54,21 +88,29 @@ export async function processCltPrequalification(
 ) {
   let config: ReturnType<typeof resolveConfiguredOpenCreditProviderContext>;
   try { config = (options.resolve ?? resolveConfiguredOpenCreditProviderContext)(); }
-  catch { await queue.retryOrFail(lease, "CONFIGURATION"); return "RETRY" as const; }
+  catch {
+    logPrequalificationOutcome({ workflowId: lease.id, outcome: "RETRY", errorCode: "CONFIGURATION", stage: "RESOLVE_CONFIG" });
+    await queue.retryOrFail(lease, "CONFIGURATION"); return "RETRY" as const;
+  }
 
   let initial: Awaited<ReturnType<typeof target>>;
   try { initial = await target(db, lease, config.providerScope); }
-  catch { await queue.fail(lease, "CONFIGURATION"); return "FAILED" as const; }
+  catch {
+    logPrequalificationOutcome({ workflowId: lease.id, outcome: "FAILED", errorCode: "CONFIGURATION", stage: "TARGET" });
+    await queue.fail(lease, "CONFIGURATION"); return "FAILED" as const;
+  }
 
   let catalog: Awaited<ReturnType<typeof readSimulationBanks>>;
   try {
     catalog = await (options.banks ?? readSimulationBanks)();
   } catch {
+    logPrequalificationOutcome({ workflowId: lease.id, outcome: "RETRY", errorCode: "PROVIDER_UNAVAILABLE", stage: "BANK_CATALOG" });
     await queue.retryOrFail(lease, "PROVIDER_UNAVAILABLE");
     return "RETRY" as const;
   }
   const eligible = catalog.filter(bank => bank.enabled !== false && bank.capabilities.simulacaoAtiva === true);
   if (!eligible.length || eligible.length > 100) {
+    logPrequalificationOutcome({ workflowId: lease.id, outcome: "FAILED", errorCode: "CONFIGURATION", stage: "ELIGIBLE_BANKS", eligibleBanks: eligible.length });
     await queue.fail(lease, "CONFIGURATION");
     return "FAILED" as const;
   }
@@ -89,26 +131,48 @@ export async function processCltPrequalification(
     );
     if (execution.response.status !== 200) {
       void execution.response.body?.cancel().catch(() => {});
+      logPrequalificationOutcome({ workflowId: lease.id, outcome: "FAILED", errorCode: "PROVIDER_UNAVAILABLE", stage: "HTTP_STATUS", httpStatus: execution.response.status });
       await queue.fail(lease, "PROVIDER_UNAVAILABLE");
       return "FAILED" as const;
     }
     const raw = await readOpenCreditStrictJsonResponse(execution.response);
-    const result = parsePrequalificationProviderResponse(raw, {
-      cpf: initial.cpf,
-      banks: eligible.map(bank => ({ bankId: bank.bankId, bankName: bank.bankName })),
-      observedAt: new Date().toISOString(),
-    });
+    let result;
+    try {
+      result = parsePrequalificationProviderResponse(raw, {
+        cpf: initial.cpf,
+        banks: eligible.map(bank => ({ bankId: bank.bankId, bankName: bank.bankName })),
+        observedAt: new Date().toISOString(),
+      });
+    } catch {
+      logPrequalificationOutcome({
+        workflowId: lease.id,
+        outcome: "FAILED",
+        errorCode: "INVALID_RESPONSE",
+        stage: "PARSE_PROVIDER_RESPONSE",
+        providerShape: safeProviderShape(raw)
+      });
+      await queue.fail(lease, "INVALID_RESPONSE");
+      return "FAILED" as const;
+    }
     const protectedResult = protectCltPrequalificationResult(lease.id, result);
-    if (!await queue.complete(lease, protectedResult)) return "LEASE_LOST" as const;
+    if (!await queue.complete(lease, protectedResult)) {
+      logPrequalificationOutcome({ workflowId: lease.id, outcome: "LEASE_LOST", stage: "COMPLETE" });
+      return "LEASE_LOST" as const;
+    }
+    logPrequalificationOutcome({ workflowId: lease.id, outcome: "COMPLETED", stage: "COMPLETE", requestedBanks: result.requestedBanks, returnedBanks: result.banks.length });
     return "COMPLETED" as const;
   } catch (error) {
     if (!dispatched) {
-      await queue.retryOrFail(lease, readOpenCreditApiErrorCode(error) === "CONFIGURATION" ? "CONFIGURATION" : "PROVIDER_UNAVAILABLE");
+      const code = readOpenCreditApiErrorCode(error) === "CONFIGURATION" ? "CONFIGURATION" : "PROVIDER_UNAVAILABLE";
+      logPrequalificationOutcome({ workflowId: lease.id, outcome: "RETRY", errorCode: code, stage: "PRE_DISPATCH" });
+      await queue.retryOrFail(lease, code);
       return "RETRY" as const;
     }
     const api = readOpenCreditApiErrorCode(error);
     const invalid = error instanceof OpenCreditHttpJsonBoundaryError && error.code === "INVALID_JSON";
-    await queue.fail(lease, invalid ? "INVALID_RESPONSE" : api === "CONFIGURATION" ? "CONFIGURATION" : "PROVIDER_UNAVAILABLE");
+    const code = invalid ? "INVALID_RESPONSE" : api === "CONFIGURATION" ? "CONFIGURATION" : "PROVIDER_UNAVAILABLE";
+    logPrequalificationOutcome({ workflowId: lease.id, outcome: "FAILED", errorCode: code, stage: invalid ? "READ_JSON" : "POST_DISPATCH" });
+    await queue.fail(lease, code);
     return "FAILED" as const;
   }
 }
