@@ -10,7 +10,7 @@ export function createCltPrequalificationWorker(
     recover(limit?: number): Promise<unknown[]>;
     claim(limit?: number): Promise<Array<{ id: string; leaseToken: string; attempts: number }>>;
     process(lease: { id: string; leaseToken: string; attempts: number }): Promise<unknown>;
-    log?(event: { event: "opencredit_clt_prequalification_worker"; phase: "started" | "completed" | "failed"; claimed: number; processed: number }): unknown;
+    log?(event: { event: "opencredit_clt_prequalification_worker"; phase: "started" | "completed" | "failed"; claimed: number; processed: number; result?: string }): unknown;
   },
   intervalMs = 2000
 ) {
@@ -26,8 +26,9 @@ export function createCltPrequalificationWorker(
       claimed = leases.length;
       for (const lease of leases) {
         if (!isCltPrequalificationEnabled()) break;
-        await deps.process(lease);
+        const result = await deps.process(lease);
         processed++;
+        log({ event: "opencredit_clt_prequalification_worker", phase: "completed", claimed, processed, result: typeof result === "string" ? result : "UNKNOWN" });
       }
       log({ event: "opencredit_clt_prequalification_worker", phase: "completed", claimed, processed });
       return { skipped: claimed === 0, claimed, processed };
