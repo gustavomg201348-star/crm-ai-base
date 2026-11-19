@@ -134,7 +134,7 @@ material("completed manual simulations create distinct audited operations withou
   const t = transport(f);
   const a = await simulation.dispatchCltSimulation(db, input(f), { ...options(f), client: t.client });
   const before = await db.openCreditCommercialOperation.findUniqueOrThrow({ where: { id: a.operation.operationId } });
-  const b = await simulation.dispatchCltSimulation(db, { ...input(f), amountBRL: "999,00" }, { ...options(f), client: t.client });
+  const b = await simulation.dispatchCltSimulation(db, input(f), { ...options(f), client: t.client });
   assert.notEqual(a.operation.operationId, b.operation.operationId); assert.equal(t.posts(), 2); assert.equal(t.gets(), 0);
   const events = await db.openCreditCommercialOperationEvent.findMany({ where: { operationId: before.id }, orderBy: { revision: "asc" } });
   assert.deepEqual(events.map(e => e.action), ["PREPARED", "RESERVED_FOR_DISPATCH", "SIMULATION_COMPLETED"]);
@@ -179,7 +179,11 @@ for (const failure of ["TIMEOUT", "NETWORK"] as const) material(failure + " afte
   const t = transport(f); let posts = 0;
   const client: typeof t.client = { ...t.client, async simulateJsonAfterCommit(_path, commit) { await commit(); posts++; throw new api.OpenCreditApiError(failure); } };
   const a = await simulation.dispatchCltSimulation(db, input(f), { ...options(f), client }); assert.equal(a.operation.state, "UNKNOWN");
-  await simulation.dispatchCltSimulation(db, input(f), { ...options(f), client }); assert.equal(posts, 1); assert.equal(t.gets(), 0);
+  await assert.rejects(
+    () => simulation.dispatchCltSimulation(db, input(f), { ...options(f), client }),
+    e => e instanceof simulation.CltSimulationError && e.code === "UNRESOLVED_SIMULATION"
+  );
+  assert.equal(posts, 1); assert.equal(t.gets(), 0);
 });
 material("bank removed/disabled since UI read fails closed before any reservation", async f => {
   const t = transport(f);
