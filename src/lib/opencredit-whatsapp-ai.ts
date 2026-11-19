@@ -6,28 +6,31 @@ import { createOutboundOperationService } from "./outbound-operation.service";
 import { requireAuthority } from "./conversation-authority-contract";
 type ReplyPolicy = (input: { companyMode?: string | null; conversationMode?: string | null; aiPaused?: boolean; agentId?: string | null }) => boolean;
 export async function openCreditWhatsappCanAutoReply(db: Pick<PrismaClient, "conversation" | "company" | "conversationAuthority">, companyId: string, conversationId: string,
-  policy: (input: { companyMode?: string | null; conversationMode?: string | null; aiPaused?: boolean; agentId?: string | null }) => boolean) {
+  policy: (input: { companyMode?: string | null; conversationMode?: string | null; aiPaused?: boolean; agentId?: string | null }) => boolean,
+  options: { allowAssignedAgent?: boolean } = {}) {
   const c = await db.conversation.findFirst({ where: { id: conversationId, contact: { companyId, archivedAt: null },
     openCreditWhatsappMetas: { some: { companyId, state: "SENT" } } }, include: { channelRef: true } });
   if (!c?.channelId || !c.lastInboundMessageAt || !validBootstrapChannel(c.channelRef, companyId)
     || !["OPEN", "PENDING", "BOT"].includes(c.status)) return false;
   const company = await db.company.findUnique({ where: { id: companyId }, select: { aiMode: true } });
   if (!company || !policy({ companyMode: company.aiMode, conversationMode: c.aiMode, aiPaused: c.aiPaused, agentId: c.agentId })) return false;
+  if (!options.allowAssignedAgent && c.agentId) return false;
   const authority = await db.conversationAuthority.findFirst({ where: { companyId, channelId: c.channelId, conversationId } });
   return !!authority && ["AI", "HUMAN_QUEUE"].includes(authority.state) && authority.ownerUserId === null;
 }
 
 /** One native operation per verified inbound, captured BEFORE generating the reply. */
-export async function prepareOpenCreditWhatsappAiReply(database: AuthorityDatabase, companyId: string, conversationId: string, policy: ReplyPolicy) {
+export async function prepareOpenCreditWhatsappAiReply(database: AuthorityDatabase, companyId: string, conversationId: string, policy: ReplyPolicy,
+  options: { allowAssignedAgent?: boolean } = {}) {
   const storage = authorityStorage(database), core = conversationAuthorityTransactionCore(database);
   const operations = createOutboundOperationService(database);
   try {
     const plan = await storage.transaction(async tx => {
       const conversation = await storage.lockConversation(tx, companyId, conversationId);
-      if (!await openCreditWhatsappCanAutoReply(tx, companyId, conversationId, policy)) return null;
+      if (!await openCreditWhatsappCanAutoReply(tx, companyId, conversationId, policy, options)) return null;
       const scope = { companyId, conversationId, channelId: conversation.channelId! };
       const authority = await storage.lock(tx, scope);
-      requireAuthority(conversation.agentId === null && authority.ownerUserId === null, "AUTHORITY_PROJECTION_DRIFT");
+      requireAuthority((options.allowAssignedAgent || conversation.agentId === null) && authority.ownerUserId === null, "AUTHORITY_PROJECTION_DRIFT");
       const event = await tx.conversationInboundEvent.findFirst({ where: { ...scope, contactId: conversation.contactId,
         provenanceKind: "META_WEBHOOK_HMAC_SHA256_VERIFIED", provenanceVersion: 1 }, orderBy: { sequence: "desc" } });
       if (!event) return null;
@@ -70,7 +73,7 @@ export async function prepareOpenCreditWhatsappAiReply(database: AuthorityDataba
           dispatchAttempted = true;
           await operations.authorizeDispatch({ ...plan.scope, operationId: operation.id, expectedGeneration: plan.generation, token,
             validate: async tx => {
-              requireAuthority(await openCreditWhatsappCanAutoReply(tx, companyId, conversationId, policy), "AUTHORITY_DENIED");
+              requireAuthority(await openCreditWhatsappCanAutoReply(tx, companyId, conversationId, policy, options), "AUTHORITY_DENIED");
               const current = await tx.channel.findUniqueOrThrow({ where: { id: plan.scope.channelId } });
               requireAuthority(current.companyId === companyId && current.phoneNumberId === channel.phoneNumberId && current.wabaId === channel.wabaId,
                 "INVALID_CONVERSATION_SCOPE");
