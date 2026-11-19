@@ -141,7 +141,7 @@ for (const [http, status, expected] of [[200, "aprovado", "SUCCEEDED"], [200, "r
   const r = await service.dispatchCltSimulation(f.db, f.input, { client: t.client, resolve: f.resolve, banks: async () => catalog() });
   assert.equal(r.operation.state, expected); assert.equal(t.posts(), 1); assert.equal(t.gets(), 0);
   if (expected === "SUCCEEDED") {
-    const again = await service.dispatchCltSimulation(f.db, { ...f.input, amountBRL: "999,00" }, { client: t.client, resolve: f.resolve, banks: async () => catalog() });
+    const again = await service.dispatchCltSimulation(f.db, f.input, { client: t.client, resolve: f.resolve, banks: async () => catalog() });
     assert.notEqual(again.operation.operationId, r.operation.operationId); assert.equal(t.posts(), 2);
   } else {
     const again = await service.dispatchCltSimulation(f.db, { ...f.input, amountBRL: "999,00" }, { client: t.client, resolve: f.resolve, banks: async () => catalog() });
