@@ -1328,3 +1328,11 @@ test("OpenCredit button reply transport still requires unowned authority", () =>
   assert.match(source, /authority\.ownerUserId === null/);
   assert.match(source, /openCreditWhatsappCanAutoReply\(tx, companyId, conversationId, policy, options\)/);
 });
+
+
+test("verified template button classification is not restricted to OpenCredit bridge conversations", () => {
+  const source = readFileSync("src/lib/ai-attendant.service.ts", "utf8");
+  assert.match(source, /const latestVerifiedInbound = await prisma\.conversationInboundEvent\.findFirst/);
+  assert.doesNotMatch(source, /const latestVerifiedInbound = bridge \?/);
+  assert.match(source, /classifyOpenCreditTemplateButton\(latestVerifiedInbound\.message\)/);
+});
