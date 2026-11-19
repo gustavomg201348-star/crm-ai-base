@@ -116,7 +116,8 @@ material("new simulation purpose preserves old grants/revisions/events and isola
   const previous = await db.openCreditConsumerAuthorization.findMany({ where: { companyId: f.company.id }, orderBy: { purpose: "asc" } });
   const events = await db.openCreditConsumerAuthorizationEvent.findMany({ where: { companyId: f.company.id }, orderBy: { id: "asc" } });
   const t = transport(f);
-  await assert.rejects(() => simulation.dispatchCltSimulation(db, input(f), { ...options(f), client: t.client })); assert.equal(t.posts(), 0);
+  const manual = await simulation.dispatchCltSimulation(db, input(f), { ...options(f), client: t.client });
+  assert.equal(manual.operation.state, "SUCCEEDED"); assert.equal(t.posts(), 1);
   await grant(f);
   assert.deepEqual(await db.openCreditConsumerAuthorization.findMany({ where: { companyId: f.company.id, purpose: { in: ["CLIENT_PROFILE_UPSERT", "CLIENT_PROFILE_CORRECTION"] } }, orderBy: { purpose: "asc" } }), previous);
   assert.deepEqual(await db.openCreditConsumerAuthorizationEvent.findMany({ where: { id: { in: events.map(e => e.id) } }, orderBy: { id: "asc" } }), events);
@@ -129,44 +130,42 @@ material("simulation grant alone cannot reserve UPSERT or dispatch CORRECTION", 
   await assert.rejects(() => operation.reserveOpenCreditClientProfileOperationForDispatch(db, { actor: f.actor, companyId: f.company.id, providerScope: f.input.providerScope, operationId: prepared.operationId, expectedRevision: 0 }), e => e instanceof operation.OpenCreditCommercialOperationServiceError && e.code === "CONSUMER_AUTHORIZATION_MISSING");
   assert.equal((await db.openCreditCommercialOperation.findUniqueOrThrow({ where: { id: prepared.operationId } })).state, "PREPARED");
 });
-material("same GRANTED repeats reconcile exact operation, one POST, no financial payload in diagnostics", async f => {
-  await grant(f); const t = transport(f);
+material("completed manual simulations create distinct audited operations without authorization events", async f => {
+  const t = transport(f);
   const a = await simulation.dispatchCltSimulation(db, input(f), { ...options(f), client: t.client });
   const before = await db.openCreditCommercialOperation.findUniqueOrThrow({ where: { id: a.operation.operationId } });
   const b = await simulation.dispatchCltSimulation(db, { ...input(f), amountBRL: "999,00" }, { ...options(f), client: t.client });
-  assert.equal(a.operation.operationId, b.operation.operationId); assert.equal(t.posts(), 1); assert.equal(t.gets(), 0);
-  assert.deepEqual(await db.openCreditCommercialOperation.findUnique({ where: { id: before.id } }), before);
+  assert.notEqual(a.operation.operationId, b.operation.operationId); assert.equal(t.posts(), 2); assert.equal(t.gets(), 0);
   const events = await db.openCreditCommercialOperationEvent.findMany({ where: { operationId: before.id }, orderBy: { revision: "asc" } });
   assert.deepEqual(events.map(e => e.action), ["PREPARED", "RESERVED_FOR_DISPATCH", "SIMULATION_COMPLETED"]);
-  assert.equal(before.intentKey, "simulation-" + events[1].dispatchAuthorizationEventId);
+  assert.equal(events[1].dispatchAuthorizationEventId, null);
+  assert.match(before.intentKey, /^manual-simulation-[a-f0-9]{32}$/);
   for (const secret of ["00000000000", "PRIVATE_SENTINEL", "105000", "cpf", "offers", "1050,00"]) assert.equal(before.diagnostic!.includes(secret), false);
 });
-material("concurrent requests under same GRANTED produce one intention and one paid POST", async f => {
-  await grant(f); const t = transport(f);
+material("concurrent manual requests cannot create two unresolved paid simulations", async f => {
+  const t = transport(f, 200, "pendente");
   const result = await Promise.allSettled(Array.from({ length: 6 }, () => simulation.dispatchCltSimulation(db, input(f), { ...options(f), client: t.client })));
   assert(result.some(r => r.status === "fulfilled")); assert.equal(t.posts(), 1); assert.equal(await db.openCreditCommercialOperation.count({ where: where(f) }), 1);
   const events = await db.openCreditCommercialOperationEvent.findMany({ where: { companyId: f.company.id }, orderBy: { revision: "asc" } });
   assert.deepEqual(events.map(e => e.revision), [0, 1, 2]);
 });
-material("regrant after completed simulation creates distinct grant-bound intention, never reuses prior terminal", async f => {
-  await grant(f); const t = transport(f);
+material("repeated completed manual simulation creates a distinct terminal intention", async f => {
+  const t = transport(f);
   const a = await simulation.dispatchCltSimulation(db, input(f), { ...options(f), client: t.client });
-  await revoke(f); await grant(f);
   const b = await simulation.dispatchCltSimulation(db, input(f), { ...options(f), client: t.client });
   assert.notEqual(a.operation.operationId, b.operation.operationId); assert.equal(t.posts(), 2);
   const rows = await db.openCreditCommercialOperation.findMany({ where: where(f) }); assert.equal(new Set(rows.map(r => r.intentKey)).size, 2);
 });
 material("pending persists ID; manual provider GET settles, zero additional POST", async f => {
-  await grant(f); const t = transport(f, 200, "pendente");
+  const t = transport(f, 200, "pendente");
   const a = await simulation.dispatchCltSimulation(db, input(f), { ...options(f), client: t.client });
   assert.equal(a.operation.state, "IN_FLIGHT"); assert.equal(a.operation.displayState, "PENDING");
   const b = await simulation.pollCltSimulation(db, input(f), { ...options(f), client: t.client });
   assert.equal(b.operation.state, "SUCCEEDED"); assert.equal(t.posts(), 1); assert.equal(t.gets(), 1);
 });
 for (const http of [401, 500]) material("HTTP " + http + " -> UNKNOWN, no replay, blocks later grant", async f => {
-  await grant(f); const t = transport(f, http);
+  const t = transport(f, http);
   const a = await simulation.dispatchCltSimulation(db, input(f), { ...options(f), client: t.client }); assert.equal(a.operation.state, "UNKNOWN");
-  await revoke(f); await grant(f);
   await assert.rejects(() => simulation.dispatchCltSimulation(db, input(f), { ...options(f), client: t.client }));
   assert.equal(t.posts(), 1); assert.equal(await db.openCreditCommercialOperation.count({ where: where(f) }), 1);
 });
@@ -177,25 +176,23 @@ material("IN_FLIGHT pending blocks a new grant but read-only GET can reconcile t
   assert.equal((await simulation.pollCltSimulation(db, input(f), { ...options(f), client: t.client })).operation.state, "SUCCEEDED"); assert.equal(t.posts(), 1);
 });
 for (const failure of ["TIMEOUT", "NETWORK"] as const) material(failure + " after commit becomes UNKNOWN without retry", async f => {
-  await grant(f); const t = transport(f); let posts = 0;
+  const t = transport(f); let posts = 0;
   const client: typeof t.client = { ...t.client, async simulateJsonAfterCommit(_path, commit) { await commit(); posts++; throw new api.OpenCreditApiError(failure); } };
   const a = await simulation.dispatchCltSimulation(db, input(f), { ...options(f), client }); assert.equal(a.operation.state, "UNKNOWN");
   await simulation.dispatchCltSimulation(db, input(f), { ...options(f), client }); assert.equal(posts, 1); assert.equal(t.gets(), 0);
 });
 material("bank removed/disabled since UI read fails closed before any reservation", async f => {
-  await grant(f); const t = transport(f);
+  const t = transport(f);
   await assert.rejects(() => simulation.dispatchCltSimulation(db, input(f), { ...options(f), client: t.client, banks: async () => [] }));
   assert.equal(t.posts(), 0); assert.equal(await db.openCreditCommercialOperation.count({ where: where(f) }), 0);
 });
-material("revocation before reservation blocks; after commit does not undo observation", async f => {
-  await grant(f); const t = transport(f);
-  await assert.rejects(() => simulation.dispatchCltSimulation(db, input(f), { ...options(f), client: t.client, banks: async () => { await revoke(f); return options(f).banks(); } }));
-  assert.equal(t.posts(), 0); await grant(f);
-  const client: typeof t.client = { ...t.client, async simulateJsonAfterCommit(path, commit) { return t.client.simulateJsonAfterCommit(path, async () => { const committed = await commit(); await revoke(f); return committed; }); } };
-  assert.equal((await simulation.dispatchCltSimulation(db, input(f), { ...options(f), client })).operation.state, "SUCCEEDED"); assert.equal(t.posts(), 1);
+material("consumer authorization state does not gate manual simulation", async f => {
+  await grant(f); await revoke(f); const t = transport(f);
+  const result = await simulation.dispatchCltSimulation(db, input(f), { ...options(f), client: t.client });
+  assert.equal(result.operation.state, "SUCCEEDED"); assert.equal(t.posts(), 1);
 });
 material("database independently rejects two unresolved simulation intentions", async f => {
-  await grant(f); const t = transport(f, 200, "pendente");
+  const t = transport(f, 200, "pendente");
   const r = await simulation.dispatchCltSimulation(db, input(f), { ...options(f), client: t.client });
   const data = { ...where(f), remoteIdentityId: f.identity.id, intentKey: randomUUID(), state: "IN_FLIGHT", revision: 1, createdByUserId: f.actor.id };
   await assert.rejects(() => db.openCreditCommercialOperation.create({ data }), e => {
