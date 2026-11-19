@@ -31,31 +31,34 @@ export function QuickRepliesPanel({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({ title: "", body: "" });
 
-  async function load() {
-    setLoading(true);
-    setError("");
-    try {
-      const response = await fetch("/api/quick-replies", {
-        credentials: "same-origin",
-        cache: "no-store"
-      });
-      const data = await response.json().catch(() => null) as { quickReplies?: QuickReplyRow[]; error?: string } | null;
-      if (!response.ok) throw new Error(data?.error ?? "Nao foi possivel carregar as respostas rapidas.");
-      setItems(data?.quickReplies ?? []);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Nao foi possivel carregar as respostas rapidas.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
   useEffect(() => {
-    if (open) void load();
-    else {
+    if (!open) {
       setEditingId(null);
       setForm({ title: "", body: "" });
       setError("");
+      return;
     }
+
+    let cancelled = false;
+    setLoading(true);
+    setError("");
+    void fetch("/api/quick-replies", {
+      credentials: "same-origin",
+      cache: "no-store"
+    })
+      .then(async response => {
+        const data = await response.json().catch(() => null) as { quickReplies?: QuickReplyRow[]; error?: string } | null;
+        if (!response.ok) throw new Error(data?.error ?? "Nao foi possivel carregar as respostas rapidas.");
+        if (!cancelled) setItems(data?.quickReplies ?? []);
+      })
+      .catch(error => {
+        if (!cancelled) setError(error instanceof Error ? error.message : "Nao foi possivel carregar as respostas rapidas.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => { cancelled = true; };
   }, [open]);
 
   function startNew() {
