@@ -1,5 +1,5 @@
 import "server-only";
-import { randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import type { SessionUser } from "./auth";
 import { isPlatformAdmin } from "./permissions";
@@ -185,7 +185,7 @@ async function record(db: Db, i: Input, c: Config, op: Operation, diagnostic: Di
 /** Auth -> current catalog -> frozen payload -> durable reservation -> one paid POST. */
 export async function dispatchCltSimulation(db: Db, i: Input & SimulationParameters, options: Options = {}) {
   const resolve = options.resolve ?? resolveConfiguredOpenCreditProviderContext, c = config(resolve);
-  const requestIntentKey = "manual-simulation-" + randomUUID();
+  const requestIntentKey = "manual-simulation-" + randomBytes(16).toString("hex");
   const initial = await db.$transaction(tx => target(tx, i, c, false, options.automation, requestIntentKey), settings);
   if (initial.existing) return { ok: true as const, operation: operationView(initial.existing), result: null };
   let parameters: SimulationParameters;
