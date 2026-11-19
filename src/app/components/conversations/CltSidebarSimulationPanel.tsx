@@ -252,7 +252,7 @@ export function CltSidebarSimulationPanel({
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-[11px] font-black uppercase tracking-[0.12em] text-brand">
-            Prospecta
+            Consulta automatica
           </p>
           <h3 className="font-bold text-slate-950">Simulacao CLT</h3>
         </div>
@@ -322,13 +322,13 @@ export function CltSidebarSimulationPanel({
           </>
         ) : (
           <div className="rounded-xl bg-slate-50 px-3 py-3 text-xs text-slate-600">
-            A pre-simulacao sera iniciada automaticamente quando um lead da Prospecta clicar em Conferir ou Verificar.
+            A simulacao sera iniciada automaticamente quando o cliente clicar em Conferir ou Verificar. O CPF salvo no cadastro sera usado e todos os bancos elegiveis serao consultados.
           </div>
         )}
 
         {enabled && (
           <details className="border-t border-line pt-3">
-            <summary className="cursor-pointer text-xs font-bold text-slate-600">Refinar simulacao em um banco</summary>
+            <summary className="cursor-pointer text-xs font-bold text-slate-600">Refinar manualmente em um banco</summary>
             <div className="mt-3 space-y-3">
               <label className="block text-xs font-bold text-slate-500">
                 CPF
