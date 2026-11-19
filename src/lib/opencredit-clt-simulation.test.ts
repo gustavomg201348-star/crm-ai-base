@@ -47,6 +47,7 @@ const actor = { id: "synthetic-admin", companyId: "synthetic-platform", role: "A
 const scope = "synthetic-scope" as never;
 function fixture(scope = "synthetic-scope" as never) {
   let operation: Record<string, unknown> | null = null;
+  let operationSequence = 0;
   const events: Record<string, unknown>[] = [];
   const state = { cpf: "00000000000", phone: "5511999999999", active: true, access: true, grantId: "synthetic-grant", revision: 0, identityEnabled: true, owner: "synthetic-identity", purpose: "CREDIT_SIMULATION" };
   const auth = () => ({ id: "synthetic-auth", purpose: state.purpose, active: state.active, revision: state.revision, companyId: "synthetic-company", contactId: "synthetic-contact", providerScope: scope, remoteIdentityId: "synthetic-identity", evidenceInboundEventId: "synthetic-evidence" });
@@ -61,9 +62,16 @@ function fixture(scope = "synthetic-scope" as never) {
     conversationInboundEvent: { findUnique: async () => ({ id: "synthetic-evidence", companyId: "synthetic-company", contactId: "synthetic-contact", channelId: "synthetic-channel", conversationId: "synthetic-conversation", messageId: "synthetic-message", provenanceKind: "META_WEBHOOK_HMAC_SHA256_VERIFIED", provenanceVersion: 1,
       channel: { id: "synthetic-channel", companyId: "synthetic-company" }, conversation: { channelId: "synthetic-channel", contactId: "synthetic-contact", contact: { companyId: "synthetic-company" } }, message: { id: "synthetic-message", conversationId: "synthetic-conversation", direction: "inbound", type: "text", body: "Synthetic correction attestation", providerMessageId: "synthetic-provider" } }) },
     openCreditCommercialOperation: {
-      findUnique: async () => operation,
+      findUnique: async (arg?: { where?: Record<string, unknown> }) => {
+        const where = arg?.where ?? {};
+        if ("companyId_providerScope_intentKey" in where) {
+          const composite = where.companyId_providerScope_intentKey as { intentKey?: unknown };
+          return operation?.intentKey === composite.intentKey ? operation : null;
+        }
+        return operation;
+      },
       findFirst: async () => operation && ["IN_FLIGHT", "UNKNOWN"].includes(operation.state as string) ? operation : null,
-      create: async ({ data }: { data: Record<string, unknown> }) => operation = { id: "synthetic-operation", ...data },
+      create: async ({ data }: { data: Record<string, unknown> }) => operation = { id: "synthetic-operation-" + (++operationSequence), ...data },
       updateMany: async ({ where, data }: { where: { state: string; revision: number }; data: Record<string, unknown> }) => {
         if (!operation || operation.state !== where.state || operation.revision !== where.revision) return { count: 0 };
         Object.assign(operation, data); return { count: 1 };
@@ -100,8 +108,9 @@ for (const localId of [undefined, "12345", "local_partner"] as const) for (const
     const options = { client, banks: async () => catalog(), ...(localId === undefined ? { resolve: f.resolve } : {}) };
     const first = await service.dispatchCltSimulation(f.db, input, options);
     const second = await service.dispatchCltSimulation(f.db, input, options);
-    assert.equal(first.operation.state, "SUCCEEDED"); assert.equal(second.operation.operationId, first.operation.operationId); assert.equal(posts, 1);
-    assert.deepEqual(f.events.map(e => e.action), ["PREPARED", "RESERVED_FOR_DISPATCH", "SIMULATION_COMPLETED"]);
+    assert.equal(first.operation.state, "SUCCEEDED"); assert.equal(second.operation.state, "SUCCEEDED");
+    assert.notEqual(second.operation.operationId, first.operation.operationId); assert.equal(posts, 2);
+    assert.deepEqual(f.events.map(e => e.action), ["PREPARED", "RESERVED_FOR_DISPATCH", "SIMULATION_COMPLETED", "PREPARED", "RESERVED_FOR_DISPATCH", "SIMULATION_COMPLETED"]);
   } finally { keys.forEach((k, index) => { if (previous[index] === undefined) delete process.env[k]; else process.env[k] = previous[index]; }); }
 });
 
@@ -134,13 +143,22 @@ function transport(status = 200, bankStatus: "aprovado" | "recusado" | "pendente
   };
   return { client, posts: () => posts, gets: () => gets };
 }
-for (const [http, status, expected] of [[200, "aprovado", "SUCCEEDED"], [200, "recusado", "SUCCEEDED"], [200, "pendente", "IN_FLIGHT"], [201, "aprovado", "UNKNOWN"], [401, "aprovado", "UNKNOWN"], [500, "aprovado", "UNKNOWN"]] as const) test("one grant + one POST -> " + http + "/" + status, async () => {
+for (const [http, status, expected] of [[200, "aprovado", "SUCCEEDED"], [200, "recusado", "SUCCEEDED"], [200, "pendente", "IN_FLIGHT"], [201, "aprovado", "UNKNOWN"], [401, "aprovado", "UNKNOWN"], [500, "aprovado", "UNKNOWN"]] as const) test("manual dispatch without authorization -> " + http + "/" + status, async () => {
   const f = fixture(), t = transport(http, status);
   const r = await service.dispatchCltSimulation(f.db, f.input, { client: t.client, resolve: f.resolve, banks: async () => catalog() });
   assert.equal(r.operation.state, expected); assert.equal(t.posts(), 1); assert.equal(t.gets(), 0);
-  const again = await service.dispatchCltSimulation(f.db, { ...f.input, amountBRL: "999,00" }, { client: t.client, resolve: f.resolve, banks: async () => catalog() });
-  assert.equal(again.operation.operationId, r.operation.operationId); assert.equal(t.posts(), 1);
-  assert.equal(f.current()?.intentKey, "simulation-synthetic-grant"); assert.equal(f.events[1].dispatchAuthorizationEventId, "synthetic-grant");
+  if (expected === "SUCCEEDED") {
+    const again = await service.dispatchCltSimulation(f.db, f.input, { client: t.client, resolve: f.resolve, banks: async () => catalog() });
+    assert.notEqual(again.operation.operationId, r.operation.operationId); assert.equal(t.posts(), 2);
+  } else {
+    await assert.rejects(
+      () => service.dispatchCltSimulation(f.db, { ...f.input, amountBRL: "999,00" }, { client: t.client, resolve: f.resolve, banks: async () => catalog() }),
+      e => e instanceof service.CltSimulationError && e.code === "UNRESOLVED_SIMULATION"
+    );
+    assert.equal(t.posts(), 1);
+  }
+  assert.match(String(f.current()?.intentKey), /^manual-simulation-[a-f0-9]{32}$/);
+  assert.equal(f.events.some(e => e.dispatchAuthorizationEventId), false);
   const diagnostic = String(f.current()?.diagnostic);
   for (const secret of ["00000000000", "PRIVATE_SENTINEL", "1050", "105000", "synthetic@example.invalid"]) assert.equal(diagnostic.includes(secret), false);
   assert.equal(f.events.some(e => e.nextState === "FAILED"), false);
@@ -163,11 +181,16 @@ for (const error of ["TIMEOUT", "NETWORK"] as const) test(error + " never replay
   const client: typeof t.client = { ...t.client, async simulateJsonAfterCommit(_path, commit) { await commit(); posts++; throw new api.OpenCreditApiError(error); } };
   const r = await service.dispatchCltSimulation(f.db, f.input, { client, resolve: f.resolve, banks: async () => catalog() }); assert.equal(r.operation.state, "UNKNOWN");
   await assert.rejects(() => service.pollCltSimulation(f.db, f.input, { client, resolve: f.resolve })); assert.equal(t.gets(), 0); assert.equal(posts, 1);
-  await service.dispatchCltSimulation(f.db, f.input, { client, resolve: f.resolve }); assert.equal(posts, 1);
+  await assert.rejects(
+    () => service.dispatchCltSimulation(f.db, f.input, { client, resolve: f.resolve }),
+    e => e instanceof service.CltSimulationError && e.code === "UNRESOLVED_SIMULATION"
+  );
+  assert.equal(posts, 1);
 });
-for (const purpose of ["CLIENT_PROFILE_UPSERT", "CLIENT_PROFILE_CORRECTION"]) test(purpose + " does not authorize paid simulation", async () => {
+for (const purpose of ["CLIENT_PROFILE_UPSERT", "CLIENT_PROFILE_CORRECTION"]) test(purpose + " authorization does not gate manual simulation", async () => {
   const f = fixture(); f.state.purpose = purpose; const t = transport();
-  await assert.rejects(() => service.dispatchCltSimulation(f.db, f.input, { client: t.client, resolve: f.resolve, banks: async () => catalog() })); assert.equal(t.posts(), 0);
+  const result = await service.dispatchCltSimulation(f.db, f.input, { client: t.client, resolve: f.resolve, banks: async () => catalog() });
+  assert.equal(result.operation.state, "SUCCEEDED"); assert.equal(t.posts(), 1);
 });
 for (const capabilities of [{}, { simulacaoAtiva: false }, { simulacaoAtiva: true }, { simulacaoAtiva: true, suportaParcela: false }]) test("absent/disabled mode capability blocks before reservation " + JSON.stringify(capabilities), async () => {
   const f = fixture(), t = transport();
@@ -197,14 +220,14 @@ test("financial parameters and serialized body do not change during auth/catalog
   assert.equal(r.operation.state, "SUCCEEDED"); assert.equal(t.posts(), 1);
   assert.equal(JSON.parse(String(f.current()?.diagnostic)).requestedMode, "parcela");
 });
-for (const fault of ["scope", "tenant", "credentials", "revoke", "owner", "cpf"]) test("pre-commit change blocks: " + fault, async () => {
+for (const fault of ["scope", "tenant", "credentials", "owner", "cpf"]) test("pre-commit change blocks: " + fault, async () => {
   const f = fixture(), t = transport(); let changed = false;
   const old = process.env.OPENCREDIT_API_PASSWORD;
   const resolve = () => ({ tenantId: changed && fault === "tenant" ? "other" : "synthetic", providerScope: changed && fault === "scope" ? "other-scope" as never : scope });
   try {
     await assert.rejects(() => service.dispatchCltSimulation(f.db, f.input, { client: t.client, resolve, banks: async () => {
       changed = true; if (fault === "credentials") process.env.OPENCREDIT_API_PASSWORD = "changed-synthetic";
-      if (fault === "revoke") f.state.active = false; if (fault === "owner") f.state.owner = "other"; if (fault === "cpf") f.state.cpf = "11111111111";
+if (fault === "owner") f.state.owner = "other"; if (fault === "cpf") f.state.cpf = "11111111111";
       return catalog();
     } }));
     assert.equal(t.posts(), 0); assert.equal(f.current(), null);

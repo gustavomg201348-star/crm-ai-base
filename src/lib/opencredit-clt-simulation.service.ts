@@ -1,4 +1,5 @@
 import "server-only";
+import { randomBytes } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import type { SessionUser } from "./auth";
 import { isPlatformAdmin } from "./permissions";
@@ -35,50 +36,109 @@ function view(o: Operation) {
 function config(resolve: () => Config) {
   try { return resolve(); } catch { throw new CltSimulationError("CONFIGURATION"); }
 }
-async function target(tx: Prisma.TransactionClient, i: Input, c: Config, inspectOnly = false, automation?: AiSimulationPermit) {
+async function target(
+  tx: Prisma.TransactionClient,
+  i: Input,
+  c: Config,
+  inspectOnly = false,
+  automation?: AiSimulationPermit,
+  requestIntentKey?: string
+) {
   if (automation) await validateAiSimulationPermit(tx, automation, i, c.providerScope);
   if (typeof window !== "undefined" || !id(i.companyId) || !id(i.contactId) || !id(i.actor?.id) || (!automation && !isPlatformAdmin(i.actor))) throw new CltSimulationError("NOT_AUTHORIZED");
   const a = await tx.user.findUnique({ where: { id: i.actor.id }, select: { id: true, companyId: true, role: true, email: true, name: true } });
   if (!a || a.role !== "ADMIN" || a.companyId !== i.actor.companyId || a.email.trim().toLowerCase() !== i.actor.email.trim().toLowerCase()
     || (!automation && !isPlatformAdmin({ ...a, role: "ADMIN" }))) throw new CltSimulationError("NOT_AUTHORIZED");
-  const contact = await tx.contact.findUnique({ where: { companyId_id: { companyId: i.companyId, id: i.contactId } }, select: { id: true, companyId: true, cpf: true, archivedAt: true } });
-  if (!contact || contact.companyId !== i.companyId || contact.id !== i.contactId) return deny();
-  const identity = await tx.openCreditRemoteIdentity.findUnique({ where: { companyId_providerScope_contactId: { companyId: i.companyId, providerScope: c.providerScope, contactId: i.contactId } } });
-  if (!identity || identity.companyId !== i.companyId || identity.providerScope !== c.providerScope || identity.contactId !== i.contactId) return deny();
-  const auth = await tx.openCreditConsumerAuthorization.findUnique({ where: { companyId_providerScope_contactId_purpose: { companyId: i.companyId, providerScope: c.providerScope, contactId: i.contactId, purpose: KIND } } });
-  if (!auth || typeof auth.active !== "boolean" || auth.purpose !== KIND || auth.companyId !== i.companyId || auth.providerScope !== c.providerScope || auth.contactId !== i.contactId
-    || auth.remoteIdentityId !== identity.id || !Number.isSafeInteger(auth.revision) || auth.revision < 0) return deny();
-  // A revoked authorization's previous revision is its last GRANTED. Reading it grants no dispatch authority.
-  const grantRevision = auth.active ? auth.revision : auth.revision - 1;
-  if (grantRevision < 0) return deny();
-  const grant = await tx.openCreditConsumerAuthorizationEvent.findUnique({ where: { authorizationId_revision: { authorizationId: auth.id, revision: grantRevision } } });
-  if (!grant || !id(grant.id) || grant.action !== "GRANTED" || grant.nextActive !== true || grant.authorizationId !== auth.id || grant.revision !== grantRevision
-    || grant.companyId !== i.companyId || grant.providerScope !== c.providerScope || grant.evidenceInboundEventId !== auth.evidenceInboundEventId) return deny();
-  const intentKey = "simulation-" + grant.id;
-  const existing = await tx.openCreditCommercialOperation.findUnique({ where: { companyId_providerScope_intentKey: { companyId: i.companyId, providerScope: c.providerScope, intentKey } }, select: operationSelect });
-  if (existing && (existing.remoteIdentityId !== identity.id || existing.operationKind !== KIND || existing.companyId !== i.companyId || existing.providerScope !== c.providerScope)) return deny();
-  // Reconciliation remains possible after gate changes; no old row is resumed or reused.
-  if (existing) return { cpf: identity.normalizedCpf, identityId: identity.id, grantId: grant.id, authorizationId: auth.id, revision: auth.revision, intentKey, existing };
-  if (!auth.active || contact.archivedAt !== null || !identity.enabled) return deny();
-  let cpf: string; try { cpf = canonicalizeOpenCreditOwnershipCpf(contact.cpf); } catch { return deny(); }
+
+  const contact = await tx.contact.findUnique({
+    where: { companyId_id: { companyId: i.companyId, id: i.contactId } },
+    select: { id: true, companyId: true, cpf: true, archivedAt: true }
+  });
+  if (!contact || contact.companyId !== i.companyId || contact.id !== i.contactId || contact.archivedAt !== null) return deny();
+
+  const identity = await tx.openCreditRemoteIdentity.findUnique({
+    where: { companyId_providerScope_contactId: { companyId: i.companyId, providerScope: c.providerScope, contactId: i.contactId } }
+  });
+  if (!identity || identity.companyId !== i.companyId || identity.providerScope !== c.providerScope
+    || identity.contactId !== i.contactId || !identity.enabled) return deny();
+
+  let cpf: string;
+  try { cpf = canonicalizeOpenCreditOwnershipCpf(contact.cpf); } catch { return deny(); }
   if (identity.normalizedCpf !== cpf) return deny();
+
   const formatted = cpf.slice(0, 3) + "." + cpf.slice(3, 6) + "." + cpf.slice(6, 9) + "-" + cpf.slice(9);
-  const matches = await tx.contact.findMany({ where: { companyId: i.companyId, cpf: { in: [cpf, formatted] } }, select: { id: true }, take: 2 });
+  const matches = await tx.contact.findMany({
+    where: { companyId: i.companyId, cpf: { in: [cpf, formatted] } },
+    select: { id: true },
+    take: 2
+  });
   if (matches.length !== 1 || matches[0].id !== i.contactId) return deny();
-  const access = await tx.openCreditCommercialAccess.findUnique({ where: { companyId_providerScope: { companyId: i.companyId, providerScope: c.providerScope } }, select: { enabled: true } });
+
+  const access = await tx.openCreditCommercialAccess.findUnique({
+    where: { companyId_providerScope: { companyId: i.companyId, providerScope: c.providerScope } },
+    select: { enabled: true }
+  });
   if (access?.enabled !== true) return deny();
-  const owner = await tx.openCreditRemoteIdentity.findUnique({ where: { providerScope_normalizedCpf: { providerScope: c.providerScope, normalizedCpf: cpf } }, select: { id: true } });
+
+  const owner = await tx.openCreditRemoteIdentity.findUnique({
+    where: { providerScope_normalizedCpf: { providerScope: c.providerScope, normalizedCpf: cpf } },
+    select: { id: true }
+  });
   if (owner?.id !== identity.id) return deny();
-  const evidence = await tx.conversationInboundEvent.findUnique({ where: { id: auth.evidenceInboundEventId }, include: { message: true, conversation: { include: { contact: { select: { companyId: true } } } }, channel: { select: { companyId: true, id: true } } } });
-  if (!evidence || evidence.companyId !== i.companyId || evidence.contactId !== i.contactId || !evidence.channelId || evidence.channel?.companyId !== i.companyId
-    || evidence.provenanceKind !== "META_WEBHOOK_HMAC_SHA256_VERIFIED" || evidence.provenanceVersion !== 1
-    || evidence.conversation.contactId !== i.contactId || evidence.conversation.contact.companyId !== i.companyId || evidence.conversation.channelId !== evidence.channelId
-    || evidence.message.id !== evidence.messageId || evidence.message.conversationId !== evidence.conversationId || evidence.message.direction !== "inbound"
-    || evidence.message.type !== "text" || !evidence.message.body?.trim() || !evidence.message.providerMessageId?.trim()) return deny();
-  const unresolved = await tx.openCreditCommercialOperation.findFirst({ where: { companyId: i.companyId, providerScope: c.providerScope, remoteIdentityId: identity.id, operationKind: KIND, state: { in: ["IN_FLIGHT", "UNKNOWN"] } }, select: operationSelect });
+
+  let automationGrantId: string | null = null;
+  let automationAuthorizationId: string | null = null;
+  let automationRevision: number | null = null;
+  if (automation) {
+    const auth = await tx.openCreditConsumerAuthorization.findUnique({
+      where: {
+        companyId_providerScope_contactId_purpose: {
+          companyId: i.companyId,
+          providerScope: c.providerScope,
+          contactId: i.contactId,
+          purpose: KIND
+        }
+      }
+    });
+    if (!auth || auth.active !== true || auth.purpose !== KIND || auth.companyId !== i.companyId
+      || auth.providerScope !== c.providerScope || auth.contactId !== i.contactId
+      || auth.remoteIdentityId !== identity.id || !Number.isSafeInteger(auth.revision) || auth.revision < 0) return deny();
+    const grant = await tx.openCreditConsumerAuthorizationEvent.findUnique({
+      where: { authorizationId_revision: { authorizationId: auth.id, revision: auth.revision } }
+    });
+    if (!grant || !id(grant.id) || grant.action !== "GRANTED" || grant.nextActive !== true
+      || grant.authorizationId !== auth.id || grant.revision !== auth.revision
+      || grant.companyId !== i.companyId || grant.providerScope !== c.providerScope
+      || grant.evidenceInboundEventId !== auth.evidenceInboundEventId) return deny();
+    automationGrantId = grant.id;
+    automationAuthorizationId = auth.id;
+    automationRevision = auth.revision;
+  }
+
+  const intentKey = automation ? "simulation-" + automationGrantId : requestIntentKey;
+  const existing = intentKey
+    ? await tx.openCreditCommercialOperation.findUnique({
+        where: { companyId_providerScope_intentKey: { companyId: i.companyId, providerScope: c.providerScope, intentKey } },
+        select: operationSelect
+      })
+    : null;
+  if (existing && (existing.remoteIdentityId !== identity.id || existing.operationKind !== KIND
+    || existing.companyId !== i.companyId || existing.providerScope !== c.providerScope)) return deny();
+  if (existing) return { cpf, identityId: identity.id, intentKey, existing, automationGrantId, automationAuthorizationId, automationRevision };
+
+  const unresolved = await tx.openCreditCommercialOperation.findFirst({
+    where: {
+      companyId: i.companyId,
+      providerScope: c.providerScope,
+      remoteIdentityId: identity.id,
+      operationKind: KIND,
+      state: { in: ["IN_FLIGHT", "UNKNOWN"] }
+    },
+    select: operationSelect
+  });
   if (unresolved && !inspectOnly) throw new CltSimulationError("UNRESOLVED_SIMULATION");
-  if (unresolved) return { cpf, identityId: identity.id, grantId: grant.id, authorizationId: auth.id, revision: auth.revision, intentKey, existing: unresolved };
-  return { cpf, identityId: identity.id, grantId: grant.id, authorizationId: auth.id, revision: auth.revision, intentKey, existing };
+  if (unresolved) return { cpf, identityId: identity.id, intentKey: unresolved.intentKey, existing: unresolved, automationGrantId, automationAuthorizationId, automationRevision };
+  return { cpf, identityId: identity.id, intentKey: intentKey ?? "manual-inspect", existing: null, automationGrantId, automationAuthorizationId, automationRevision };
 }
 
 type Diagnostic = { bankId: string; requestedMode: SimulationParameters["mode"]; simulationId: string | null; httpStatus: number | null; requestId: string | null; correlationId: string | null;
@@ -154,7 +214,8 @@ async function record(db: Db, i: Input, c: Config, op: Operation, diagnostic: Di
 /** Auth -> current catalog -> frozen payload -> durable reservation -> one paid POST. */
 export async function dispatchCltSimulation(db: Db, i: Input & SimulationParameters, options: Options = {}) {
   const resolve = options.resolve ?? resolveConfiguredOpenCreditProviderContext, c = config(resolve);
-  const initial = await db.$transaction(tx => target(tx, i, c, false, options.automation), settings);
+  const requestIntentKey = options.automation ? undefined : "manual-simulation-" + randomBytes(16).toString("hex");
+  const initial = await db.$transaction(tx => target(tx, i, c, false, options.automation, requestIntentKey), settings);
   if (initial.existing) return { ok: true as const, operation: operationView(initial.existing), result: null };
   let parameters: SimulationParameters;
   try { parameters = Object.freeze(simulationParameters(i)); } catch { throw new CltSimulationError("INVALID_FIELDS"); }
@@ -175,16 +236,25 @@ export async function dispatchCltSimulation(db: Db, i: Input & SimulationParamet
         await tx.$queryRaw`SELECT "id" FROM "Contact" WHERE "id" = ${i.contactId} AND "companyId" = ${i.companyId} FOR SHARE`;
         await tx.$queryRaw`SELECT "id" FROM "OpenCreditCommercialAccess" WHERE "companyId" = ${i.companyId} AND "providerScope" = ${c.providerScope} FOR SHARE`;
         await tx.$queryRaw`SELECT "id" FROM "OpenCreditRemoteIdentity" WHERE "id" = ${initial.identityId} AND "companyId" = ${i.companyId} AND "providerScope" = ${c.providerScope} FOR SHARE`;
-        await tx.$queryRaw`SELECT "id" FROM "OpenCreditConsumerAuthorization" WHERE "id" = ${initial.authorizationId} AND "companyId" = ${i.companyId} AND "providerScope" = ${c.providerScope} FOR SHARE`;
-        const current = await target(tx, i, c, false, options.automation);
+        if (options.automation && initial.automationAuthorizationId) {
+          await tx.$queryRaw`SELECT "id" FROM "OpenCreditConsumerAuthorization" WHERE "id" = ${initial.automationAuthorizationId} AND "companyId" = ${i.companyId} AND "providerScope" = ${c.providerScope} FOR SHARE`;
+        }
+        const current = await target(tx, i, c, false, options.automation, requestIntentKey);
         if (current.existing) throw new ExistingSimulation(current.existing);
-        if (current.cpf !== initial.cpf || current.identityId !== initial.identityId || current.grantId !== initial.grantId || current.revision !== initial.revision || current.authorizationId !== initial.authorizationId) return deny();
+        if (current.cpf !== initial.cpf || current.identityId !== initial.identityId || current.intentKey !== initial.intentKey
+          || current.automationGrantId !== initial.automationGrantId
+          || current.automationAuthorizationId !== initial.automationAuthorizationId
+          || current.automationRevision !== initial.automationRevision) return deny();
         const op = await tx.openCreditCommercialOperation.create({ data: { companyId: i.companyId, providerScope: c.providerScope, remoteIdentityId: current.identityId,
           operationKind: KIND, intentKey: current.intentKey, state: "PREPARED", revision: 0, createdByUserId: i.actor.id, diagnostic: JSON.stringify(diagnostic) }, select: operationSelect });
         await tx.openCreditCommercialOperationEvent.create({ data: { operationId: op.id, companyId: i.companyId, providerScope: c.providerScope, actorUserId: i.actor.id, action: "PREPARED", previousState: null, nextState: "PREPARED", revision: 0 } });
         const changed = await tx.openCreditCommercialOperation.updateMany({ where: { id: op.id, companyId: i.companyId, providerScope: c.providerScope, operationKind: KIND, state: "PREPARED", revision: 0 }, data: { state: "IN_FLIGHT", revision: 1 } });
         if (changed.count !== 1) return deny();
-        await tx.openCreditCommercialOperationEvent.create({ data: { operationId: op.id, companyId: i.companyId, providerScope: c.providerScope, actorUserId: i.actor.id, action: "RESERVED_FOR_DISPATCH", previousState: "PREPARED", nextState: "IN_FLIGHT", revision: 1, dispatchAuthorizationEventId: current.grantId } });
+        await tx.openCreditCommercialOperationEvent.create({ data: {
+          operationId: op.id, companyId: i.companyId, providerScope: c.providerScope, actorUserId: i.actor.id,
+          action: "RESERVED_FOR_DISPATCH", previousState: "PREPARED", nextState: "IN_FLIGHT", revision: 1,
+          ...(current.automationGrantId ? { dispatchAuthorizationEventId: current.automationGrantId } : {})
+        } });
         unchanged(); return { ...op, state: "IN_FLIGHT", revision: 1 };
       }, settings);
       diagnostic.dispatchCommittedAt = new Date().toISOString(); return { body, committed: reserved };
@@ -201,8 +271,8 @@ export async function dispatchCltSimulation(db: Db, i: Input & SimulationParamet
     if (!reserved) {
       if (error instanceof ExistingSimulation) return { ok: true as const, operation: operationView(error.operation), result: null };
       if (error instanceof CltSimulationError) throw error;
-      const current = await db.$transaction(tx => target(tx, i, c, false, options.automation), settings);
-      if (current.grantId === initial.grantId && current.existing) return { ok: true as const, operation: operationView(current.existing), result: null };
+      const current = await db.$transaction(tx => target(tx, i, c, false, options.automation, requestIntentKey), settings);
+      if (current.intentKey === initial.intentKey && current.existing) return { ok: true as const, operation: operationView(current.existing), result: null };
       throw new CltSimulationError("PRE_DISPATCH_FAILED");
     }
     result = null;
