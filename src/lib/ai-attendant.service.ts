@@ -606,7 +606,7 @@ export async function maybeSendAutomaticAiReply({
   if (!conversation) { gate("CONVERSATION_NOT_FOUND"); return null; }
   if (isOpenCreditConversation(conversation)) { gate("INTERNAL_OPENCREDIT_CONVERSATION"); return null; }
   const bridge = Boolean(conversation.openCreditWhatsappMetas?.length);
-  const latestVerifiedInbound = bridge ? await prisma.conversationInboundEvent.findFirst({
+  const latestVerifiedInbound = await prisma.conversationInboundEvent.findFirst({
     where: {
       companyId,
       conversationId,
@@ -617,7 +617,7 @@ export async function maybeSendAutomaticAiReply({
     },
     orderBy: { sequence: "desc" },
     include: { message: { select: { type: true, body: true } } },
-  }) : null;
+  });
   const buttonAction = latestVerifiedInbound
     ? classifyOpenCreditTemplateButton(latestVerifiedInbound.message)
     : null;
