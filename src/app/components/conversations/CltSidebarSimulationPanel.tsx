@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Loader2, RefreshCcw } from "lucide-react";
-import { parseAuthorizationContext } from "@/lib/opencredit-consumer-authorization-ui";
 import {
   parseSimulationReply,
   simulationParameters,
@@ -73,7 +72,6 @@ export function CltSidebarSimulationPanel({
   const [bankId, setBankId] = useState("");
   const [mode, setMode] = useState<SimulationParameters["mode"]>("maximum");
   const [amountBRL, setAmountBRL] = useState("");
-  const [authorizationActive, setAuthorizationActive] = useState(false);
   const [contextReady, setContextReady] = useState(false);
   const [reply, setReply] = useState<SimulationReply | null>(null);
   const [attempted, setAttempted] = useState(false);
@@ -89,7 +87,6 @@ export function CltSidebarSimulationPanel({
     setReply(null);
     setAttempted(false);
     setContextReady(false);
-    setAuthorizationActive(false);
     setMessage("");
   }, [contactId, cpf]);
 
@@ -163,21 +160,6 @@ export function CltSidebarSimulationPanel({
       (mode === "parcela" && selectedBank?.capabilities.suportaParcela === true) ||
       (mode === "liberado" && selectedBank?.capabilities.suportaLiquido === true));
 
-  async function readAuthorization() {
-    const response = await fetch(base + "/authorization/context", {
-      method: "POST",
-      credentials: "same-origin",
-      cache: "no-store",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ companyId, contactId, conversationId })
-    });
-    const raw: unknown = await response.json().catch(() => null);
-    const parsed = response.ok ? parseAuthorizationContext(raw) : null;
-    const active = parsed?.authorization.active === true;
-    setAuthorizationActive(active);
-    return active;
-  }
-
   async function request(action: "banks" | "context" | "dispatch" | "poll") {
     if (!enabled || busy) return;
     setBusy(true);
@@ -192,11 +174,6 @@ export function CltSidebarSimulationPanel({
             setMessage("Nao foi possivel salvar o CPF antes da simulacao.");
             return;
           }
-        }
-        const active = authorizationActive || (await readAuthorization());
-        if (!active) {
-          setMessage("Para aprofundar a simulacao neste banco, solicite a autorizacao do cliente.");
-          return;
         }
         setAttempted(true);
       }
@@ -225,7 +202,6 @@ export function CltSidebarSimulationPanel({
       if (action === "banks") {
         setBanks(parsed.banks ?? []);
         setBankId(parsed.banks?.[0]?.bankId ?? "");
-        await readAuthorization();
         setMessage(parsed.banks?.length ? "" : "Nenhum banco CLT disponivel.");
         return;
       }
@@ -413,10 +389,6 @@ export function CltSidebarSimulationPanel({
                     {busy ? "Consultando..." : attempted ? "Simulacao enviada" : "Simular"}
                   </button>
                 </>
-              )}
-
-              {authorizationActive === false && banks.length > 0 && (
-                <p className="text-xs text-slate-500">Para aprofundar a simulacao em um banco, solicite a autorizacao do cliente.</p>
               )}
 
               {reply?.result && (
