@@ -382,6 +382,7 @@ model Company {
   chatbotFlows ChatbotFlow[]
   inboundEvents ConversationInboundEvent[]
   contactImportBatches ContactImportBatch[]
+  quickReplies QuickReply[]
 }
 
 model ContactImportBatch {
@@ -1135,6 +1136,20 @@ model Task {
   @@index([assigneeId])
   @@index([assigneeId, status, dueAt])
   @@index([dueAt])
+}
+
+model QuickReply {
+  id        String   @id @default(cuid())
+  companyId String
+  title     String
+  body      String
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, position])
+  @@index([companyId, title])
 }
 
 model Tag {
