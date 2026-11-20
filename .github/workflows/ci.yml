@@ -185,6 +185,9 @@ jobs:
       - name: Validate OpenCredit human authorization review context and UI guards
         run: npx --yes tsx@4.20.6 --test src/lib/opencredit-consumer-authorization-context.service.test.ts src/lib/opencredit-consumer-authorization-context-admin-handler.test.ts src/lib/opencredit-consumer-authorization-ui.test.ts
 
+      - name: Validate browser security headers
+        run: npx --yes tsx@4.20.6 --test src/lib/security-headers.test.ts
+
       - name: Verify project
         run: npm run verify
         env:
