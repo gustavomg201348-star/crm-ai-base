@@ -53,14 +53,21 @@ export async function GET(request: NextRequest) {
         ...(assigneeId ? { assigneeId } : {})
       },
       include: {
-        contact: { select: { name: true, cpf: true, phone: true } },
+        contact: { select: { id: true, name: true, cpf: true, phone: true } },
         assignee: { select: { name: true } }
       },
       orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
       take: 5000
     });
 
-    const rows = tasks.map((task) => ({
+    const uniqueContacts = new Map<string, (typeof tasks)[number]>();
+    for (const task of tasks) {
+      if (!uniqueContacts.has(task.contact.id)) {
+        uniqueContacts.set(task.contact.id, task);
+      }
+    }
+
+    const rows = Array.from(uniqueContacts.values()).map((task) => ({
       Nome: clean(task.contact.name),
       CPF: clean(task.contact.cpf),
       Telefone: clean(task.contact.phone),
