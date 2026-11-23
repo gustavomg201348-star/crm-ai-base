@@ -103,7 +103,7 @@ export async function POST(request: NextRequest) {
     let alreadyScheduled = 0;
 
     await prisma.$transaction(async (tx) => {
-      for (const candidate of candidates.values()) {
+      for (const candidate of Array.from(candidates.values())) {
         const pending = tasksByContact.get(candidate.contactId) ?? [];
         const todayTask = pending.find(
           (task) => task.dueAt >= dayStart && task.dueAt < nextDay
