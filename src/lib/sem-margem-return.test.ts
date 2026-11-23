@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   isSemMargemTagName,
@@ -44,4 +45,12 @@ test("automatic task id is stable for the same client and turnover", () => {
   const second = semMargemAutomaticTaskId("company-a", "contact-a", dueAt);
   assert.equal(first, second);
   assert.notEqual(first, semMargemAutomaticTaskId("company-a", "contact-b", dueAt));
+});
+
+test("historical backfill uses tag creation date and moves pending tasks to today", () => {
+  const source = readFileSync("src/app/api/tasks/sem-margem/backfill/route.ts", "utf8");
+  assert.match(source, /createdAt: \{ lt: dayStart \}/);
+  assert.match(source, /todaySemMargemReturnWindow\(\)/);
+  assert.match(source, /tx\.task\.update\([\s\S]{0,240}dueAt/);
+  assert.match(source, /movedToToday \+= 1/);
 });
