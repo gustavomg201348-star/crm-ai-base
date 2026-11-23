@@ -63,6 +63,14 @@ function ratio(numerator: number, denominator: number) {
   return Math.round((numerator / denominator) * 1000) / 10;
 }
 
+function chunked<T>(items: T[], size = 1000) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const session = await getSessionFromRequest(request);
@@ -76,35 +84,105 @@ export async function GET(request: NextRequest) {
     const period: Period = rawPeriod === "today" || rawPeriod === "30d" ? rawPeriod : "7d";
     const from = startForPeriod(period);
 
-    const campaigns = await prisma.campaign.findMany({
+    const recentRecipients = await prisma.campaignRecipient.findMany({
       where: {
-        companyId: session.companyId,
-        messageType: "TEMPLATE",
-        createdAt: { gte: from }
+        campaign: {
+          companyId: session.companyId,
+          messageType: "TEMPLATE"
+        },
+        OR: [
+          { createdAt: { gte: from } },
+          { sentAt: { gte: from } },
+          { deliveredAt: { gte: from } },
+          { failedAt: { gte: from } }
+        ]
+      },
+      select: { campaignId: true }
+    });
+
+    const periodMessageRefs = await prisma.message.findMany({
+      where: {
+        conversation: { contact: { companyId: session.companyId } },
+        OR: [
+          {
+            direction: "outbound",
+            readAt: { gte: from },
+            providerMessageId: { not: null }
+          },
+          {
+            direction: "inbound",
+            createdAt: { gte: from },
+            replyToProviderMessageId: { not: null },
+            metaReplySnapshot: { not: null }
+          }
+        ]
       },
       select: {
-        id: true,
-        name: true,
-        templateName: true,
-        createdAt: true,
-        total: true,
-        recipients: {
+        providerMessageId: true,
+        replyToProviderMessageId: true
+      }
+    });
+
+    const eventProviderIds = Array.from(new Set(
+      periodMessageRefs.flatMap((message) =>
+        [message.providerMessageId, message.replyToProviderMessageId]
+          .filter((value): value is string => Boolean(value))
+      )
+    ));
+
+    const eventRecipientGroups = eventProviderIds.length
+      ? await Promise.all(
+          chunked(eventProviderIds).map((providerIds) =>
+            prisma.campaignRecipient.findMany({
+              where: {
+                providerMessageId: { in: providerIds },
+                campaign: {
+                  companyId: session.companyId,
+                  messageType: "TEMPLATE"
+                }
+              },
+              select: { campaignId: true }
+            })
+          )
+        )
+      : [];
+
+    const campaignIds = Array.from(new Set([
+      ...recentRecipients.map((recipient) => recipient.campaignId),
+      ...eventRecipientGroups.flat().map((recipient) => recipient.campaignId)
+    ]));
+
+    const campaigns = campaignIds.length
+      ? await prisma.campaign.findMany({
+          where: {
+            id: { in: campaignIds },
+            companyId: session.companyId,
+            messageType: "TEMPLATE"
+          },
           select: {
             id: true,
-            contactId: true,
-            providerMessageId: true,
-            status: true,
-            sentAt: true,
-            deliveredAt: true,
-            failedAt: true,
-            conversationId: true,
-            contact: { select: { name: true } }
-          }
-        }
-      },
-      orderBy: { createdAt: "desc" },
-      take: 100
-    });
+            name: true,
+            templateName: true,
+            createdAt: true,
+            total: true,
+            recipients: {
+              select: {
+                id: true,
+                contactId: true,
+                providerMessageId: true,
+                status: true,
+                sentAt: true,
+                deliveredAt: true,
+                failedAt: true,
+                createdAt: true,
+                conversationId: true,
+                contact: { select: { name: true } }
+              }
+            }
+          },
+          orderBy: { createdAt: "desc" }
+        })
+      : [];
 
     const providerIds = Array.from(new Set(
       campaigns.flatMap((campaign) =>
@@ -114,49 +192,61 @@ export async function GET(request: NextRequest) {
       )
     ));
 
-    const outboundMessages = providerIds.length
-      ? await prisma.message.findMany({
-          where: {
-            providerMessageId: { in: providerIds },
-            direction: "outbound",
-            conversation: { contact: { companyId: session.companyId } }
-          },
-          select: { providerMessageId: true, readAt: true }
-        })
+    const outboundGroups = providerIds.length
+      ? await Promise.all(
+          chunked(providerIds).map((providerIdChunk) =>
+            prisma.message.findMany({
+              where: {
+                providerMessageId: { in: providerIdChunk },
+                direction: "outbound",
+                readAt: { gte: from },
+                conversation: { contact: { companyId: session.companyId } }
+              },
+              select: { providerMessageId: true, readAt: true }
+            })
+          )
+        )
       : [];
+    const outboundMessages = outboundGroups.flat();
 
-    const inboundReplies = providerIds.length
-      ? await prisma.message.findMany({
-          where: {
-            direction: "inbound",
-            replyToProviderMessageId: { in: providerIds },
-            metaReplySnapshot: { not: null },
-            conversation: { contact: { companyId: session.companyId } }
-          },
-          select: {
-            id: true,
-            body: true,
-            createdAt: true,
-            replyToProviderMessageId: true,
-            metaReplySnapshot: true,
-            conversation: {
+    const inboundGroups = providerIds.length
+      ? await Promise.all(
+          chunked(providerIds).map((providerIdChunk) =>
+            prisma.message.findMany({
+              where: {
+                direction: "inbound",
+                createdAt: { gte: from },
+                replyToProviderMessageId: { in: providerIdChunk },
+                metaReplySnapshot: { not: null },
+                conversation: { contact: { companyId: session.companyId } }
+              },
               select: {
-                contactId: true,
-                contact: { select: { name: true } }
+                id: true,
+                body: true,
+                createdAt: true,
+                replyToProviderMessageId: true,
+                metaReplySnapshot: true,
+                conversation: {
+                  select: {
+                    contactId: true,
+                    contact: { select: { name: true } }
+                  }
+                }
               }
-            }
-          },
-          orderBy: { createdAt: "desc" },
-          take: 500
-        })
+            })
+          )
+        )
       : [];
-
-    const readProviderIds = new Set(
-      outboundMessages
-        .filter((message) => message.readAt)
-        .map((message) => message.providerMessageId)
-        .filter((value): value is string => Boolean(value))
+    const inboundReplies = inboundGroups.flat().sort(
+      (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
     );
+
+    const readAtByProvider = new Map<string, Date>();
+    for (const message of outboundMessages) {
+      if (!message.providerMessageId || !message.readAt) continue;
+      readAtByProvider.set(message.providerMessageId, message.readAt);
+    }
+    const readProviderIds = new Set(readAtByProvider.keys());
 
     const recipientByProvider = new Map<string, {
       campaignId: string;
@@ -223,10 +313,10 @@ export async function GET(request: NextRequest) {
     let pending = 0;
     for (const campaign of campaigns) {
       for (const recipient of campaign.recipients) {
-        if (recipient.sentAt) sent += 1;
-        if (recipient.status === "DELIVERED") delivered += 1;
-        if (recipient.status === "FAILED") failed += 1;
-        if (recipient.status === "PENDING") pending += 1;
+        if (recipient.sentAt && recipient.sentAt >= from) sent += 1;
+        if (recipient.deliveredAt && recipient.deliveredAt >= from) delivered += 1;
+        if (recipient.failedAt && recipient.failedAt >= from) failed += 1;
+        if (recipient.status === "PENDING" && recipient.createdAt >= from) pending += 1;
       }
     }
 
@@ -242,15 +332,17 @@ export async function GET(request: NextRequest) {
       const campaignRead = campaign.recipients.filter((recipient) =>
         readRecipientIds.has(recipient.id)
       ).length;
-      const campaignSent = campaign.recipients.filter((recipient) => recipient.sentAt).length;
+      const campaignSent = campaign.recipients.filter(
+        (recipient) => recipient.sentAt && recipient.sentAt >= from
+      ).length;
       const campaignDelivered = campaign.recipients.filter(
-        (recipient) => recipient.status === "DELIVERED"
+        (recipient) => recipient.deliveredAt && recipient.deliveredAt >= from
       ).length;
       const campaignFailed = campaign.recipients.filter(
-        (recipient) => recipient.status === "FAILED"
+        (recipient) => recipient.failedAt && recipient.failedAt >= from
       ).length;
       const campaignPending = campaign.recipients.filter(
-        (recipient) => recipient.status === "PENDING"
+        (recipient) => recipient.status === "PENDING" && recipient.createdAt >= from
       ).length;
 
       return {
@@ -296,10 +388,13 @@ export async function GET(request: NextRequest) {
           const item = daily.get(key);
           if (item) item.delivered += 1;
         }
-        if (recipient.providerMessageId && readProviderIds.has(recipient.providerMessageId) && recipient.sentAt) {
-          const key = dateKey(recipient.sentAt);
-          const item = daily.get(key);
-          if (item) item.read += 1;
+        if (recipient.providerMessageId) {
+          const readAt = readAtByProvider.get(recipient.providerMessageId);
+          if (readAt) {
+            const key = dateKey(readAt);
+            const item = daily.get(key);
+            if (item) item.read += 1;
+          }
         }
       }
     }
