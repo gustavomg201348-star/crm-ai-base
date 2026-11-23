@@ -5,8 +5,8 @@ import { requireAdmin } from "@/lib/permissions";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { safeLogError } from "@/lib/safe-logger";
 import {
-  nextSemMargemReturnWindow,
-  semMargemAutomaticTaskId
+  semMargemAutomaticTaskId,
+  todaySemMargemReturnWindow
 } from "@/lib/sem-margem-return";
 
 export const runtime = "nodejs";
@@ -19,28 +19,30 @@ export async function POST(request: NextRequest) {
     const blocked = requireAdmin(session);
     if (blocked) return blocked;
 
-    const conversations = await prisma.conversation.findMany({
+    const { dueAt, dayStart, nextDay } = todaySemMargemReturnWindow();
+
+    const historicalAssignments = await prisma.conversationTag.findMany({
       where: {
-        contact: { companyId: session.companyId },
-        tags: {
-          some: {
-            companyId: session.companyId,
-            tag: {
-              companyId: session.companyId,
-              isActive: true,
-              name: { equals: "Sem margem" }
-            }
-          }
+        companyId: session.companyId,
+        createdAt: { lt: dayStart },
+        tag: {
+          companyId: session.companyId,
+          isActive: true,
+          name: { equals: "Sem margem" }
         }
       },
       select: {
-        id: true,
-        agentId: true,
-        updatedAt: true,
-        contactId: true,
-        contact: { select: { ownerId: true } }
+        createdAt: true,
+        conversation: {
+          select: {
+            id: true,
+            agentId: true,
+            contactId: true,
+            contact: { select: { ownerId: true } }
+          }
+        }
       },
-      orderBy: { updatedAt: "desc" },
+      orderBy: { createdAt: "desc" },
       take: 5000
     });
 
@@ -49,7 +51,8 @@ export async function POST(request: NextRequest) {
       { contactId: string; assigneeId: string }
     >();
 
-    for (const conversation of conversations) {
+    for (const assignment of historicalAssignments) {
+      const conversation = assignment.conversation;
       if (candidates.has(conversation.contactId)) continue;
       candidates.set(conversation.contactId, {
         contactId: conversation.contactId,
@@ -60,69 +63,114 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const { dueAt, dayStart, nextDay } = nextSemMargemReturnWindow();
     const contactIds = Array.from(candidates.keys());
 
     if (contactIds.length === 0) {
       return NextResponse.json({
         candidates: 0,
         created: 0,
+        movedToToday: 0,
         alreadyScheduled: 0,
         dueAt: dueAt.toISOString()
       });
     }
 
-    const existing = await prisma.task.findMany({
+    const existingTasks = await prisma.task.findMany({
       where: {
         companyId: session.companyId,
         contactId: { in: contactIds },
         title: "Retorno: Sem margem",
-        status: "PENDING",
-        dueAt: { gte: dayStart, lt: nextDay }
+        status: "PENDING"
       },
-      select: { contactId: true }
+      select: {
+        id: true,
+        contactId: true,
+        dueAt: true,
+        assigneeId: true
+      },
+      orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }]
     });
-    const alreadyScheduled = new Set(existing.map((task) => task.contactId));
 
-    const missing = Array.from(candidates.values()).filter(
-      (candidate) => !alreadyScheduled.has(candidate.contactId)
-    );
-
-    if (missing.length > 0) {
-      await prisma.$transaction(
-        missing.map((candidate) =>
-          prisma.task.upsert({
-            where: {
-              id: semMargemAutomaticTaskId(
-                session.companyId,
-                candidate.contactId,
-                dueAt
-              )
-            },
-            update: {},
-            create: {
-              id: semMargemAutomaticTaskId(
-                session.companyId,
-                candidate.contactId,
-                dueAt
-              ),
-              companyId: session.companyId,
-              contactId: candidate.contactId,
-              assigneeId: candidate.assigneeId,
-              title: "Retorno: Sem margem",
-              note: "Agendado automaticamente pela tag Sem margem.",
-              dueAt,
-              status: "PENDING"
-            }
-          })
-        )
-      );
+    const tasksByContact = new Map<string, typeof existingTasks>();
+    for (const task of existingTasks) {
+      const current = tasksByContact.get(task.contactId) ?? [];
+      current.push(task);
+      tasksByContact.set(task.contactId, current);
     }
+
+    let created = 0;
+    let movedToToday = 0;
+    let alreadyScheduled = 0;
+
+    await prisma.$transaction(async (tx) => {
+      for (const candidate of candidates.values()) {
+        const pending = tasksByContact.get(candidate.contactId) ?? [];
+        const todayTask = pending.find(
+          (task) => task.dueAt >= dayStart && task.dueAt < nextDay
+        );
+
+        if (todayTask) {
+          alreadyScheduled += 1;
+          continue;
+        }
+
+        if (pending.length > 0) {
+          const canonical = pending[0];
+          await tx.task.update({
+            where: { id: canonical.id },
+            data: {
+              dueAt,
+              assigneeId: canonical.assigneeId ?? candidate.assigneeId
+            }
+          });
+
+          const duplicateAutomaticIds = pending
+            .slice(1)
+            .filter((task) => task.id.startsWith("sem-margem-"))
+            .map((task) => task.id);
+
+          if (duplicateAutomaticIds.length > 0) {
+            await tx.task.deleteMany({
+              where: {
+                id: { in: duplicateAutomaticIds },
+                companyId: session.companyId,
+                contactId: candidate.contactId
+              }
+            });
+          }
+
+          movedToToday += 1;
+          continue;
+        }
+
+        const id = semMargemAutomaticTaskId(
+          session.companyId,
+          candidate.contactId,
+          dueAt
+        );
+        await tx.task.upsert({
+          where: { id },
+          update: {},
+          create: {
+            id,
+            companyId: session.companyId,
+            contactId: candidate.contactId,
+            assigneeId: candidate.assigneeId,
+            title: "Retorno: Sem margem",
+            note: "Cliente Sem margem anterior a hoje, reposicionado para o retorno de hoje.",
+            dueAt,
+            status: "PENDING"
+          }
+        });
+        created += 1;
+      }
+    });
 
     return NextResponse.json({
       candidates: candidates.size,
-      created: missing.length,
-      alreadyScheduled: alreadyScheduled.size,
+      created,
+      movedToToday,
+      alreadyScheduled,
       dueAt: dueAt.toISOString()
     });
   } catch (error) {
