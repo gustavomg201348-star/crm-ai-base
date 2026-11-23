@@ -1312,6 +1312,18 @@ test("CLT prequalification worker stays independent from origin and remote ident
 });
 
 
+test("verified button first reply ignores company AI OFF but respects conversation OFF and pause", () => {
+  const source = readFileSync("src/lib/ai-attendant.service.ts", "utf8");
+  const policyStart = source.indexOf("const fixedButtonPolicy");
+  const policyEnd = source.indexOf("if (buttonAction === \"CHECK\")", policyStart);
+  assert.ok(policyStart >= 0 && policyEnd > policyStart);
+  const policy = source.slice(policyStart, policyEnd);
+
+  assert.doesNotMatch(policy, /normalizeAiMode\(conversationMode \|\| companyMode\)/);
+  assert.match(policy, /!aiPaused/);
+  assert.match(policy, /!conversationMode \|\| normalizeAiMode\(conversationMode\) !== "OFF"/);
+});
+
 test("verified button replies bypass only the HYBRID assigned-agent gate", () => {
   const source = readFileSync("src/lib/ai-attendant.service.ts", "utf8");
   assert.match(source, /const fixedButtonReply = buttonAction === "CHECK"/);
