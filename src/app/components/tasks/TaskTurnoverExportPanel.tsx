@@ -41,7 +41,7 @@ export function TaskTurnoverExportPanel({ attendants }: { attendants: AttendantO
   async function backfillExistingSemMargem() {
     setError("");
     setBackfillResult("");
-    if (!window.confirm("Agendar todos os clientes que ja possuem a tag Sem margem para a proxima virada?")) {
+    if (!window.confirm("Colocar em hoje todos os clientes que ja tinham a tag Sem margem antes de hoje?")) {
       return;
     }
     setBackfillBusy(true);
@@ -52,13 +52,13 @@ export function TaskTurnoverExportPanel({ attendants }: { attendants: AttendantO
         body: "{}"
       });
       const data = (await response.json().catch(() => null)) as
-        | { candidates?: number; created?: number; alreadyScheduled?: number; error?: string }
+        | { candidates?: number; created?: number; movedToToday?: number; alreadyScheduled?: number; error?: string }
         | null;
       if (!response.ok) {
         throw new Error(data?.error ?? "Nao foi possivel agendar os clientes existentes.");
       }
       setBackfillResult(
-        `${data?.created ?? 0} agendado(s); ${data?.alreadyScheduled ?? 0} ja estavam agendados; ${data?.candidates ?? 0} cliente(s) Sem margem encontrados.`
+        `${data?.created ?? 0} criado(s) para hoje; ${data?.movedToToday ?? 0} movido(s) para hoje; ${data?.alreadyScheduled ?? 0} ja estavam em hoje; ${data?.candidates ?? 0} cliente(s) historicos encontrados.`
       );
     } catch (error) {
       setError(error instanceof Error ? error.message : "Nao foi possivel agendar os clientes existentes.");
@@ -120,7 +120,7 @@ export function TaskTurnoverExportPanel({ attendants }: { attendants: AttendantO
             className="inline-flex h-10 items-center gap-2 rounded-full border border-blue-200 bg-white px-4 text-sm font-bold text-brand disabled:opacity-60"
           >
             {backfillBusy && <Loader2 className="h-4 w-4 animate-spin" />}
-            {backfillBusy ? "Agendando..." : "Agendar Sem margem existentes"}
+            {backfillBusy ? "Agendando..." : "Trazer Sem margem antigos para hoje"}
           </button>
           <button
             type="button"
