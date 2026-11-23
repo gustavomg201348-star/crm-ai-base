@@ -626,12 +626,12 @@ export async function maybeSendAutomaticAiReply({
     : buttonAction === "BLOCK"
       ? OPEN_CREDIT_BLOCK_FIRST_REPLY
       : null;
-  const fixedButtonPolicy = ({ companyMode, conversationMode, aiPaused }: {
+  const fixedButtonPolicy = ({ conversationMode, aiPaused }: {
     companyMode?: string | null;
     conversationMode?: string | null;
     aiPaused?: boolean | null;
     agentId?: string | null;
-  }) => !aiPaused && normalizeAiMode(conversationMode || companyMode) !== "OFF";
+  }) => !aiPaused && (!conversationMode || normalizeAiMode(conversationMode) !== "OFF");
 
   if (buttonAction === "CHECK") {
     const cltTag = await prisma.tag.findFirst({
