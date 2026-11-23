@@ -21,6 +21,7 @@ import {
   Tags
 } from "@/lib/mock-data";
 import { OpenCreditWhatsappCanary } from "@/app/components/conversations/OpenCreditWhatsappCanary";
+import { CampaignAnalyticsDashboard } from "@/app/components/campaigns/CampaignAnalyticsDashboard";
 import { TaskTurnoverExportPanel } from "@/app/components/tasks/TaskTurnoverExportPanel";
 import { ConversationList } from "@/app/components/conversations/ConversationList";
 import { CltSidebarSimulationPanel } from "@/app/components/conversations/CltSidebarSimulationPanel";
@@ -16494,7 +16495,9 @@ function Disparos({
   }
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
+    <>
+      <CampaignAnalyticsDashboard />
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
       <form
         className="rounded border border-line bg-white p-4 shadow-soft"
         onSubmit={handleSubmit}
@@ -17509,7 +17512,8 @@ function Disparos({
           </div>
         )}
       </aside>
-    </div>
+      </div>
+    </>
   );
 }
 
