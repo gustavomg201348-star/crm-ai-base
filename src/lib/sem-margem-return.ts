@@ -22,12 +22,8 @@ function saoPauloCalendarDate(now: Date) {
   };
 }
 
-function targetYearMonth(now: Date) {
-  const local = saoPauloCalendarDate(now);
-  if (local.day < 23) return { year: local.year, month: local.month };
-  return local.month === 12
-    ? { year: local.year + 1, month: 1 }
-    : { year: local.year, month: local.month + 1 };
+function nextYearMonth(year: number, month: number) {
+  return month === 12 ? { year: year + 1, month: 1 } : { year, month: month + 1 };
 }
 
 function isoDate(year: number, month: number, day: number, time: string) {
@@ -36,13 +32,29 @@ function isoDate(year: number, month: number, day: number, time: string) {
   );
 }
 
-export function nextSemMargemReturnWindow(now = new Date()) {
-  const target = targetYearMonth(now);
-  const dueAt = isoDate(target.year, target.month, 23, SHEET_TURNOVER_HOUR);
-  const dayStart = isoDate(target.year, target.month, 23, "00:00:00");
+function dayWindow(year: number, month: number, day: number) {
+  const dueAt = isoDate(year, month, day, SHEET_TURNOVER_HOUR);
+  const dayStart = isoDate(year, month, day, "00:00:00");
   const nextDay = new Date(dayStart);
   nextDay.setUTCDate(nextDay.getUTCDate() + 1);
   return { dueAt, dayStart, nextDay };
+}
+
+/**
+ * New Sem margem entries always return on day 23 of the following calendar month.
+ */
+export function nextSemMargemReturnWindow(now = new Date()) {
+  const local = saoPauloCalendarDate(now);
+  const target = nextYearMonth(local.year, local.month);
+  return dayWindow(target.year, target.month, 23);
+}
+
+/**
+ * One-time/backfill window for Sem margem entries that already existed before today.
+ */
+export function todaySemMargemReturnWindow(now = new Date()) {
+  const local = saoPauloCalendarDate(now);
+  return dayWindow(local.year, local.month, local.day);
 }
 
 export function semMargemAutomaticTaskId(companyId: string, contactId: string, dueAt: Date) {
