@@ -16688,7 +16688,7 @@ function Disparos({
                       </button>
                     )}
                     <button
-                      className="inline-flex h-8 items-center gap-1 rounded-full bg-brand px-3 text-xs font-semibold text-white disabled:opacity-60"
+                      className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-blue-500 px-3.5 text-xs font-black text-white shadow-[0_6px_16px_rgba(37,99,235,0.22)] transition hover:-translate-y-0.5 hover:from-blue-700 hover:to-blue-600 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
                       disabled={importing || importPreview.summary.validRows === 0}
                       type="button"
                       onClick={handleConfirmSpreadsheetImport}
@@ -17296,7 +17296,7 @@ function Disparos({
               </p>
             </div>
             <button
-              className="inline-flex h-8 items-center gap-1 rounded-full border border-line px-3 text-xs font-semibold text-slate-600"
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
               type="button"
               onClick={() => void onRefreshCampaigns()}
             >
