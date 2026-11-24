@@ -13474,7 +13474,7 @@ function Multicred({
                       {selectedClientDetail.whatsapp ?? selectedClientDetail.phone ?? "sem telefone"}
                     </p>
                   </div>
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                  <div className="rounded border border-line bg-white p-3">
                     <p className="text-xs font-semibold uppercase text-slate-500">
                       Propostas vinculadas
                     </p>
@@ -16800,7 +16800,7 @@ function Disparos({
               </select>
             </label>
 
-            <div className="rounded border border-line bg-white p-3">
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold">Tipo de mensagem</p>
