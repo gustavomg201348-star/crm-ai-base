@@ -426,6 +426,15 @@ type WhatsAppTemplateRow = {
   status: string;
   preview: string;
   variableCount: number;
+  headerFormat?: string | null;
+  hasHeaderImage?: boolean;
+  headerImageUrl?: string | null;
+  buttons?: Array<{
+    type: string;
+    text: string;
+    url?: string | null;
+    phoneNumber?: string | null;
+  }>;
 };
 
 type ChannelRow = {
@@ -16041,6 +16050,13 @@ function Disparos({
         }
       : null);
 
+  const selectedTemplateHeaderImage =
+    messageMode === "TEMPLATE" && selectedCampaignTemplate?.hasHeaderImage
+      ? selectedCampaignTemplate.headerImageUrl?.trim() || ""
+      : "";
+  const previewMediaUrl =
+    messageMode === "TEMPLATE" ? selectedTemplateHeaderImage : imagePreview;
+
   function renderMessagePreview() {
     if (
       messageMode === "TEMPLATE" &&
@@ -16889,6 +16905,14 @@ function Disparos({
                           {selectedCampaignTemplate.language}
                         </span>
                       </div>
+                      {selectedCampaignTemplate.hasHeaderImage && (
+                        <div className="mt-3 flex items-center gap-2 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-xs font-semibold text-blue-800">
+                          <ImageIcon className="h-4 w-4" />
+                          {selectedCampaignTemplate.headerImageUrl
+                            ? "Imagem do cabecalho carregada na previa."
+                            : "Template possui imagem, mas a previa nao esta disponivel."}
+                        </div>
+                      )}
                       <p className="mt-3 whitespace-pre-wrap text-slate-700">
                         {selectedCampaignTemplate.preview}
                       </p>
@@ -17254,18 +17278,27 @@ function Disparos({
               </div>
             </div>
             <div className="p-3">
-            {imagePreview ? (
-              <NextImage
-                alt="Preview da imagem"
-                className="mb-3 max-h-56 w-full rounded object-cover"
-                height={224}
-                src={imagePreview}
-                unoptimized
-                width={320}
+            {previewMediaUrl ? (
+              <div
+                aria-label={
+                  messageMode === "TEMPLATE"
+                    ? "Imagem cadastrada no template"
+                    : "Preview da imagem"
+                }
+                className="mb-3 h-40 w-full rounded-xl border border-slate-200 bg-cover bg-center shadow-sm"
+                role="img"
+                style={{ backgroundImage: `url("${previewMediaUrl.replace(/"/g, "%22")}")` }}
               />
             ) : (
-              <div className="mb-3 grid h-32 place-items-center rounded border border-dashed border-emerald-300 bg-white/40 text-emerald-700">
-                <ImageIcon className="h-8 w-8" />
+              <div className="mb-3 grid h-32 place-items-center rounded-xl border border-dashed border-emerald-300 bg-white/40 text-emerald-700">
+                <div className="text-center">
+                  <ImageIcon className="mx-auto h-8 w-8" />
+                  <p className="mt-2 text-[10px] font-bold uppercase tracking-[0.12em]">
+                    {messageMode === "TEMPLATE" && selectedCampaignTemplate?.hasHeaderImage
+                      ? "Imagem do template indisponivel"
+                      : "Sem imagem"}
+                  </p>
+                </div>
               </div>
             )}
             <p className="whitespace-pre-wrap rounded-2xl bg-white p-3 shadow-sm">
