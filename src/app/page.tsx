@@ -16521,7 +16521,7 @@ function Disparos({
               </div>
             </div>
             <button
-              className="inline-flex h-11 items-center gap-2 rounded-xl border border-white/15 bg-white px-4 text-sm font-bold text-[#0b4db9] shadow-[0_10px_30px_rgba(2,6,23,0.18)] transition hover:-translate-y-0.5 hover:shadow-[0_14px_34px_rgba(2,6,23,0.22)] disabled:opacity-60"
+              className="group inline-flex h-12 items-center gap-2.5 rounded-xl border border-white/20 bg-gradient-to-r from-white to-blue-50 px-5 text-sm font-black text-[#0b4db9] shadow-[0_12px_32px_rgba(2,6,23,0.2)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_18px_38px_rgba(2,6,23,0.25)] active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
               disabled={sending || loading}
               type="submit"
             >
@@ -16538,7 +16538,7 @@ function Disparos({
           </label>
 
           <select
-            className="mt-2 h-10 w-full rounded border border-line bg-white px-3 text-sm text-slate-700 outline-none"
+            className="mt-3 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
             value={aiProfile}
             onChange={(event) =>
               setAiProfile(
@@ -16575,14 +16575,14 @@ function Disparos({
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <button
-                className="inline-flex h-10 items-center gap-2 rounded-full border border-blue-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm"
+                className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-bold text-slate-700 shadow-[0_4px_12px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 hover:shadow-md active:translate-y-0"
                 type="button"
                 onClick={downloadImportTemplate}
               >
                 <Download className="h-4 w-4" />
                 Baixar modelo
               </button>
-              <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-full border border-blue-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm">
+              <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-bold text-slate-700 shadow-[0_4px_12px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 hover:shadow-md">
                 <Upload className="h-4 w-4" />
                 {importFile ? importFile.name : "Escolher planilha"}
                 <input
@@ -16617,7 +16617,7 @@ function Disparos({
                 </button>
               )}
               <button
-                className="inline-flex h-10 items-center gap-2 rounded-full bg-white px-3 text-sm font-semibold text-brand shadow-sm ring-1 ring-blue-200 disabled:opacity-60"
+                className="inline-flex h-10 items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-blue-500 px-4 text-sm font-black text-white shadow-[0_8px_20px_rgba(37,99,235,0.22)] transition hover:-translate-y-0.5 hover:from-blue-700 hover:to-blue-600 hover:shadow-[0_12px_26px_rgba(37,99,235,0.28)] disabled:cursor-not-allowed disabled:from-slate-200 disabled:to-slate-200 disabled:text-slate-400 disabled:shadow-none"
                 disabled={importLoading || !importFile}
                 type="button"
                 onClick={handleSpreadsheetPreview}
@@ -16679,7 +16679,7 @@ function Disparos({
                   <div className="flex gap-2">
                     {importPreview.summary.invalidRows > 0 && (
                       <button
-                        className="inline-flex h-8 items-center gap-1 rounded-full border border-line px-3 text-xs font-semibold text-slate-600"
+                        className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
                         type="button"
                         onClick={downloadImportErrors}
                       >
@@ -16688,7 +16688,7 @@ function Disparos({
                       </button>
                     )}
                     <button
-                      className="inline-flex h-8 items-center gap-1 rounded-full bg-brand px-3 text-xs font-semibold text-white disabled:opacity-60"
+                      className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-blue-500 px-3.5 text-xs font-black text-white shadow-[0_6px_16px_rgba(37,99,235,0.22)] transition hover:-translate-y-0.5 hover:from-blue-700 hover:to-blue-600 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
                       disabled={importing || importPreview.summary.validRows === 0}
                       type="button"
                       onClick={handleConfirmSpreadsheetImport}
@@ -16787,7 +16787,7 @@ function Disparos({
                 Selecione o numero utilizado nesta campanha.
               </span>
               <select
-                className="mt-3 h-12 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 font-normal text-slate-800 outline-none transition focus:border-brand focus:bg-white"
+                className="mt-3 h-12 w-full rounded-xl border border-slate-200 bg-gradient-to-r from-slate-50 to-white px-3 font-semibold text-slate-800 shadow-sm outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100/70"
                 value={channelId}
                 onChange={(event) => setChannelId(event.target.value)}
               >
@@ -16813,8 +16813,8 @@ function Disparos({
                     className={clsx(
                       "rounded-lg px-3 py-2 transition",
                       messageMode === "TEMPLATE"
-                        ? "bg-white text-brand shadow-sm"
-                        : "text-slate-500"
+                        ? "bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-[0_6px_16px_rgba(37,99,235,0.22)]"
+                        : "text-slate-500 hover:bg-white hover:text-slate-800"
                     )}
                     type="button"
                     onClick={() => setMessageMode("TEMPLATE")}
@@ -16825,8 +16825,8 @@ function Disparos({
                     className={clsx(
                       "rounded-lg px-3 py-2 transition",
                       messageMode === "TEXT"
-                        ? "bg-white text-brand shadow-sm"
-                        : "text-slate-500"
+                        ? "bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-[0_6px_16px_rgba(37,99,235,0.22)]"
+                        : "text-slate-500 hover:bg-white hover:text-slate-800"
                     )}
                     type="button"
                     onClick={() => setMessageMode("TEXT")}
@@ -16841,7 +16841,7 @@ function Disparos({
                   <label className="block text-sm font-semibold">
                     Template aprovado
                     <select
-                      className="mt-2 h-11 w-full rounded border border-line bg-white px-3 font-normal outline-none focus:border-brand"
+                      className="mt-2 h-12 w-full rounded-xl border border-slate-200 bg-white px-3 font-semibold text-slate-800 shadow-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
                       value={
                         selectedCampaignTemplate
                           ? `${selectedCampaignTemplate.name}::${selectedCampaignTemplate.language}`
@@ -16879,12 +16879,13 @@ function Disparos({
                   </label>
 
                   {selectedCampaignTemplate && (
-                    <div className="rounded-xl bg-slate-50 p-3 text-sm">
+                    <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-4 text-sm shadow-[0_6px_18px_rgba(15,23,42,0.04)]">
                       <div className="flex flex-wrap gap-2 text-xs">
-                        <span className="rounded-full bg-emerald-50 px-2 py-1 font-semibold text-emerald-700">
+                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-bold text-emerald-700 shadow-sm">
+                          <Check className="h-3 w-3" />
                           {selectedCampaignTemplate.status}
                         </span>
-                        <span className="rounded-full bg-blue-50 px-2 py-1 font-semibold text-blue-700">
+                        <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 font-bold text-blue-700 shadow-sm">
                           {selectedCampaignTemplate.language}
                         </span>
                       </div>
@@ -17111,7 +17112,7 @@ function Disparos({
                     JPG, JPEG ou PNG ate 5MB. A imagem sera enviada com legenda.
                   </p>
                 </div>
-                <label className="flex h-10 cursor-pointer items-center gap-2 rounded border border-line bg-white px-3 text-sm font-semibold text-slate-700">
+                <label className="flex h-10 cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-bold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700">
                   <Upload className="h-4 w-4" />
                   Escolher imagem
                   <input
@@ -17169,7 +17170,7 @@ function Disparos({
           </div>
 
           <div className="space-y-4">
-            <div className="rounded border border-line bg-white p-3">
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
               <div className="mb-3 flex items-center justify-between">
                 <p className="text-sm font-semibold">
                   Contatos selecionados: {selectedIds.length}
@@ -17193,7 +17194,7 @@ function Disparos({
               <div className="relative">
                 <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
                 <input
-                  className="h-10 w-full rounded border border-line pl-9 pr-3 text-sm outline-none focus:border-brand"
+                  className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm font-medium outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100/60"
                   placeholder="Buscar contatos..."
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
@@ -17203,7 +17204,7 @@ function Disparos({
                 {filteredContacts.map((contact) => (
                   <label
                     key={contact.id}
-                    className="flex cursor-pointer items-center gap-3 rounded border border-line p-3 text-sm hover:bg-slate-50"
+                    className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 text-sm transition hover:border-blue-200 hover:bg-blue-50/50 hover:shadow-sm"
                   >
                     <input
                       checked={selectedIds.includes(contact.id)}
@@ -17242,7 +17243,17 @@ function Disparos({
             </span>
           </div>
           <div className="p-4">
-          <div className="rounded-[18px] border border-emerald-100 bg-[#efeae2] p-3 text-sm text-slate-800 shadow-inner">
+          <div className="overflow-hidden rounded-[20px] border border-slate-200 bg-[#efeae2] text-sm text-slate-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]">
+            <div className="flex items-center gap-2 border-b border-slate-200/80 bg-white/90 px-3 py-2.5">
+              <div className="grid h-8 w-8 place-items-center rounded-full bg-emerald-500 text-white">
+                <MessageCircle className="h-4 w-4" />
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-xs font-black text-slate-900">M10 Intermediacoes</p>
+                <p className="text-[10px] font-medium text-emerald-700">Conta comercial</p>
+              </div>
+            </div>
+            <div className="p-3">
             {imagePreview ? (
               <NextImage
                 alt="Preview da imagem"
@@ -17257,9 +17268,10 @@ function Disparos({
                 <ImageIcon className="h-8 w-8" />
               </div>
             )}
-            <p className="whitespace-pre-wrap">
+            <p className="whitespace-pre-wrap rounded-2xl bg-white p-3 shadow-sm">
               {renderMessagePreview()}
             </p>
+            </div>
           </div>
           <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
             {selectedContacts.slice(0, 3).map((contact) => contact.name).join(", ") ||
@@ -17284,7 +17296,7 @@ function Disparos({
               </p>
             </div>
             <button
-              className="inline-flex h-8 items-center gap-1 rounded-full border border-line px-3 text-xs font-semibold text-slate-600"
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
               type="button"
               onClick={() => void onRefreshCampaigns()}
             >
@@ -17293,7 +17305,7 @@ function Disparos({
             </button>
           </div>
           <select
-            className="mb-3 h-9 w-full rounded border border-line bg-white px-3 text-xs font-semibold outline-none focus:border-brand"
+            className="mb-3 h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-bold text-slate-700 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100/60"
             value={campaignStatusFilter}
             onChange={(event) => setCampaignStatusFilter(event.target.value)}
           >
@@ -17312,8 +17324,8 @@ function Disparos({
                 className={clsx(
                   "w-full rounded-2xl border p-3.5 text-left text-sm transition hover:-translate-y-0.5 hover:shadow-md",
                   selectedCampaign?.id === campaign.id
-                    ? "border-brand bg-blue-50/40"
-                    : "border-line bg-white"
+                    ? "border-blue-500 bg-gradient-to-br from-blue-50 to-white shadow-[0_8px_22px_rgba(37,99,235,0.10)]"
+                    : "border-slate-200 bg-white hover:border-blue-200"
                 )}
                 type="button"
                 onClick={() => setSelectedCampaignId(campaign.id)}
@@ -17376,10 +17388,11 @@ function Disparos({
         </div>
 
         {selectedCampaign && (
-          <div className="rounded border border-line bg-white p-4 shadow-soft">
+          <div className="rounded-[22px] border border-slate-200/80 bg-white p-4 shadow-[0_18px_50px_rgba(15,23,42,0.08)]">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h3 className="font-bold">Acompanhamento</h3>
+                <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand">Monitoramento</p>
+                <h3 className="font-black text-slate-950">Acompanhamento</h3>
                 <p className="mt-1 text-xs text-slate-500">
                   {selectedCampaign.channel.name}
                   {selectedCampaign.channel.displayPhone
