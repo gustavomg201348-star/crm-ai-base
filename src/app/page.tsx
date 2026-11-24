@@ -13474,7 +13474,7 @@ function Multicred({
                       {selectedClientDetail.whatsapp ?? selectedClientDetail.phone ?? "sem telefone"}
                     </p>
                   </div>
-                  <div className="rounded border border-line bg-white p-3">
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                     <p className="text-xs font-semibold uppercase text-slate-500">
                       Propostas vinculadas
                     </p>
@@ -16497,29 +16497,42 @@ function Disparos({
   return (
     <>
       <CampaignAnalyticsDashboard />
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_400px]">
       <form
-        className="rounded border border-line bg-white p-4 shadow-soft"
+        className="overflow-hidden rounded-[24px] border border-slate-200/80 bg-white shadow-[0_18px_55px_rgba(15,23,42,0.08)]"
         onSubmit={handleSubmit}
       >
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-4">
-          <div>
-            <h3 className="text-lg font-bold">Disparo WhatsApp</h3>
-            <p className="text-sm text-slate-500">
-              Campanhas em massa pela API oficial da Meta.
-            </p>
+        <div className="relative overflow-hidden border-b border-slate-200 bg-gradient-to-br from-[#071b3a] via-[#0a3165] to-[#0b5fd7] px-5 py-5 text-white lg:px-6">
+          <div className="pointer-events-none absolute -right-12 -top-20 h-52 w-52 rounded-full bg-cyan-300/15 blur-2xl" />
+          <div className="pointer-events-none absolute bottom-[-75px] right-20 h-40 w-40 rounded-full bg-blue-200/10 blur-2xl" />
+          <div className="relative flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="grid h-14 w-14 place-items-center rounded-2xl border border-white/15 bg-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]">
+                <MessageCircle className="h-7 w-7 text-emerald-300" />
+              </div>
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-sky-200">
+                  Campanha em massa
+                </p>
+                <h3 className="mt-1 text-xl font-black tracking-tight">Novo disparo WhatsApp</h3>
+                <p className="mt-1 text-sm text-blue-100">
+                  Campanhas em massa pela API oficial da Meta.
+                </p>
+              </div>
+            </div>
+            <button
+              className="inline-flex h-11 items-center gap-2 rounded-xl border border-white/15 bg-white px-4 text-sm font-bold text-[#0b4db9] shadow-[0_10px_30px_rgba(2,6,23,0.18)] transition hover:-translate-y-0.5 hover:shadow-[0_14px_34px_rgba(2,6,23,0.22)] disabled:opacity-60"
+              disabled={sending || loading}
+              type="submit"
+            >
+              <Send className="h-4 w-4" />
+              {sending ? "Enviando..." : "Enviar disparo"}
+            </button>
           </div>
-          <button
-            className="flex h-10 items-center gap-2 rounded bg-brand px-4 text-sm font-semibold text-white disabled:opacity-60"
-            disabled={sending || loading}
-            type="submit"
-          >
-            <Send className="h-4 w-4" />
-            {sending ? "Enviando..." : "Enviar disparo"}
-          </button>
         </div>
+        <div className="p-5 lg:p-6">
 
-        <div className="mt-4 max-w-sm">
+        <div className="max-w-md rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
           <label className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">
             Agente IA
           </label>
@@ -16546,12 +16559,14 @@ function Disparos({
           </p>
         </div>
 
-        <div className="mt-4 rounded-2xl border border-dashed border-blue-200 bg-blue-50/60 p-4">
+        <div className="mt-5 rounded-[20px] border border-dashed border-blue-200 bg-gradient-to-br from-blue-50/80 to-slate-50 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <p className="flex items-center gap-2 text-sm font-bold text-slate-900">
-                <FileText className="h-4 w-4 text-brand" />
-                Importar planilha para disparo
+                <span className="grid h-9 w-9 place-items-center rounded-xl bg-blue-100 text-brand">
+                  <FileText className="h-4 w-4" />
+                </span>
+                Importar base de contatos
               </p>
               <p className="mt-1 text-xs text-slate-600">
                 Aceita CSV ou Excel .xlsx. CPF, Nome e Telefone sao obrigatorios.
@@ -16759,12 +16774,20 @@ function Disparos({
           )}
         </div>
 
-        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-4">
-            <label className="block text-sm font-semibold">
-              Canal de envio
+            <label className="block rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+              <span className="flex items-center gap-2 text-sm font-bold text-slate-900">
+                <span className="grid h-8 w-8 place-items-center rounded-xl bg-blue-50 text-brand">
+                  <Send className="h-4 w-4" />
+                </span>
+                Canal de envio
+              </span>
+              <span className="mt-1 block text-xs font-normal text-slate-500">
+                Selecione o numero utilizado nesta campanha.
+              </span>
               <select
-                className="mt-2 h-11 w-full rounded border border-line bg-white px-3 font-normal outline-none focus:border-brand"
+                className="mt-3 h-12 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 font-normal text-slate-800 outline-none transition focus:border-brand focus:bg-white"
                 value={channelId}
                 onChange={(event) => setChannelId(event.target.value)}
               >
@@ -16785,10 +16808,10 @@ function Disparos({
                     Use template aprovado para clientes fora da janela de 24h.
                   </p>
                 </div>
-                <div className="flex rounded-full bg-slate-100 p-1 text-xs font-semibold">
+                <div className="flex rounded-xl border border-slate-200 bg-slate-50 p-1 text-xs font-semibold shadow-inner">
                   <button
                     className={clsx(
-                      "rounded-full px-3 py-1.5",
+                      "rounded-lg px-3 py-2 transition",
                       messageMode === "TEMPLATE"
                         ? "bg-white text-brand shadow-sm"
                         : "text-slate-500"
@@ -16800,7 +16823,7 @@ function Disparos({
                   </button>
                   <button
                     className={clsx(
-                      "rounded-full px-3 py-1.5",
+                      "rounded-lg px-3 py-2 transition",
                       messageMode === "TEXT"
                         ? "bg-white text-brand shadow-sm"
                         : "text-slate-500"
@@ -17204,12 +17227,22 @@ function Disparos({
             </div>
           </div>
         </div>
+        </div>
       </form>
 
-      <aside className="space-y-4">
-        <div className="rounded border border-line bg-white p-4 shadow-soft">
-          <h3 className="font-bold">Previa da mensagem</h3>
-          <div className="mt-3 rounded bg-[#e7ffdb] p-3 text-sm text-slate-800">
+      <aside className="space-y-5">
+        <div className="overflow-hidden rounded-[22px] border border-slate-200/80 bg-white shadow-[0_18px_50px_rgba(15,23,42,0.08)]">
+          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-4">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand">Visualizacao</p>
+              <h3 className="mt-0.5 font-black text-slate-950">Previa da mensagem</h3>
+            </div>
+            <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-bold text-blue-700">
+              {messageMode === "TEMPLATE" ? "Template Meta" : "Mensagem livre"}
+            </span>
+          </div>
+          <div className="p-4">
+          <div className="rounded-[18px] border border-emerald-100 bg-[#efeae2] p-3 text-sm text-slate-800 shadow-inner">
             {imagePreview ? (
               <NextImage
                 alt="Preview da imagem"
@@ -17228,7 +17261,7 @@ function Disparos({
               {renderMessagePreview()}
             </p>
           </div>
-          <div className="mt-3 rounded border border-line p-3 text-xs text-slate-500">
+          <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
             {selectedContacts.slice(0, 3).map((contact) => contact.name).join(", ") ||
               importedContactsPreview.map((contact) => contact.name).join(", ") ||
               "Selecione contatos ou importe uma planilha para ver destinatarios."}
@@ -17239,11 +17272,13 @@ function Disparos({
               : ""}
           </div>
         </div>
+        </div>
 
-        <div className="rounded border border-line bg-white p-4 shadow-soft">
+        <div className="rounded-[22px] border border-slate-200/80 bg-white p-4 shadow-[0_18px_50px_rgba(15,23,42,0.08)]">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div>
-              <h3 className="font-bold">Historico de disparos</h3>
+              <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand">Campanhas</p>
+              <h3 className="font-black text-slate-950">Historico recente</h3>
               <p className="text-xs text-slate-500">
                 {loading ? "Carregando..." : `${campaigns.length} campanhas`}
               </p>
@@ -17275,7 +17310,7 @@ function Disparos({
               <button
                 key={campaign.id}
                 className={clsx(
-                  "w-full rounded border p-3 text-left text-sm transition hover:bg-slate-50",
+                  "w-full rounded-2xl border p-3.5 text-left text-sm transition hover:-translate-y-0.5 hover:shadow-md",
                   selectedCampaign?.id === campaign.id
                     ? "border-brand bg-blue-50/40"
                     : "border-line bg-white"
@@ -17313,14 +17348,14 @@ function Disparos({
                     : ""}
                 </p>
                 <div className="mt-3 grid grid-cols-4 gap-2 text-center text-xs">
-                  <span className="rounded bg-slate-50 p-2">Total {campaign.total}</span>
-                  <span className="rounded bg-emerald-50 p-2">
+                  <span className="rounded-lg bg-slate-100 p-2 font-semibold text-slate-700">Total {campaign.total}</span>
+                  <span className="rounded-lg bg-emerald-50 p-2 font-semibold text-emerald-700">
                     Env. {campaign.sent}
                   </span>
-                  <span className="rounded bg-teal-50 p-2">
+                  <span className="rounded-lg bg-cyan-50 p-2 font-semibold text-cyan-700">
                     Ent. {campaign.delivered}
                   </span>
-                  <span className="rounded bg-rose-50 p-2">
+                  <span className="rounded-lg bg-rose-50 p-2 font-semibold text-rose-700">
                     Erro {campaign.failed}
                   </span>
                 </div>
