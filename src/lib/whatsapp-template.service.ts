@@ -168,7 +168,39 @@ export function mapApprovedTemplate(template: MetaTemplate) {
     language: normalized.language,
     status: normalized.status,
     preview: normalized.body.text,
-    variableCount: normalized.bodyVariableCount
+    variableCount: normalized.bodyVariableCount,
+    headerFormat: normalized.header.format,
+    hasHeaderImage: normalized.header.format === "IMAGE",
+    buttons: extractTemplateButtons(template)
+  };
+}
+
+async function mapApprovedTemplateForUi({
+  companyId,
+  localTemplate
+}: {
+  companyId: string;
+  localTemplate: MetaTemplateLibraryEntry;
+}) {
+  const template = mapLocalTemplateToMetaTemplate(localTemplate);
+  if (!template) return null;
+
+  let headerImageUrl: string | null = null;
+  if (templateHasHeaderImage(template)) {
+    try {
+      headerImageUrl = await resolveLocalTemplateHeaderImageUrl({
+        companyId,
+        localTemplate,
+        template
+      });
+    } catch {
+      headerImageUrl = null;
+    }
+  }
+
+  return {
+    ...mapApprovedTemplate(template),
+    headerImageUrl
   };
 }
 
@@ -445,12 +477,17 @@ export async function getApprovedTemplatesForConversation({
     operationalStatus: "READY"
   });
 
-  return templates
+  const localTemplates = templates
     .map(deserializeMetaTemplate)
-    .filter(isUsableLocalTemplate)
-    .map(mapLocalTemplateToMetaTemplate)
-    .filter((template): template is MetaTemplate => template !== null)
-    .map(mapApprovedTemplate);
+    .filter(isUsableLocalTemplate);
+
+  const mapped = await Promise.all(
+    localTemplates.map((localTemplate) =>
+      mapApprovedTemplateForUi({ companyId, localTemplate })
+    )
+  );
+
+  return mapped.filter((template): template is NonNullable<typeof template> => template !== null);
 }
 
 export async function getApprovedTemplatesForChannel({
@@ -479,12 +516,17 @@ export async function getApprovedTemplatesForChannel({
     operationalStatus: "READY"
   });
 
-  return templates
+  const localTemplates = templates
     .map(deserializeMetaTemplate)
-    .filter(isUsableLocalTemplate)
-    .map(mapLocalTemplateToMetaTemplate)
-    .filter((template): template is MetaTemplate => template !== null)
-    .map(mapApprovedTemplate);
+    .filter(isUsableLocalTemplate);
+
+  const mapped = await Promise.all(
+    localTemplates.map((localTemplate) =>
+      mapApprovedTemplateForUi({ companyId, localTemplate })
+    )
+  );
+
+  return mapped.filter((template): template is NonNullable<typeof template> => template !== null);
 }
 
 export async function sendConversationTemplate({
