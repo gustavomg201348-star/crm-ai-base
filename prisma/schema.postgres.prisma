@@ -246,6 +246,8 @@ model ChatbotFlowVersion {
   replyCorrelations ChatbotReplyCorrelation[]
   sessions     ChatbotSession[]
 
+  cltCampaignBindings CltChatbotCampaignBinding[]
+
   @@unique([companyId, flowId, number])
   @@unique([companyId, flowId, id])
 }
@@ -1373,6 +1375,8 @@ model Campaign {
   chatbotSessions ChatbotSession[]
   replyCorrelations ChatbotReplyCorrelation[]
 
+  cltChatbotBinding CltChatbotCampaignBinding?
+
   @@unique([companyId, channelId, id])
   @@index([companyId])
   @@index([channelId])
@@ -1625,4 +1629,23 @@ model OpenCreditAiSimulation {
   @@unique([companyId, conversationId, inboundEventId], map: "CltAi_inbound_key")
   @@unique([companyId, conversationId, authorizationId, authorizationRevision], map: "CltAi_grant_key")
   @@index([companyId, providerScope, state], map: "CltAi_scope_idx")
+}
+
+model CltChatbotCampaignBinding {
+  companyId String
+  channelId String
+  campaignId String
+  templateName String
+  templateLanguage String
+  optionId String
+  flowId String
+  flowVersionId String
+  enabled Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  campaign Campaign @relation(fields: [companyId, channelId, campaignId], references: [companyId, channelId, id], onDelete: Restrict, onUpdate: NoAction, map: "CltChatbotBinding_campaign_fkey")
+  version ChatbotFlowVersion @relation(fields: [companyId, flowId, flowVersionId], references: [companyId, flowId, id], onDelete: Restrict, onUpdate: NoAction, map: "CltChatbotBinding_version_fkey")
+
+  @@id([companyId, channelId, campaignId])
+  @@index([companyId, flowId, flowVersionId], map: "CltChatbotBinding_version_idx")
 }
