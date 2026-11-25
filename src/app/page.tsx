@@ -4438,10 +4438,11 @@ export default function Home() {
       <aside
         className={clsx(
           "fixed left-0 top-0 hidden h-screen flex-col border-r shadow-[10px_0_28px_rgba(15,23,42,0.08)] backdrop-blur transition-[width] duration-300 ease-out xl:flex",
-          active === "dashboard" ? "border-blue-950 bg-gradient-to-b from-[#06102b] via-[#0b1c43] to-[#102653] text-white" : "border-slate-200/80 bg-[#F3F6FB]",
+          active === "dashboard" ? "isolate overflow-hidden border-blue-950 bg-gradient-to-b from-[#050d27] via-[#091939] to-[#071331] text-white" : "border-slate-200/80 bg-[#F3F6FB]",
           leftSidebarCollapsed ? "w-[72px]" : "w-[264px]"
         )}
       >
+        {active === "dashboard" && <svg aria-hidden="true" viewBox="0 0 264 280" preserveAspectRatio="none" className="pointer-events-none absolute inset-x-0 bottom-12 -z-10 h-64 w-full"><defs><linearGradient id="nav-wave-fill" x1="0" y1="0" x2="1" y2="1"><stop stopColor="#004cff" stopOpacity=".5"/><stop offset="1" stopColor="#001e75" stopOpacity="0"/></linearGradient></defs><path d="M0 105 C65 167 102 146 160 90 S225 32 264 55 L264 280 L0 280 Z" fill="url(#nav-wave-fill)"/>{Array.from({length:24},(_,i)=><path key={i} d={"M0 "+(105+i*2.7)+" C65 "+(167+i*2.7)+" 102 "+(146+i*2.7)+" 160 "+(90+i*2.7)+" S225 "+(32+i*2.7)+" 264 "+(55+i*2.7)} fill="none" stroke="#1765ff" strokeWidth=".7" opacity={.36-i*.009}/>)}<path d="M0 141 C65 203 102 182 160 126 S225 68 264 91" fill="none" stroke="#2477ff" strokeWidth="1.5" opacity=".65"/></svg>}
         <div
           className={clsx(
             "flex h-20 shrink-0 items-center gap-3 px-5",
@@ -4488,7 +4489,7 @@ export default function Home() {
 
         <nav
           className={clsx(
-            "min-h-0 flex-1 space-y-1 overflow-y-scroll pb-4 [scrollbar-color:#CBD5E1_transparent] [scrollbar-width:thin]",
+            "relative min-h-0 flex-1 space-y-1 overflow-y-scroll pb-4 [scrollbar-color:#CBD5E1_transparent] [scrollbar-width:thin]",
             leftSidebarCollapsed ? "mt-4 px-3" : "mt-4 px-3 pr-2"
           )}
         >
@@ -4778,7 +4779,7 @@ export default function Home() {
           leftSidebarCollapsed ? "xl:pl-[72px]" : "xl:pl-[264px]"
         )}
       >
-        <header className="sticky top-0 z-10 flex min-h-20 shrink-0 items-center justify-between border-b border-line/70 bg-white/90 px-4 backdrop-blur-xl md:px-8">
+        <header className={clsx("sticky top-0 z-10 flex min-h-20 shrink-0 items-center justify-between border-b px-4 backdrop-blur-xl md:px-8",active === "dashboard" ? "border-white/10 bg-[#071331] text-white" : "border-line/70 bg-white/90")}>
           <div className="flex min-w-0 items-center gap-4">
             <button
               type="button"
@@ -4789,12 +4790,12 @@ export default function Home() {
               <Menu className="h-5 w-5" />
             </button>
             <div className="min-w-0">
-              <div className="flex items-center gap-2 text-xs text-slate-500">
+              <div className={clsx("flex items-center gap-2 text-xs",active === "dashboard" ? "text-blue-200" : "text-slate-500")}>
                 <span>Base inicial</span>
                 <span>/</span>
-                <span className="font-medium text-slate-700">{pageTitle}</span>
+                <span className={clsx("font-medium",active === "dashboard" ? "text-blue-100" : "text-slate-700")}>{pageTitle}</span>
               </div>
-              <h2 className="truncate text-xl font-bold tracking-tight text-slate-950 md:text-2xl">
+              <h2 className={clsx("truncate text-xl font-bold tracking-tight md:text-2xl",active === "dashboard" ? "text-white" : "text-slate-950")}>
                 {pageTitle}
               </h2>
             </div>
@@ -4927,7 +4928,7 @@ export default function Home() {
           className={clsx(
             active === "atendimento"
               ? "flex min-h-0 flex-1 flex-col overflow-hidden p-2 md:p-3"
-              : "p-4 md:p-8"
+              : active === "dashboard" ? "p-3 md:p-4" : "p-4 md:p-8"
           )}
         >
           {appError && (
@@ -6635,8 +6636,8 @@ function Dashboard({
   const selectClass = "h-11 min-w-0 rounded-2xl border border-white/25 bg-[#13264b] px-4 text-sm font-semibold text-white outline-none focus:ring-2 focus:ring-blue-400";
   return (
     <div className="space-y-3">
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#06102b] via-[#0b245f] to-[#07132f] p-5 text-white shadow-xl">
-        <svg aria-hidden="true" viewBox="0 0 1200 250" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full"><defs><linearGradient id="dashboard-wave" x1="0" y1="0" x2="1" y2="1"><stop stopColor="#2563eb" stopOpacity=".28"/><stop offset="1" stopColor="#2563eb" stopOpacity="0"/></linearGradient></defs><path d="M0 140 C180 20 300 210 510 80 S810 10 1200 100 L1200 0 L0 0 Z" fill="url(#dashboard-wave)"/><path d="M0 140 C180 20 300 210 510 80 S810 10 1200 100" fill="none" stroke="#397bff" strokeOpacity=".24"/></svg>
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#050d27] via-[#071d58] to-[#071331] p-5 text-white shadow-[0_12px_24px_rgba(7,19,49,0.25)]">
+        <svg aria-hidden="true" viewBox="0 0 1200 280" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full"><defs><linearGradient id="dashboard-wave" x1="0" y1="0" x2="1" y2="1"><stop stopColor="#0a48f5" stopOpacity=".43"/><stop offset=".6" stopColor="#0935be" stopOpacity=".13"/><stop offset="1" stopColor="#06102b" stopOpacity="0"/></linearGradient><radialGradient id="dashboard-glow"><stop stopColor="#124cfd" stopOpacity=".26"/><stop offset="1" stopColor="#124cfd" stopOpacity="0"/></radialGradient></defs><ellipse cx="520" cy="25" rx="380" ry="160" fill="url(#dashboard-glow)"/><path d="M0 28 C130 26 185 116 320 88 C415 66 450 -25 565 4 S735 82 850 62 S1080 24 1200 68 L1200 280 L0 280 Z" fill="url(#dashboard-wave)"/><path d="M0 28 C130 26 185 116 320 88 C415 66 450 -25 565 4 S735 82 850 62 S1080 24 1200 68" fill="none" stroke="#1d62ff" strokeOpacity=".65" strokeWidth="1.4"/>{Array.from({length:12},(_,i)=><path key={i} d={"M0 "+(30+i*3)+" C130 "+(28+i*3)+" 185 "+(118+i*3)+" 320 "+(90+i*3)+" C415 "+(68+i*3)+" 450 "+(-23+i*3)+" 565 "+(6+i*3)+" S735 "+(84+i*3)+" 850 "+(64+i*3)+" S1080 "+(26+i*3)+" 1200 "+(70+i*3)} fill="none" stroke="#2366ff" strokeOpacity=".08" strokeWidth=".7"/>)}</svg>
         <div className="relative flex flex-wrap items-center justify-between gap-4">
           <div><h2 className="text-3xl font-black tracking-tight">{greeting}, {firstName}!</h2><p className="mt-1 text-sm text-blue-100">Aqui está o panorama da sua operação.</p></div>
           <div className="flex flex-wrap gap-2">
