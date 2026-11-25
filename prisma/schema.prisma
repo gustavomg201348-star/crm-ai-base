@@ -1643,8 +1643,8 @@ model CltChatbotCampaignBinding {
   enabled Boolean @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  campaign Campaign @relation(fields: [companyId, channelId, campaignId], references: [companyId, channelId, id], onDelete: Restrict, onUpdate: NoAction, map: "CltChatbotBinding_campaign_fkey")
-  version ChatbotFlowVersion @relation(fields: [companyId, flowId, flowVersionId], references: [companyId, flowId, id], onDelete: Restrict, onUpdate: NoAction, map: "CltChatbotBinding_version_fkey")
+  campaign Campaign @relation(fields: [companyId, channelId, campaignId], references: [companyId, channelId, id], onDelete: Restrict, onUpdate: NoAction)
+  version ChatbotFlowVersion @relation(fields: [companyId, flowId, flowVersionId], references: [companyId, flowId, id], onDelete: Restrict, onUpdate: NoAction)
 
   @@id([companyId, channelId, campaignId])
   @@index([companyId, flowId, flowVersionId], map: "CltChatbotBinding_version_idx")
