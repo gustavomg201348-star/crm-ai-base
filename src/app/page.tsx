@@ -954,6 +954,7 @@ type DashboardData = {
     channels: Array<{ label: string; count: number }>;
     conversations: Array<{ status: string; count: number }>;
     agents: Array<{ id: string; name: string; count: number }>;
+    comparisons?: { leads: number | null; conversationsCreated: number | null; currentConversationsCreated: number; proposals: number | null; paidAmount: number | null; commission: number | null };
     recentActivity?: Array<{ id: string; kind: string; title: string; detail: string; at: string }>;
     performance?: { inboundTotal: number; answered: number; responseRate: number | null; averageResponseSeconds: number | null };
   };
@@ -4935,6 +4936,7 @@ export default function Home() {
           )}
           {active === "dashboard" && (
             <Dashboard
+              userName={session.user.name}
               data={dashboard}
               filters={dashboardFilters}
               loading={dashboardLoading}
@@ -6550,6 +6552,7 @@ function LoginScreen({
 }
 
 function Dashboard({
+  userName,
   data,
   filters,
   loading,
@@ -6558,6 +6561,7 @@ function Dashboard({
   onCompleteTask,
   onRefresh
 }: {
+  userName: string;
   data: DashboardData;
   filters: { period: string; originId: string; ownerId: string };
   loading: boolean;
@@ -6581,12 +6585,23 @@ function Dashboard({
   };
   const analytics = data.analytics;
   const number = (value: number) => value.toLocaleString("pt-BR");
+  const [hour, setHour] = useState<number | null>(null);
+  useEffect(() => {
+    const update = () => setHour(Number(new Intl.DateTimeFormat("en-GB", {timeZone:"America/Sao_Paulo",hour:"2-digit",hourCycle:"h23"}).format(new Date())));
+    update();
+    const timer = window.setInterval(update, 60000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const greeting = hour === null ? "Olá" : hour < 12 ? "Bom dia" : hour < 18 ? "Boa tarde" : "Boa noite";
+  const firstName = userName.trim().split(/\s+/)[0] || "equipe";
+  const comparisons = analytics?.comparisons;
+  const change = (current:number,previous:number|null|undefined) => previous == null || previous === 0 ? null : (current-previous)/previous*100;
   const cards = [
-    { label: "Leads recebidos", value: number(data.metrics.newContacts), hint: number(data.metrics.todayContacts ?? 0) + " novos hoje", icon: UserRound, color: "from-[#0d47b5] to-[#071d4e]", accent: "bg-blue-600" },
-    { label: "Conversas abertas", value: number(data.metrics.openConversations), hint: "Carteira atual", icon: MessageCircle, color: "from-[#087f83] to-[#06353f]", accent: "bg-emerald-500" },
-    { label: "Propostas ativas", value: number(data.metrics.proposals), hint: formatCurrency(data.metrics.totalProposalAmount), icon: FileText, color: "from-[#7047b8] to-[#302052]", accent: "bg-violet-500" },
-    { label: "Receita paga", value: formatCurrency(data.metrics.paidAmount), hint: number(data.metrics.paidProposals) + " propostas pagas", icon: Banknote, color: "from-[#a65b30] to-[#663016]", accent: "bg-amber-500" },
-    { label: "Comissao prevista", value: formatCurrency(data.metrics.commissionForecast), hint: "Propostas ativas", icon: BriefcaseBusiness, color: "from-[#a52e59] to-[#631a36]", accent: "bg-pink-500" }
+    { label: "Leads recebidos", delta:change(data.metrics.newContacts,comparisons?.leads), comparisonLabel:"vs. período anterior", series:"leads" as const, value: number(data.metrics.newContacts), hint: number(data.metrics.todayContacts ?? 0) + " novos hoje", icon: UserRound, color: "from-[#0d47b5] to-[#071d4e]", accent: "bg-blue-600" },
+    { label: "Conversas abertas", delta:change(comparisons?.currentConversationsCreated??0,comparisons?.conversationsCreated), comparisonLabel:"Novas conversas vs. período anterior", series:null, value: number(data.metrics.openConversations), hint: "Carteira atual", icon: MessageCircle, color: "from-[#087f83] to-[#06353f]", accent: "bg-emerald-500" },
+    { label: "Propostas ativas", delta:change(data.metrics.proposals,comparisons?.proposals), comparisonLabel:"vs. período anterior", series:"proposals" as const, value: number(data.metrics.proposals), hint: formatCurrency(data.metrics.totalProposalAmount), icon: FileText, color: "from-[#7047b8] to-[#302052]", accent: "bg-violet-500" },
+    { label: "Receita paga", delta:change(data.metrics.paidAmount,comparisons?.paidAmount), comparisonLabel:"Por criação da proposta", series:null, value: formatCurrency(data.metrics.paidAmount), hint: number(data.metrics.paidProposals) + " propostas pagas", icon: Banknote, color: "from-[#a65b30] to-[#663016]", accent: "bg-amber-500" },
+    { label: "Comissão prevista", delta:change(data.metrics.commissionForecast,comparisons?.commission), comparisonLabel:"vs. período anterior", series:null, value: formatCurrency(data.metrics.commissionForecast), hint: "Propostas ativas", icon: BriefcaseBusiness, color: "from-[#a52e59] to-[#631a36]", accent: "bg-pink-500" }
   ];
   const trend = analytics?.trend ?? [];
   const maxTrend = Math.max(1, ...trend.flatMap(row => [row.leads, row.proposals]));
@@ -6622,7 +6637,7 @@ function Dashboard({
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#06102b] via-[#0b245f] to-[#07132f] p-5 text-white shadow-xl">
         <svg aria-hidden="true" viewBox="0 0 1200 250" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full"><defs><linearGradient id="dashboard-wave" x1="0" y1="0" x2="1" y2="1"><stop stopColor="#2563eb" stopOpacity=".28"/><stop offset="1" stopColor="#2563eb" stopOpacity="0"/></linearGradient></defs><path d="M0 140 C180 20 300 210 510 80 S810 10 1200 100 L1200 0 L0 0 Z" fill="url(#dashboard-wave)"/><path d="M0 140 C180 20 300 210 510 80 S810 10 1200 100" fill="none" stroke="#397bff" strokeOpacity=".24"/></svg>
         <div className="relative flex flex-wrap items-center justify-between gap-4">
-          <div><h2 className="text-3xl font-black tracking-tight">Dashboard executivo</h2><p className="mt-1 text-sm text-blue-100">Panorama da sua operacao comercial.</p></div>
+          <div><h2 className="text-3xl font-black tracking-tight">{greeting}, {firstName}!</h2><p className="mt-1 text-sm text-blue-100">Aqui está o panorama da sua operação.</p></div>
           <div className="flex flex-wrap gap-2">
             <select aria-label="Periodo" className={selectClass} value={filters.period} onChange={event => onFiltersChange({...filters, period:event.target.value})}><option value="7d">Ultimos 7 dias</option><option value="30d">Ultimos 30 dias</option><option value="90d">Ultimos 90 dias</option><option value="all">Todo periodo</option></select>
             <select aria-label="Origem" className={selectClass} value={filters.originId} onChange={event => onFiltersChange({...filters, originId:event.target.value})}><option value="">Todas as origens</option>{reference.origins.map(origin => <option key={origin.id} value={origin.id}>{origin.name}</option>)}</select>
@@ -6631,7 +6646,7 @@ function Dashboard({
           </div>
         </div>
         <div className="relative mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-          {cards.map(({icon: Icon,...card}) => <div key={card.label} className={clsx("relative min-h-[132px] min-w-0 overflow-hidden rounded-2xl border border-white/20 bg-gradient-to-br p-4 shadow-lg transition hover:-translate-y-0.5 hover:brightness-110",card.color)}><div className="flex items-start gap-3"><span className={clsx("grid h-11 w-11 shrink-0 place-items-center rounded-xl shadow",card.accent)}><Icon className="h-5 w-5"/></span><div className="min-w-0"><p className="text-xs font-semibold text-white/90">{card.label}</p><strong className="mt-1 block break-words text-[clamp(1.15rem,1.7vw,1.9rem)] font-black tabular-nums">{card.value}</strong></div></div><p className="mt-4 text-xs font-medium text-white/80">{card.hint}</p></div>)}
+          {cards.map(({icon: Icon,...card}) => <div key={card.label} className={clsx("relative min-h-[158px] min-w-0 overflow-hidden rounded-2xl border border-white/20 bg-gradient-to-br p-4 shadow-lg transition hover:-translate-y-0.5 hover:brightness-110",card.color)}><div className="flex items-start gap-3"><span className={clsx("grid h-11 w-11 shrink-0 place-items-center rounded-xl shadow",card.accent)}><Icon className="h-5 w-5"/></span><div className="min-w-0"><p className="text-xs font-semibold text-white/90">{card.label}</p><strong className="mt-1 block break-words text-[clamp(1.15rem,1.7vw,1.9rem)] font-black tabular-nums">{card.value}</strong></div></div><div className="mt-3 flex items-end justify-between gap-2"><div className="min-w-0"><p className="text-xs font-medium text-white/80">{card.hint}</p>{card.delta !== null ? <><p className={clsx("mt-1 text-sm font-black",card.delta>0?"text-emerald-300":card.delta<0?"text-rose-200":"text-white/80")}>{card.delta>0?"↑ +":card.delta<0?"↓ ":""}{card.delta.toLocaleString("pt-BR",{maximumFractionDigits:1})}%</p><p className="text-[10px] leading-tight text-white/75">{card.comparisonLabel}</p></> : <p className="mt-1 text-[10px] text-white/70">{filters.period==="all"?"Todo o período":"Sem base comparativa"}</p>}</div>{card.series && trend.length>1 && (()=>{const field=card.series;const values=trend.map(row=>row[field]);const max=Math.max(1,...values);return <svg viewBox="0 0 64 32" className="h-8 w-14 shrink-0" role="img" aria-label={"Evolução diária de "+card.label}><polyline points={values.map((value,index)=>(2+index*60/(values.length-1))+","+(30-value/max*27)).join(" ")} fill="none" stroke="currentColor" strokeWidth="2" className="text-white/70"/></svg>;})()}</div></div>)}
         </div>
       </div>
       <div className="grid gap-4 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.4fr)]">
