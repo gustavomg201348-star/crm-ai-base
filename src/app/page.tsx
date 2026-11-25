@@ -4802,22 +4802,23 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-2 md:gap-3">
             <AttendantStatusToggle
+              dark={active === "dashboard"}
               value={myAvailability}
               onChange={(status) => void updateMyAvailability(status)}
             />
-            <div className="hidden h-10 w-[min(26vw,360px)] items-center gap-2 rounded-full border border-line bg-slate-50 px-3 text-sm text-slate-500 ring-0 focus-within:border-blue-200 focus-within:bg-white focus-within:shadow-soft lg:flex">
+            <div className={clsx("hidden h-10 w-[min(26vw,360px)] items-center gap-2 rounded-full border px-3 text-sm ring-0 lg:flex",active === "dashboard" ? "border-white/20 bg-white/10 text-blue-100 focus-within:border-blue-400" : "border-line bg-slate-50 text-slate-500 focus-within:border-blue-200 focus-within:bg-white focus-within:shadow-soft")}>
               <Search className="h-4 w-4 text-slate-400" />
               <input
-                className="w-full bg-transparent outline-none"
+                className="w-full bg-transparent outline-none placeholder:text-slate-400"
                 placeholder="Buscar cliente, telefone ou conversa"
               />
-              <kbd className="rounded-md border border-line bg-white px-1.5 py-0.5 text-[10px] text-slate-400">
+              <kbd className={clsx("rounded-md border px-1.5 py-0.5 text-[10px]",active === "dashboard" ? "border-white/15 bg-white/10 text-blue-100" : "border-line bg-white text-slate-400")}>
                 ⌘K
               </kbd>
             </div>
             <div className="relative">
               <button
-                className="relative grid h-10 w-10 place-items-center rounded-full border border-line bg-white text-slate-600 shadow-sm hover:-translate-y-0.5 hover:shadow-soft"
+                className={clsx("relative grid h-10 w-10 place-items-center rounded-full border shadow-sm hover:-translate-y-0.5",active === "dashboard" ? "border-white/20 bg-white/10 text-white hover:bg-white/20" : "border-line bg-white text-slate-600 hover:shadow-soft")}
                 onClick={() => setNotificationsOpen((current) => !current)}
                 title="Notificacoes"
               >
@@ -4829,7 +4830,7 @@ export default function Home() {
                 )}
               </button>
               {notificationsOpen && (
-                <div className="absolute right-0 top-12 z-30 w-[min(22rem,calc(100vw-2rem))] rounded border border-line bg-white shadow-soft">
+                <div className="absolute right-0 top-12 z-30 w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-line bg-white text-slate-900 shadow-soft">
                   <div className="flex items-center justify-between border-b border-line p-3">
                     <div>
                       <p className="text-sm font-bold">Notificacoes</p>
@@ -4909,14 +4910,14 @@ export default function Home() {
               <Plus className="h-4 w-4" />
               Nova conversa
             </button>
-            <button className="hidden h-10 items-center gap-2 rounded-full border border-line bg-white px-2.5 text-sm font-semibold text-slate-700 shadow-sm md:flex">
+            <button className={clsx("hidden h-10 items-center gap-2 rounded-full border px-2.5 text-sm font-semibold shadow-sm md:flex",active === "dashboard" ? "border-white/20 bg-white/10 text-white" : "border-line bg-white text-slate-700")}>
               <div className="grid h-7 w-7 place-items-center rounded-full bg-slate-900 text-[11px] font-bold text-white">
                 {session.user.name.slice(0, 1).toUpperCase()}
               </div>
               <ChevronDown className="h-4 w-4 text-slate-400" />
             </button>
             <button
-              className="hidden h-10 rounded-full border border-line bg-white px-3 text-sm font-semibold text-slate-600 shadow-sm hover:bg-slate-50 md:block"
+              className={clsx("hidden h-10 rounded-full border px-3 text-sm font-semibold shadow-sm md:block",active === "dashboard" ? "border-white/20 bg-white/10 text-white hover:bg-white/20" : "border-line bg-white text-slate-600 hover:bg-slate-50")}
               onClick={handleLogout}
             >
               Sair
@@ -4928,7 +4929,7 @@ export default function Home() {
           className={clsx(
             active === "atendimento"
               ? "flex min-h-0 flex-1 flex-col overflow-hidden p-2 md:p-3"
-              : active === "dashboard" ? "p-3 md:p-4" : "p-4 md:p-8"
+              : active === "dashboard" ? "px-3 pb-3 pt-0 md:px-4 md:pb-4" : "p-4 md:p-8"
           )}
         >
           {appError && (
@@ -6352,8 +6353,10 @@ function ConfirmUnassignModal({
 
 function AttendantStatusToggle({
   value,
-  onChange
+  onChange,
+  dark = false
 }: {
+  dark?: boolean;
   value: AvailabilityStatus;
   onChange: (status: AvailabilityStatus) => void;
 }) {
@@ -6365,10 +6368,10 @@ function AttendantStatusToggle({
   };
 
   return (
-    <label className="hidden h-10 items-center gap-2 rounded-full border border-line bg-white px-3 text-xs font-semibold text-slate-600 shadow-sm md:flex">
+    <label className={clsx("hidden h-10 items-center gap-2 rounded-full border px-3 text-xs font-semibold shadow-sm md:flex",dark ? "border-white/20 bg-white/10 text-blue-100" : "border-line bg-white text-slate-600")}>
       <span className={clsx("h-2 w-2 rounded-full", colors[value])} />
       <select
-        className="bg-transparent outline-none"
+        className={clsx("bg-transparent outline-none",dark && "[color-scheme:dark]")}
         value={value}
         onChange={(event) => onChange(event.target.value as AvailabilityStatus)}
         title="Disponibilidade"
@@ -6636,7 +6639,7 @@ function Dashboard({
   const selectClass = "h-11 min-w-0 rounded-2xl border border-white/25 bg-[#13264b] px-4 text-sm font-semibold text-white outline-none focus:ring-2 focus:ring-blue-400";
   return (
     <div className="space-y-3">
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#050d27] via-[#071d58] to-[#071331] p-5 text-white shadow-[0_12px_24px_rgba(7,19,49,0.25)]">
+      <div className="relative overflow-hidden rounded-b-2xl bg-gradient-to-br from-[#071331] via-[#071d58] to-[#071331] px-5 pb-5 pt-4 text-white shadow-[0_12px_24px_rgba(7,19,49,0.25)]">
         <svg aria-hidden="true" viewBox="0 0 1200 280" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full"><defs><linearGradient id="dashboard-wave" x1="0" y1="0" x2="1" y2="1"><stop stopColor="#0a48f5" stopOpacity=".43"/><stop offset=".6" stopColor="#0935be" stopOpacity=".13"/><stop offset="1" stopColor="#06102b" stopOpacity="0"/></linearGradient><radialGradient id="dashboard-glow"><stop stopColor="#124cfd" stopOpacity=".26"/><stop offset="1" stopColor="#124cfd" stopOpacity="0"/></radialGradient></defs><ellipse cx="520" cy="25" rx="380" ry="160" fill="url(#dashboard-glow)"/><path d="M0 28 C130 26 185 116 320 88 C415 66 450 -25 565 4 S735 82 850 62 S1080 24 1200 68 L1200 280 L0 280 Z" fill="url(#dashboard-wave)"/><path d="M0 28 C130 26 185 116 320 88 C415 66 450 -25 565 4 S735 82 850 62 S1080 24 1200 68" fill="none" stroke="#1d62ff" strokeOpacity=".65" strokeWidth="1.4"/>{Array.from({length:12},(_,i)=><path key={i} d={"M0 "+(30+i*3)+" C130 "+(28+i*3)+" 185 "+(118+i*3)+" 320 "+(90+i*3)+" C415 "+(68+i*3)+" 450 "+(-23+i*3)+" 565 "+(6+i*3)+" S735 "+(84+i*3)+" 850 "+(64+i*3)+" S1080 "+(26+i*3)+" 1200 "+(70+i*3)} fill="none" stroke="#2366ff" strokeOpacity=".08" strokeWidth=".7"/>)}</svg>
         <div className="relative flex flex-wrap items-center justify-between gap-4">
           <div><h2 className="text-3xl font-black tracking-tight">{greeting}, {firstName}!</h2><p className="mt-1 text-sm text-blue-100">Aqui está o panorama da sua operação.</p></div>
@@ -6648,7 +6651,7 @@ function Dashboard({
           </div>
         </div>
         <div className="relative mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-          {cards.map(({icon: Icon,...card}) => <div key={card.label} className={clsx("relative min-h-[144px] min-w-0 overflow-hidden rounded-2xl border border-white/20 bg-gradient-to-br p-4 shadow-lg transition hover:-translate-y-0.5 hover:brightness-110",card.color)}><div className="flex items-start gap-3"><span className={clsx("grid h-11 w-11 shrink-0 place-items-center rounded-xl shadow",card.accent)}><Icon className="h-5 w-5"/></span><div className="min-w-0"><p className="text-xs font-semibold text-white/90">{card.label}</p><strong className="mt-1 block break-words text-[clamp(1.15rem,1.7vw,1.9rem)] font-black tabular-nums">{card.value}</strong></div></div><div className="mt-3 flex items-end justify-between gap-2"><div className="min-w-0"><p className="text-xs font-medium text-white/80">{card.hint}</p>{card.delta !== null ? <><p className={clsx("mt-1 text-sm font-black",card.delta>0?"text-emerald-300":card.delta<0?"text-rose-200":"text-white/80")}>{card.delta>0?"↑ +":card.delta<0?"↓ ":""}{card.delta.toLocaleString("pt-BR",{maximumFractionDigits:1})}%</p><p className="text-[10px] leading-tight text-white/75">{card.comparisonLabel}</p></> : <p className="mt-1 text-[10px] text-white/70">{filters.period==="all"?"Todo o período":"Sem base comparativa"}</p>}</div>{card.series && trend.length>1 && (()=>{const field=card.series;const values=trend.map(row=>row[field]);const max=Math.max(1,...values);return <svg viewBox="0 0 64 32" className="h-8 w-14 shrink-0" role="img" aria-label={"Evolução diária de "+card.label}><polyline points={values.map((value,index)=>(2+index*60/(values.length-1))+","+(30-value/max*27)).join(" ")} fill="none" stroke="currentColor" strokeWidth="2" className="text-white/90"/></svg>;})()}</div></div>)}
+          {cards.map(({icon: Icon,...card}) => <div key={card.label} className={clsx("relative min-h-[144px] min-w-0 overflow-hidden rounded-2xl border border-white/20 bg-gradient-to-br p-4 shadow-lg transition hover:-translate-y-0.5 hover:brightness-110",card.color)}><div className="flex items-start gap-3"><span className={clsx("grid h-11 w-11 shrink-0 place-items-center rounded-xl shadow",card.accent)}><Icon className="h-5 w-5"/></span><div className="min-w-0"><p className="text-sm font-semibold leading-tight text-white/95">{card.label}</p><strong className="mt-1 block break-words text-[clamp(1.15rem,1.7vw,1.9rem)] font-black tabular-nums">{card.value}</strong></div></div><div className="mt-3 flex items-end justify-between gap-2"><div className="min-w-0"><p className="text-xs font-medium text-white/80">{card.hint}</p>{card.delta !== null ? <><p className={clsx("mt-1 text-sm font-black",card.delta>0?"text-emerald-300":card.delta<0?"text-rose-200":"text-white/80")}>{card.delta>0?"↑ +":card.delta<0?"↓ ":""}{card.delta.toLocaleString("pt-BR",{maximumFractionDigits:1})}%</p><p className="text-xs leading-tight text-white/75">{card.comparisonLabel}</p></> : <p className="mt-1 text-xs text-white/70">{filters.period==="all"?"Todo o período":"Sem base comparativa"}</p>}</div>{card.series && trend.length>1 && (()=>{const field=card.series;const values=trend.map(row=>row[field]);const max=Math.max(1,...values);return <svg viewBox="0 0 64 32" className="h-8 w-14 shrink-0" role="img" aria-label={"Evolução diária de "+card.label}><polyline points={values.map((value,index)=>(2+index*60/(values.length-1))+","+(30-value/max*27)).join(" ")} fill="none" stroke="currentColor" strokeWidth="2" className="text-white/90"/></svg>;})()}</div></div>)}
         </div>
       </div>
       <div className="grid gap-3 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.4fr)]">
@@ -6676,14 +6679,14 @@ function Dashboard({
           </details>
         </section>
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-soft">
-          <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="flex items-center gap-2 font-bold text-slate-950"><Activity className="h-5 w-5 text-blue-700"/> Evolução de leads e propostas</h3><div className="flex gap-3 text-xs"><span className="text-blue-600">● Leads</span><span className="text-emerald-600">● Propostas</span></div></div>
+          <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="flex items-center gap-2 text-base font-bold text-slate-950"><Activity className="h-5 w-5 text-blue-700"/> Evolução de leads e propostas</h3><div className="flex gap-3 text-xs"><span className="text-blue-600">● Leads</span><span className="text-emerald-600">● Propostas</span></div></div>
           {trend.length ? <><svg viewBox="0 0 740 180" className="mt-2 w-full" role="img" aria-label="Evolucao diaria de leads e propostas"><defs><linearGradient id="dashboard-leads-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#2563eb" stopOpacity=".25"/><stop offset="100%" stopColor="#2563eb" stopOpacity=".02"/></linearGradient></defs>{[0,1,2,3,4].map(i=><g key={i}><line x1="40" x2="690" y1={25+i*31.25} y2={25+i*31.25} stroke="#e2e8f0"/><text x="33" y={29+i*31.25} textAnchor="end" fontSize="10" fill="#64748b">{Math.round(maxTrend*(4-i)/4)}</text></g>)}<path d={chartPath("leads")+" L690 150 L40 150 Z"} fill="url(#dashboard-leads-fill)"/><path d={chartPath("proposals")+" L690 150 L40 150 Z"} fill="#16a34a" fillOpacity=".09"/><path d={chartPath("leads")} fill="none" stroke="#2563eb" strokeWidth="3" strokeLinecap="round"/><path d={chartPath("proposals")} fill="none" stroke="#16a34a" strokeWidth="3" strokeLinecap="round"/>{lastTrend && (["leads","proposals"] as const).map(field=>{const y=150-lastTrend[field]/maxTrend*125;const color=field==="leads"?"#2563eb":"#16a34a";return <g key={field}><circle cx="690" cy={y} r="4" fill="white" stroke={color} strokeWidth="2"/><rect x="698" y={Math.max(9,y-(field==="leads"?15:2))} width="39" height="15" rx="5" fill={color}/><text x="717.5" y={Math.max(9,y-(field==="leads"?15:2))+10.5} textAnchor="middle" fontSize="9" fontWeight="bold" fill="white">{number(lastTrend[field])}</text><title>{field==="leads"?"Leads":"Propostas"}: {lastTrend[field]}</title></g>})}{trend.filter((_,i)=>i%Math.max(1,Math.ceil(trend.length/7))===0||i===trend.length-1).map(row=><text key={row.date} x={40+trend.indexOf(row)*650/Math.max(1,trend.length-1)} y="170" textAnchor="middle" fontSize="10" fill="#64748b">{row.date.slice(8,10)+"/"+row.date.slice(5,7)}</text>)}</svg><p className="text-[11px] text-slate-500">{filters.period === "all" ? "Evolucao dos ultimos 90 dias" : "Evolucao diaria no periodo selecionado"}</p></> : <p className="py-16 text-center text-sm text-slate-500">{loading ? "Carregando..." : "Historico indisponivel."}</p>}
         </section>
       </div>
       <div className="grid gap-3 lg:grid-cols-3">
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-soft"><h3 className="mb-4 flex items-center gap-2 font-bold text-slate-950"><MessageCircle className="h-5 w-5 text-blue-700"/> Canais de atendimento</h3>{channelRows.map(row=><div key={row.label} className="mb-4 flex items-center gap-3"><span className={clsx("grid h-10 w-10 shrink-0 place-items-center rounded-full",row.label==="WhatsApp"?"bg-emerald-50 text-emerald-600":"bg-slate-100 text-slate-600")}><MessageCircle className="h-5 w-5"/></span><div className="min-w-0 flex-1"><div className="flex justify-between gap-2 text-sm font-semibold"><span>{row.label}</span><span>{number(row.count)}</span></div><div className="mt-2 flex items-center gap-2"><div className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100"><div className={clsx("h-full rounded-full",row.label==="WhatsApp"?"bg-emerald-500":"bg-slate-500")} style={{width:(row.count/Math.max(1,channelTotal)*100)+"%"}}/></div><span className="text-xs font-bold text-slate-600">{(row.count/Math.max(1,channelTotal)*100).toFixed(1)}%</span></div></div></div>)}{!channelRows.length && <p className="text-xs text-slate-500">Sem dados de canais.</p>}</section>
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft"><h3 className="mb-4 flex items-center gap-2 font-bold text-slate-950"><Activity className="h-5 w-5 text-blue-700"/> Status das conversas</h3><div className="flex flex-wrap items-center gap-4"><div className="grid h-32 w-32 shrink-0 place-items-center rounded-full shadow-inner" style={{background:donut ? "conic-gradient("+donut+")" : "#e2e8f0"}}><div className="grid h-[88px] w-[88px] place-content-center rounded-full bg-white text-center"><strong className="text-xl font-black">{number(totalConversations)}</strong><span className="text-xs text-slate-500">Total</span></div></div><div className="min-w-0 flex-1 space-y-2">{statuses.map(row=><div key={row.status} className="flex items-center justify-between gap-2 text-xs"><span className="flex items-center gap-2"><span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{background:statusColors[row.status]??"#94a3b8"}}/>{statusNames[row.status]??row.status}</span><strong className="whitespace-nowrap">{number(row.count)} <span className="font-normal text-slate-500">({(row.count/Math.max(1,totalConversations)*100).toFixed(1)}%)</span></strong></div>)}</div></div></section>
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft"><h3 className="mb-4 flex items-center gap-2 font-bold text-slate-950"><BriefcaseBusiness className="h-5 w-5 text-blue-700"/> Top responsáveis</h3>{rankedAgents.map((row,i)=><div key={row.id} className="mb-3 flex items-center gap-2"><span className={clsx("grid h-6 w-6 shrink-0 place-items-center rounded-lg text-xs font-black",i===0?"bg-amber-100 text-amber-700":i===1?"bg-blue-100 text-blue-700":i===2?"bg-orange-100 text-orange-700":"bg-slate-100 text-slate-600")}>{i+1}</span><span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-blue-50 text-xs font-black text-blue-800">{row.name.trim().split(/\s+/).slice(0,2).map(part=>part[0]?.toUpperCase()).join("")}</span><div className="min-w-0 flex-1"><p className="truncate text-xs font-bold" title={row.name}>{row.name}</p><p className="text-[11px] text-slate-500">{number(row.count)} atendimentos atribuídos</p></div><div className="h-2 w-14 shrink-0 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-blue-600" style={{width:(row.count/Math.max(1,rankedAgents[0]?.count??1)*100)+"%"}}/></div></div>)}{!rankedAgents.length&&<p className="text-xs text-slate-500">Sem atendimentos atribuídos no período.</p>}</section>
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-soft"><h3 className="mb-4 flex items-center gap-2 text-base font-bold text-slate-950"><MessageCircle className="h-5 w-5 text-blue-700"/> Canais de atendimento</h3>{channelRows.map(row=><div key={row.label} className="mb-4 flex items-center gap-3"><span className={clsx("grid h-10 w-10 shrink-0 place-items-center rounded-full",row.label==="WhatsApp"?"bg-emerald-50 text-emerald-600":"bg-slate-100 text-slate-600")}><MessageCircle className="h-5 w-5"/></span><div className="min-w-0 flex-1"><div className="flex justify-between gap-2 text-sm font-semibold"><span>{row.label}</span><span>{number(row.count)}</span></div><div className="mt-2 flex items-center gap-2"><div className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100"><div className={clsx("h-full rounded-full",row.label==="WhatsApp"?"bg-emerald-500":"bg-slate-500")} style={{width:(row.count/Math.max(1,channelTotal)*100)+"%"}}/></div><span className="text-xs font-bold text-slate-600">{(row.count/Math.max(1,channelTotal)*100).toFixed(1)}%</span></div></div></div>)}{!channelRows.length && <p className="text-xs text-slate-500">Sem dados de canais.</p>}</section>
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft"><h3 className="mb-4 flex items-center gap-2 text-base font-bold text-slate-950"><Activity className="h-5 w-5 text-blue-700"/> Status das conversas</h3><div className="flex flex-wrap items-center gap-4"><div className="grid h-32 w-32 shrink-0 place-items-center rounded-full shadow-inner" style={{background:donut ? "conic-gradient("+donut+")" : "#e2e8f0"}}><div className="grid h-[88px] w-[88px] place-content-center rounded-full bg-white text-center"><strong className="text-xl font-black">{number(totalConversations)}</strong><span className="text-xs text-slate-500">Total</span></div></div><div className="min-w-0 flex-1 space-y-2">{statuses.map(row=><div key={row.status} className="flex items-center justify-between gap-2 text-xs"><span className="flex items-center gap-2"><span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{background:statusColors[row.status]??"#94a3b8"}}/>{statusNames[row.status]??row.status}</span><strong className="whitespace-nowrap">{number(row.count)} <span className="font-normal text-slate-500">({(row.count/Math.max(1,totalConversations)*100).toFixed(1)}%)</span></strong></div>)}</div></div></section>
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft"><h3 className="mb-4 flex items-center gap-2 text-base font-bold text-slate-950"><BriefcaseBusiness className="h-5 w-5 text-blue-700"/> Top responsáveis</h3>{rankedAgents.map((row,i)=><div key={row.id} className="mb-3 flex items-center gap-2"><span className={clsx("grid h-6 w-6 shrink-0 place-items-center rounded-lg text-xs font-black",i===0?"bg-amber-100 text-amber-700":i===1?"bg-blue-100 text-blue-700":i===2?"bg-orange-100 text-orange-700":"bg-slate-100 text-slate-600")}>{i+1}</span><span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-blue-50 text-xs font-black text-blue-800">{row.name.trim().split(/\s+/).slice(0,2).map(part=>part[0]?.toUpperCase()).join("")}</span><div className="min-w-0 flex-1"><p className="truncate text-xs font-bold" title={row.name}>{row.name}</p><p className="text-[11px] text-slate-500">{number(row.count)} atendimentos atribuídos</p></div><div className="h-2 w-14 shrink-0 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-blue-600" style={{width:(row.count/Math.max(1,rankedAgents[0]?.count??1)*100)+"%"}}/></div></div>)}{!rankedAgents.length&&<p className="text-xs text-slate-500">Sem atendimentos atribuídos no período.</p>}</section>
       </div>
       <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-soft">
@@ -6695,7 +6698,7 @@ function Dashboard({
           {!analytics?.recentActivity?.length && <p className="py-6 text-xs text-slate-500">{loading ? "Carregando..." : "Nenhuma atividade registrada no periodo."}</p>}
         </section>
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-soft">
-          <h3 className="mb-4 flex items-center gap-2 font-bold text-slate-950"><Activity className="h-5 w-5 text-blue-700"/> Desempenho da operacao</h3>
+          <h3 className="mb-4 flex items-center gap-2 text-base font-bold text-slate-950"><Activity className="h-5 w-5 text-blue-700"/> Desempenho da operacao</h3>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             {[
               {label:"Taxa de resposta",value:analytics?.performance?.responseRate == null ? "—" : analytics.performance.responseRate.toFixed(1)+"%",hint:"Resposta antes da próxima entrada",icon:MessageCircle,tone:"text-emerald-600"},
