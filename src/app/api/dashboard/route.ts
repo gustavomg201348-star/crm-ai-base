@@ -371,7 +371,7 @@ export async function GET(request: NextRequest) {
     for (const row of proposalTrend) { const item = trendMap.get(dateKey(row.createdAt)); if (item) item.proposals += row._count._all; }
     return NextResponse.json({
       analytics: {
-        trend: [...trendMap.values()],
+        trend: Array.from(trendMap.values()),
         channels: channelGroups.map(row => ({ label: row.channel, count: row._count._all })),
         conversations: conversationGroups.map(row => ({ status: row.status, count: row._count._all })),
         agents: agentGroups.flatMap(row => { const agent = agents.find(user => user.id === row.agentId); return agent ? [{ id: agent.id, name: agent.name, count: row._count._all }] : []; })
