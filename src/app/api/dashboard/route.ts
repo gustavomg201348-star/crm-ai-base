@@ -190,7 +190,8 @@ export async function GET(request: NextRequest) {
       previousLeads,
       previousProposals,
       currentCreatedConversations,
-      previousCreatedConversations
+      previousCreatedConversations,
+      commercialStages
     ] = await Promise.all([
       prisma.contact.count({ where: contactWhere }),
       prisma.contact.count({ where: periodContactWhere }),
@@ -335,7 +336,14 @@ export async function GET(request: NextRequest) {
       previousSince && since ? prisma.contact.count({ where: { ...contactWhere, createdAt: { gte: previousSince, lt: since } } }) : Promise.resolve(null),
       previousSince && since ? prisma.proposal.findMany({ where: { ...proposalWhere, createdAt: { gte: previousSince, lt: since } }, select: { amount: true, commission: true, status: true } }) : Promise.resolve(null),
       prisma.conversation.count({ where: { contact: contactWhere, ...(since ? { createdAt: { gte: since } } : {}) } }),
-      previousSince && since ? prisma.conversation.count({ where: { contact: contactWhere, createdAt: { gte: previousSince, lt: since } } }) : Promise.resolve(null)
+      previousSince && since ? prisma.conversation.count({ where: { contact: contactWhere, createdAt: { gte: previousSince, lt: since } } }) : Promise.resolve(null),
+      Promise.all([
+        prisma.contact.count({ where: { ...periodContactWhere, conversations: { some: { messages: { some: { direction: "inbound" } } } } } }),
+        prisma.contact.count({ where: { ...periodContactWhere, openCreditCltPrequalifications: { some: { companyId: session.companyId, state: "COMPLETED" } } } }),
+        prisma.contact.count({ where: { ...periodContactWhere, proposals: { some: { companyId: session.companyId, status: { not: "CANCELED" } } } } }),
+        prisma.contact.count({ where: { ...periodContactWhere, proposals: { some: { companyId: session.companyId, status: { in: ["FORMALIZING", "PAID"] } } } } }),
+        prisma.contact.count({ where: { ...periodContactWhere, proposals: { some: { companyId: session.companyId, status: "PAID" } } } })
+      ])
     ]);
 
     const activeProposals = proposals.filter((proposal) => proposal.status !== "CANCELED");
@@ -420,6 +428,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       analytics: {
         recentActivity,
+        commercialFunnel: [
+          { label: "Leads (base)", count: newContacts, color: "#2563eb" },
+          { label: "Responderam", count: commercialStages[0], color: "#0ea5e9" },
+          { label: "Pré-simulação CLT", count: commercialStages[1], color: "#6366f1" },
+          { label: "Com proposta", count: commercialStages[2], color: "#8b5cf6" },
+          { label: "Formalização / pago", count: commercialStages[3], color: "#14b8a6" },
+          { label: "Pago", count: commercialStages[4], color: "#16a34a" }
+        ],
         comparisons: {
           leads: previousLeads,
           conversationsCreated: previousCreatedConversations,
