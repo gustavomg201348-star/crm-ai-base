@@ -11,7 +11,7 @@ export function buildChatbotMetaButtonPayload(to: string, step: ButtonStep) {
   if (!step || step.type !== "BUTTONS" || !Array.isArray(step.options)) {
     throw new ChatbotError("INVALID_DEFINITION");
   }
-  const destinations = [...new Set(step.options.map(option => option.next))];
+  const destinations = Array.from(new Set(step.options.map(option => option.next)));
   const validated = validateChatbotDefinition({
     schemaVersion: 1,
     entryStepId: step.id,
