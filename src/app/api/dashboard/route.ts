@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { Prisma } from "@prisma/client";
 import { requireAdmin } from "@/lib/permissions";
 
 const periodDays = {
@@ -180,7 +181,11 @@ export async function GET(request: NextRequest) {
       agentGroups,
       agents,
       leadTrend,
-      proposalTrend
+      proposalTrend,
+      recentLeads,
+      recentSimulations,
+      recentInbound,
+      responseStats
     ] = await Promise.all([
       prisma.contact.count({ where: contactWhere }),
       prisma.contact.count({ where: periodContactWhere }),
@@ -295,7 +300,33 @@ export async function GET(request: NextRequest) {
       prisma.conversation.groupBy({ by: ["agentId"], where: { contact: contactWhere, agentId: { not: null }, ...(since ? { createdAt: { gte: since } } : {}) }, _count: { _all: true }, orderBy: { _count: { agentId: "desc" } }, take: 5 }),
       prisma.user.findMany({ where: { companyId: session.companyId }, select: { id: true, name: true } }),
       prisma.contact.groupBy({ by: ["createdAt"], where: { ...periodContactWhere, createdAt: { gte: since ?? new Date(now.getTime() - 89 * 86400000) } }, _count: { _all: true } }),
-      prisma.proposal.groupBy({ by: ["createdAt"], where: { ...proposalWhere, createdAt: { gte: since ?? new Date(now.getTime() - 89 * 86400000) } }, _count: { _all: true } })
+      prisma.proposal.groupBy({ by: ["createdAt"], where: { ...proposalWhere, createdAt: { gte: since ?? new Date(now.getTime() - 89 * 86400000) } }, _count: { _all: true } }),
+      prisma.contact.findMany({ where: periodContactWhere, select: { id: true, name: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 5 }),
+      prisma.openCreditCltPrequalification.findMany({ where: { companyId: session.companyId, contact: contactWhere, state: "COMPLETED", completedAt: { not: null, ...(since ? { gte: since } : {}) } }, select: { id: true, completedAt: true, contact: { select: { name: true } } }, orderBy: { completedAt: "desc" }, take: 5 }),
+      prisma.conversationInboundEvent.findMany({ where: { companyId: session.companyId, contact: contactWhere, ...(since ? { createdAt: { gte: since } } : {}), message: { type: { in: ["button", "interactive"] } } }, select: { id: true, createdAt: true, contact: { select: { name: true } } }, orderBy: { createdAt: "desc" }, take: 5 }),
+      prisma.$queryRaw<Array<{ total: bigint; answered: bigint; averageSeconds: number | null }>>(Prisma.sql`
+        WITH inbound AS (
+          SELECT m."conversationId", m."id", m."createdAt",
+            LEAD(m."createdAt") OVER (PARTITION BY m."conversationId" ORDER BY m."createdAt", m."id") AS next_inbound
+          FROM "Message" m
+          JOIN "Conversation" v ON v."id" = m."conversationId"
+          JOIN "Contact" c ON c."id" = v."contactId"
+          WHERE c."companyId" = ${session.companyId} AND c."archivedAt" IS NULL AND m."direction" = 'inbound'
+          ${originId ? Prisma.sql`AND c."originId" = ${originId}` : Prisma.empty}
+          ${ownerId ? Prisma.sql`AND c."ownerId" = ${ownerId}` : Prisma.empty}
+          ${since ? Prisma.sql`AND m."createdAt" >= ${since}` : Prisma.empty}
+        ), replies AS (
+          SELECT i."createdAt", (
+            SELECT MIN(o."createdAt") FROM "Message" o
+            WHERE o."conversationId" = i."conversationId" AND o."direction" = 'outbound'
+              AND o."createdAt" > i."createdAt" AND (i.next_inbound IS NULL OR o."createdAt" < i.next_inbound)
+              AND o."type" <> 'template' AND o."status" NOT IN ('failed', 'FAILED')
+          ) AS replied_at FROM inbound i
+        )
+        SELECT COUNT(*) AS total, COUNT(replied_at) AS answered,
+          AVG(EXTRACT(EPOCH FROM (replied_at - "createdAt")))::double precision AS "averageSeconds"
+        FROM replies
+      `)
     ]);
 
     const activeProposals = proposals.filter((proposal) => proposal.status !== "CANCELED");
@@ -369,8 +400,23 @@ export async function GET(request: NextRequest) {
     }
     for (const row of leadTrend) { const item = trendMap.get(dateKey(row.createdAt)); if (item) item.leads += row._count._all; }
     for (const row of proposalTrend) { const item = trendMap.get(dateKey(row.createdAt)); if (item) item.proposals += row._count._all; }
+    const recentActivity = [
+      ...recentLeads.map(row => ({ id: "lead-" + row.id, kind: "lead", title: "Novo lead recebido", detail: row.name, at: row.createdAt.toISOString() })),
+      ...recentSimulations.map(row => ({ id: "simulation-" + row.id, kind: "simulation", title: "Simulacao concluida", detail: row.contact.name, at: row.completedAt!.toISOString() })),
+      ...recentInbound.map(row => ({ id: "button-" + row.id, kind: "button", title: "Interacao com botao", detail: row.contact.name, at: row.createdAt.toISOString() }))
+    ].sort((a,b) => b.at.localeCompare(a.at)).slice(0, 6);
+    const response = responseStats[0];
+    const inboundTotal = Number(response?.total ?? 0);
+    const answered = Number(response?.answered ?? 0);
     return NextResponse.json({
       analytics: {
+        recentActivity,
+        performance: {
+          inboundTotal,
+          answered,
+          responseRate: inboundTotal ? answered / inboundTotal * 100 : null,
+          averageResponseSeconds: response?.averageSeconds ?? null
+        },
         trend: Array.from(trendMap.values()),
         channels: channelGroups.map(row => ({ label: row.channel, count: row._count._all })),
         conversations: conversationGroups.map(row => ({ status: row.status, count: row._count._all })),
