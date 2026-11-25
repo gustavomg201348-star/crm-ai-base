@@ -4802,6 +4802,7 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-2 md:gap-3">
             <AttendantStatusToggle
+              dark={active === "dashboard"}
               value={myAvailability}
               onChange={(status) => void updateMyAvailability(status)}
             />
@@ -6352,8 +6353,10 @@ function ConfirmUnassignModal({
 
 function AttendantStatusToggle({
   value,
-  onChange
+  onChange,
+  dark = false
 }: {
+  dark?: boolean;
   value: AvailabilityStatus;
   onChange: (status: AvailabilityStatus) => void;
 }) {
@@ -6365,10 +6368,10 @@ function AttendantStatusToggle({
   };
 
   return (
-    <label className="hidden h-10 items-center gap-2 rounded-full border border-line bg-white px-3 text-xs font-semibold text-slate-600 shadow-sm md:flex">
+    <label className={clsx("hidden h-10 items-center gap-2 rounded-full border px-3 text-xs font-semibold shadow-sm md:flex",dark ? "border-white/20 bg-white/10 text-blue-100" : "border-line bg-white text-slate-600")}>
       <span className={clsx("h-2 w-2 rounded-full", colors[value])} />
       <select
-        className="bg-transparent outline-none"
+        className={clsx("bg-transparent outline-none",dark && "[color-scheme:dark]")}
         value={value}
         onChange={(event) => onChange(event.target.value as AvailabilityStatus)}
         title="Disponibilidade"
