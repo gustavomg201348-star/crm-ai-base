@@ -4433,7 +4433,8 @@ export default function Home() {
     >
       <aside
         className={clsx(
-          "fixed left-0 top-0 hidden h-screen flex-col border-r border-slate-200/80 bg-[#F3F6FB] shadow-[10px_0_28px_rgba(15,23,42,0.08)] backdrop-blur transition-[width] duration-300 ease-out xl:flex",
+          "fixed left-0 top-0 hidden h-screen flex-col border-r shadow-[10px_0_28px_rgba(15,23,42,0.08)] backdrop-blur transition-[width] duration-300 ease-out xl:flex",
+          active === "dashboard" ? "border-blue-950 bg-gradient-to-b from-[#07132f] to-[#102653] text-white" : "border-slate-200/80 bg-[#F3F6FB]",
           leftSidebarCollapsed ? "w-[72px]" : "w-[264px]"
         )}
       >
@@ -4449,10 +4450,10 @@ export default function Home() {
           {!leftSidebarCollapsed && (
             <>
               <div className="min-w-0 flex-1">
-                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-brand">
+                <p className={clsx("text-[11px] font-bold uppercase tracking-[0.18em]",active === "dashboard" ? "text-blue-300" : "text-brand")}>
                   CRM
                 </p>
-                <h1 className="truncate text-[15px] font-bold text-slate-950">
+                <h1 className={clsx("truncate text-[15px] font-bold",active === "dashboard" ? "text-white" : "text-slate-950")}>
                   Operacao Inteligente
                 </h1>
               </div>
@@ -4488,7 +4489,7 @@ export default function Home() {
           )}
         >
           {!leftSidebarCollapsed && (
-            <p className="px-3 pb-3 text-xs font-semibold tracking-wide text-slate-700">
+            <p className={clsx("px-3 pb-3 text-xs font-semibold tracking-wide",active === "dashboard" ? "text-blue-200" : "text-slate-700")}>
               Navegacao
             </p>
           )}
@@ -4541,7 +4542,7 @@ export default function Home() {
                     key={group.id}
                     className={clsx(
                       "space-y-2 rounded-2xl p-1 transition-colors",
-                      !isCollapsed && "bg-white/45 shadow-sm ring-1 ring-white/70",
+                      !isCollapsed && (active === "dashboard" ? "bg-white/[0.03]" : "bg-white/45 shadow-sm ring-1 ring-white/70"),
                       groupIndex > 0 && "mt-4 pt-1"
                     )}
                   >
@@ -4549,9 +4550,9 @@ export default function Home() {
                       type="button"
                       className={clsx(
                         "flex w-full items-center justify-between rounded-xl border-l-[3px] px-3 py-2.5 text-left text-[14px] font-bold tracking-normal shadow-sm transition-colors duration-150",
-                        isActiveGroup
-                          ? "border-blue-500 bg-white text-slate-950 ring-1 ring-blue-100"
-                          : "border-transparent bg-white/65 text-slate-700 hover:border-blue-400 hover:bg-blue-50 hover:text-slate-950 hover:ring-1 hover:ring-blue-100"
+                        active === "dashboard"
+                          ? isActiveGroup ? "border-blue-500 bg-blue-600/20 text-white" : "border-transparent text-blue-100 hover:bg-white/10"
+                          : isActiveGroup ? "border-blue-500 bg-white text-slate-950 ring-1 ring-blue-100" : "border-transparent bg-white/65 text-slate-700 hover:border-blue-400 hover:bg-blue-50 hover:text-slate-950 hover:ring-1 hover:ring-blue-100"
                       )}
                       onClick={() => toggleNavigationGroup(group.id)}
                     >
@@ -4578,9 +4579,9 @@ export default function Home() {
                             key={item.id}
                             className={clsx(
                               "group relative flex h-10 w-full items-center justify-between rounded-xl px-3 pl-4 text-left text-sm font-medium transition-colors",
-                              active === item.id
-                                ? "bg-blue-50 text-brand shadow-[inset_0_0_0_1px_rgba(37,99,235,0.12)]"
-                                : "text-slate-600 hover:bg-white/90 hover:text-slate-950"
+                              active === "dashboard"
+                                ? active === item.id ? "bg-blue-600 text-white shadow-lg" : "text-blue-100 hover:bg-white/10 hover:text-white"
+                                : active === item.id ? "bg-blue-50 text-brand shadow-[inset_0_0_0_1px_rgba(37,99,235,0.12)]" : "text-slate-600 hover:bg-white/90 hover:text-slate-950"
                             )}
                             onClick={() => setActive(item.id)}
                           >
@@ -4588,9 +4589,7 @@ export default function Home() {
                               <Icon
                                 className={clsx(
                                   "h-4 w-4",
-                                  active === item.id
-                                    ? "text-brand"
-                                    : "text-slate-400 group-hover:text-slate-600"
+                                  active === "dashboard" ? "text-blue-200" : active === item.id ? "text-brand" : "text-slate-400 group-hover:text-slate-600"
                                 )}
                               />
                               {item.label}
@@ -4610,13 +4609,13 @@ export default function Home() {
 
         <div
           className={clsx(
-            "shrink-0 border-t border-slate-200/70",
+            "shrink-0 border-t", active === "dashboard" ? "border-white/10" : "border-slate-200/70",
             leftSidebarCollapsed ? "p-3" : "p-4"
           )}
         >
           <div
             className={clsx(
-              "flex items-center rounded-2xl transition hover:bg-white/70",
+              "flex items-center rounded-2xl transition", active === "dashboard" ? "hover:bg-white/10" : "hover:bg-white/70",
               leftSidebarCollapsed ? "justify-center p-0" : "gap-3 p-2"
             )}
             title={leftSidebarCollapsed ? `${session.user.name} - ${session.user.role}` : undefined}
@@ -4626,10 +4625,10 @@ export default function Home() {
             </div>
             {!leftSidebarCollapsed && (
               <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-slate-900">
+                <p className={clsx("truncate text-sm font-semibold",active === "dashboard" ? "text-white" : "text-slate-900")}>
                   {session.user.name}
                 </p>
-                <p className="truncate text-xs text-slate-500">{session.user.role}</p>
+                <p className={clsx("truncate text-xs",active === "dashboard" ? "text-blue-200" : "text-slate-500")}>{session.user.role}</p>
               </div>
             )}
           </div>
