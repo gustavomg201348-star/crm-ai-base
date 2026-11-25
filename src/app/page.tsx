@@ -4437,7 +4437,7 @@ export default function Home() {
       <aside
         className={clsx(
           "fixed left-0 top-0 hidden h-screen flex-col border-r shadow-[10px_0_28px_rgba(15,23,42,0.08)] backdrop-blur transition-[width] duration-300 ease-out xl:flex",
-          active === "dashboard" ? "border-blue-950 bg-gradient-to-b from-[#07132f] to-[#102653] text-white" : "border-slate-200/80 bg-[#F3F6FB]",
+          active === "dashboard" ? "border-blue-950 bg-gradient-to-b from-[#06102b] via-[#0b1c43] to-[#102653] text-white" : "border-slate-200/80 bg-[#F3F6FB]",
           leftSidebarCollapsed ? "w-[72px]" : "w-[264px]"
         )}
       >
@@ -4545,7 +4545,7 @@ export default function Home() {
                     key={group.id}
                     className={clsx(
                       "space-y-2 rounded-2xl p-1 transition-colors",
-                      !isCollapsed && (active === "dashboard" ? "bg-white/[0.03]" : "bg-white/45 shadow-sm ring-1 ring-white/70"),
+                      !isCollapsed && (active === "dashboard" ? "border-b border-white/10 pb-3" : "bg-white/45 shadow-sm ring-1 ring-white/70"),
                       groupIndex > 0 && "mt-4 pt-1"
                     )}
                   >
@@ -4618,7 +4618,7 @@ export default function Home() {
         >
           <div
             className={clsx(
-              "flex items-center rounded-2xl transition", active === "dashboard" ? "hover:bg-white/10" : "hover:bg-white/70",
+              "flex items-center rounded-2xl transition", active === "dashboard" ? "border border-white/10 bg-white/5 hover:bg-white/10" : "hover:bg-white/70",
               leftSidebarCollapsed ? "justify-center p-0" : "gap-3 p-2"
             )}
             title={leftSidebarCollapsed ? `${session.user.name} - ${session.user.role}` : undefined}
@@ -6680,7 +6680,7 @@ function Dashboard({
               {label:"Propostas por novo contato",value:data.metrics.newContacts ? (data.metrics.proposals/data.metrics.newContacts*100).toFixed(1)+"%" : "—",hint:"Propostas / novos contatos",icon:FileText,tone:"text-violet-600"},
               {label:"Conversao em pagamento",value:data.metrics.conversionRate+"%",hint:"Pagas / base ativa",icon:Banknote,tone:"text-amber-600"},
               {label:"Tempo medio de resposta",value:analytics?.performance?.averageResponseSeconds == null ? "—" : Math.floor(Math.round(analytics.performance.averageResponseSeconds)/60)+" min "+Math.round(analytics.performance.averageResponseSeconds)%60+" s",hint:"Inclui respostas da IA",icon:Clock3,tone:"text-blue-600"}
-            ].map(({icon:Icon,...row})=><div key={row.label} className="min-w-0 rounded-xl bg-slate-50 p-3"><div className="flex items-center gap-2"><Icon className={clsx("h-5 w-5 shrink-0",row.tone)}/><p className="text-[11px] font-semibold leading-tight text-slate-700">{row.label}</p></div><strong className="mt-3 block break-words text-xl font-black tabular-nums text-slate-950">{row.value}</strong><p className="mt-1 text-[10px] text-slate-500">{row.hint}</p></div>)}
+            ].map(({icon:Icon,...row})=><div key={row.label} className="min-w-0 rounded-xl bg-gradient-to-br from-slate-50 to-blue-50/50 p-3 ring-1 ring-slate-100"><div className="flex items-center gap-2"><Icon className={clsx("h-5 w-5 shrink-0",row.tone)}/><p className="text-[11px] font-semibold leading-tight text-slate-700">{row.label}</p></div><strong className="mt-3 block break-words text-xl font-black tabular-nums text-slate-950">{row.value}</strong><p className="mt-1 text-[10px] text-slate-500">{row.hint}</p></div>)}
           </div>
           <div className="mt-3 grid grid-cols-3 gap-2 border-t border-slate-100 pt-3 text-xs"><div><p className="text-slate-500">SLA critico</p><strong className="text-rose-700">{number(data.metrics.staleConversations)}</strong></div><div><p className="text-slate-500">Leads quentes</p><strong className="text-amber-700">{number(data.metrics.hotContacts)}</strong></div><div><p className="text-slate-500">Em formalizacao</p><strong className="text-blue-700">{number(data.metrics.formalizingProposals)}</strong></div></div>
         </section>
