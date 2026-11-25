@@ -1,0 +1,19 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { buildCltQualificationDefinition } from "./chatbot-clt-qualification";
+
+test("CLT qualification definition validates and offers human handoff", () => {
+  const flow = buildCltQualificationDefinition();
+  const entry = flow.steps.find(step => step.id === flow.entryStepId);
+  assert.ok(entry && entry.type === "BUTTONS");
+  assert.deepEqual(entry.options.map(option => option.next), ["competitor", "need", "handoff"]);
+  const need = flow.steps.find(step => step.id === "need");
+  assert.ok(need && need.type === "BUTTONS");
+  assert.deepEqual(need.options.map(option => option.next), ["amount", "handoff", "handoff"]);
+  for (const id of ["competitor", "amount"]) {
+    const step = flow.steps.find(item => item.id === id);
+    assert.ok(step && step.type === "INPUT");
+    assert.equal(step.next, "handoff");
+  }
+  assert.deepEqual(flow.steps.find(step => step.id === "handoff"), { id: "handoff", type: "HANDOFF", queue: "DEFAULT" });
+});
