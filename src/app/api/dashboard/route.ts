@@ -115,6 +115,7 @@ export async function GET(request: NextRequest) {
     const originId = request.nextUrl.searchParams.get("originId") ?? "";
     const ownerId = request.nextUrl.searchParams.get("ownerId") ?? "";
     const since = getPeriodStart(period);
+    const previousSince = since ? new Date(since.getTime() - (periodDays[period as keyof typeof periodDays] ?? 0) * 86400000) : null;
     const todayRange = getTodayRange();
     const now = new Date();
     const contactWhere = {
@@ -185,7 +186,11 @@ export async function GET(request: NextRequest) {
       recentLeads,
       recentSimulations,
       recentInbound,
-      responseStats
+      responseStats,
+      previousLeads,
+      previousProposals,
+      currentCreatedConversations,
+      previousCreatedConversations
     ] = await Promise.all([
       prisma.contact.count({ where: contactWhere }),
       prisma.contact.count({ where: periodContactWhere }),
@@ -326,7 +331,11 @@ export async function GET(request: NextRequest) {
         SELECT COUNT(*) AS total, COUNT(replied_at) AS answered,
           AVG(EXTRACT(EPOCH FROM (replied_at - "createdAt")))::double precision AS "averageSeconds"
         FROM replies
-      `)
+      `),
+      previousSince && since ? prisma.contact.count({ where: { ...contactWhere, createdAt: { gte: previousSince, lt: since } } }) : Promise.resolve(null),
+      previousSince && since ? prisma.proposal.findMany({ where: { ...proposalWhere, createdAt: { gte: previousSince, lt: since } }, select: { amount: true, commission: true, status: true } }) : Promise.resolve(null),
+      prisma.conversation.count({ where: { contact: contactWhere, ...(since ? { createdAt: { gte: since } } : {}) } }),
+      previousSince && since ? prisma.conversation.count({ where: { contact: contactWhere, createdAt: { gte: previousSince, lt: since } } }) : Promise.resolve(null)
     ]);
 
     const activeProposals = proposals.filter((proposal) => proposal.status !== "CANCELED");
@@ -411,6 +420,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       analytics: {
         recentActivity,
+        comparisons: {
+          leads: previousLeads,
+          conversationsCreated: previousCreatedConversations,
+          currentConversationsCreated: currentCreatedConversations,
+          proposals: previousProposals?.filter(row => row.status !== "CANCELED").length ?? null,
+          paidAmount: previousProposals ? sumMoney(previousProposals.filter(row => row.status === "PAID"), "amount") : null,
+          commission: previousProposals ? sumMoney(previousProposals.filter(row => row.status !== "CANCELED"), "commission") : null
+        },
         performance: {
           inboundTotal,
           answered,
