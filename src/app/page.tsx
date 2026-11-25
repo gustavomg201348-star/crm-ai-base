@@ -949,6 +949,12 @@ type NotificationRow = {
 };
 
 type DashboardData = {
+  analytics?: {
+    trend: Array<{ date: string; leads: number; proposals: number }>;
+    channels: Array<{ label: string; count: number }>;
+    conversations: Array<{ status: string; count: number }>;
+    agents: Array<{ id: string; name: string; count: number }>;
+  };
   metrics: {
     activeContacts: number;
     newContacts: number;
@@ -4427,7 +4433,8 @@ export default function Home() {
     >
       <aside
         className={clsx(
-          "fixed left-0 top-0 hidden h-screen flex-col border-r border-slate-200/80 bg-[#F3F6FB] shadow-[10px_0_28px_rgba(15,23,42,0.08)] backdrop-blur transition-[width] duration-300 ease-out xl:flex",
+          "fixed left-0 top-0 hidden h-screen flex-col border-r shadow-[10px_0_28px_rgba(15,23,42,0.08)] backdrop-blur transition-[width] duration-300 ease-out xl:flex",
+          active === "dashboard" ? "border-blue-950 bg-gradient-to-b from-[#07132f] to-[#102653] text-white" : "border-slate-200/80 bg-[#F3F6FB]",
           leftSidebarCollapsed ? "w-[72px]" : "w-[264px]"
         )}
       >
@@ -4443,10 +4450,10 @@ export default function Home() {
           {!leftSidebarCollapsed && (
             <>
               <div className="min-w-0 flex-1">
-                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-brand">
+                <p className={clsx("text-[11px] font-bold uppercase tracking-[0.18em]",active === "dashboard" ? "text-blue-300" : "text-brand")}>
                   CRM
                 </p>
-                <h1 className="truncate text-[15px] font-bold text-slate-950">
+                <h1 className={clsx("truncate text-[15px] font-bold",active === "dashboard" ? "text-white" : "text-slate-950")}>
                   Operacao Inteligente
                 </h1>
               </div>
@@ -4482,7 +4489,7 @@ export default function Home() {
           )}
         >
           {!leftSidebarCollapsed && (
-            <p className="px-3 pb-3 text-xs font-semibold tracking-wide text-slate-700">
+            <p className={clsx("px-3 pb-3 text-xs font-semibold tracking-wide",active === "dashboard" ? "text-blue-200" : "text-slate-700")}>
               Navegacao
             </p>
           )}
@@ -4535,7 +4542,7 @@ export default function Home() {
                     key={group.id}
                     className={clsx(
                       "space-y-2 rounded-2xl p-1 transition-colors",
-                      !isCollapsed && "bg-white/45 shadow-sm ring-1 ring-white/70",
+                      !isCollapsed && (active === "dashboard" ? "bg-white/[0.03]" : "bg-white/45 shadow-sm ring-1 ring-white/70"),
                       groupIndex > 0 && "mt-4 pt-1"
                     )}
                   >
@@ -4543,9 +4550,9 @@ export default function Home() {
                       type="button"
                       className={clsx(
                         "flex w-full items-center justify-between rounded-xl border-l-[3px] px-3 py-2.5 text-left text-[14px] font-bold tracking-normal shadow-sm transition-colors duration-150",
-                        isActiveGroup
-                          ? "border-blue-500 bg-white text-slate-950 ring-1 ring-blue-100"
-                          : "border-transparent bg-white/65 text-slate-700 hover:border-blue-400 hover:bg-blue-50 hover:text-slate-950 hover:ring-1 hover:ring-blue-100"
+                        active === "dashboard"
+                          ? isActiveGroup ? "border-blue-500 bg-blue-600/20 text-white" : "border-transparent text-blue-100 hover:bg-white/10"
+                          : isActiveGroup ? "border-blue-500 bg-white text-slate-950 ring-1 ring-blue-100" : "border-transparent bg-white/65 text-slate-700 hover:border-blue-400 hover:bg-blue-50 hover:text-slate-950 hover:ring-1 hover:ring-blue-100"
                       )}
                       onClick={() => toggleNavigationGroup(group.id)}
                     >
@@ -4572,9 +4579,9 @@ export default function Home() {
                             key={item.id}
                             className={clsx(
                               "group relative flex h-10 w-full items-center justify-between rounded-xl px-3 pl-4 text-left text-sm font-medium transition-colors",
-                              active === item.id
-                                ? "bg-blue-50 text-brand shadow-[inset_0_0_0_1px_rgba(37,99,235,0.12)]"
-                                : "text-slate-600 hover:bg-white/90 hover:text-slate-950"
+                              active === "dashboard"
+                                ? active === item.id ? "bg-blue-600 text-white shadow-lg" : "text-blue-100 hover:bg-white/10 hover:text-white"
+                                : active === item.id ? "bg-blue-50 text-brand shadow-[inset_0_0_0_1px_rgba(37,99,235,0.12)]" : "text-slate-600 hover:bg-white/90 hover:text-slate-950"
                             )}
                             onClick={() => setActive(item.id)}
                           >
@@ -4582,9 +4589,7 @@ export default function Home() {
                               <Icon
                                 className={clsx(
                                   "h-4 w-4",
-                                  active === item.id
-                                    ? "text-brand"
-                                    : "text-slate-400 group-hover:text-slate-600"
+                                  active === "dashboard" ? "text-blue-200" : active === item.id ? "text-brand" : "text-slate-400 group-hover:text-slate-600"
                                 )}
                               />
                               {item.label}
@@ -4604,13 +4609,13 @@ export default function Home() {
 
         <div
           className={clsx(
-            "shrink-0 border-t border-slate-200/70",
+            "shrink-0 border-t", active === "dashboard" ? "border-white/10" : "border-slate-200/70",
             leftSidebarCollapsed ? "p-3" : "p-4"
           )}
         >
           <div
             className={clsx(
-              "flex items-center rounded-2xl transition hover:bg-white/70",
+              "flex items-center rounded-2xl transition", active === "dashboard" ? "hover:bg-white/10" : "hover:bg-white/70",
               leftSidebarCollapsed ? "justify-center p-0" : "gap-3 p-2"
             )}
             title={leftSidebarCollapsed ? `${session.user.name} - ${session.user.role}` : undefined}
@@ -4620,10 +4625,10 @@ export default function Home() {
             </div>
             {!leftSidebarCollapsed && (
               <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-slate-900">
+                <p className={clsx("truncate text-sm font-semibold",active === "dashboard" ? "text-white" : "text-slate-900")}>
                   {session.user.name}
                 </p>
-                <p className="truncate text-xs text-slate-500">{session.user.role}</p>
+                <p className={clsx("truncate text-xs",active === "dashboard" ? "text-blue-200" : "text-slate-500")}>{session.user.role}</p>
               </div>
             )}
           </div>
@@ -4934,6 +4939,7 @@ export default function Home() {
               reference={reference}
               onFiltersChange={setDashboardFilters}
               onCompleteTask={handleCompleteTask}
+              onRefresh={() => void loadDashboard(dashboardFilters)}
             />
           )}
           {active === "motor-comercial" && (
@@ -6547,7 +6553,8 @@ function Dashboard({
   loading,
   reference,
   onFiltersChange,
-  onCompleteTask
+  onCompleteTask,
+  onRefresh
 }: {
   data: DashboardData;
   filters: { period: string; originId: string; ownerId: string };
@@ -6559,6 +6566,7 @@ function Dashboard({
     ownerId: string;
   }) => void;
   onCompleteTask: (taskId: string) => Promise<TaskRow | null>;
+  onRefresh: () => void;
 }) {
   const maxFunnel = Math.max(...data.funnel.map((item) => item.count), 1);
   const maxStatus = Math.max(...data.proposalStatus.map((item) => item.count), 1);
@@ -6569,167 +6577,62 @@ function Dashboard({
     upcoming: 0,
     items: []
   };
+  const analytics = data.analytics;
+  const number = (value: number) => value.toLocaleString("pt-BR");
   const cards = [
-    {
-      label: "Receita paga",
-      value: formatCurrency(data.metrics.paidAmount),
-      hint: `${data.metrics.paidProposals} proposta(s) paga(s) no filtro atual`,
-      icon: Banknote,
-      tone: "emerald"
-    },
-    {
-      label: "Propostas em aberto",
-      value: formatCurrency(data.metrics.totalProposalAmount),
-      hint: `${data.metrics.proposals} proposta(s) ativa(s) no periodo`,
-      icon: CircleDollarSign,
-      tone: "blue"
-    },
-    {
-      label: "Conversao",
-      value: `${data.metrics.conversionRate}%`,
-      hint: "Propostas pagas sobre a base ativa",
-      icon: Activity,
-      tone: "violet"
-    },
-    {
-      label: "Leads novos",
-      value: data.metrics.newContacts.toString(),
-      hint: `${data.metrics.todayContacts ?? 0} novo(s) hoje`,
-      icon: UserRound,
-      tone: "slate"
-    },
-    {
-      label: "SLA critico",
-      value: data.metrics.staleConversations.toString(),
-      hint: "Conversas aguardando ha mais de 4h",
-      icon: AlertTriangle,
-      tone: "rose"
-    },
-    {
-      label: "Comissao prevista",
-      value: formatCurrency(data.metrics.commissionForecast),
-      hint: "Comissao potencial nas propostas ativas",
-      icon: BriefcaseBusiness,
-      tone: "violet"
-    }
+    { label: "Leads recebidos", value: number(data.metrics.newContacts), hint: number(data.metrics.todayContacts ?? 0) + " novos hoje", icon: UserRound, color: "from-[#0d47b5] to-[#071d4e]", accent: "bg-blue-600" },
+    { label: "Conversas abertas", value: number(data.metrics.openConversations), hint: "Carteira atual", icon: MessageCircle, color: "from-[#087f83] to-[#06353f]", accent: "bg-emerald-500" },
+    { label: "Propostas ativas", value: number(data.metrics.proposals), hint: formatCurrency(data.metrics.totalProposalAmount), icon: FileText, color: "from-[#7047b8] to-[#302052]", accent: "bg-violet-500" },
+    { label: "Receita paga", value: formatCurrency(data.metrics.paidAmount), hint: number(data.metrics.paidProposals) + " propostas pagas", icon: Banknote, color: "from-[#a65b30] to-[#663016]", accent: "bg-amber-500" },
+    { label: "Comissao prevista", value: formatCurrency(data.metrics.commissionForecast), hint: "Propostas ativas", icon: BriefcaseBusiness, color: "from-[#a52e59] to-[#631a36]", accent: "bg-pink-500" }
   ];
-
+  const trend = analytics?.trend ?? [];
+  const maxTrend = Math.max(1, ...trend.flatMap(row => [row.leads, row.proposals]));
+  const trendPoints = (field: "leads" | "proposals") => trend.map((row, index) => (40 + index * 680 / Math.max(1, trend.length - 1)) + "," + (150 - row[field] / maxTrend * 125)).join(" ");
+  const statuses = analytics?.conversations ?? [];
+  const totalConversations = statuses.reduce((sum, item) => sum + item.count, 0);
+  const statusNames: Record<string, string> = { OPEN: "Abertas", PENDING: "Pendentes", BOT: "Robo (IA)", SOLD: "Vendidas", RESOLVED: "Resolvidas" };
+  const statusColors: Record<string, string> = { OPEN: "#2563eb", PENDING: "#f59e0b", BOT: "#8b5cf6", SOLD: "#14b8a6", RESOLVED: "#16a34a" };
+  let running = 0;
+  const donut = statuses.filter(item => item.count > 0).map(item => { const from = running; running += item.count / Math.max(1,totalConversations) * 100; return (statusColors[item.status] ?? "#94a3b8") + " " + from + "% " + running + "%"; }).join(", ");
+  const channelTotal = (analytics?.channels ?? []).reduce((sum,row) => sum + row.count,0);
+  const totalStages = data.funnel.reduce((sum,row) => sum + row.count,0);
+  const selectClass = "h-10 min-w-0 rounded-xl border border-white/20 bg-[#13264b] px-3 text-xs font-semibold text-white outline-none focus:ring-2 focus:ring-blue-400";
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 rounded-[1.35rem] border border-line/80 bg-white p-5 shadow-soft md:flex-row md:items-center md:justify-between">
-        <div>
-          <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-xs font-bold uppercase tracking-wide text-brand">
-            <Sparkles className="h-3.5 w-3.5" />
-            Visao de gestao
+    <div className="space-y-4">
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#07132f] via-[#0b2259] to-[#07132f] p-5 text-white shadow-xl">
+        <div className="pointer-events-none absolute -right-24 -top-36 h-96 w-96 rounded-full border border-blue-500/25 bg-blue-600/10" />
+        <div className="relative flex flex-wrap items-center justify-between gap-4">
+          <div><h2 className="text-2xl font-black tracking-tight">Dashboard executivo</h2><p className="mt-1 text-sm text-blue-100">Panorama da sua operacao comercial.</p></div>
+          <div className="flex flex-wrap gap-2">
+            <select aria-label="Periodo" className={selectClass} value={filters.period} onChange={event => onFiltersChange({...filters, period:event.target.value})}><option value="7d">Ultimos 7 dias</option><option value="30d">Ultimos 30 dias</option><option value="90d">Ultimos 90 dias</option><option value="all">Todo periodo</option></select>
+            <select aria-label="Origem" className={selectClass} value={filters.originId} onChange={event => onFiltersChange({...filters, originId:event.target.value})}><option value="">Todas as origens</option>{reference.origins.map(origin => <option key={origin.id} value={origin.id}>{origin.name}</option>)}</select>
+            <select aria-label="Responsavel" className={selectClass} value={filters.ownerId} onChange={event => onFiltersChange({...filters, ownerId:event.target.value})}><option value="">Todos os responsaveis</option>{reference.users.map(user => <option key={user.id} value={user.id}>{user.name}</option>)}</select>
+            <button type="button" title="Atualizar dashboard" aria-label="Atualizar dashboard" disabled={loading} onClick={onRefresh} className="grid h-10 w-10 place-items-center rounded-xl border border-white/20 bg-white/10 hover:bg-white/20 disabled:opacity-50"><RefreshCcw className={clsx("h-4 w-4",loading && "animate-spin")}/></button>
           </div>
-          <h2 className="mt-3 text-2xl font-bold tracking-tight text-slate-950">
-            Dashboard executivo
-          </h2>
-          <p className="mt-1 text-sm text-slate-500">
-            Saude comercial, receita, conversao e gargalos do periodo.
-          </p>
         </div>
-        <div className="grid gap-2 sm:grid-cols-3">
-          <select
-            className="h-10 rounded-full border border-line bg-slate-50 px-3 text-sm text-slate-700 outline-none hover:bg-white focus:border-blue-200 focus:bg-white focus:shadow-soft"
-            value={filters.period}
-            onChange={(event) =>
-              onFiltersChange({ ...filters, period: event.target.value })
-            }
-          >
-            <option value="7d">Ultimos 7 dias</option>
-            <option value="30d">Ultimos 30 dias</option>
-            <option value="90d">Ultimos 90 dias</option>
-            <option value="all">Todo periodo</option>
-          </select>
-          <select
-            className="h-10 rounded-full border border-line bg-slate-50 px-3 text-sm text-slate-700 outline-none hover:bg-white focus:border-blue-200 focus:bg-white focus:shadow-soft"
-            value={filters.originId}
-            onChange={(event) =>
-              onFiltersChange({ ...filters, originId: event.target.value })
-            }
-          >
-            <option value="">Todas as origens</option>
-            {reference.origins.map((origin) => (
-              <option key={origin.id} value={origin.id}>
-                {origin.name}
-              </option>
-            ))}
-          </select>
-          <select
-            className="h-10 rounded-full border border-line bg-slate-50 px-3 text-sm text-slate-700 outline-none hover:bg-white focus:border-blue-200 focus:bg-white focus:shadow-soft"
-            value={filters.ownerId}
-            onChange={(event) =>
-              onFiltersChange({ ...filters, ownerId: event.target.value })
-            }
-          >
-            <option value="">Todos os responsaveis</option>
-            {reference.users.map((user) => (
-              <option key={user.id} value={user.id}>
-                {user.name}
-              </option>
-            ))}
-          </select>
+        <div className="relative mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          {cards.map(({icon: Icon,...card}) => <div key={card.label} className={clsx("min-w-0 rounded-xl border border-white/15 bg-gradient-to-br p-4 shadow-lg",card.color)}><div className="flex items-start gap-3"><span className={clsx("grid h-10 w-10 shrink-0 place-items-center rounded-xl shadow",card.accent)}><Icon className="h-5 w-5"/></span><div className="min-w-0"><p className="text-xs font-semibold text-white/90">{card.label}</p><strong className="mt-1 block break-words text-xl font-black tabular-nums">{card.value}</strong></div></div><p className="mt-3 text-xs text-white/75">{card.hint}</p></div>)}
         </div>
       </div>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {cards.map((card) => (
-          <MetricCard key={card.label} {...card} showTrend={false} variant="executive" />
-        ))}
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-2">
-        <PipelineCard
-          title="Funil de leads"
-          subtitle={`${data.metrics.hotContacts} quente(s)`}
-          empty="Sem leads no filtro atual."
-          loading={loading}
-        >
-          {data.funnel.map((item) => (
-            <div key={item.id} className="group">
-              <div className="mb-2 flex items-center justify-between text-sm">
-                <span className="font-medium text-slate-700">{item.label}</span>
-                <strong className="text-slate-950">{item.count}</strong>
-              </div>
-              <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
-                <div
-                  className="h-2.5 rounded-full transition-all duration-500 group-hover:brightness-95"
-                  style={{
-                    width: `${Math.max(6, (item.count / maxFunnel) * 100)}%`,
-                    backgroundColor: item.color
-                  }}
-                />
-              </div>
-            </div>
-          ))}
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.4fr)]">
+        <PipelineCard title="Funil de leads" subtitle="Distribuicao atual por etapa" empty="Sem leads" loading={loading}>
+          {data.funnel.map(item => <div key={item.id} className="grid grid-cols-[minmax(80px,1fr)_minmax(80px,1.5fr)_48px] items-center gap-2 text-xs"><span className="truncate font-semibold text-slate-700" title={item.label}>{item.label}</span><div className="relative h-6 overflow-hidden rounded-md bg-slate-100"><div className="h-full rounded-md" style={{width:(item.count/maxFunnel*100)+"%",backgroundColor:item.color}}/><span className="absolute inset-y-0 left-2 flex items-center font-bold text-slate-900">{number(item.count)}</span></div><span className="text-right font-bold text-slate-700">{(item.count/Math.max(1,totalStages)*100).toFixed(1)}%</span></div>)}
         </PipelineCard>
-
-        <PipelineCard
-          title="Status Multicred"
-          subtitle={formatCurrency(data.metrics.commissionForecast)}
-          empty="Sem propostas no filtro atual."
-          loading={loading}
-        >
-          {data.proposalStatus.map((item) => (
-            <div key={item.status} className="group">
-              <div className="mb-2 flex items-center justify-between text-sm">
-                <span className="font-medium text-slate-700">
-                  {proposalStatusLabels[item.status] ?? item.status}
-                </span>
-                <strong className="text-slate-950">{item.count}</strong>
-              </div>
-              <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
-                <div
-                  className="h-2.5 rounded-full bg-brand transition-all duration-500 group-hover:bg-blue-700"
-                  style={{ width: `${Math.max(6, (item.count / maxStatus) * 100)}%` }}
-                />
-              </div>
-            </div>
-          ))}
-        </PipelineCard>
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-soft">
+          <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold text-slate-950">Evolucao de leads e propostas</h3><div className="flex gap-3 text-xs"><span className="text-blue-600">● Leads</span><span className="text-emerald-600">● Propostas</span></div></div>
+          {trend.length ? <><svg viewBox="0 0 740 180" className="mt-3 w-full" role="img" aria-label="Evolucao diaria de leads e propostas"><defs><linearGradient id="dashboard-leads-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#2563eb" stopOpacity=".25"/><stop offset="100%" stopColor="#2563eb" stopOpacity=".02"/></linearGradient></defs>{[0,1,2,3,4].map(i=><g key={i}><line x1="40" x2="720" y1={25+i*31.25} y2={25+i*31.25} stroke="#e2e8f0"/><text x="33" y={29+i*31.25} textAnchor="end" fontSize="10" fill="#64748b">{Math.round(maxTrend*(4-i)/4)}</text></g>)}<polygon points={"40,150 "+trendPoints("leads")+" 720,150"} fill="url(#dashboard-leads-fill)"/><polyline points={trendPoints("leads")} fill="none" stroke="#2563eb" strokeWidth="3" strokeLinejoin="round"/><polyline points={trendPoints("proposals")} fill="none" stroke="#16a34a" strokeWidth="3" strokeLinejoin="round"/>{trend.filter((_,i)=>i%Math.max(1,Math.ceil(trend.length/7))===0||i===trend.length-1).map(row=><text key={row.date} x={40+trend.indexOf(row)*680/Math.max(1,trend.length-1)} y="170" textAnchor="middle" fontSize="10" fill="#64748b">{row.date.slice(8,10)+"/"+row.date.slice(5,7)}</text>)}</svg><p className="text-[11px] text-slate-500">{filters.period === "all" ? "Evolucao dos ultimos 90 dias" : "Evolucao diaria no periodo selecionado"}</p></> : <p className="py-16 text-center text-sm text-slate-500">{loading ? "Carregando..." : "Historico indisponivel."}</p>}
+        </section>
       </div>
-
+      <div className="grid gap-4 lg:grid-cols-3">
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-soft"><h3 className="mb-4 font-bold text-slate-950">Canais de atendimento</h3>{(analytics?.channels ?? []).map(row=><div key={row.label} className="mb-4"><div className="flex justify-between text-xs font-semibold"><span className="capitalize">{row.label}</span><span>{number(row.count)}</span></div><div className="mt-2 h-2 rounded-full bg-slate-100"><div className="h-2 rounded-full bg-emerald-500" style={{width:(row.count/Math.max(1,channelTotal)*100)+"%"}}/></div></div>)}{!analytics?.channels.length && <p className="text-xs text-slate-500">Sem dados de canais.</p>}</section>
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-soft"><h3 className="mb-4 font-bold text-slate-950">Status das conversas</h3><div className="flex flex-wrap items-center gap-4"><div className="grid h-28 w-28 shrink-0 place-items-center rounded-full" style={{background:donut ? "conic-gradient("+donut+")" : "#e2e8f0"}}><div className="grid h-[76px] w-[76px] place-content-center rounded-full bg-white text-center"><strong className="text-lg">{number(totalConversations)}</strong><span className="text-[10px] text-slate-500">Total</span></div></div><div className="min-w-0 flex-1 space-y-2">{statuses.map(row=><div key={row.status} className="flex items-center justify-between gap-2 text-xs"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full" style={{background:statusColors[row.status]??"#94a3b8"}}/>{statusNames[row.status]??row.status}</span><strong>{number(row.count)}</strong></div>)}</div></div></section>
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-soft"><h3 className="mb-4 font-bold text-slate-950">Top responsaveis</h3>{(analytics?.agents??[]).map((row,i)=><div key={row.id} className="mb-3 flex items-center gap-2"><span className="grid h-6 w-6 shrink-0 place-items-center rounded-lg bg-blue-50 text-xs font-black text-blue-700">{i+1}</span><span className="min-w-0 flex-1 truncate text-xs font-semibold" title={row.name}>{row.name}</span><strong className="text-xs">{number(row.count)}</strong></div>)}{!analytics?.agents.length&&<p className="text-xs text-slate-500">Sem atendimentos atribuidos no periodo.</p>}</section>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {[{label:"Conversao em pagamento",value:data.metrics.conversionRate+"%",tone:"text-violet-700"},{label:"SLA critico",value:number(data.metrics.staleConversations),tone:"text-rose-700"},{label:"Leads quentes",value:number(data.metrics.hotContacts),tone:"text-amber-700"},{label:"Em formalizacao",value:number(data.metrics.formalizingProposals),tone:"text-blue-700"}].map(row=><div key={row.label} className="rounded-xl border border-slate-200 bg-white p-4 shadow-soft"><p className="text-xs font-semibold text-slate-500">{row.label}</p><strong className={clsx("mt-2 block text-xl font-black",row.tone)}>{row.value}</strong></div>)}
+      </div>
+      <PipelineCard title="Status Multicred" subtitle={formatCurrency(data.metrics.commissionForecast)} empty="Sem propostas" loading={loading}>{data.proposalStatus.map(item=><div key={item.status} className="flex items-center gap-3 text-xs"><span className="w-28">{proposalStatusLabels[item.status]??item.status}</span><div className="h-2 flex-1 rounded-full bg-slate-100"><div className="h-2 rounded-full bg-blue-600" style={{width:(item.count/maxStatus*100)+"%"}}/></div><strong>{number(item.count)}</strong></div>)}</PipelineCard>
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.85fr)]">
         <div className="rounded-[1.35rem] border border-line/80 bg-white p-5 shadow-soft">
           <div className="mb-4 flex items-center justify-between">
@@ -6874,89 +6777,6 @@ function Dashboard({
           </section>
         </div>
       </div>
-    </div>
-  );
-}
-
-function MetricCard({
-  label,
-  value,
-  hint,
-  trend,
-  icon: Icon,
-  tone,
-  showTrend = true,
-  variant = "default"
-}: {
-  label: string;
-  value: string;
-  hint: string;
-  trend?: string;
-  icon: typeof MessageCircle;
-  tone: string;
-  showTrend?: boolean;
-  variant?: "default" | "executive";
-}) {
-  const toneClass =
-    tone === "emerald"
-      ? "bg-emerald-50 text-emerald-600 ring-emerald-100"
-      : tone === "violet"
-        ? "bg-violet-50 text-violet-600 ring-violet-100"
-        : tone === "rose"
-          ? "bg-rose-50 text-rose-600 ring-rose-100"
-        : tone === "slate"
-          ? "bg-slate-100 text-slate-600 ring-slate-200"
-          : "bg-blue-50 text-brand ring-blue-100";
-  const executive = variant === "executive";
-
-  return (
-    <div
-      className={clsx(
-        "group rounded-[1.35rem] border border-line/80 bg-white p-5 shadow-soft",
-        !executive && "hover:-translate-y-0.5 hover:shadow-lift"
-      )}
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <p
-            className={clsx(
-              executive
-                ? "text-sm font-semibold uppercase tracking-wide text-slate-500"
-                : "text-sm font-medium text-slate-500"
-            )}
-          >
-            {label}
-          </p>
-          <strong
-            className={clsx(
-              "mt-3 block truncate tracking-tight text-slate-950",
-              executive ? "text-3xl font-black" : "text-3xl font-bold"
-            )}
-          >
-            {value}
-          </strong>
-        </div>
-        <div
-          className={clsx(
-            "grid shrink-0 place-items-center rounded-2xl ring-1",
-            executive ? "h-11 w-11" : "h-10 w-10",
-            toneClass
-          )}
-        >
-          <Icon className={clsx(executive ? "h-5 w-5" : "h-4 w-4")} />
-        </div>
-      </div>
-      {showTrend && trend ? (
-        <div className="mt-4 flex items-center justify-between gap-2">
-          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">
-            <TrendingUp className="h-3.5 w-3.5" />
-            {trend}
-          </span>
-          <span className="truncate text-xs text-slate-500">{hint}</span>
-        </div>
-      ) : (
-        <p className="mt-4 text-sm leading-5 text-slate-500">{hint}</p>
-      )}
     </div>
   );
 }

@@ -174,7 +174,13 @@ export async function GET(request: NextRequest) {
       returnItems,
       priorityConversations,
       priorityProposals,
-      priorityContacts
+      priorityContacts,
+      conversationGroups,
+      channelGroups,
+      agentGroups,
+      agents,
+      leadTrend,
+      proposalTrend
     ] = await Promise.all([
       prisma.contact.count({ where: contactWhere }),
       prisma.contact.count({ where: periodContactWhere }),
@@ -283,7 +289,13 @@ export async function GET(request: NextRequest) {
         },
         orderBy: { updatedAt: "desc" },
         take: 4
-      })
+      }),
+      prisma.conversation.groupBy({ by: ["status"], where: { contact: contactWhere }, _count: { _all: true } }),
+      prisma.conversation.groupBy({ by: ["channel"], where: { contact: contactWhere }, _count: { _all: true } }),
+      prisma.conversation.groupBy({ by: ["agentId"], where: { contact: contactWhere, agentId: { not: null }, ...(since ? { createdAt: { gte: since } } : {}) }, _count: { _all: true }, orderBy: { _count: { agentId: "desc" } }, take: 5 }),
+      prisma.user.findMany({ where: { companyId: session.companyId }, select: { id: true, name: true } }),
+      prisma.contact.groupBy({ by: ["createdAt"], where: { ...periodContactWhere, createdAt: { gte: since ?? new Date(now.getTime() - 89 * 86400000) } }, _count: { _all: true } }),
+      prisma.proposal.groupBy({ by: ["createdAt"], where: { ...proposalWhere, createdAt: { gte: since ?? new Date(now.getTime() - 89 * 86400000) } }, _count: { _all: true } })
     ]);
 
     const activeProposals = proposals.filter((proposal) => proposal.status !== "CANCELED");
@@ -348,7 +360,22 @@ export async function GET(request: NextRequest) {
       }))
     ].slice(0, 8);
 
+    const dateKey = (date: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+    const trendMap = new Map<string, { date: string; leads: number; proposals: number }>();
+    const trendStart = since ?? new Date(now.getTime() - 89 * 86400000);
+    for (let day = new Date(trendStart); day <= now; day = new Date(day.getTime() + 86400000)) {
+      const date = dateKey(day);
+      trendMap.set(date, { date, leads: 0, proposals: 0 });
+    }
+    for (const row of leadTrend) { const item = trendMap.get(dateKey(row.createdAt)); if (item) item.leads += row._count._all; }
+    for (const row of proposalTrend) { const item = trendMap.get(dateKey(row.createdAt)); if (item) item.proposals += row._count._all; }
     return NextResponse.json({
+      analytics: {
+        trend: Array.from(trendMap.values()),
+        channels: channelGroups.map(row => ({ label: row.channel, count: row._count._all })),
+        conversations: conversationGroups.map(row => ({ status: row.status, count: row._count._all })),
+        agents: agentGroups.flatMap(row => { const agent = agents.find(user => user.id === row.agentId); return agent ? [{ id: agent.id, name: agent.name, count: row._count._all }] : []; })
+      },
       filters: { period, originId, ownerId },
       metrics: {
         activeContacts,
