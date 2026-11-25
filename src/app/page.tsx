@@ -954,6 +954,8 @@ type DashboardData = {
     channels: Array<{ label: string; count: number }>;
     conversations: Array<{ status: string; count: number }>;
     agents: Array<{ id: string; name: string; count: number }>;
+    recentActivity?: Array<{ id: string; kind: string; title: string; detail: string; at: string }>;
+    performance?: { inboundTotal: number; answered: number; responseRate: number | null; averageResponseSeconds: number | null };
   };
   metrics: {
     activeContacts: number;
@@ -6629,8 +6631,27 @@ function Dashboard({
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-soft"><h3 className="mb-4 font-bold text-slate-950">Status das conversas</h3><div className="flex flex-wrap items-center gap-4"><div className="grid h-28 w-28 shrink-0 place-items-center rounded-full" style={{background:donut ? "conic-gradient("+donut+")" : "#e2e8f0"}}><div className="grid h-[76px] w-[76px] place-content-center rounded-full bg-white text-center"><strong className="text-lg">{number(totalConversations)}</strong><span className="text-[10px] text-slate-500">Total</span></div></div><div className="min-w-0 flex-1 space-y-2">{statuses.map(row=><div key={row.status} className="flex items-center justify-between gap-2 text-xs"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full" style={{background:statusColors[row.status]??"#94a3b8"}}/>{statusNames[row.status]??row.status}</span><strong>{number(row.count)}</strong></div>)}</div></div></section>
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-soft"><h3 className="mb-4 font-bold text-slate-950">Top responsaveis</h3>{(analytics?.agents??[]).map((row,i)=><div key={row.id} className="mb-3 flex items-center gap-2"><span className="grid h-6 w-6 shrink-0 place-items-center rounded-lg bg-blue-50 text-xs font-black text-blue-700">{i+1}</span><span className="min-w-0 flex-1 truncate text-xs font-semibold" title={row.name}>{row.name}</span><strong className="text-xs">{number(row.count)}</strong></div>)}{!analytics?.agents.length&&<p className="text-xs text-slate-500">Sem atendimentos atribuidos no periodo.</p>}</section>
       </div>
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {[{label:"Conversao em pagamento",value:data.metrics.conversionRate+"%",tone:"text-violet-700"},{label:"SLA critico",value:number(data.metrics.staleConversations),tone:"text-rose-700"},{label:"Leads quentes",value:number(data.metrics.hotContacts),tone:"text-amber-700"},{label:"Em formalizacao",value:number(data.metrics.formalizingProposals),tone:"text-blue-700"}].map(row=><div key={row.label} className="rounded-xl border border-slate-200 bg-white p-4 shadow-soft"><p className="text-xs font-semibold text-slate-500">{row.label}</p><strong className={clsx("mt-2 block text-xl font-black",row.tone)}>{row.value}</strong></div>)}
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-soft">
+          <h3 className="mb-3 flex items-center gap-2 font-bold text-slate-950"><Clock3 className="h-5 w-5 text-blue-700"/> Atividades recentes</h3>
+          {(analytics?.recentActivity ?? []).map(row => {
+            const Icon = row.kind === "simulation" ? Check : row.kind === "button" ? MessageCircle : Plus;
+            return <div key={row.id} className="flex items-center gap-3 border-t border-slate-100 py-2.5"><span className={clsx("grid h-8 w-8 shrink-0 place-items-center rounded-full",row.kind === "simulation" ? "bg-emerald-100 text-emerald-700" : row.kind === "button" ? "bg-blue-100 text-blue-700" : "bg-violet-100 text-violet-700")}><Icon className="h-4 w-4"/></span><div className="min-w-0 flex-1"><p className="truncate text-xs font-bold text-slate-900">{row.title}</p><p className="truncate text-xs text-slate-500">{row.detail}</p></div><time dateTime={row.at} className="shrink-0 text-[10px] text-slate-500">{new Date(row.at).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</time></div>;
+          })}
+          {!analytics?.recentActivity?.length && <p className="py-6 text-xs text-slate-500">{loading ? "Carregando..." : "Nenhuma atividade registrada no periodo."}</p>}
+        </section>
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-soft">
+          <h3 className="mb-4 flex items-center gap-2 font-bold text-slate-950"><Activity className="h-5 w-5 text-blue-700"/> Desempenho da operacao</h3>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {[
+              {label:"Taxa de resposta",value:analytics?.performance?.responseRate == null ? "—" : analytics.performance.responseRate.toFixed(1)+"%",hint:"Mensagens recebidas respondidas",icon:MessageCircle,tone:"text-emerald-600"},
+              {label:"Propostas por novo contato",value:data.metrics.newContacts ? (data.metrics.proposals/data.metrics.newContacts*100).toFixed(1)+"%" : "—",hint:"Propostas / novos contatos",icon:FileText,tone:"text-violet-600"},
+              {label:"Conversao em pagamento",value:data.metrics.conversionRate+"%",hint:"Pagas / base ativa",icon:Banknote,tone:"text-amber-600"},
+              {label:"Tempo medio de resposta",value:analytics?.performance?.averageResponseSeconds == null ? "—" : Math.floor(Math.round(analytics.performance.averageResponseSeconds)/60)+" min "+Math.round(analytics.performance.averageResponseSeconds)%60+" s",hint:"Entre entrada e resposta",icon:Clock3,tone:"text-blue-600"}
+            ].map(({icon:Icon,...row})=><div key={row.label} className="min-w-0 rounded-xl bg-slate-50 p-3"><div className="flex items-center gap-2"><Icon className={clsx("h-5 w-5 shrink-0",row.tone)}/><p className="text-[11px] font-semibold leading-tight text-slate-700">{row.label}</p></div><strong className="mt-3 block break-words text-xl font-black tabular-nums text-slate-950">{row.value}</strong><p className="mt-1 text-[10px] text-slate-500">{row.hint}</p></div>)}
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-2 border-t border-slate-100 pt-3 text-xs"><div><p className="text-slate-500">SLA critico</p><strong className="text-rose-700">{number(data.metrics.staleConversations)}</strong></div><div><p className="text-slate-500">Leads quentes</p><strong className="text-amber-700">{number(data.metrics.hotContacts)}</strong></div><div><p className="text-slate-500">Em formalizacao</p><strong className="text-blue-700">{number(data.metrics.formalizingProposals)}</strong></div></div>
+        </section>
       </div>
       <PipelineCard title="Status Multicred" subtitle={formatCurrency(data.metrics.commissionForecast)} empty="Sem propostas" loading={loading}>{data.proposalStatus.map(item=><div key={item.status} className="flex items-center gap-3 text-xs"><span className="w-28">{proposalStatusLabels[item.status]??item.status}</span><div className="h-2 flex-1 rounded-full bg-slate-100"><div className="h-2 rounded-full bg-blue-600" style={{width:(item.count/maxStatus*100)+"%"}}/></div><strong>{number(item.count)}</strong></div>)}</PipelineCard>
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.85fr)]">
