@@ -675,6 +675,12 @@ export async function maybeSendAutomaticAiReply({
     }
   }
 
+  // Operator-requested pause: keep tagging and prequalification, suppress only CHECK replies.
+  if (buttonAction === "CHECK" && process.env.CLT_CHECK_AUTO_REPLY_ENABLED !== "true") {
+    gate("PROSPECTA_CLT_CHECK_REPLY_DISABLED");
+    return null;
+  }
+
   const replyPolicy = fixedButtonReply ? fixedButtonPolicy : shouldAutoReply;
   const allowAssignedAgent = Boolean(fixedButtonReply);
   if (bridge && !await openCreditWhatsappCanAutoReply(prisma, companyId, conversationId, replyPolicy, { allowAssignedAgent })) {
