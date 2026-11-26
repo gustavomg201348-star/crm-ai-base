@@ -131,6 +131,7 @@ export async function POST(request: NextRequest) {
     const contactIds = parseContactIds(formData.get("contactIds"));
     const image = formData.get("image");
     const messageType = String(formData.get("messageType") ?? "TEXT").trim();
+    const draftOnly = formData.get("draftOnly") === "true";
 
     let aiProfile: ReturnType<typeof parseAiAgentProfile>;
 
@@ -363,6 +364,7 @@ export async function POST(request: NextRequest) {
         imageName,
         imageMime,
         imageSize,
+        status: draftOnly ? "DRAFT" : "PENDING",
         total: contacts.length,
         recipients: {
           create: contacts.map((contact) => {
@@ -391,6 +393,11 @@ export async function POST(request: NextRequest) {
         where: { id: campaign.id },
         data: { imagePath }
       });
+    }
+
+    if (draftOnly) {
+      const draft = await prisma.campaign.findUniqueOrThrow({ where: { id: campaign.id }, include: campaignInclude });
+      return NextResponse.json({ campaign: mapCampaign(draft) }, { status: 201 });
     }
 
     const processed = await processCampaign(campaign.id);
