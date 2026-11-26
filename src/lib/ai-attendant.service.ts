@@ -18,6 +18,7 @@ import {
 } from "@/lib/conversation-message.service";
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
+import { cltBlocksAiSend } from "./chatbot-clt-outbound-policy";
 import { readMetaMessageId, sendMetaTextMessage } from "@/lib/meta-whatsapp";
 import { openCreditWhatsappCanAutoReply, prepareOpenCreditWhatsappAiReply, prepareOpenCreditCrmDirectAiReply } from "./opencredit-whatsapp-ai";
 import { classifyOpenCreditTemplateButton, OPEN_CREDIT_BLOCK_FIRST_REPLY, OPEN_CREDIT_CHECK_FIRST_REPLY } from "./opencredit-whatsapp-button-policy";
@@ -605,6 +606,9 @@ export async function maybeSendAutomaticAiReply({
   });
   if (!conversation) { gate("CONVERSATION_NOT_FOUND"); return null; }
   if (isOpenCreditConversation(conversation)) { gate("INTERNAL_OPENCREDIT_CONVERSATION"); return null; }
+  if (conversation.channelId && await cltBlocksAiSend(prisma, { companyId, conversationId, channelId: conversation.channelId })) {
+    gate("CLT_CHATBOT_CONTROLS_CONVERSATION"); return null;
+  }
   const bridge = Boolean(conversation.openCreditWhatsappMetas?.length);
   const latestVerifiedInbound = await prisma.conversationInboundEvent.findFirst({
     where: {
@@ -738,6 +742,9 @@ export async function maybeSendAutomaticAiReply({
     }
 
     const { channel } = await getConversationIntegration({ conversationId, companyId });
+    if (await cltBlocksAiSend(prisma, { companyId, channelId: channel.id, conversationId })) {
+      await attempt?.cancel(); return null;
+    }
     if (attempt && !await attempt.authorize(channel, clt?.validateFinancial)) return null;
     clt?.onAuthorized?.();
     const metaResponse = await sendMetaTextMessage({

@@ -27,6 +27,7 @@ import {
 import { digitsOnlyPhone } from "@/lib/phone-normalization.service";
 import { BootstrapBlocked, analyzeOpenCreditBootstrapTemplate, bootstrapPhone, bootstrapTemplateFingerprint, resolveBootstrapVariables,
   validBootstrapMediaAsset, type BootstrapMediaBinding, type BootstrapVariableMapping } from "./opencredit-whatsapp-policy";
+import { withCltHumanSend } from "./chatbot-clt-outbound-policy";
 import { authorityFingerprint } from "./conversation-authority-contract";
 import { createHash } from "node:crypto";
 import type { MediaAsset } from "@prisma/client";
@@ -604,7 +605,7 @@ export async function sendConversationTemplate({
     ...(automation ? { preparedMedia, signal } : {})
   });
   await beforeMessageGuard?.();
-  const metaResponse = await sendMetaTemplateMessage({
+  const send = () => sendMetaTemplateMessage({
     phoneNumberId: channel.phoneNumberId!,
     accessToken: channel.accessToken!,
     to: destination,
@@ -616,6 +617,8 @@ export async function sendConversationTemplate({
     ...(automation ? { quiet: true } : {}),
     ...(signal ? { signal } : {})
   });
+  const metaResponse = automation ? await send() : await withCltHumanSend(prisma, { companyId, channelId: channel.id,
+    conversationId }, userId, send);
   const providerMessageId = readMetaMessageId(metaResponse);
   if (automation && !providerMessageId) throw new Error("BOOTSTRAP_OUTCOME_UNKNOWN");
   if (providerMessageId) onProviderAccepted?.(providerMessageId);

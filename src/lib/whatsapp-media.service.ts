@@ -1,3 +1,5 @@
+import { withCltHumanSend } from "./chatbot-clt-outbound-policy";
+import { prisma } from "@/lib/db";
 import {
   readMetaMessageId,
   sendMetaMediaMessage,
@@ -112,7 +114,8 @@ export async function sendConversationMedia({
     bytes: preparedMedia.bytes
   });
   const mediaType = resolveMetaMediaType(preparedMedia.mimeType);
-  const metaResponse = await sendMetaMediaMessage({
+  const metaResponse = await withCltHumanSend(prisma, { companyId, channelId: channel.id, conversationId }, userId,
+    () => sendMetaMediaMessage({
     phoneNumberId: channel.phoneNumberId!,
     accessToken: channel.accessToken!,
     to: digitsOnlyPhone(conversation.contact.phone),
@@ -120,7 +123,7 @@ export async function sendConversationMedia({
     mediaType,
     caption,
     fileName
-  });
+  }));
   const providerMessageId = readMetaMessageId(metaResponse);
   if (mediaType === "audio" && !providerMessageId) {
     throw new Error("A Meta nao confirmou o envio do audio.");

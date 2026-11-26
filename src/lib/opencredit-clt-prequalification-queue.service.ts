@@ -1,4 +1,5 @@
 import "server-only";
+import { cltBlocksAiSend } from "./chatbot-clt-outbound-policy";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { canonicalizeOpenCreditOwnershipCpf } from "./opencredit-commercial-identity-policy";
 import { resolveConfiguredOpenCreditProviderContext } from "./opencredit-provider-scope-resolver";
@@ -23,7 +24,8 @@ export async function enqueueCltPrequalification(db: PrismaClient, input: Enqueu
         where: { id: input.conversationId, contact: { companyId: input.companyId } },
         include: { contact: true }
       });
-      if (!conversation?.channelId) return null;
+      if (!conversation?.channelId || await cltBlocksAiSend(tx, { companyId: input.companyId,
+        conversationId: conversation.id, channelId: conversation.channelId })) return null;
       const evidence = await tx.conversationInboundEvent.findFirst({
         where: {
           id: input.inboundEventId,

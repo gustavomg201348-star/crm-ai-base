@@ -167,6 +167,7 @@ async function routeScenario(channel: boolean, mode: "OFF" | "SHADOW", row: Shad
     "next/server": { NextResponse: { json: (body: unknown, init?: ResponseInit) => new Response(JSON.stringify(body), init) } },
     "@/lib/auth": { getSessionFromRequest: async () => ({ id: "actor", companyId: "company", role: "AGENT" }) },
     "@/lib/authority-text-shadow-runtime": { observeTextOutboundAuthority: observe },
+    "@/lib/chatbot-clt-outbound-policy": { CltPilotSendConflict: class extends Error {}, withCltHumanSend: async (_db: unknown, _scope: unknown, _user: string, send: () => Promise<unknown>) => send() },
     "@/lib/conversation-inbound-event": { createInboundMessageWithDurableEvent, inboundEventTransaction },
     "@/lib/activities": { createActivity: async () => {} },
     "@/lib/db": { prisma: { conversation: { findFirst: async () => conversation }, channel: { findFirst: async () => integration },

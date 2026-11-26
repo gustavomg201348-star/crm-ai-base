@@ -51,6 +51,65 @@ export function conversationAuthorityTransactionCore(database: AuthorityDatabase
           toState: row.state, fromGeneration: BigInt("0"), toGeneration: BigInt("0"), toOwnerUserId: ownerUserId } });
       };
     }
+  function transition(input: Transition, humanIntentFingerprint?: string, admitChatbot = false) {
+    input = { ...input };
+    const cmd = command(input); requireGeneration(input.expectedGeneration); if (!admitChatbot) requireAuthorityState(input.state);
+    const ownerUserId = input.ownerUserId ?? null;
+    requireAuthority((input.state === "HUMAN") === (ownerUserId !== null), "INVALID_OWNER");
+    if (ownerUserId !== null) requireReference(ownerUserId);
+    if (humanIntentFingerprint !== undefined) requireAuthority(/^[0-9a-f]{64}$/.test(humanIntentFingerprint), "INVALID_PAYLOAD");
+    const fingerprint = humanIntentFingerprint ?? authorityFingerprint({ ...cmd, kind: "TRANSITION", expectedGeneration: input.expectedGeneration.toString(), state: input.state, ownerUserId });
+    return async (tx: AuthorityTx) => {
+      const row = await storage.lock(tx, cmd);
+      const actor = await storage.actor(tx, cmd.companyId, cmd.actorUserId);
+      const existing = await replay(tx, cmd, fingerprint); if (existing) return existing;
+      requireAuthority(row.generation === input.expectedGeneration, "GENERATION_CONFLICT");
+      const administrative = ["ADMIN", "SUPERVISOR"].includes(actor.role);
+      if (admitChatbot) {
+        requireAuthority(administrative && row.state === "HUMAN_QUEUE" && row.ownerUserId === null &&
+          await tx.chatbotSession.findFirst({ where: { ...authorityScope(cmd), activeConversationId: cmd.conversationId,
+            status: "ACTIVE", runtimeActorId: actor.id, campaignId: { not: null } }, select: { id: true } }), "AUTHORITY_DENIED");
+      }
+      const releaseChatbot = row.state === "CHATBOT" && input.state === "HUMAN_QUEUE" &&
+        await tx.chatbotSession.findFirst({ where: { ...authorityScope(cmd), activeConversationId: cmd.conversationId,
+          runtimeActorId: actor.id }, select: { id: true } });
+      if (!administrative && !releaseChatbot) {
+        const conversation = await tx.conversation.findFirst({ where: { id: cmd.conversationId, contact: { companyId: cmd.companyId },
+          OR: [{ agentId: null }, { agentId: actor.id }] } });
+        requireAuthority(conversation && input.state === "HUMAN" && ownerUserId === actor.id &&
+          (row.state !== "HUMAN" || row.ownerUserId === actor.id), "FORBIDDEN");
+      }
+      if (ownerUserId) await storage.actor(tx, cmd.companyId, ownerUserId);
+      const allowed: Record<string, string[]> = {
+        HUMAN_QUEUE: ["HUMAN_QUEUE", "HUMAN", "AI", "CLOSED"], HUMAN: ["HUMAN", "HUMAN_QUEUE", "AI", "CLOSED"],
+        AI: ["AI", "HUMAN", "HUMAN_QUEUE", "CLOSED"], CHATBOT: ["HUMAN", "HUMAN_QUEUE", "CLOSED"], CLOSED: ["CLOSED", "HUMAN_QUEUE", "HUMAN"]
+      };
+      requireAuthority(admitChatbot || allowed[row.state]?.includes(input.state), "INVALID_TRANSITION");
+      const changed = row.state !== input.state || row.ownerUserId !== ownerUserId;
+      const generation = changed ? nextGeneration(row.generation) : row.generation;
+      if (changed) {
+        const updated = await tx.conversationAuthority.updateMany({ where: { ...authorityScope(cmd), id: row.id, generation: row.generation },
+          data: { state: input.state, ownerUserId, generation } });
+        requireAuthority(updated.count === 1, "GENERATION_CONFLICT");
+        await tx.outboundOperation.updateMany({ where: { authorityId: row.id, status: { in: ["PREPARED", "RESERVED"] } },
+          data: { status: "CANCELED", activeSlot: null, reservationToken: null, leaseUntil: null } });
+        if (row.state === "CHATBOT") {
+          const session = await tx.chatbotSession.findFirst({ where: { ...authorityScope(cmd), activeConversationId: cmd.conversationId, runtimeActorId: { not: null } } });
+          if (session) {
+            await tx.chatbotSession.update({ where: { id: session.id }, data: { status: "CLOSED", authority: "HUMAN",
+              closureReason: input.state === "HUMAN" || input.reason === "CLT_HANDOFF" ? "HUMAN_HANDOFF" : "CANCELED",
+              activeConversationId: null, endedAt: await storage.now(tx), revision: { increment: 1 } } });
+            await tx.chatbotEvent.updateMany({ where: { sessionId: session.id, status: { in: ["PENDING", "ERROR", "PROCESSING"] } },
+              data: { status: "DEAD", errorCode: "SESSION_CLOSED", leaseToken: null, leaseUntil: null } });
+            await tx.conversation.updateMany({ where: { id: cmd.conversationId, status: "BOT" }, data: { status: "PENDING", aiPaused: true } });
+          }
+        }
+      }
+      return tx.authorityEvent.create({ data: { ...cmd, authorityId: row.id, fingerprint, kind: "TRANSITION",
+        fromState: row.state, toState: input.state, fromGeneration: row.generation, toGeneration: generation,
+        fromOwnerUserId: row.ownerUserId, toOwnerUserId: ownerUserId } });
+    };
+  }
   return {
     initialize: (input: Command & { state: AuthorityState; ownerUserId?: string | null }) => initialize(input),
     // Narrow internal exception: an agent can adopt only an open queue or their
@@ -71,46 +130,10 @@ export function conversationAuthorityTransactionCore(database: AuthorityDatabase
       const scope = authorityScope(input);
       return database.db.conversationAuthority.findFirst({ where: scope });
     },
-    transition(input: Transition, humanIntentFingerprint?: string) {
-      input = { ...input };
-      const cmd = command(input); requireGeneration(input.expectedGeneration); requireAuthorityState(input.state);
-      const ownerUserId = input.ownerUserId ?? null;
-      requireAuthority((input.state === "HUMAN") === (ownerUserId !== null), "INVALID_OWNER");
-      if (ownerUserId !== null) requireReference(ownerUserId);
-      if (humanIntentFingerprint !== undefined) requireAuthority(/^[0-9a-f]{64}$/.test(humanIntentFingerprint), "INVALID_PAYLOAD");
-      const fingerprint = humanIntentFingerprint ?? authorityFingerprint({ ...cmd, kind: "TRANSITION", expectedGeneration: input.expectedGeneration.toString(), state: input.state, ownerUserId });
-      return async (tx: AuthorityTx) => {
-        const row = await storage.lock(tx, cmd);
-        const actor = await storage.actor(tx, cmd.companyId, cmd.actorUserId);
-        const existing = await replay(tx, cmd, fingerprint); if (existing) return existing;
-        requireAuthority(row.generation === input.expectedGeneration, "GENERATION_CONFLICT");
-        const administrative = ["ADMIN", "SUPERVISOR"].includes(actor.role);
-        if (!administrative) {
-          const conversation = await tx.conversation.findFirst({ where: { id: cmd.conversationId, contact: { companyId: cmd.companyId },
-            OR: [{ agentId: null }, { agentId: actor.id }] } });
-          requireAuthority(conversation && input.state === "HUMAN" && ownerUserId === actor.id &&
-            (row.state !== "HUMAN" || row.ownerUserId === actor.id), "FORBIDDEN");
-        }
-        if (ownerUserId) await storage.actor(tx, cmd.companyId, ownerUserId);
-        const allowed: Record<string, string[]> = {
-          HUMAN_QUEUE: ["HUMAN_QUEUE", "HUMAN", "AI", "CLOSED"], HUMAN: ["HUMAN", "HUMAN_QUEUE", "AI", "CLOSED"],
-          AI: ["AI", "HUMAN", "HUMAN_QUEUE", "CLOSED"], CHATBOT: ["HUMAN", "HUMAN_QUEUE", "CLOSED"], CLOSED: ["CLOSED", "HUMAN_QUEUE", "HUMAN"]
-        };
-        requireAuthority(allowed[row.state]?.includes(input.state), "INVALID_TRANSITION");
-        const changed = row.state !== input.state || row.ownerUserId !== ownerUserId;
-        const generation = changed ? nextGeneration(row.generation) : row.generation;
-        if (changed) {
-          const updated = await tx.conversationAuthority.updateMany({ where: { ...authorityScope(cmd), id: row.id, generation: row.generation },
-            data: { state: input.state, ownerUserId, generation } });
-          requireAuthority(updated.count === 1, "GENERATION_CONFLICT");
-          await tx.outboundOperation.updateMany({ where: { authorityId: row.id, status: { in: ["PREPARED", "RESERVED"] } },
-            data: { status: "CANCELED", activeSlot: null, reservationToken: null, leaseUntil: null } });
-        }
-        return tx.authorityEvent.create({ data: { ...cmd, authorityId: row.id, fingerprint, kind: "TRANSITION",
-          fromState: row.state, toState: input.state, fromGeneration: row.generation, toGeneration: generation,
-          fromOwnerUserId: row.ownerUserId, toOwnerUserId: ownerUserId } });
-      };
-    }
+    transition: (input: Transition, humanIntentFingerprint?: string) => transition(input, humanIntentFingerprint),
+    admitVerifiedChatbot(input: Command & { expectedGeneration: bigint }) {
+      return transition({ ...input, state: "CHATBOT", ownerUserId: null }, undefined, true);
+    },
   };
 }
 

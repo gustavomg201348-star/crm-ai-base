@@ -8,6 +8,7 @@ import { PrismaClient } from "@prisma/client";
 import { createShadowAuthorityReader } from "./authority-text-shadow-reader";
 import { createTextAuthorityObserver } from "./authority-text-shadow";
 import type { ShadowMetric } from "./authority-text-shadow-contract";
+import * as cltOutbound from "./chatbot-clt-outbound-policy";
 import { createConversationAuthorityService } from "./conversation-authority.service";
 import {
   conversationMatchesChannel,
@@ -89,6 +90,9 @@ test("real private PostgreSQL pool cannot starve either legacy text route, even 
             "next/server": { NextResponse: { json: (body: unknown, init?: ResponseInit) => new Response(JSON.stringify(body), init) } },
             "@/lib/auth": { getSessionFromRequest: async () => ({ id: authority.ownerUserId, companyId: authority.companyId, role: "ADMIN" }) },
             "@/lib/authority-text-shadow-runtime": { observeTextOutboundAuthority: observe },
+            "@/lib/chatbot-clt-outbound-policy": { ...cltOutbound, withCltHumanSend: (_db: PrismaClient,
+              scope: Parameters<typeof cltOutbound.withCltHumanSend>[1], user: string, send: () => Promise<unknown>) =>
+              cltOutbound.withCltHumanSend(db, scope, user, send) },
             "@/lib/conversation-inbound-event": { createInboundMessageWithDurableEvent, inboundEventTransaction },
             "@/lib/activities": { createActivity: async () => {} },
             "@/lib/db": { prisma: { conversation: { findFirst: async () => conversation }, channel: { findFirst: async () => channel },

@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { Message, Prisma, PrismaClient } from "@prisma/client";
 import { createReplySnapshot, readReplySnapshot, replyFingerprint, replyContentDigest, type CaptureMetaReplyInput } from "./meta-reply-snapshot";
 import { replyProvider, replyTransaction, type ReplyProvider } from "./meta-reply-storage";
 import { createInboundMessageWithDurableEvent, inboundEventTransaction, InboundEventError } from "./conversation-inbound-event";
@@ -9,13 +9,17 @@ export class ReplyEvidencePersistenceError extends Error {
 type Evidence = Omit<CaptureMetaReplyInput, "conversationId" | "providerMessageId" | "contentDigest"> & { contactId: string };
 
 // Message, original evidence, sequence and event share one transaction.
-export function persistInboundMessage(db: Pick<PrismaClient, "$transaction">, data: Prisma.MessageUncheckedCreateInput, evidence: Evidence | undefined, companyId: string, provenance?: unknown) {
+export function persistInboundMessage(db: Pick<PrismaClient, "$transaction">, data: Prisma.MessageUncheckedCreateInput, evidence: Evidence | undefined, companyId: string, provenance?: unknown, handleVerified?: (tx: Prisma.TransactionClient, message: Message) => Promise<boolean>) {
   if (evidence && evidence.companyId !== companyId) return Promise.reject(new InboundEventError("INVALID_SCOPE"));
   const metaReplySnapshot = evidence && data.providerMessageId
     ? createReplySnapshot({ ...evidence, conversationId: data.conversationId, providerMessageId: data.providerMessageId, contentDigest: replyContentDigest(data) })
     : undefined;
-  return inboundEventTransaction(db, tx => createInboundMessageWithDurableEvent(tx, companyId, { ...data, metaReplySnapshot },
-    evidence ? { contactId: evidence.contactId, channelId: evidence.channelId } : undefined, provenance));
+  return inboundEventTransaction(db, async tx => {
+    const message = await createInboundMessageWithDurableEvent(tx, companyId, { ...data, metaReplySnapshot },
+      evidence ? { contactId: evidence.contactId, channelId: evidence.channelId } : undefined, provenance);
+    const chatbotHandled = provenance !== undefined && handleVerified ? await handleVerified(tx, message) : false;
+    return { ...message, chatbotHandled };
+  });
 }
 
 /** Both initial lookup and P2002 recovery must pass this same fail-closed check. */

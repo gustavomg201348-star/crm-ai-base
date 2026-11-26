@@ -7,7 +7,7 @@ export type EngineScope = {
   flowId: string; flowVersionId: string; sessionId: string;
 };
 export type LogicalPrompt = { id: string; stepId: string; issuedRevision: number; kind: "BUTTONS" | "LIST" | "INPUT" };
-export type ReplyEvidence = { promptId: string; inboundProviderMessageId: string; contextProviderMessageId: string };
+export type ReplyEvidence = { promptId: string; inboundProviderMessageId: string; contextProviderMessageId: string | null };
 export type PromptDelivery = { scope: EngineScope; promptId: string; providerMessageId: string };
 export type EngineVersion = { companyId: string; flowId: string; id: string; status: string; definition: unknown };
 export type EngineEvent = { id: string; occurredAt: string; reply?: ReplyEvidence } & (
@@ -59,7 +59,8 @@ function eventFingerprint(event: EngineEvent, delivery?: PromptDelivery | null) 
   reference(event.id); time(event.occurredAt);
   if (event.reply !== undefined) {
     ensure(event.kind !== "START" && record(event.reply), "INVALID_REPLY_EVIDENCE");
-    [event.reply.promptId, event.reply.inboundProviderMessageId, event.reply.contextProviderMessageId].forEach(reference);
+    [event.reply.promptId, event.reply.inboundProviderMessageId].forEach(reference);
+    if (event.reply.contextProviderMessageId !== null) reference(event.reply.contextProviderMessageId);
   }
   if (delivery !== undefined && delivery !== null) {
     ensure(event.kind !== "START" && record(delivery), "INVALID_PROMPT_DELIVERY");
@@ -82,7 +83,7 @@ function eventFingerprint(event: EngineEvent, delivery?: PromptDelivery | null) 
   ])).digest("hex");
 }
 
-// Simulation only. There is deliberately no Prisma, session writer, outbox writer or sender.
+// Pure planner. The runtime proves authority and commits its output.
 export function planChatbotExecution(input: {
   scope: EngineScope; version: EngineVersion | null; state: EngineState | null;
   expectedRevision: number; event: EngineEvent; maxSteps?: number; promptDelivery?: PromptDelivery | null;
@@ -178,7 +179,8 @@ export function planChatbotExecution(input: {
     const delivery = input.promptDelivery;
     ensure(evidence && delivery, "PROMPT_CORRELATION_REQUIRED");
     ensure(evidence.promptId === state.expectedPrompt!.id && delivery.promptId === state.expectedPrompt!.id
-      && scopeKey(delivery.scope) === key && evidence.contextProviderMessageId === delivery.providerMessageId, "PROMPT_CORRELATION_MISMATCH");
+      && scopeKey(delivery.scope) === key && (evidence.contextProviderMessageId === delivery.providerMessageId ||
+        (evidence.contextProviderMessageId === null && input.event.kind === "TEXT" && state.expectedPrompt!.kind === "INPUT")), "PROMPT_CORRELATION_MISMATCH");
     result.confirmation = { status: "CONSISTENT_PROJECTION", promptId: evidence.promptId,
       inboundProviderMessageId: evidence.inboundProviderMessageId, outboundProviderMessageId: delivery.providerMessageId };
   }
@@ -202,7 +204,10 @@ export function planChatbotExecution(input: {
       if (matches.length > 1) {
         decision(step.id, "AMBIGUOUS_TITLE"); result.outcome = "AMBIGUOUS_REPLY"; return result;
       }
-      if (matches.length === 1) next = matches[0].next;
+      if (matches.length === 1) {
+        next = matches[0].next;
+        if (step.type === "BUTTONS" && step.variable) state.variables[step.variable] = matches[0].title;
+      }
     }
     if (!next) {
       decision(step.id, "INVALID_REPLY"); result.outcome = "INVALID_REPLY"; return result;

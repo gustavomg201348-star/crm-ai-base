@@ -189,6 +189,8 @@ async function createRuntimeWorker(mode: Exclude<MaterializationWorkerMode, { ki
   }, { env });
 }
 
+export { startCltChatbotWorker } from "./chatbot-clt-runtime";
+
 export async function startOpenCreditMaterializationWorkerFromRuntime(env: WorkerEnvironment = process.env as WorkerEnvironment,
   deps: RuntimeDependencies = { createWorker: createRuntimeWorker, log: event => console.info(JSON.stringify(event)) }) {
   const finish = (started: boolean, reason: StartupReason) => {

@@ -13,7 +13,8 @@ export async function bootstrapOpenCreditServer({
   emit("worker_start", null);
   let reason = "startup_error";
   try {
-    const { startOpenCreditMaterializationWorkerFromRuntime } = await loadWorker();
+    const { startOpenCreditMaterializationWorkerFromRuntime, startCltChatbotWorker } = await loadWorker();
+    startCltChatbotWorker?.();
     const result = await startOpenCreditMaterializationWorkerFromRuntime();
     if (reasons.has(result?.reason)) reason = result.reason;
   } catch {

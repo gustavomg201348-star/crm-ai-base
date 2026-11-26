@@ -47,10 +47,10 @@ test("auto-draft preserva limiter normal e adiciona claim compartilhado antes do
 
 test("envios humanos sao bloqueados antes dos providers", () => {
   const routes = [
-    ["src/app/api/conversations/[id]/messages/route.ts", "await sendMetaTextMessage"],
+    ["src/app/api/conversations/[id]/messages/route.ts", "return sendMetaTextMessage("],
     ["src/app/api/conversations/[id]/messages/media/route.ts", "await sendConversationMedia"],
     ["src/app/api/conversations/[id]/messages/template/route.ts", "await sendConversationTemplate"],
-    ["src/app/api/channels/[id]/messages/route.ts", "await sendMetaTextMessage"]
+    ["src/app/api/channels/[id]/messages/route.ts", "return sendMetaTextMessage("]
   ] as const;
 
   for (const [path, providerCall] of routes) {

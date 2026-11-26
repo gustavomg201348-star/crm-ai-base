@@ -308,6 +308,27 @@ export async function sendMetaTextMessage({
   return data;
 }
 
+export async function sendMetaChatbotMessage({ phoneNumberId, accessToken, payload }: {
+  phoneNumberId: string; accessToken: string; payload: object;
+}): Promise<{ status: "SENT"; providerMessageId: string } | { status: "FAILED" | "UNKNOWN" }> {
+  const apiVersion = process.env.META_GRAPH_VERSION || "v20.0";
+  try {
+    const response = await fetch(`https://graph.facebook.com/${apiVersion}/${phoneNumberId}/messages`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) {
+      return { status: response.status >= 400 && response.status < 500 && response.status !== 408 ? "FAILED" : "UNKNOWN" };
+    }
+    const providerMessageId = readMetaMessageId(await response.json());
+    return providerMessageId ? { status: "SENT", providerMessageId } : { status: "UNKNOWN" };
+  } catch {
+    return { status: "UNKNOWN" };
+  }
+}
+
 export function buildMetaTextMessagePayload({
   to,
   body,
@@ -524,7 +545,7 @@ function countTemplateVariables(text?: string | null) {
   return extractMetaTemplateVariables(text).length;
 }
 
-function normalizeButtonPayload(value: string | null | undefined, index: number) {
+export function normalizeButtonPayload(value: string | null | undefined, index: number) {
   const normalized = (value || `BOTAO_${index + 1}`)
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")

@@ -29,10 +29,17 @@ function fixture(options: { preparationFails?: boolean; uploadFails?: boolean; s
         return { bytes: Buffer.from("validated audio"), fileName: "recording.ogg", mimeType: "audio/ogg" };
       }
     };
+    if (name === "@/lib/db") return { prisma: {
+      conversation: { findFirst: async ({ where }: { where: unknown }) => {
+        assert.deepEqual(where, { id: "conversation-a", channelId: "channel-a", contact: { companyId: "company-a" } });
+        return { contactId: "contact-a", agentId: "user-a", aiPaused: false, chatbotSessions: [], openCreditWhatsappMetas: [] };
+      } },
+      campaignRecipient: { findFirst: async () => null }
+    } };
     if (name === "@/lib/conversation-message.service") return {
       getConversationIntegration: async (data: Record<string, unknown>) => {
         record("scope", data);
-        return { conversation: { contact: { phone: "+5511999990000" } }, channel: { phoneNumberId: "synthetic-channel", accessToken: "synthetic-token" } };
+        return { conversation: { contact: { phone: "+5511999990000" } }, channel: { id: "channel-a", phoneNumberId: "synthetic-channel", accessToken: "synthetic-token" } };
       },
       saveOutboundMessage: async (data: Record<string, unknown>) => { record("save", data); return { id: "synthetic-message" }; }
     };

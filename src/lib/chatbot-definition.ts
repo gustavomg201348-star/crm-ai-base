@@ -1,7 +1,7 @@
 export type ChatbotOption = { id: string; title: string; next: string; description?: string };
 export type ChatbotStep = { id: string } & (
   | { type: "TEXT"; text: string; next: string }
-  | { type: "BUTTONS"; text: string; options: ChatbotOption[] }
+  | { type: "BUTTONS"; text: string; options: ChatbotOption[]; variable?: string }
   | { type: "LIST"; text: string; buttonText: string; options: ChatbotOption[] }
   | { type: "INPUT"; text: string; variable: string; maxLength: number; next: string }
   | { type: "CONDITION"; variable: string; branches: Array<{ equals: string; next: string }>; otherwise: string }
@@ -56,9 +56,10 @@ export function validateChatbotDefinition(input: unknown): ChatbotDefinition {
         if (!Number.isInteger(step.maxLength) || Number(step.maxLength) < 1 || Number(step.maxLength) > 2000) fail();
       }
     } else if (step.type === "BUTTONS" || step.type === "LIST") {
-      keys(step, step.type === "BUTTONS" ? ["id", "type", "text", "options"] : ["id", "type", "text", "buttonText", "options"]);
+      keys(step, step.type === "BUTTONS" ? ["id", "type", "text", "options", "variable"] : ["id", "type", "text", "buttonText", "options"]);
       text(step.text, 1024);
       if (step.type === "LIST") text(step.buttonText, 20);
+      if (step.type === "BUTTONS" && step.variable !== undefined) id(step.variable);
       if (!Array.isArray(step.options) || !step.options.length || step.options.length > (step.type === "BUTTONS" ? 3 : 10)) fail();
       const options = new Set<string>();
       for (const rawOption of step.options) {

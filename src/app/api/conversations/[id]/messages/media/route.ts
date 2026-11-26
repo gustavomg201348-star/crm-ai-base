@@ -1,3 +1,4 @@
+import { CltPilotSendConflict } from "@/lib/chatbot-clt-outbound-policy";
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { resolveConversationAccess } from "@/lib/conversation-access-control";
@@ -83,6 +84,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     return NextResponse.json({ conversation });
   } catch (error) {
+    if (error instanceof CltPilotSendConflict) return publicErrorResponse({ code: "CONFLICT", status: 409 });
     if (error instanceof OpenCreditTransportBlockedError) return publicErrorResponse({ code: "FORBIDDEN", status: 403 });
     const message = "Falha ao enviar midia.";
 

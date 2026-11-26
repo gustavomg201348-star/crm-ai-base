@@ -139,6 +139,7 @@ model OutboundOperation {
   @@unique([companyId, channelId, providerMessageId])
   @@index([authorityId, status])
   @@index([status, leaseUntil])
+  @@index([origin, status, createdAt], map: "OutboundOperation_origin_status_created_idx")
 }
 
 model AuthorityEvent {
@@ -263,6 +264,9 @@ model ChatbotSession {
   campaignId           String?
   campaignRecipientId  String?
   activeConversationId String? @unique
+  runtimeState         String?
+  runtimeActorId       String?
+  lastPromptKey        String?
   currentStepId        String
   status               String @default("ACTIVE")
   authority            String @default("CHATBOT")
@@ -284,6 +288,7 @@ model ChatbotSession {
 
   @@unique([companyId, channelId, id])
   @@index([companyId, conversationId, createdAt])
+  @@index([companyId, channelId, campaignId, campaignRecipientId], map: "ChatbotSession_campaign_recipient_idx")
   @@index([status, expiresAt])
 }
 
@@ -297,6 +302,7 @@ model ChatbotEvent {
   sessionRevision         Int?
   kind                    String
   payload                 String
+  inboundSequence         BigInt?
   occurredAt              DateTime
   status                  String @default("PENDING")
   attempts                Int @default(0)
@@ -1641,6 +1647,8 @@ model CltChatbotCampaignBinding {
   flowId String
   flowVersionId String
   enabled Boolean @default(false)
+  enabledAt DateTime?
+  activatedByUserId String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   campaign Campaign @relation(fields: [companyId, channelId, campaignId], references: [companyId, channelId, id], onDelete: Restrict, onUpdate: NoAction)
