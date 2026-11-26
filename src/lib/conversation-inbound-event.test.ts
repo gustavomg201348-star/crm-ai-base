@@ -122,7 +122,7 @@ test("writer inventory: exactly the two production ingress adapters use atomic p
     if (/\.message\.(?:create|createMany|upsert)\(/.test(source)) writes.push(normalized);
     if (normalized !== "lib/conversation-inbound-event.ts") assert.doesNotMatch(source, /\.conversationInboundEvent\.(?:create|createMany|update|updateMany|delete|deleteMany|upsert)\(/);
   }
-  assert.deepEqual(writes.sort(), ["app/api/channels/[id]/messages/route.ts", "app/api/conversations/[id]/messages/route.ts", "lib/campaigns.ts", "lib/conversation-inbound-event.ts", "lib/conversation-message.service.ts", "lib/message-delivery.ts"].sort());
+  assert.deepEqual(writes.sort(), ["app/api/channels/[id]/messages/route.ts", "app/api/conversations/[id]/messages/route.ts", "lib/campaigns.ts", "lib/chatbot-clt-session-runtime.ts", "lib/conversation-inbound-event.ts", "lib/conversation-message.service.ts", "lib/message-delivery.ts"].sort());
   for (const file of writes.filter(file => !["lib/conversation-inbound-event.ts", "app/api/conversations/[id]/messages/route.ts"].includes(file))) {
     assert.doesNotMatch(readFileSync("src/" + file, "utf8"), /direction:\s*["']inbound["']/);
   }
@@ -131,7 +131,7 @@ test("writer inventory: exactly the two production ingress adapters use atomic p
   assert.match(route, /if \(direction === "inbound"\)\s*\{\s*await createInboundMessageWithDurableEvent/);
   assert.match(route, /else\s*\{\s*await tx.message.create/);
   const ingestion = readFileSync("src/lib/meta-reply-ingestion.ts", "utf8");
-  assert.match(ingestion, /inboundEventTransaction\(db, tx => createInboundMessageWithDurableEvent/);
+  assert.match(ingestion, /inboundEventTransaction\(db, async tx => \{\s*const message = await createInboundMessageWithDurableEvent[\s\S]*handleVerified\(tx, message\)/);
   const inbound = readFileSync("src/lib/inbound-message.ts", "utf8");
   assert.match(inbound, /isProviderMessageIdUniqueViolation\(error\)/);
   assert.match(inbound, /return mapConversation\(existingMessage.conversation\)/);
