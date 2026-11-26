@@ -15625,7 +15625,53 @@ function summarizeTemplateImportValidation(
 }
 
 
-function CltCampaignControl({ campaign }: { campaign: CampaignRow }) {
+
+function CltCompanyEmergencyControl({ onState }: { onState: (value: boolean | null) => void }) {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const lock = useRef(false);
+  const url = "/api/campaigns/clt-chatbot/company";
+  const refresh = useCallback(async (signal?: AbortSignal) => {
+    const response = await fetch(url, { cache: "no-store", signal });
+    const data = await response.json();
+    if (!response.ok || typeof data.enabled !== "boolean") throw new Error("Status indisponivel.");
+    if (!signal?.aborted) { setEnabled(data.enabled); onState(data.enabled); }
+  }, [url, onState]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void refresh(controller.signal).catch(() => { if (!controller.signal.aborted) { setError("Status nao confirmado. Use Desligar todos para solicitar a pausa."); onState(null); } });
+    return () => controller.abort();
+  }, [refresh, onState]);
+  async function change(next: boolean) {
+    if (lock.current) return;
+    if (next && !window.confirm("Liberar o chatbot CLT nesta empresa? Cada campanha ainda precisa ser ativada separadamente.")) return;
+    lock.current = true; setBusy(true); setError(""); onState(null);
+    try {
+      const response = await fetch(url, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: next }) });
+      const data = await response.json();
+      if (!response.ok || data.enabled !== next) throw new Error("Alteracao nao confirmada.");
+      setEnabled(next); onState(next);
+    } catch { setEnabled(null); onState(null); setError("Alteracao nao confirmada. Tente desligar novamente."); }
+    finally { lock.current = false; setBusy(false); }
+  }
+  return (
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div><p className="text-sm font-black text-slate-900">Controle geral do chatbot CLT</p>
+        <p className="mt-1 text-xs text-slate-600">Todas as campanhas desta empresa. Nao interrompe disparos de templates nem atendimento manual.</p>
+        <p aria-live="polite" className={clsx("mt-1 text-xs font-bold", enabled === true ? "text-emerald-700" : "text-rose-700")}>{busy ? "Atualizando..." : enabled === null ? "Status nao confirmado" : enabled ? "Liberado por campanha" : "Desligado geral"}</p>
+        {error && <p role="alert" className="mt-1 text-xs text-rose-700">{error}</p>}
+      </div>
+      <div className="flex gap-2">
+        <button type="button" disabled={busy || enabled === true} onClick={() => void change(true)} className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-800 disabled:opacity-50">Liberar chatbot</button>
+        <button type="button" disabled={busy} onClick={() => void change(false)} className="rounded-xl bg-rose-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">Desligar todos</button>
+      </div>
+      <p className="w-full text-xs text-slate-500">A pausa desativa os vinculos das campanhas; um envio ja autorizado pode terminar. Religando, nenhuma campanha volta automaticamente.</p>
+    </div>
+  );
+}
+
+function CltCampaignControl({ campaign, companyEnabled }: { campaign: CampaignRow; companyEnabled: boolean | null }) {
   const [binding, setBinding] = useState<{ enabled: boolean; optionId: string } | null | undefined>(undefined);
   const [title, setTitle] = useState("Conferir");
   const [busy, setBusy] = useState(false);
@@ -15647,7 +15693,7 @@ function CltCampaignControl({ campaign }: { campaign: CampaignRow }) {
   async function toggle() {
     if (inFlight.current || binding === undefined) return;
     const enable = !binding?.enabled;
-    if (enable && !binding && campaign.status !== "DRAFT") return;
+    if (enable && (companyEnabled !== true || (!binding && campaign.status !== "DRAFT"))) return;
     if (enable && !window.confirm("Ativar chatbot para novos envios desta campanha? Templates enviados antes da ativacao nao iniciam o fluxo.")) return;
     inFlight.current = true; setBusy(true); setError("");
     try {
@@ -15678,10 +15724,10 @@ function CltCampaignControl({ campaign }: { campaign: CampaignRow }) {
       <div className="flex items-center justify-between gap-3">
         <div><p className="text-sm font-bold text-slate-900">Chatbot comercial CLT</p>
           <p aria-live="polite" className={clsx("text-xs font-semibold", binding?.enabled ? "text-emerald-700" : "text-slate-600")}>{busy ? "Atualizando..." : binding === undefined ? "Status nao confirmado" : binding?.enabled ? "Ativado" : "Desativado"}</p></div>
-        <button type="button" role="switch" aria-label="Chatbot comercial CLT" aria-checked={Boolean(binding?.enabled)} disabled={busy || binding === undefined || (!binding && campaign.status !== "DRAFT")} onClick={() => void toggle()} className={clsx("relative h-7 w-12 shrink-0 rounded-full transition disabled:opacity-50", binding?.enabled ? "bg-emerald-600" : "bg-slate-400")}><span className={clsx("absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all", binding?.enabled ? "left-6" : "left-1")} /></button>
+        <button type="button" role="switch" aria-label="Chatbot comercial CLT" aria-checked={Boolean(binding?.enabled)} disabled={busy || binding === undefined || (!binding?.enabled && (companyEnabled !== true || (!binding && campaign.status !== "DRAFT")))} onClick={() => void toggle()} className={clsx("relative h-7 w-12 shrink-0 rounded-full transition disabled:opacity-50", binding?.enabled ? "bg-emerald-600" : "bg-slate-400")}><span className={clsx("absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all", binding?.enabled ? "left-6" : "left-1")} /></button>
       </div>
       {binding === null && campaign.status === "DRAFT" && <label className="mt-3 block text-xs font-semibold text-slate-600">Botao do template<select className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2" value={title} disabled={busy} onChange={event => setTitle(event.target.value)}><option>Conferir</option><option>Verificar</option></select></label>}
-      <p className="mt-2 text-xs text-slate-500">{binding?.enabled ? "Desligue aqui para interromper novos envios do chatbot. Um envio ja autorizado pode terminar." : binding === null && campaign.status !== "DRAFT" ? "Prepare um novo rascunho para ativar antes do disparo." : "Ative antes de iniciar o disparo. A pausa nao cancela os templates da campanha."}</p>
+      <p className="mt-2 text-xs text-slate-500">{companyEnabled !== true ? "Controle geral desligado ou nao confirmado. Libere primeiro o chatbot geral." : binding?.enabled ? "Desligue aqui para interromper novos envios do chatbot. Um envio ja autorizado pode terminar." : binding === null && campaign.status !== "DRAFT" ? "Prepare um novo rascunho para ativar antes do disparo." : "Ative antes de iniciar o disparo. A pausa nao cancela os templates da campanha."}</p>
       {error && <p role="alert" className="mt-2 text-xs font-semibold text-rose-700">{error}</p>}
       <button type="button" disabled={busy} onClick={() => void refresh()} className="mt-2 text-xs font-semibold text-brand disabled:opacity-50">Atualizar status</button>
     </div>
@@ -15745,6 +15791,7 @@ function Disparos({
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
   const [draftOnly, setDraftOnly] = useState(false);
+  const [companyEnabled, setCompanyEnabled] = useState<boolean | null>(null);
   const [lastCampaign, setLastCampaign] = useState<CampaignRow | null>(null);
   const [selectedCampaignId, setSelectedCampaignId] = useState("");
   const [campaignStatusFilter, setCampaignStatusFilter] = useState("ALL");
@@ -16481,6 +16528,7 @@ function Disparos({
 
   return (
     <>
+      <CltCompanyEmergencyControl onState={setCompanyEnabled} />
       <CampaignAnalyticsDashboard />
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_400px]">
       <form
@@ -17416,7 +17464,7 @@ function Disparos({
               </span>
             </div>
 
-            {selectedCampaign.messageType === "TEMPLATE" && <CltCampaignControl key={selectedCampaign.id} campaign={selectedCampaign} />}
+            {selectedCampaign.messageType === "TEMPLATE" && <CltCampaignControl key={`${selectedCampaign.id}:${companyEnabled}`} campaign={selectedCampaign} companyEnabled={companyEnabled} />}
 
             <div className="mt-4 grid grid-cols-2 gap-2 text-center text-xs">
               <span className="rounded-xl bg-slate-50 p-3">
