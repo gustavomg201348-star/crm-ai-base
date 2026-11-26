@@ -1,0 +1,1 @@
+ALTER TABLE "Company" ADD COLUMN "cltChatbotEnabled" BOOLEAN NOT NULL DEFAULT false;

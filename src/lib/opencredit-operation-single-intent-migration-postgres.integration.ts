@@ -74,7 +74,9 @@ async function isolated(run: (db: PrismaClient, url: string) => Promise<void>) {
   }
 }
 async function fixture(db: PrismaClient) {
-  const company = await db.company.create({ data: { name: "Synthetic migration fixture" }, select: { id: true } });
+  // Seed only columns present in every historical schema under test.
+  const company = { id: randomUUID() };
+  await db.$executeRaw`INSERT INTO "Company" ("id", "name", "createdAt") VALUES (${company.id}, ${"Synthetic migration fixture"}, CURRENT_TIMESTAMP)`;
   const user = await db.user.create({ data: { companyId: company.id, name: "Synthetic", email: randomUUID() + "@example.invalid", role: "ADMIN", passwordHash: "SYNTHETIC" }, select: { id: true } });
   const scope = "synthetic-migration-" + randomUUID();
   await db.openCreditCommercialAccess.create({ data: { companyId: company.id, providerScope: scope, changedByUserId: user.id }, select: { id: true } });

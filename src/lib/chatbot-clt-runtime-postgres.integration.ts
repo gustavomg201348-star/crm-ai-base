@@ -13,6 +13,7 @@ async function main() {
   const { prisma: db } = await import("./db");
   const { createCltSessionRuntime } = await import("./chatbot-clt-session-runtime");
   const { configureCltCampaign, setCltCampaignEnabled } = await import("./chatbot-clt-admin-config");
+  const { setCltCompanyEnabled } = await import("./chatbot-clt-company-control");
   const { cltBlocksAiSend, requireCltHumanSend } = await import("./chatbot-clt-outbound-policy");
   const { assignConversationToUser, maybeAutoAssignConversation } = await import("./lead-assignment");
   const { createConversationAuthorityService } = await import("./conversation-authority.service");
@@ -65,6 +66,7 @@ async function main() {
       language: campaign.templateLanguage!, metaStatus: "APPROVED", operationalStatus: "READY",
       components: JSON.stringify([{ type: "BODY", text: "Synthetic" }, { type: "BUTTONS", buttons: [{ type: "QUICK_REPLY", text: title }] }]) } });
     const admin = { companyId: company.id, actorUserId: user.id, campaignId: campaign.id };
+    await setCltCompanyEnabled(database, { ...admin, enabled: true });
     const configured = await configureCltCampaign(db, { ...admin, buttonTitle: title });
     assert.equal(configured.enabled, false);
     const setEnabled = (enabled: boolean) => setCltCampaignEnabled(database, { ...admin, enabled });
@@ -209,6 +211,22 @@ async function main() {
       campaignId: active.campaign.id, enabled: false }), /BINDING_NOT_FOUND/);
     await assert.rejects(setCltCampaignEnabled(database, { companyId: active.company.id, actorUserId: active.agent.id,
       campaignId: active.campaign.id, enabled: false }), /FORBIDDEN/);
+  });
+
+  test("company emergency stop fences pending messages, isolates tenants and requires explicit campaign reactivation", async () => {
+    const f = await fixture();
+    const other = await fixture();
+    await f.start(); await f.drain(1);
+    await assert.rejects(setCltCompanyEnabled(database, { companyId: f.company.id, actorUserId: other.user.id, enabled: false }), /FORBIDDEN/);
+    await setCltCompanyEnabled(database, { companyId: f.company.id, actorUserId: f.user.id, enabled: false });
+    await assert.rejects(f.setEnabled(true), /COMPANY_CHATBOT_DISABLED/);
+    await f.drain();
+    assert.equal(f.sent().length, 0);
+    assert.equal((await f.owner())?.state, "HUMAN_QUEUE");
+    await setCltCompanyEnabled(database, { companyId: f.company.id, actorUserId: f.user.id, enabled: true });
+    assert.equal((await db.cltChatbotCampaignBinding.findFirstOrThrow({ where: { campaignId: f.campaign.id } })).enabled, false);
+    await other.start(); await other.drain();
+    assert.equal(other.sent().length, 1);
   });
 
   test("pause cancels pending jobs before network dispatch and hands off", async () => {

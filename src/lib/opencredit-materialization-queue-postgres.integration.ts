@@ -403,11 +403,13 @@ test("queue migration preserves preexisting PENDING and NEEDS_REVIEW without cla
     assert(migrations.includes(migration));
     for (const dir of migrations.filter(dir => dir < migration)) cpSync(join("prisma/migrations", dir), join(temp, "migrations", dir), { recursive: true });
     deploy();
-    const company = await isolated.company.create({ data: { name: "Historical queue" } });
+    const company = { id: randomUUID() };
+    await isolated.$executeRaw`INSERT INTO "Company" ("id", "name", "createdAt") VALUES (${company.id}, ${"Historical queue"}, CURRENT_TIMESTAMP)`;
     const companyId = company.id;
     const providerScope = "historical-queue";
     const integration = await isolated.openCreditIntegration.create({ data: { companyId, providerScope, publicWebhookId: randomUUID(), webhookSecret: "fixture" } });
-    const emptyCompany = await isolated.company.create({ data: { name: "No historical jobs" } });
+    const emptyCompany = { id: randomUUID() };
+    await isolated.$executeRaw`INSERT INTO "Company" ("id", "name", "createdAt") VALUES (${emptyCompany.id}, ${"No historical jobs"}, CURRENT_TIMESTAMP)`;
     for (const state of ["PENDING", "NEEDS_REVIEW"]) {
       const externalLeadId = "historical-" + state;
       const binding = { companyId, providerScope, integrationId: integration.id, externalLeadId };

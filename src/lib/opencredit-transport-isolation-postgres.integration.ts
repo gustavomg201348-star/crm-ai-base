@@ -90,7 +90,8 @@ test("migration upgrades preexisting WhatsApp rows without backfill or changing 
     assert(migrations.includes(migration));
     for (const dir of migrations.filter(dir => dir < migration)) cpSync(join("prisma/migrations", dir), join(temp, "migrations", dir), { recursive: true });
     deploy();
-    const company = await isolated.company.create({ data: { name: "Historical WhatsApp" } });
+    const company = { id: randomUUID() };
+    await isolated.$executeRaw`INSERT INTO "Company" ("id", "name", "createdAt") VALUES (${company.id}, ${"Historical WhatsApp"}, CURRENT_TIMESTAMP)`;
     const contact = await isolated.contact.create({ data: { companyId: company.id, name: "Synthetic", phone: "5511987654321" } });
     const channel = await isolated.channel.create({
       data: { companyId: company.id, name: "Existing", provider: "meta", accessToken: "synthetic-token", phoneNumberId: "synthetic-phone" },

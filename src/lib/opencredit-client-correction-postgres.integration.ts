@@ -37,9 +37,16 @@ after(async () => { globalThis.fetch = originalFetch; await db.$disconnect(); })
 const mainDb = db;
 async function fixture(client: PrismaClient = mainDb) {
   const db = client;
-  const company = await db.company.create({ data: { name: "Synthetic authorization" } });
-  const other = await db.company.create({ data: { name: "Synthetic other" } });
-  const platform = await db.company.create({ data: { name: "Synthetic platform" } });
+  // This fixture also runs against a historical migration prefix.
+  // Avoid modern Prisma Company defaults/return fields that do not exist there.
+  async function seedCompany(name: string) {
+    const id = randomUUID();
+    await db.$executeRaw`INSERT INTO "Company" ("id", "name", "createdAt") VALUES (${id}, ${name}, CURRENT_TIMESTAMP)`;
+    return { id };
+  }
+  const company = await seedCompany("Synthetic authorization");
+  const other = await seedCompany("Synthetic other");
+  const platform = await seedCompany("Synthetic platform");
   const user = await db.user.create({ data: { companyId: platform.id, name: "Synthetic admin", email: randomUUID() + "@example.invalid", passwordHash: "NOT_A_REAL_HASH", role: "ADMIN" } });
   const actor: SessionUser = { id: user.id, companyId: platform.id, role: "ADMIN", email: user.email, name: user.name };
   const contact = await db.contact.create({ data: { companyId: company.id, name: "Synthetic", phone: "5547999999999", normalizedPhone: classifyPhoneNormalization("5547999999999").normalizedPhone, cpf: "00000000000" } });

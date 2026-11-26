@@ -1,3 +1,4 @@
+import { lockCltCompanyGate } from "./chatbot-clt-company-control";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { ChatbotError } from "./chatbot-definition";
 import { canonicalChatbotValue } from "./chatbot-canonical";
@@ -75,6 +76,7 @@ export async function setCltCampaignEnabled(database: AuthorityDatabase, input: 
   return storage.transaction(async tx => {
     const actor = await tx.user.findFirst({ where: { id: actorUserId, companyId, role: "ADMIN" } });
     requireConfig(actor, "FORBIDDEN");
+    if (enabled) requireConfig(await lockCltCompanyGate(tx, database.provider, companyId), "COMPANY_CHATBOT_DISABLED");
     const binding = await tx.cltChatbotCampaignBinding.findFirst({ where: { companyId, campaignId }, include: {
       campaign: { include: { channel: true } },
       version: { include: { flow: true } }
