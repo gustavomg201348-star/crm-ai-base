@@ -153,9 +153,10 @@ export function createCltSessionRuntime(database: AuthorityDatabase, transport: 
       if (!session?.campaignId) return false;
       const current = await storage.lock(tx, scope);
       if (current.state !== "CHATBOT") return false;
-      const binding = await lockBinding(tx, scope, session.campaignId);
+      const companyEnabled = await lockCltCompanyGate(tx, database.provider, scope.companyId);
+      const binding = companyEnabled ? await lockBinding(tx, scope, session.campaignId) : null;
       const now = await storage.now(tx);
-      if (!await lockCltCompanyGate(tx, database.provider, scope.companyId) || !binding?.enabled || session.expiresAt <= now) return release(tx, session, "CLT_UNAVAILABLE");
+      if (!companyEnabled || !binding?.enabled || session.expiresAt <= now) return release(tx, session, "CLT_UNAVAILABLE");
 
       const event = await tx.chatbotEvent.findFirst({ where: { sessionId: session.id, status: "PENDING", inboundSequence: { not: null } },
         orderBy: { inboundSequence: "asc" } });
@@ -246,6 +247,7 @@ export function createCltSessionRuntime(database: AuthorityDatabase, transport: 
       if (!reserved?.reservationToken) return;
       const permit = token = reserved.reservationToken;
       authorized = await outbound.authorizeDispatch({ ...input, token: permit, validate: async tx => {
+        if (!await lockCltCompanyGate(tx, database.provider, scope.companyId)) throw new ChatbotError("CLT_DISPATCH_UNAVAILABLE");
         const session = await tx.chatbotSession.findFirst({ where: { ...scope, id: content.sessionId, ...runtimeSession } });
         const binding = session?.campaignId && await lockBinding(tx, scope, session.campaignId);
         const latest = await tx.channel.findFirst({ where: { id: scope.channelId, companyId: scope.companyId,
@@ -253,7 +255,7 @@ export function createCltSessionRuntime(database: AuthorityDatabase, transport: 
         const event = await tx.chatbotEvent.findFirst({ where: { id: content.eventId, sessionId: content.sessionId, status: "PROCESSED" } });
         const cause = event && await tx.message.findFirst({ where: { id: JSON.parse(event.payload).messageId,
           conversationId: scope.conversationId, metaReplyConflictSnapshot: null } });
-        if (!await lockCltCompanyGate(tx, database.provider, scope.companyId) || !session || !binding || !binding.enabled || !latest || !cause || session.expiresAt <= await storage.now(tx)) {
+        if (!session || !binding || !binding.enabled || !latest || !cause || session.expiresAt <= await storage.now(tx)) {
           throw new ChatbotError("CLT_DISPATCH_UNAVAILABLE");
         }
       } });
