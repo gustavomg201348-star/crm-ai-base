@@ -424,7 +424,8 @@ for (const cutoff of ["20261029190000_add_opencredit_passive_inbound", "20261030
     copyFileSync("prisma/schema.postgres.prisma",join(temp,"schema.postgres.prisma")); mkdirSync(join(temp,"migrations")); copyFileSync("prisma/migrations/migration_lock.toml",join(temp,"migrations/migration_lock.toml"));
     const names=readdirSync("prisma/migrations",{withFileTypes:true}).filter(e=>e.isDirectory()).map(e=>e.name).sort(); assert(names.includes(cutoff));
     for(const m of names.filter(n=>n<cutoff)) cpSync(join("prisma/migrations",m),join(temp,"migrations",m),{recursive:true}); deploy();
-    const c=await isolated.company.create({data:{name:"Synthetic historical"}});
+    const c = { id: randomUUID() };
+    await isolated.$executeRaw`INSERT INTO "Company" ("id", "name", "createdAt") VALUES (${c.id}, ${"Synthetic historical"}, CURRENT_TIMESTAMP)`;
     for (const enabled of [false,true]) {
       await isolated.$executeRaw`INSERT INTO "OpenCreditIntegration" ("id","companyId","publicWebhookId","webhookSecret","enabled","paused","createdAt","updatedAt") VALUES (${enabled ? "historical-on" : "historical-off"},${c.id},${(enabled ? "b" : "c").repeat(48)},'synthetic-existing-cipher',${enabled},${!enabled},NOW(),NOW())`;
     }

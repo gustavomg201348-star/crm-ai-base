@@ -337,7 +337,8 @@ test("additive upgrade of the 32-migration production fixture preserves all exis
     assert.equal(names.length, 32);
     for (const n of names) cpSync(join("prisma/migrations", n), join(directory, "migrations", n), { recursive: true });
     deploy();
-    const company = await isolated.company.create({ data: { name: "Synthetic upgrade" } });
+    const company = { id: randomUUID() };
+    await isolated.$executeRaw`INSERT INTO "Company" ("id", "name", "createdAt") VALUES (${company.id}, ${"Synthetic upgrade"}, CURRENT_TIMESTAMP)`;
     const integration = await isolated.openCreditIntegration.create({ data: { companyId: company.id, providerScope: "synthetic-upgrade",
       publicWebhookId: randomUUID(), webhookSecret: "synthetic", passiveInboundEnabled: true, materializationEnabled: true } });
     const event = await isolated.openCreditInboundEvent.create({ data: {

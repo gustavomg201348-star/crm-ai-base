@@ -173,7 +173,8 @@ test("upgrade preserves existing legacy, passive inbox and new-mode rows without
     const names = readdirSync("prisma/migrations", { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => entry.name);
     for (const entry of names.filter(entry => entry < migration)) copyMigration(entry);
     deploy();
-    const company = await isolated.company.create({ data: { name: "Synthetic historical interlock" } });
+    const company = { id: randomUUID() };
+    await isolated.$executeRaw`INSERT INTO "Company" ("id", "name", "createdAt") VALUES (${company.id}, ${"Synthetic historical interlock"}, CURRENT_TIMESTAMP)`;
     const [integration] = await Promise.all([legacy, materialization, none].map(mode =>
       isolated.openCreditIntegration.create({ data: {
         ...mode, companyId: company.id, providerScope: "synthetic-scope",

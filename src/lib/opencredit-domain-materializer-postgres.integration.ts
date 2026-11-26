@@ -666,7 +666,8 @@ test("upgrade from 31 migrations preserves historical jobs, inbox, legacy and do
     assert.equal(previous.length, 31);
     for (const entry of previous) copy(entry);
     deploy();
-    const { id: companyId } = await isolated.company.create({ data: { name: "Historical" } });
+    const companyId = randomUUID();
+    await isolated.$executeRaw`INSERT INTO "Company" ("id", "name", "createdAt") VALUES (${companyId}, ${"Historical"}, CURRENT_TIMESTAMP)`;
     const providerScope = "historical-scope";
     const integration = await isolated.openCreditIntegration.create({ data: {
       companyId, providerScope, enabled: true, passiveInboundEnabled: true, publicWebhookId: randomUUID(), webhookSecret: "synthetic"

@@ -600,12 +600,13 @@ test("clean migration and upgrade preserve historical rows and never backfill/en
     const copy = (entry: string) => cpSync(join("prisma/migrations", entry), join(directory, "migrations", entry), { recursive: true });
     const previous = names.filter(n => n < migration); assert.equal(previous.length, 33);
     for (const entry of previous) copy(entry); deploy();
-    const company = await isolated.company.create({ data: { name: "Synthetic historical" } });
+    const company = { id: randomUUID() };
+    await isolated.$executeRaw`INSERT INTO "Company" ("id", "name", "createdAt") VALUES (${company.id}, ${"Synthetic historical"}, CURRENT_TIMESTAMP)`;
     const integration = await isolated.openCreditIntegration.create({ data: { companyId: company.id, providerScope: "synthetic-history", publicWebhookId: randomUUID(), webhookSecret: "synthetic" } });
     const contact = await isolated.contact.create({ data: { companyId: company.id, name: "Synthetic", phone: "5511987654321" } });
     const channel = await isolated.channel.create({ data: { companyId: company.id, name: "OpenCredit", provider: "internal", type: "OPEN_CREDIT" } });
     await isolated.conversation.create({ data: { contactId: contact.id, channelId: channel.id, channel: "OPEN_CREDIT" } });
-    const snapshot = () => Promise.all([isolated.company.findMany(), isolated.contact.findMany(), isolated.channel.findMany(),
+    const snapshot = () => Promise.all([isolated.company.findMany({ select: { id: true, name: true, segment: true, aiMode: true, aiInstructions: true, createdAt: true } }), isolated.contact.findMany(), isolated.channel.findMany(),
       isolated.conversation.findMany(), isolated.openCreditIntegration.findMany(), isolated.message.count()]);
     const before = await snapshot(), networkBefore = network.length;
     copy(migration); deploy(); assert.deepEqual(await snapshot(), before);
