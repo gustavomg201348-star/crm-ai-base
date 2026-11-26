@@ -143,5 +143,5 @@ export function createMetaReplyCorrelation(db: PrismaClient, options: { provider
     return result;
   }
 
-  return { processMessage, refresh, processBatch };
+  return { processMessage, processInTransaction, refresh, processBatch };
 }

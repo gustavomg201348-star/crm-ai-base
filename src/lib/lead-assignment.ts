@@ -402,7 +402,9 @@ export async function maybeAutoAssignConversation({
         where: { id: conversationId, contact: { companyId }, status: { in: ["OPEN", "PENDING", "BOT"] } },
         select: { id: true, agentId: true }
       });
-      if (!existing || existing.agentId) return null;
+      if (!existing || existing.agentId || await tx.conversationAuthority.findFirst({
+        where: { companyId, conversationId, state: "CHATBOT" }, select: { id: true }
+      })) return null;
 
       const attendants = await listAttendants(companyId, tx);
       const next = attendants

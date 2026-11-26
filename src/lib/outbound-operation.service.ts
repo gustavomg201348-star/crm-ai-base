@@ -10,6 +10,7 @@ import { authorityStorage, type AuthorityDatabase, type AuthorityTx } from "./co
 
 type OperationInput = AuthorityScope & { operationId: string };
 type Result = { status: "SENT" | "FAILED" | "UNKNOWN"; providerMessageId?: string };
+type Prepare = AuthorityScope & { expectedGeneration: bigint; logicalKey: string; origin: OutboundOrigin; actorUserId?: string | null; payload: unknown };
 
 export function createOutboundOperationService(database: AuthorityDatabase) {
   const storage = authorityStorage(database);
@@ -23,7 +24,6 @@ export function createOutboundOperationService(database: AuthorityDatabase) {
     return row;
   }
   async function eligible(tx: AuthorityTx, authority: ConversationAuthority, origin: string, actorUserId: string | null) {
-    requireAuthority(origin !== "CHATBOT", "CHATBOT_ACTIVATION_BLOCKED");
     const conversation = await tx.conversation.findFirst({ where: {
       id: authority.conversationId, contactId: authority.contactId, channelId: authority.channelId,
       contact: { companyId: authority.companyId, archivedAt: null },
@@ -38,7 +38,12 @@ export function createOutboundOperationService(database: AuthorityDatabase) {
       requireAuthority(["ADMIN", "SUPERVISOR"].includes(actor.role) || !conversation.agentId || conversation.agentId === actor.id, "FORBIDDEN");
     } else if (origin === "AI") {
       requireAuthority(authority.state === "AI" && actorUserId === null, "AUTHORITY_DENIED");
+    } else if (origin === "CHATBOT") {
+      requireAuthority(authority.state === "CHATBOT" && actorUserId === null && !conversation.agentId &&
+        await tx.chatbotSession.findFirst({ where: { companyId: authority.companyId, channelId: authority.channelId,
+          activeConversationId: authority.conversationId, status: "ACTIVE", runtimeActorId: { not: null } }, select: { id: true } }), "AUTHORITY_DENIED");
     } else if (origin === "CAMPAIGN") {
+      requireAuthority(authority.state !== "CHATBOT", "AUTHORITY_DENIED");
       requireReference(actorUserId);
       await storage.actor(tx, authority.companyId, actorUserId, true);
     } else requireAuthority(false, "INVALID_ORIGIN");
@@ -54,40 +59,47 @@ export function createOutboundOperationService(database: AuthorityDatabase) {
     return status === "UNKNOWN" ? { activeSlot: row.activeSlot, reservationToken: row.reservationToken }
       : { activeSlot: null, reservationToken: null };
   }
+  async function prepareInTransaction(tx: AuthorityTx, input: Prepare) {
+    input = { ...input };
+    const scope = authorityScope(input); requireGeneration(input.expectedGeneration); requireReference(input.logicalKey);
+    requireAuthority(["HUMAN", "AI", "CAMPAIGN", "CHATBOT"].includes(input.origin), "INVALID_ORIGIN");
+    const actorUserId = input.actorUserId ?? null;
+    if (actorUserId !== null) requireReference(actorUserId);
+    const content = canonicalChatbotValue(input.payload);
+    requireAuthority(content.length <= 65536 && input.payload !== null && typeof input.payload === "object" && !Array.isArray(input.payload), "INVALID_PAYLOAD");
+    const snapshot: unknown = JSON.parse(content);
+    const intent = { ...scope, generation: input.expectedGeneration.toString(), origin: input.origin, actorUserId };
+    const authority = await storage.lock(tx, scope);
+    if (actorUserId) await storage.actor(tx, scope.companyId, actorUserId);
+    const existing = await tx.outboundOperation.findUnique({ where: { companyId_channelId_logicalKey: {
+      companyId: scope.companyId, channelId: scope.channelId, logicalKey: input.logicalKey
+    } } });
+    if (existing) {
+      const fingerprint = authorityFingerprint({ ...intent, payload: canonicalChatbotValue({ destination: JSON.parse(existing.payload).destination, content: snapshot }) });
+      requireAuthority(existing.fingerprint === fingerprint && existing.conversationId === scope.conversationId, "IDEMPOTENCY_CONFLICT");
+      return existing;
+    }
+    requireAuthority(authority.generation === input.expectedGeneration, "GENERATION_CONFLICT");
+    const conversation = await eligible(tx, authority, input.origin, actorUserId);
+    const destination = normalizeContactPhone(conversation.contact.phone);
+    requireReference(destination);
+    const payload = canonicalChatbotValue({ destination, content: snapshot });
+    return tx.outboundOperation.create({ data: {
+      ...scope, authorityId: authority.id, logicalKey: input.logicalKey, origin: input.origin, actorUserId,
+      authorityGeneration: authority.generation, fingerprint: authorityFingerprint({ ...intent, payload }), payload
+    } });
+  }
   return {
-    async prepare(input: AuthorityScope & { expectedGeneration: bigint; logicalKey: string; origin: OutboundOrigin; actorUserId?: string | null; payload: unknown }) {
+    async prepare(input: Prepare) {
       input = { ...input };
-      const scope = authorityScope(input); requireGeneration(input.expectedGeneration); requireReference(input.logicalKey);
-      requireAuthority(["HUMAN", "AI", "CAMPAIGN", "CHATBOT"].includes(input.origin), "INVALID_ORIGIN");
+      authorityScope(input);
       requireAuthority(input.origin !== "CHATBOT", "CHATBOT_ACTIVATION_BLOCKED");
-      const actorUserId = input.actorUserId ?? null;
-      if (actorUserId !== null) requireReference(actorUserId);
-      const content = canonicalChatbotValue(input.payload);
-      requireAuthority(content.length <= 65536 && input.payload !== null && typeof input.payload === "object" && !Array.isArray(input.payload), "INVALID_PAYLOAD");
-      const snapshot: unknown = JSON.parse(content);
-      const intent = { ...scope, generation: input.expectedGeneration.toString(), origin: input.origin, actorUserId };
-      return storage.transaction(async tx => {
-        const authority = await storage.lock(tx, scope);
-        if (actorUserId) await storage.actor(tx, scope.companyId, actorUserId);
-        const existing = await tx.outboundOperation.findUnique({ where: { companyId_channelId_logicalKey: {
-          companyId: scope.companyId, channelId: scope.channelId, logicalKey: input.logicalKey
-        } } });
-        if (existing) {
-          const fingerprint = authorityFingerprint({ ...intent, payload: canonicalChatbotValue({ destination: JSON.parse(existing.payload).destination, content: snapshot }) });
-          requireAuthority(existing.fingerprint === fingerprint && existing.conversationId === scope.conversationId, "IDEMPOTENCY_CONFLICT");
-          return existing;
-        }
-        requireAuthority(authority.generation === input.expectedGeneration, "GENERATION_CONFLICT");
-        const conversation = await eligible(tx, authority, input.origin, actorUserId);
-        const destination = normalizeContactPhone(conversation.contact.phone);
-        requireReference(destination);
-        const payload = canonicalChatbotValue({ destination, content: snapshot });
-        return tx.outboundOperation.create({ data: {
-          ...scope, authorityId: authority.id, logicalKey: input.logicalKey, origin: input.origin, actorUserId,
-          authorityGeneration: authority.generation, fingerprint: authorityFingerprint({ ...intent, payload }), payload
-        } });
-      });
+      return storage.transaction(tx => prepareInTransaction(tx, input));
     },
+    prepareCampaignInTransaction: (tx: AuthorityTx, input: Omit<Prepare, "origin">) =>
+      prepareInTransaction(tx, { ...input, origin: "CAMPAIGN" }),
+    prepareChatbotInTransaction: (tx: AuthorityTx, input: Omit<Prepare, "origin" | "actorUserId">) =>
+      prepareInTransaction(tx, { ...input, origin: "CHATBOT", actorUserId: null }),
     async reserve(input: OperationInput & { expectedGeneration: bigint; leaseMs?: number }) {
       input = { ...input };
       selection(input); requireGeneration(input.expectedGeneration);
@@ -150,20 +162,23 @@ export function createOutboundOperationService(database: AuthorityDatabase) {
         return true;
       });
     },
-    async finish(input: OperationInput & Result & { token: string }) {
+    async finish(input: OperationInput & Result & { token: string }, persist?: (tx: AuthorityTx, updated: OutboundOperation) => Promise<void>) {
       input = { ...input };
       selection(input); requireReference(input.token); const outcome = result(input);
       const fingerprint = authorityFingerprint({ ...outcome, token: input.token });
       return storage.transaction(async tx => {
+        if (persist) await storage.lockConversation(tx, input.companyId, input.conversationId);
         await storage.lock(tx, input); const row = await operation(tx, input);
         if (row.resultFingerprint) {
           requireAuthority(row.resultFingerprint === fingerprint, "RESULT_CONFLICT");
           return row;
         }
         requireAuthority(row.status === "DISPATCHING" && row.reservationToken === input.token, "INVALID_OPERATION_STATE");
-        return tx.outboundOperation.update({ where: { id: row.id }, data: {
+        const updated = await tx.outboundOperation.update({ where: { id: row.id }, data: {
           ...outcome, ...retained(row, outcome.status), resultFingerprint: fingerprint, dispatchDeadline: null
         } });
+        await persist?.(tx, updated);
+        return updated;
       });
     },
     async recover(input: OperationInput) {

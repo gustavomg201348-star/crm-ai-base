@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import type { Contact, Conversation } from "@prisma/client";
 import { getSessionFromRequest } from "@/lib/auth";
+import { CltPilotSendConflict, withCltHumanSend, readCltEnrollment } from "@/lib/chatbot-clt-outbound-policy";
 import { observeTextOutboundAuthority } from "@/lib/authority-text-shadow-runtime";
 import { createActivity } from "@/lib/activities";
 import { resolveChannelAccessToken } from "@/lib/channel-secrets";
@@ -142,20 +143,31 @@ export async function POST(request: NextRequest, context: RouteContext) {
           channelId: channel.id
         })
       : null;
-    observeTextOutboundAuthority(request, {
-      companyId: session.companyId, channelId: channel.id, conversationId: conversation?.id ?? null,
-      actorUserId: session.id, assignedUserId: conversation?.agentId ?? null,
-      source: "CHANNEL_TEXT", intentId: null
-    });
-    const sent = await sendMetaTextMessage({
-      phoneNumberId: channel.phoneNumberId,
-      accessToken,
-      to: conversation
-        ? normalizeContactPhone(conversation.contact.phone)
-        : normalizedPhone,
-      body: message,
-      contextMessageId: reply?.contextMessageId
-    });
+    if (!conversation) {
+      const existingContact = await findContactByNormalizedPhone(prisma, { companyId: session.companyId, phone: normalizedPhone,
+        source: "channel-message-send", allowBrazilianWhatsappAlternate: true });
+      if (existingContact && (await readCltEnrollment(prisma, { companyId: session.companyId, channelId: channel.id,
+        contactId: existingContact.id }) || await prisma.chatbotSession.findFirst({ where: { companyId: session.companyId,
+        channelId: channel.id, contactId: existingContact.id, runtimeActorId: { not: null } }, select: { id: true } }))) {
+        throw new CltPilotSendConflict();
+      }
+    }
+    const send = () => {
+      observeTextOutboundAuthority(request, {
+        companyId: session.companyId, channelId: channel.id, conversationId: conversation?.id ?? null,
+        actorUserId: session.id, assignedUserId: conversation?.agentId ?? null,
+        source: "CHANNEL_TEXT", intentId: null
+      });
+      return sendMetaTextMessage({
+        phoneNumberId: channel.phoneNumberId!,
+        accessToken,
+        to: conversation ? normalizeContactPhone(conversation.contact.phone) : normalizedPhone,
+        body: message,
+        contextMessageId: reply?.contextMessageId
+      });
+    };
+    const sent = conversation ? await withCltHumanSend(prisma, { companyId: session.companyId, channelId: channel.id,
+      conversationId: conversation.id }, session.id, send) : await send();
     const providerMessageId = readMetaMessageId(sent);
     metaAcceptedMessage = true;
 
@@ -292,6 +304,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       conversation: mapConversation(updated)
     });
   } catch (error) {
+    if (error instanceof CltPilotSendConflict) return publicErrorResponse({ code: "CONFLICT", status: 409 });
     if (error instanceof InvalidMessageReplyError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }

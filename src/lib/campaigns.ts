@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
+import { beginCltCampaignSend, finishCltCampaignSend, type CltCampaignPermit } from "@/lib/chatbot-clt-campaign-send";
 import { createActivity } from "@/lib/activities";
 import { resolveChannelAccessToken } from "@/lib/channel-secrets";
 import { findOrCreateConversationForChannel } from "@/lib/conversation-lifecycle.service";
@@ -441,6 +442,7 @@ export async function processCampaign(campaignId: string) {
       break;
     }
 
+    let permit: CltCampaignPermit | null | undefined;
     try {
       const to = normalizePhone(recipient.phone);
       const personalizedMessage = renderCampaignMessage(campaign.message, {
@@ -476,6 +478,9 @@ export async function processCampaign(campaignId: string) {
       const templateHeaderImageUrl = campaignTemplate
         ? campaignTemplateHistoryMediaUrl
         : null;
+      permit = await beginCltCampaignSend({ companyId: campaign.companyId, channelId: campaign.channelId,
+        campaignId: campaign.id, recipientId: recipient.id, contactId: recipient.contactId, destination: to });
+      if (permit === undefined) continue; // Another worker is handling this campaign recipient.
       const metaResponse =
         campaign.messageType === "TEMPLATE" &&
         campaign.templateName &&
@@ -506,6 +511,7 @@ export async function processCampaign(campaignId: string) {
                 body: personalizedMessage
               });
       const providerMessageId = readMetaMessageId(metaResponse);
+      if (permit && !providerMessageId) throw new Error("A Meta não confirmou o envio da campanha.");
       const historyBody = campaignTemplate
         ? renderTemplateHistoryBody({
             template: campaignTemplate,
@@ -515,9 +521,9 @@ export async function processCampaign(campaignId: string) {
           ? `[Imagem: ${campaign.imageName}] ${personalizedMessage}`.trim()
           : personalizedMessage;
 
-      await prisma.$transaction(async (tx) => {
-        const sentAt = new Date();
-        const conversation = await findOrCreateCampaignConversation({
+      const recordSent = async (tx: Prisma.TransactionClient) => {
+        const sentAt = permit?.dispatchedAt ?? new Date();
+        const conversation = permit ? await tx.conversation.findUniqueOrThrow({ where: { id: permit.conversationId } }) : await findOrCreateCampaignConversation({
           db: tx,
           companyId: campaign.companyId,
           userId: campaign.createdById ?? "",
@@ -581,8 +587,11 @@ export async function processCampaign(campaignId: string) {
             errorMessage: null
           }
         });
-      });
+      };
+      if (permit && providerMessageId) await finishCltCampaignSend(permit, providerMessageId, recordSent);
+      else await prisma.$transaction(recordSent);
     } catch (error) {
+      if (permit) await finishCltCampaignSend(permit).catch(() => {});
       await prisma.$transaction(async (tx) => {
         await tx.campaignRecipient.update({
           where: { id: recipient.id },

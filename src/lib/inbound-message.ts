@@ -29,7 +29,7 @@ import {
 } from "@/lib/prisma-errors";
 import { safeLogError, safeLogWarn } from "@/lib/safe-logger";
 import { buildInboundReplyFields } from "@/lib/message-reply";
-import { persistInboundMessage, preserveReplyReplay, validateAuthenticatedInboundReplay } from "./meta-reply-ingestion";
+import { persistInboundMessage, preserveReplyReplay, ReplyEvidencePersistenceError, validateAuthenticatedInboundReplay } from "./meta-reply-ingestion";
 import type { MetaReplyMetadata } from "./meta-reply-metadata";
 import { replyContentDigest } from "./meta-reply-snapshot";
 
@@ -300,6 +300,13 @@ export async function processInboundMessage({
       ? referencedMessage.conversation
       : null;
 
+  if (!conversation && authenticatedInput && channelId && !contextProviderMessageId) {
+    const sessions = await prisma.chatbotSession.findMany({ where: { companyId, channelId, contactId: contact.id,
+      status: "ACTIVE", runtimeActorId: { not: null }, conversation: { status: { in: ["OPEN", "PENDING", "BOT"] } } },
+      select: { conversation: true }, take: 2 });
+    if (sessions.length === 1) conversation = sessions[0].conversation;
+  }
+
   if (!conversation && channelId) {
     const result = await findOrCreateConversationForChannel({
       db: prisma,
@@ -352,15 +359,16 @@ export async function processInboundMessage({
     channelId
   });
 
-  if (!conversation.agentId) {
+  if (!authenticatedInput && !conversation.agentId) {
     await maybeAutoAssignConversation({
       companyId,
       conversationId: conversation.id
     });
   }
 
+  let chatbotHandled = false;
   try {
-    await persistInboundMessage(prisma, {
+    const persisted = await persistInboundMessage(prisma, {
         conversationId: conversation.id,
         direction: "inbound",
         senderType: "customer",
@@ -371,7 +379,9 @@ export async function processInboundMessage({
         mimeType: mimeType ?? null,
         providerMessageId: providerMessageId ?? null,
         ...replyFields
-    }, replyMetadata && channelId ? { companyId, channelId, contactId: contact.id, senderPhone: phone, contextProviderMessageId, metadata: replyMetadata } : undefined, companyId, provenance);
+    }, replyMetadata && channelId ? { companyId, channelId, contactId: contact.id, senderPhone: phone, contextProviderMessageId, metadata: replyMetadata } : undefined, companyId, provenance,
+    authenticatedInput ? (await import("./chatbot-clt-runtime")).cltChatbotRuntime.ingestVerified : undefined);
+    chatbotHandled = persisted.chatbotHandled;
   } catch (error) {
     if (providerMessageId && isProviderMessageIdUniqueViolation(error)) {
       const existingMessage = await prisma.message.findFirst({
@@ -395,7 +405,16 @@ export async function processInboundMessage({
       }
     }
 
+    if (authenticatedInput && error instanceof Prisma.PrismaClientKnownRequestError &&
+        (["P2034", "P2028", "P1008"].includes(error.code) ||
+          error.code === "P2010" && ["40001", "40P01", "55P03"].includes(String(error.meta?.code)))) {
+      throw new ReplyEvidencePersistenceError();
+    }
     throw error;
+  }
+
+  if (authenticatedInput && !chatbotHandled && !conversation.agentId) {
+    await maybeAutoAssignConversation({ companyId, conversationId: conversation.id });
   }
 
   const receivedAt = new Date();
@@ -406,7 +425,7 @@ export async function processInboundMessage({
       lastMessageAt: receivedAt,
       lastMessagePreview: messageBody,
       lastInboundMessageAt: receivedAt,
-      status: "PENDING",
+      ...(chatbotHandled ? {} : { status: "PENDING" }),
       updatedAt: receivedAt
     },
     include: conversationInclude
@@ -450,7 +469,7 @@ export async function processInboundMessage({
     notification: mapNotification(notification)
   });
 
-  void maybeSendAutomaticAiReply({
+  if (!chatbotHandled) void maybeSendAutomaticAiReply({
     companyId,
     conversationId: updated.id
   }).catch((error) => {

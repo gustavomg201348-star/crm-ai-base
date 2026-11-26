@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { isOpenCreditConversation, openCreditChannelRef, OpenCreditTransportBlockedError } from "@/lib/conversation-channel.service";
 import { getSessionFromRequest } from "@/lib/auth";
+import { CltPilotSendConflict, withCltHumanSend } from "@/lib/chatbot-clt-outbound-policy";
 import { observeTextOutboundAuthority } from "@/lib/authority-text-shadow-runtime";
 import { createActivity } from "@/lib/activities";
 import {
@@ -90,17 +91,20 @@ export async function POST(request: NextRequest, context: RouteContext) {
         conversationId: conversation.id,
         channelId: channel.id
       });
-      observeTextOutboundAuthority(request, {
-        companyId: session.companyId, channelId: channel.id, conversationId: integrationConversation.id,
-        actorUserId: session.id, assignedUserId: integrationConversation.agentId,
-        source: "CONVERSATION_TEXT", intentId: null
-      });
-      const sent = await sendMetaTextMessage({
-        phoneNumberId: channel.phoneNumberId!,
-        accessToken: channel.accessToken!,
-        to: digitsOnlyPhone(integrationConversation.contact.phone),
-        body: messageBody,
-        contextMessageId: reply?.contextMessageId
+      const sent = await withCltHumanSend(prisma, { companyId: session.companyId, channelId: channel.id,
+        conversationId: conversation.id }, session.id, () => {
+        observeTextOutboundAuthority(request, {
+          companyId: session.companyId, channelId: channel.id, conversationId: integrationConversation.id,
+          actorUserId: session.id, assignedUserId: integrationConversation.agentId,
+          source: "CONVERSATION_TEXT", intentId: null
+        });
+        return sendMetaTextMessage({
+          phoneNumberId: channel.phoneNumberId!,
+          accessToken: channel.accessToken!,
+          to: digitsOnlyPhone(integrationConversation.contact.phone),
+          body: messageBody,
+          contextMessageId: reply?.contextMessageId
+        });
       });
       const updated = await saveOutboundMessage({
         conversationId: conversation.id,
@@ -161,6 +165,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     return NextResponse.json({ conversation: mapConversation(updated) });
   } catch (error) {
+    if (error instanceof CltPilotSendConflict) return publicErrorResponse({ code: "CONFLICT", status: 409 });
     if (error instanceof OpenCreditTransportBlockedError) return publicErrorResponse({ code: "FORBIDDEN", status: 403 });
     if (error instanceof InvalidMessageReplyError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
