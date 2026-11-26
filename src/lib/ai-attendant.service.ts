@@ -605,10 +605,10 @@ export async function maybeSendAutomaticAiReply({
     include: { contact: { include: { origin: { select: { name: true } } } }, channelRef: openCreditChannelRef, openCreditWhatsappMetas: { select: { state: true } } }
   });
   if (!conversation) { gate("CONVERSATION_NOT_FOUND"); return null; }
+  if (isOpenCreditConversation(conversation)) { gate("INTERNAL_OPENCREDIT_CONVERSATION"); return null; }
   if (conversation.channelId && await cltBlocksAiSend(prisma, { companyId, conversationId, channelId: conversation.channelId })) {
     gate("CLT_CHATBOT_CONTROLS_CONVERSATION"); return null;
   }
-  if (isOpenCreditConversation(conversation)) { gate("INTERNAL_OPENCREDIT_CONVERSATION"); return null; }
   const bridge = Boolean(conversation.openCreditWhatsappMetas?.length);
   const latestVerifiedInbound = await prisma.conversationInboundEvent.findFirst({
     where: {

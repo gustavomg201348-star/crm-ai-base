@@ -18,6 +18,10 @@ async function main() {
   const { createConversationAuthorityService } = await import("./conversation-authority.service");
   const { createOutboundOperationService } = await import("./outbound-operation.service");
   const { processCampaign } = await import("./campaigns");
+  // Match the existing provenance harness under Node 20 and tsx so the
+  // webhook and lazy persistence use the same private capability issuer.
+  await import("./meta-inbound-provenance");
+  await import("./inbound-message");
   const webhook = await import("../app/api/webhooks/whatsapp/route");
   const reconcile = await import("../app/api/campaigns/clt-chatbot/reconcile/route");
   const { createSessionToken } = await import("./auth");
