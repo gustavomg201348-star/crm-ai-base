@@ -23,7 +23,8 @@ export const navItems = [
   { id: "empresas", label: "Empresas", icon: Building2 },
   { id: "chatbot", label: "Chatbot", icon: Bot },
   { id: "inteligencia-artificial", label: "Inteligência Artificial", icon: Sparkles },
-  { id: "config", label: "Configurações", icon: Settings }
+  { id: "config", label: "Configurações", icon: Settings },
+  { id: "equipe", label: "Equipe e Permissões", icon: UsersRound }
 ] as const;
 
 export type NavigationItem = (typeof navItems)[number];
@@ -39,14 +40,14 @@ const navigationSections: readonly NavigationSection[] = [
   { id: "relacionamento", label: "Relacionamento", icon: UsersRound, itemIds: ["atendimento", "agenda", "kanban", "contatos", "tags"] },
   { id: "comunicacao", label: "Comunicação", icon: MessagesSquare, itemIds: ["canais", "templates", "disparos", "chatbot", "inteligencia-artificial"] },
   { id: "produtos-financeiros", label: "Produtos Financeiros", icon: CircleDollarSign, itemIds: ["simulacao-clt", "multicred", "recem-aposentados"] },
-  { id: "administracao-apoio", label: "Administração", icon: ShieldCheck, itemIds: ["empresas", "config"] }
+  { id: "administracao-apoio", label: "Administração", icon: ShieldCheck, itemIds: ["empresas", "equipe", "config"] }
 ];
 
 const agentItems: readonly Section[] = [
   "motor-comercial", "next-best-action", "atendimento", "agenda", "contatos", "kanban", "simulacao-clt"
 ];
 const supervisorItems: readonly Section[] = [
-  ...agentItems, "dashboard", "tags", "recem-aposentados"
+  ...agentItems, "dashboard", "tags", "recem-aposentados", "equipe"
 ];
 
 export type VisibleNavigationSection =

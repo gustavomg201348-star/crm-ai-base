@@ -45,7 +45,7 @@ jobs:
         run: npm run lint:ci
 
       - name: Validate navigation, profile visibility and company AI settings
-        run: node --unhandled-rejections=strict --import tsx --test src/lib/sidebar-navigation.test.ts src/lib/company-ai-settings.test.ts src/lib/agenda-policy.test.ts src/lib/sem-margem-return.test.ts
+        run: node --unhandled-rejections=strict --import tsx --test src/lib/sidebar-navigation.test.ts src/lib/company-ai-settings.test.ts src/lib/agenda-policy.test.ts src/lib/sem-margem-return.test.ts src/lib/team-policy.test.ts
 
       - name: Validate OpenCredit Foundation A unit tests
         run: npx --yes tsx@4.20.6 src/lib/opencredit-webhook.test.ts
@@ -485,6 +485,11 @@ jobs:
 
       - name: Validate Agenda authenticated APIs, isolation, concurrent edits and XLSX export
         run: node --conditions=react-server --unhandled-rejections=strict --import tsx src/lib/agenda-postgres.integration.ts
+        env:
+          OPENCREDIT_COMMERCIAL_OPERATION_POSTGRES_TEST: "1"
+
+      - name: Validate team, platform privilege boundaries, protected tags and contextual settings
+        run: node --conditions=react-server --unhandled-rejections=strict --import tsx src/lib/settings-team-postgres.integration.ts
         env:
           OPENCREDIT_COMMERCIAL_OPERATION_POSTGRES_TEST: "1"
 

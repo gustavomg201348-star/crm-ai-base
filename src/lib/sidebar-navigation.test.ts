@@ -5,7 +5,7 @@ import { getVisibleNavigation, navItems } from "./sidebar-navigation";
 const agentItems = [
   "motor-comercial", "next-best-action", "atendimento", "agenda", "kanban", "contatos", "simulacao-clt"
 ];
-const supervisorItems = ["dashboard", ...agentItems, "tags", "recem-aposentados"];
+const supervisorItems = ["dashboard", ...agentItems, "tags", "recem-aposentados", "equipe"];
 const adminItems = [
   ...supervisorItems, "multicred", "canais", "templates", "disparos", "chatbot", "inteligencia-artificial", "config"
 ];

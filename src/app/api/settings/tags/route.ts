@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { requireAdmin } from "@/lib/permissions";
+import { isSemMargemTagName } from "@/lib/sem-margem-return";
 
 export async function GET(request: NextRequest) {
   try {
@@ -23,6 +24,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       tags: tags.map((tag) => ({
         id: tag.id,
+        protectedAutomation: isSemMargemTagName(tag.name),
         name: tag.name,
         color: tag.color,
         textColor: tag.textColor,

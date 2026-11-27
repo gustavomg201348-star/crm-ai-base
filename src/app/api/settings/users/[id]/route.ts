@@ -5,6 +5,7 @@ import { publicErrorResponse } from "@/lib/http-error-response";
 import { requireCompanyAdmin } from "@/lib/permissions";
 import { isPrismaKnownRequestError } from "@/lib/prisma-errors";
 import { safeLogError } from "@/lib/safe-logger";
+import { canManageTeamIdentity, validTeamInput } from "@/lib/team-policy";
 
 const roles = ["ADMIN", "SUPERVISOR", "AGENT"] as const;
 
@@ -33,6 +34,7 @@ export async function PATCH(
     if (!current) {
       return publicErrorResponse({ code: "USER_NOT_FOUND", status: 404 });
     }
+    if (!canManageTeamIdentity(session, current)) return publicErrorResponse({ code: "USER_PERMISSION_DENIED", status: 403 });
 
     const body = (await request.json().catch(() => null)) as
       | {
@@ -42,6 +44,7 @@ export async function PATCH(
           role?: string;
         }
       | null;
+    if (!validTeamInput(body, false)) return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
     const name = body?.name?.trim();
     const email = body?.email?.trim().toLowerCase();
 
@@ -61,8 +64,11 @@ export async function PATCH(
       return publicErrorResponse({ code: "USER_INVALID_ROLE", status: 400 });
     }
 
+    if (!canManageTeamIdentity(session, {
+      companyId: current.companyId, email: email ?? current.email, role: body?.role ?? current.role
+    })) return publicErrorResponse({ code: "USER_PERMISSION_DENIED", status: 403 });
     const user = await prisma.user.update({
-      where: { id },
+      where: { id, companyId: session.companyId, email:current.email, role:current.role },
       data: {
         ...(name !== undefined ? { name } : {}),
         ...(email !== undefined ? { email } : {}),
@@ -126,7 +132,8 @@ export async function DELETE(
       return publicErrorResponse({ code: "USER_NOT_FOUND", status: 404 });
     }
 
-    await prisma.user.delete({ where: { id } });
+    if (!canManageTeamIdentity(session, current)) return publicErrorResponse({ code: "USER_PERMISSION_DENIED", status: 403 });
+    await prisma.user.delete({ where: { id, companyId: session.companyId, email:current.email, role:current.role } });
 
     return NextResponse.json({ ok: true });
   } catch (error) {
