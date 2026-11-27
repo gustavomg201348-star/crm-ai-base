@@ -26,6 +26,10 @@ async function main() {
   const webhook = await import("../app/api/webhooks/whatsapp/route");
   const reconcile = await import("../app/api/campaigns/clt-chatbot/reconcile/route");
   const { createSessionToken } = await import("./auth");
+  const chatbotCenter = await import("../app/api/chatbot/center/route");
+  const aiSettings = await import("../app/api/settings/ai/route");
+  const companySettings = await import("../app/api/campaigns/clt-chatbot/company/route");
+  const campaignSettings = await import("../app/api/campaigns/clt-chatbot/route");
   const originalFetch = globalThis.fetch;
   const database = { db, provider: "postgresql" as const };
   const secret = "synthetic-clt-webhook-secret";
@@ -119,6 +123,115 @@ async function main() {
     return { company, user, agent, contact, channel, campaign, recipient, scope, dto, owner, thread, sent, start, option, text, drain, setEnabled };
   }
 
+  function sessionRequest(path: string, actor: Awaited<ReturnType<typeof fixture>>["user"], method = "GET", body?: object) {
+    const cookie = "crm_session=" + createSessionToken({
+      id: actor.id, companyId: actor.companyId, name: actor.name, email: actor.email,
+      role: actor.role as "ADMIN" | "SUPERVISOR" | "AGENT"
+    }, actor.passwordHash);
+    return new NextRequest("https://synthetic.invalid" + path, {
+      method, headers: { cookie, "Content-Type": "application/json" }, body: JSON.stringify(body)
+    });
+  }
+
+  test("automation centers enforce roles, scope and persistence using the existing controls", async () => {
+    const f = await fixture("Verificar", { disabled: true });
+    const other = await fixture();
+    const supervisor = await db.user.create({ data: { companyId: f.company.id, name: "Supervisor",
+      email: randomUUID() + "@invalid.test", role: "SUPERVISOR", passwordHash: "synthetic" } });
+    const centerPath = "/api/chatbot/center";
+    const aiPath = "/api/settings/ai";
+    const generalPath = "/api/campaigns/clt-chatbot/company";
+    const campaignPath = "/api/campaigns/clt-chatbot";
+    const read = async () => {
+      const response = await chatbotCenter.GET(sessionRequest(centerPath, f.user));
+      assert.equal(response.status, 200);
+      return response.json();
+    };
+
+    assert.equal((await chatbotCenter.GET(new NextRequest("https://synthetic.invalid" + centerPath))).status, 401);
+    for (const actor of [f.agent, supervisor]) {
+      assert.equal((await chatbotCenter.GET(sessionRequest(centerPath, actor))).status, 403);
+      assert.equal((await aiSettings.PATCH(sessionRequest(aiPath, actor, "PATCH", { mode: "AUTO" }))).status, 403);
+      const allowed = await aiSettings.GET(sessionRequest(aiPath, actor));
+      assert.deepEqual(await allowed.json(), { settings: { mode: "OFF" } });
+    }
+
+    const legacy = process.env.CLT_CHECK_AUTO_REPLY_ENABLED;
+    process.env.CLT_CHECK_AUTO_REPLY_ENABLED = "true";
+    try {
+      const initial = await aiSettings.GET(sessionRequest(aiPath, f.user));
+      assert.equal(initial.status, 200);
+      assert.equal((await initial.json()).settings.checkAutoReplyEnabled, true);
+      const changed = await aiSettings.PATCH(sessionRequest(aiPath, f.user, "PATCH", {
+        mode: "HYBRID", instructions: "Instrução sintética", checkAutoReplyOverride: false
+      }));
+      assert.equal(changed.status, 200);
+      const persisted = await aiSettings.GET(sessionRequest(aiPath, f.user));
+      assert.deepEqual((await persisted.json()).settings, {
+        mode: "HYBRID", instructions: "Instrução sintética", checkAutoReplyOverride: false,
+        checkAutoReplyEnabled: false, providerConfigured: Boolean(process.env.OPENAI_API_KEY)
+      });
+      const foreign = await aiSettings.GET(sessionRequest(aiPath, other.user));
+      assert.equal((await foreign.json()).settings.checkAutoReplyEnabled, true);
+      assert.equal((await aiSettings.PATCH(sessionRequest(aiPath, f.user, "PATCH", { companyId: other.company.id, checkAutoReplyOverride: false }))).status, 400);
+    } finally {
+      if (legacy === undefined) delete process.env.CLT_CHECK_AUTO_REPLY_ENABLED;
+      else process.env.CLT_CHECK_AUTO_REPLY_ENABLED = legacy;
+    }
+
+    let data = await read();
+    assert.deepEqual(data.campaigns.map((row: { campaignId: string }) => row.campaignId), [f.campaign.id]);
+    assert.equal(data.campaigns[0].optionId, "VERIFICAR");
+    assert.equal(data.campaigns[0].enabled, false);
+    assert.equal(data.flows[0].version, 1);
+    assert.equal(data.cltDefinition.entryStepId, "proposal");
+    assert.equal(data.metrics.total, 0);
+    assert.equal((await campaignSettings.PATCH(sessionRequest(campaignPath, other.user, "PATCH", { campaignId: f.campaign.id, enabled: true }))).status, 404);
+    assert.equal((await campaignSettings.PATCH(sessionRequest(campaignPath, f.user, "PATCH", { campaignId: f.campaign.id, enabled: true }))).status, 200);
+    data = await read();
+    assert.equal(data.campaigns[0].enabled, true);
+
+    assert.equal((await companySettings.PATCH(sessionRequest(generalPath, f.user, "PATCH", { enabled: false }))).status, 200);
+    data = await read();
+    assert.equal(data.enabled, false);
+    assert.equal(data.campaigns[0].enabled, false);
+    assert.equal((await companySettings.PATCH(sessionRequest(generalPath, f.user, "PATCH", { enabled: true }))).status, 200);
+    assert.equal((await read()).campaigns[0].enabled, false);
+    assert.equal((await db.cltChatbotCampaignBinding.findFirstOrThrow({ where: { campaignId: other.campaign.id } })).enabled, true);
+  });
+
+  test("the fixed CHECK reply observes the saved override even in OFF mode and honors conversation pause", async () => {
+    const f = await fixture("Conferir", { disabled: true });
+    const { maybeSendAutomaticAiReply } = await import("./ai-attendant.service");
+    const inbound = await db.message.create({ data: {
+      conversationId: f.scope.conversationId, direction: "inbound", type: "button", body: "Verificar",
+      providerMessageId: "wamid.synthetic.check." + randomUUID(), metaReplySnapshot: "{}"
+    } });
+    await db.conversation.update({
+      where: { id: f.scope.conversationId }, data: { inboundEventSequence: BigInt(1), lastInboundMessageAt: new Date() }
+    });
+    await db.conversationInboundEvent.create({ data: {
+      ...f.scope, contactId: f.contact.id, messageId: inbound.id, sequence: BigInt(1),
+      provenanceKind: "META_WEBHOOK_HMAC_SHA256_VERIFIED", provenanceVersion: 1
+    } });
+    const setOverride = (checkAutoReplyOverride: boolean) => aiSettings.PATCH(
+      sessionRequest("/api/settings/ai", f.user, "PATCH", { checkAutoReplyOverride })
+    );
+
+    assert.equal((await setOverride(false)).status, 200);
+    assert.equal(await maybeSendAutomaticAiReply(f.scope), null);
+    assert.equal(f.sent().length, 0);
+    assert.equal((await setOverride(true)).status, 200);
+    await db.conversation.update({ where: { id: f.scope.conversationId }, data: { aiPaused: true } });
+    assert.equal(await maybeSendAutomaticAiReply(f.scope), null);
+    assert.equal(f.sent().length, 0);
+    await db.conversation.update({ where: { id: f.scope.conversationId }, data: { aiPaused: false } });
+    await maybeSendAutomaticAiReply(f.scope);
+    assert.equal(f.sent().length, 1);
+    assert.match(f.sent()[0].payload.text?.body ?? "", /^Perfeito! Vamos verificar/);
+  });
+
+
   test("real campaign path sends once, starts unassigned, and a signed Conferir leads to agent with competitor offer", async () => {
     const f = await fixture("Conferir", { realCampaign: true });
     assert.equal(f.sent().length, 1);
@@ -140,6 +253,11 @@ async function main() {
     assert.equal(JSON.parse((await f.dto())!.runtimeState!).variables.competitor_offer, "R$ 3.000 em 12 parcelas de R$ 290");
     assert.match(f.sent().at(-1)?.payload.text?.body ?? "", /nossa equipe.*😊/);
     assert.equal((await f.dto())?.closureReason, "HUMAN_HANDOFF");
+    const center = await chatbotCenter.GET(sessionRequest("/api/chatbot/center", f.user));
+    const overview = await center.json();
+    assert.deepEqual(overview.metrics, { total: 1, active: 0, handoff: 1 });
+    assert.equal(overview.sessions[0].closureReason, "HUMAN_HANDOFF");
+    assert(!("runtimeState" in overview.sessions[0]));
     assert.equal((await f.owner())?.state, "HUMAN_QUEUE");
     assert.equal((await f.thread()).status, "PENDING");
     assert.equal((await f.thread()).aiPaused, true);
@@ -242,7 +360,11 @@ async function main() {
 
   test("takeover during provider call changes authority and fences human, AI, round robin and AutoStart", async () => {
     const f = await fixture();
+    const { maybeSendAutomaticAiReply } = await import("./ai-attendant.service");
+    const activated = await aiSettings.PATCH(sessionRequest("/api/settings/ai", f.user, "PATCH", { checkAutoReplyOverride: true }));
+    assert.equal(activated.status, 200);
     await f.start(); await f.drain(1);
+    assert.equal(await maybeSendAutomaticAiReply(f.scope), null);
     await db.leadAssignmentSetting.create({ data: { companyId: f.company.id, mode: "ROUND_ROBIN" } });
     assert.equal(await maybeAutoAssignConversation(f.scope), null);
     assert.equal(await cltBlocksAiSend(db, f.scope), true);

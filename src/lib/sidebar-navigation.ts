@@ -21,6 +21,7 @@ export const navItems = [
   { id: "recem-aposentados", label: "Recém-aposentados", icon: Hourglass },
   { id: "empresas", label: "Empresas", icon: Building2 },
   { id: "chatbot", label: "Chatbot", icon: Bot },
+  { id: "inteligencia-artificial", label: "Inteligência Artificial", icon: Sparkles },
   { id: "config", label: "Configurações", icon: Settings }
 ] as const;
 
@@ -35,7 +36,7 @@ const navigationSections: readonly NavigationSection[] = [
   { id: "dashboard", itemId: "dashboard" },
   { id: "operacao-comercial", label: "Operação Comercial", icon: TrendingUp, itemIds: ["motor-comercial", "next-best-action"] },
   { id: "relacionamento", label: "Relacionamento", icon: UsersRound, itemIds: ["atendimento", "kanban", "contatos", "tags"] },
-  { id: "comunicacao", label: "Comunicação", icon: MessagesSquare, itemIds: ["canais", "templates", "disparos", "chatbot"] },
+  { id: "comunicacao", label: "Comunicação", icon: MessagesSquare, itemIds: ["canais", "templates", "disparos", "chatbot", "inteligencia-artificial"] },
   { id: "produtos-financeiros", label: "Produtos Financeiros", icon: CircleDollarSign, itemIds: ["simulacao-clt", "multicred", "recem-aposentados"] },
   { id: "administracao-apoio", label: "Administração", icon: ShieldCheck, itemIds: ["empresas", "config"] }
 ];
