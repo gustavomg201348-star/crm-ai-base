@@ -19,6 +19,7 @@ import {
 import { conversationInclude, mapConversation } from "@/lib/conversations";
 import { prisma } from "@/lib/db";
 import { cltBlocksAiSend } from "./chatbot-clt-outbound-policy";
+import { resolveCltCheckAutoReply } from "./company-ai-settings";
 import { readMetaMessageId, sendMetaTextMessage } from "@/lib/meta-whatsapp";
 import { openCreditWhatsappCanAutoReply, prepareOpenCreditWhatsappAiReply, prepareOpenCreditCrmDirectAiReply } from "./opencredit-whatsapp-ai";
 import { classifyOpenCreditTemplateButton, OPEN_CREDIT_BLOCK_FIRST_REPLY, OPEN_CREDIT_CHECK_FIRST_REPLY } from "./opencredit-whatsapp-button-policy";
@@ -679,8 +680,13 @@ export async function maybeSendAutomaticAiReply({
     }
   }
 
-  // Operator-requested pause: keep tagging and prequalification, suppress only CHECK replies.
-  if (buttonAction === "CHECK" && process.env.CLT_CHECK_AUTO_REPLY_ENABLED !== "true") {
+  // Keep tagging and prequalification independent of the fixed CHECK reply.
+  const company = await prisma.company.findUnique({
+    where: { id: companyId },
+    select: { aiMode: true, cltCheckAutoReplyEnabled: true }
+  });
+  if (!company) { gate("COMPANY_NOT_FOUND"); return null; }
+  if (buttonAction === "CHECK" && !resolveCltCheckAutoReply(company.cltCheckAutoReplyEnabled, process.env.CLT_CHECK_AUTO_REPLY_ENABLED)) {
     gate("PROSPECTA_CLT_CHECK_REPLY_DISABLED");
     return null;
   }
@@ -690,12 +696,6 @@ export async function maybeSendAutomaticAiReply({
   if (bridge && !await openCreditWhatsappCanAutoReply(prisma, companyId, conversationId, replyPolicy, { allowAssignedAgent })) {
     gate("OPENCREDIT_BRIDGE_NOT_ELIGIBLE"); return null;
   }
-  const company = await prisma.company.findUnique({
-    where: { id: companyId },
-    select: { aiMode: true }
-  });
-
-  if (!company) { gate("COMPANY_NOT_FOUND"); return null; }
   if (
     !replyPolicy({
       companyMode: company.aiMode,
@@ -745,7 +745,22 @@ export async function maybeSendAutomaticAiReply({
     if (await cltBlocksAiSend(prisma, { companyId, channelId: channel.id, conversationId })) {
       await attempt?.cancel(); return null;
     }
-    if (attempt && !await attempt.authorize(channel, clt?.validateFinancial)) return null;
+    const validateCheckReply = async (db: Pick<typeof prisma, "company">) => {
+      const current = await db.company.findUnique({
+        where: { id: companyId }, select: { cltCheckAutoReplyEnabled: true }
+      });
+      return current !== null && resolveCltCheckAutoReply(current.cltCheckAutoReplyEnabled, process.env.CLT_CHECK_AUTO_REPLY_ENABLED);
+    };
+
+    if (attempt) {
+      const validateDispatch = buttonAction === "CHECK" ? async (tx: Pick<typeof prisma, "company">) => {
+        if (!await validateCheckReply(tx)) throw new Error("PROSPECTA_CLT_CHECK_REPLY_DISABLED");
+      } : clt?.validateFinancial;
+      if (!await attempt.authorize(channel, validateDispatch)) return null;
+    } else if (buttonAction === "CHECK" && !await validateCheckReply(prisma)) {
+      gate("PROSPECTA_CLT_CHECK_REPLY_DISABLED");
+      return null;
+    }
     clt?.onAuthorized?.();
     const metaResponse = await sendMetaTextMessage({
       phoneNumberId: channel.phoneNumberId!,

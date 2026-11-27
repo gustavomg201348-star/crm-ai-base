@@ -357,6 +357,7 @@ model Company {
   segment       String?
   aiMode        String          @default("COPILOT")
   aiInstructions String?
+  cltCheckAutoReplyEnabled Boolean?
   cltChatbotEnabled Boolean @default(false)
   createdAt     DateTime        @default(now())
   users         User[]

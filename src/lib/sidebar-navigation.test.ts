@@ -7,7 +7,7 @@ const agentItems = [
 ];
 const supervisorItems = ["dashboard", ...agentItems, "tags", "recem-aposentados"];
 const adminItems = [
-  ...supervisorItems, "multicred", "canais", "templates", "disparos", "chatbot", "config"
+  ...supervisorItems, "multicred", "canais", "templates", "disparos", "chatbot", "inteligencia-artificial", "config"
 ];
 
 test("keeps the existing menu visibility for each profile", () => {
@@ -26,7 +26,7 @@ test("keeps the existing menu visibility for each profile", () => {
   }
 });
 
-test("shows Dashboard once and places Chatbot under Comunicação", () => {
+test("shows Dashboard once and places Chatbot and AI together under Comunicação", () => {
   const { sections } = getVisibleNavigation("ADMIN", true);
   assert.deepEqual(sections.map(({ id }) => id), [
     "dashboard", "operacao-comercial", "relacionamento", "comunicacao",
@@ -36,7 +36,7 @@ test("shows Dashboard once and places Chatbot under Comunicação", () => {
   assert.ok("item" in dashboard && dashboard.item.id === "dashboard");
   const communication = sections.find(({ id }) => id === "comunicacao");
   assert.ok(communication && "items" in communication);
-  assert.deepEqual(communication.items.map(({ id }) => id), ["canais", "templates", "disparos", "chatbot"]);
+  assert.deepEqual(communication.items.map(({ id }) => id), ["canais", "templates", "disparos", "chatbot", "inteligencia-artificial"]);
   assert.equal(navItems.find(({ id }) => id === "simulacao-clt")?.label, "Simulação CLT");
   assert.equal(navItems.find(({ id }) => id === "recem-aposentados")?.label, "Recém-aposentados");
 });
