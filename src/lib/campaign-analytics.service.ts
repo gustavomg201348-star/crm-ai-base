@@ -59,11 +59,21 @@ function clean(row: Row) {
     ]),
   );
 }
-function timestamp(value: Row[string]) {
+export function analyticsTimestamp(value: Row[string]) {
   if (value === null || value === undefined) return null;
   if (value instanceof Date) return value.toISOString();
+  // SQLite aggregate expressions can return epoch text or UTC datetime text.
+  if (
+    typeof value === "string" &&
+    /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(value)
+  ) {
+    return new Date(value.replace(" ", "T") + "Z").toISOString();
+  }
   return new Date(
-    typeof value === "bigint" ? Number(value) : value,
+    typeof value === "bigint" ||
+    (typeof value === "string" && /^-?\d+(\.\d+)?$/.test(value))
+      ? Number(value)
+      : value,
   ).toISOString();
 }
 function logRow(
@@ -71,11 +81,11 @@ function logRow(
 ): Record<string, string | number | boolean | Date | null> {
   return {
     ...clean(row),
-    cohortAt: timestamp(row.cohortAt),
-    sentAt: timestamp(row.sentAt),
-    deliveredAt: timestamp(row.deliveredAt),
-    readAt: timestamp(row.readAt),
-    lastInteractionAt: timestamp(row.lastInteractionAt),
+    cohortAt: analyticsTimestamp(row.cohortAt),
+    sentAt: analyticsTimestamp(row.sentAt),
+    deliveredAt: analyticsTimestamp(row.deliveredAt),
+    readAt: analyticsTimestamp(row.readAt),
+    lastInteractionAt: analyticsTimestamp(row.lastInteractionAt),
     officialRead: Number(row.officialRead) === 1,
     identifiedRead:
       Number(row.officialRead) === 1 ||
@@ -221,14 +231,14 @@ export async function campaignAnalytics(
           templateName: row.templateName,
           channelName: row.channelName,
           channelId: row.channelId,
-          createdAt: timestamp(row.createdAt),
+          createdAt: analyticsTimestamp(row.createdAt),
           ...campaignMetrics(row),
         })),
         buttons: buttons.slice(0, 50).map(clean),
         logs: logs.slice(0, 50).map(logRow),
         interactions: interactions.map((row) => ({
           ...clean(row),
-          createdAt: timestamp(row.createdAt),
+          createdAt: analyticsTimestamp(row.createdAt),
         })),
         pagination: {
           page: f.page,

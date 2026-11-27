@@ -59,6 +59,10 @@ Esta implementação não faz consultas ou mutações em produção e não depen
 
 ## Evidência local desta entrega
 
-Node 20: 100 testes unitários/regressões de analytics, campanhas e Meta; 28 testes de analytics PostgreSQL; 3 testes SQLite; 17 testes existentes de runtime CLT com Meta simulado. O teste de volume inclui 3.000 envios com origem persistida e 1.000 leituras, agregação exata e página de 50 linhas. O cenário completo passou em aproximadamente 3,5s na rodada final local (incluindo a construção da fixture). Um ensaio concorrente com outras validações atingiu statement_timeout; os limites foram mantidos, e tanto fixture nova isolada quanto a suíte completa posterior passaram. Isso não substitui homologação de carga no ambiente de destino.
+Node 20: 102 testes unitários/regressões de analytics, campanhas e Meta; 28 testes de analytics PostgreSQL; 4 testes SQLite; 17 testes existentes de runtime CLT com Meta simulado. O teste de volume inclui 3.000 envios com origem persistida e 1.000 leituras, agregação exata e página de 50 linhas. O cenário completo passou em aproximadamente 3,5s na rodada final local (incluindo a construção da fixture). Um ensaio concorrente com outras validações atingiu statement_timeout; os limites foram mantidos, e tanto fixture nova isolada quanto a suíte completa posterior passaram. Isso não substitui homologação de carga no ambiente de destino.
 
 Prisma validate SQLite/PostgreSQL, TypeScript, lint, build e diff-check passaram. Navegador isolado validou dados reais sintéticos via API autenticada, filtro de cliques, CSV, desktop/mobile sem overflow da página e carregamento/vazio/erro/recuperação. Nenhum transporte real ou ambiente de produção foi utilizado.
+
+Refresh automático do mesmo recorte preserva o painel e a posição da operação enquanto atualiza. Mudança de filtro só apresenta números após a resposta correspondente; requisições antigas são abortadas e não substituem o recorte atual. Erro retira a evidência anterior e apresenta mensagem recuperável.
+
+Agregados SQLite aceitam epoch numérico/textual e datetime UTC sem timezone explícito; a serialização normaliza esses formatos sem mudar o caminho Date do PostgreSQL.

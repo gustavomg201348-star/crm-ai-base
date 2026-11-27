@@ -3,7 +3,10 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { analyticsFilters, analyticsRatio } from "./campaign-analytics-policy";
 import { analyticsCte } from "./campaign-analytics-query";
-import { campaignMetrics } from "./campaign-analytics.service";
+import {
+  campaignMetrics,
+  analyticsTimestamp,
+} from "./campaign-analytics.service";
 
 const now = new Date("2026-11-27T02:59:59Z");
 test("cohort begins at Sao Paulo midnight with inclusive presets", () => {
@@ -101,4 +104,28 @@ test("legacy operational CSV and official read writer remain outside analytics",
   );
   assert(exporter.includes("serializeCsvCell"));
   assert(exporter.includes("campaign-analytics-v1.csv"));
+});
+test("background refresh preserves the dashboard and filter changes hide stale metrics", () => {
+  const source = readFileSync(
+    "src/app/components/campaigns/CampaignAnalyticsDashboard.tsx",
+    "utf8",
+  );
+  assert(source.includes("setLoadedParams(params)"));
+  assert(source.includes("!data || loadedParams !== params"));
+  assert(source.includes("loading && data && loadedParams === params"));
+  assert(source.includes("controller.signal.aborted"));
+});
+test("timestamps preserve PostgreSQL Dates and SQLite numeric/text aggregate dates", () => {
+  const date = new Date("2026-11-27T14:00:00Z");
+  for (const value of [
+    date,
+    date.getTime(),
+    String(date.getTime()),
+    BigInt(date.getTime()),
+    date.toISOString(),
+    "2026-11-27 14:00:00",
+    "2026-11-27T14:00:00.000",
+  ])
+    assert.equal(analyticsTimestamp(value), date.toISOString());
+  assert.equal(analyticsTimestamp(null), null);
 });

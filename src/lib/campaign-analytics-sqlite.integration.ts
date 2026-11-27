@@ -168,6 +168,30 @@ async function main() {
     );
     assert.equal(csv.rows?.length, 1);
   });
+  test("SQLite mixed null and dated rows serialize aggregate timestamps safely", async () => {
+    const pending = await db.contact.create({
+      data: {
+        companyId: company.id,
+        name: "Pending synthetic",
+        phone: "5511999990089",
+      },
+    });
+    await db.campaignRecipient.create({
+      data: {
+        campaignId: campaign.id,
+        contactId: pending.id,
+        phone: pending.phone,
+        status: "PENDING",
+        createdAt: new Date(Date.now() + 1),
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const a = await query();
+    assert.equal(a.logs?.length, 2);
+    const eventRow = a.logs?.find((row) => row.lastInteractionAt !== null);
+    assert(eventRow);
+    assert(Number.isFinite(Date.parse(String(eventRow.lastInteractionAt))));
+  });
 }
 void main().catch((error) => {
   console.error(error);

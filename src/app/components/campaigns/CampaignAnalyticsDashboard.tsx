@@ -217,6 +217,7 @@ export function CampaignAnalyticsDashboard() {
     [period, selection, debouncedSearch],
   );
   const [data, setData] = useState<CampaignAnalytics | null>(null);
+  const [loadedParams, setLoadedParams] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -242,7 +243,10 @@ export function CampaignAnalyticsDashboard() {
             : "Nao foi possivel carregar o painel.",
         );
       }
-      if (!controller.signal.aborted) setData(payload);
+      if (!controller.signal.aborted) {
+        setData(payload);
+        setLoadedParams(params);
+      }
     } catch (loadError) {
       if (!controller.signal.aborted) {
         setData(null);
@@ -331,6 +335,11 @@ export function CampaignAnalyticsDashboard() {
         selection={selection}
         onChange={setSelection}
       />
+      {loading && data && loadedParams === params ? (
+        <span role="status" className="sr-only">
+          Atualizando indicadores…
+        </span>
+      ) : null}
       {error ? (
         <div
           role="alert"
@@ -338,7 +347,7 @@ export function CampaignAnalyticsDashboard() {
         >
           {error}
         </div>
-      ) : loading || !data ? (
+      ) : !data || loadedParams !== params ? (
         <p role="status" className="p-10 text-center text-sm text-slate-400">
           Carregando indicadores…
         </p>
