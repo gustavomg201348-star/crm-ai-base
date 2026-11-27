@@ -124,3 +124,6 @@ O Dashboard legado usa uma expressão SQL incompatível com SQLite e retornou 50
 no browser SQLite; seu código não muda neste PR e sua regressão PostgreSQL passou.
 As capturas finais usam PostgreSQL isolado. A inspeção visual corrigiu no formulário
 extraído o uso da cor inexistente `primary`, substituída pela cor `brand` do tema.
+Na CI, o gerador de scope da fixture foi ajustado para separar blocos aleatórios
+com letras: a cauda numérica de um UUID podia atingir 11 dígitos e ser corretamente
+rejeitada pela constraint anti-CPF. A constraint e as asserções permanecem intactas.

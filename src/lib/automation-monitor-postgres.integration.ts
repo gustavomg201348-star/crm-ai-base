@@ -121,7 +121,10 @@ async function main() {
     const integration = await db.openCreditIntegration.create({
       data: {
         companyId: company.id,
-        providerScope: "synthetic-" + randomUUID(),
+        // Break numeric runs: random UUID tails can otherwise resemble an 11-digit CPF.
+        providerScope:
+          "synthetic-" +
+          randomUUID().replaceAll("-", "").replace(/(.{8})/g, "$1f"),
         publicWebhookId: randomUUID(),
         webhookSecret: prepareOpenCreditWebhookSecret(privateValue),
         enabled: false,
