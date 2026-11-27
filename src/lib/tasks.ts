@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 
-export type TaskStatus = "PENDING" | "DONE";
+export type TaskStatus = "PENDING" | "DONE" | "CANCELLED";
 
 export const taskInclude = {
   contact: { select: { id: true, name: true, phone: true } },

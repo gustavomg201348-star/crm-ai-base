@@ -3,7 +3,7 @@ import test from "node:test";
 import { getVisibleNavigation, navItems } from "./sidebar-navigation";
 
 const agentItems = [
-  "motor-comercial", "next-best-action", "atendimento", "kanban", "contatos", "simulacao-clt"
+  "motor-comercial", "next-best-action", "atendimento", "agenda", "kanban", "contatos", "simulacao-clt"
 ];
 const supervisorItems = ["dashboard", ...agentItems, "tags", "recem-aposentados"];
 const adminItems = [
@@ -39,4 +39,7 @@ test("shows Dashboard once and places Chatbot and AI together under Comunicaçã
   assert.deepEqual(communication.items.map(({ id }) => id), ["canais", "templates", "disparos", "chatbot", "inteligencia-artificial"]);
   assert.equal(navItems.find(({ id }) => id === "simulacao-clt")?.label, "Simulação CLT");
   assert.equal(navItems.find(({ id }) => id === "recem-aposentados")?.label, "Recém-aposentados");
+  const relationship = sections.find(({ id }) => id === "relacionamento");
+  assert.ok(relationship && "items" in relationship);
+  assert.deepEqual(relationship.items.slice(0, 2).map(item => item.id), ["atendimento", "agenda"]);
 });

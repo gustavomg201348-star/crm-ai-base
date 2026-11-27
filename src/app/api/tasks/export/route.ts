@@ -6,6 +6,7 @@ import { requireAdmin } from "@/lib/permissions";
 import { neutralizeSpreadsheetFormula } from "@/lib/csv-export";
 import { publicErrorResponse } from "@/lib/http-error-response";
 import { safeLogError } from "@/lib/safe-logger";
+import { agendaWhere, parseAgendaFilters, taskOrigin } from "@/lib/agenda-policy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,6 +32,10 @@ export async function GET(request: NextRequest) {
     const to = parseDate(request.nextUrl.searchParams.get("to"));
     const reason = request.nextUrl.searchParams.get("reason")?.trim() ?? "";
     const assigneeId = request.nextUrl.searchParams.get("assigneeId")?.trim() ?? "";
+    const agenda = request.nextUrl.searchParams.get("view") === "agenda";
+    let filters;
+    try { filters = agenda ? parseAgendaFilters(request.nextUrl.searchParams) : null; }
+    catch { return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 }); }
 
     if (!from || !to || from >= to) {
       return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
@@ -46,7 +51,7 @@ export async function GET(request: NextRequest) {
 
     const title = reason ? `Retorno: ${reason}` : undefined;
     const tasks = await prisma.task.findMany({
-      where: {
+      where: filters ? agendaWhere(session, filters) : {
         companyId: session.companyId,
         dueAt: { gte: from, lt: to },
         ...(title ? { title } : {}),
@@ -57,8 +62,9 @@ export async function GET(request: NextRequest) {
         assignee: { select: { name: true } }
       },
       orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
-      take: 5000
+      take: agenda ? 5001 : 5000
     });
+    if (agenda && tasks.length > 5000) return NextResponse.json({ error: "EXPORT_LIMIT", message: "Reduza o período para até 5.000 agendamentos." }, { status: 409 });
 
     const uniqueContacts = new Map<string, (typeof tasks)[number]>();
     for (const task of tasks) {
@@ -67,20 +73,24 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const rows = Array.from(uniqueContacts.values()).map((task) => ({
+    const rows = agenda ? tasks.map(task => ({
+      Cliente: clean(task.contact.name), Data: task.dueAt.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" }),
+      Motivo: clean(task.title), Responsável: clean(task.assignee?.name),
+      Status: clean(task.status), Origem: taskOrigin(task.id), Observações: clean(task.note),
+    })) : Array.from(uniqueContacts.values()).map((task) => ({
       Nome: clean(task.contact.name),
       CPF: clean(task.contact.cpf),
       Telefone: clean(task.contact.phone),
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(rows);
-    worksheet["!cols"] = [
+    worksheet["!cols"] = agenda ? [34, 22, 40, 25, 15, 18, 60].map(wch => ({ wch })) : [
       { wch: 34 },
       { wch: 16 },
       { wch: 18 },
     ];
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Virada de folha");
+    XLSX.utils.book_append_sheet(workbook, worksheet, agenda ? "Agenda" : "Virada de folha");
     const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx", compression: true }) as Buffer;
     const bytes = Uint8Array.from(buffer).buffer;
     const date = new Date().toISOString().slice(0, 10);
@@ -89,7 +99,7 @@ export async function GET(request: NextRequest) {
       headers: {
         "Cache-Control": "no-store",
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "Content-Disposition": `attachment; filename="retornos-virada-folha-${date}.xlsx"`,
+        "Content-Disposition": `attachment; filename="${agenda ? "agenda" : "retornos-virada-folha"}-${date}.xlsx"`,
         "X-Content-Type-Options": "nosniff",
       }
     });

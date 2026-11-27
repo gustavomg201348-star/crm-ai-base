@@ -45,7 +45,7 @@ jobs:
         run: npm run lint:ci
 
       - name: Validate navigation, profile visibility and company AI settings
-        run: node --unhandled-rejections=strict --import tsx --test src/lib/sidebar-navigation.test.ts src/lib/company-ai-settings.test.ts
+        run: node --unhandled-rejections=strict --import tsx --test src/lib/sidebar-navigation.test.ts src/lib/company-ai-settings.test.ts src/lib/agenda-policy.test.ts src/lib/sem-margem-return.test.ts
 
       - name: Validate OpenCredit Foundation A unit tests
         run: npx --yes tsx@4.20.6 src/lib/opencredit-webhook.test.ts
@@ -482,6 +482,11 @@ jobs:
         run: node --conditions=react-server --unhandled-rejections=strict --import tsx src/lib/chatbot-clt-runtime-postgres.integration.ts
         env:
           DATABASE_URL: postgresql://qevora_ci:qevora_ci_password@127.0.0.1:5432/qevora_chatbot_test?schema=public
+
+      - name: Validate Agenda authenticated APIs, isolation, concurrent edits and XLSX export
+        run: node --conditions=react-server --unhandled-rejections=strict --import tsx src/lib/agenda-postgres.integration.ts
+        env:
+          OPENCREDIT_COMMERCIAL_OPERATION_POSTGRES_TEST: "1"
 
       - name: Validate passive Meta correlation and concurrency
         run: npx --yes tsx@4.20.6 --test src/lib/meta-reply-correlation.integration.test.ts

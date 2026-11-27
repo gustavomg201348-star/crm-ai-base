@@ -22,6 +22,8 @@ import {
 import { OpenCreditWhatsappCanary } from "@/app/components/conversations/OpenCreditWhatsappCanary";
 import { CampaignAnalyticsDashboard } from "@/app/components/campaigns/CampaignAnalyticsDashboard";
 import { TaskTurnoverExportPanel } from "@/app/components/tasks/TaskTurnoverExportPanel";
+import { AgendaPage } from "@/app/components/agenda/AgendaPage";
+import { notifyTaskChanges, useTaskRefresh } from "@/app/components/agenda/task-updates";
 import { SidebarNavigation } from "@/app/components/navigation/SidebarNavigation";
 import { ArtificialIntelligenceCenter } from "@/app/components/automation/ArtificialIntelligenceCenter";
 import { CampaignChatbotControl } from "@/app/components/automation/CampaignChatbotControl";
@@ -960,7 +962,7 @@ type TaskRow = {
   title: string;
   note?: string | null;
   dueAt: string;
-  status: "PENDING" | "DONE";
+  status: "PENDING" | "DONE" | "CANCELLED";
   completedAt?: string | null;
   createdAt?: string;
   updatedAt?: string;
@@ -3091,6 +3093,11 @@ export default function Home() {
     setDashboardLoading(false);
   }, [dashboardFilters]);
 
+  useTaskRefresh(() => {
+    loadedViewKeysRef.current.dashboard = "";
+    if (session && userCanManageOperation(session) && active === "dashboard") void loadDashboard(dashboardFilters);
+  });
+
   async function handleLogin(email: string, password: string) {
     setAppError("");
 
@@ -3343,6 +3350,7 @@ export default function Home() {
 
     const data = (await response.json()) as { task: TaskRow };
     void loadDashboard(dashboardFilters);
+    notifyTaskChanges();
     return data.task;
   }
 
@@ -3363,6 +3371,7 @@ export default function Home() {
 
     const data = (await response.json()) as { task: TaskRow };
     void loadDashboard(dashboardFilters);
+    notifyTaskChanges();
     return data.task;
   }
 
@@ -4720,6 +4729,7 @@ export default function Home() {
               />
             </div>
           )}
+          {active === "agenda" && <AgendaPage onOpenConversation={openConversationById} />}
           {active === "kanban" && (
             <Kanban
               loading={kanbanLoading}
@@ -5765,6 +5775,7 @@ function ScheduledReturnsModal({
       }
 
       const data = (await response.json()) as { task: TaskRow };
+      notifyTaskChanges();
       return data.task;
     } catch (error) {
       setActionError(
@@ -7554,6 +7565,8 @@ function Atendimento({
     }
   }
 
+  useTaskRefresh(() => { if (scheduledReturnsOpen) void loadScheduledReturns(); });
+
   function openScheduledReturns() {
     setScheduledReturnsOpen(true);
     void loadScheduledReturns();
@@ -7656,6 +7669,7 @@ function Atendimento({
         throw new Error(data?.error ?? "Nao foi possivel agendar o retorno.");
       }
 
+      notifyTaskChanges();
       setFollowUpOpen(false);
       setFollowUpSuccess("Retorno agendado");
     } catch (error) {
@@ -10724,6 +10738,8 @@ function ContactDrawer({
   const [activities, setActivities] = useState<ContactActivityRow[]>([]);
   const [activitiesLoading, setActivitiesLoading] = useState(false);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
+  const [taskRevision, setTaskRevision] = useState(0);
+  useTaskRefresh(() => { if (contact) setTaskRevision(value => value + 1); });
   const [tasksLoading, setTasksLoading] = useState(false);
   const [note, setNote] = useState("");
   const [taskForm, setTaskForm] = useState({
@@ -10791,7 +10807,7 @@ function ContactDrawer({
 
     let active = true;
     setTasksLoading(true);
-    fetch(`/api/tasks?contactId=${contact.id}&status=ALL`)
+    fetch(`/api/tasks?contactId=${contact.id}&status=ALL`, { cache: "no-store" })
       .then((response) => (response.ok ? response.json() : null))
       .then((data: { tasks?: TaskRow[] } | null) => {
         if (active) setTasks(data?.tasks ?? []);
@@ -10809,7 +10825,7 @@ function ContactDrawer({
     return () => {
       active = false;
     };
-  }, [contact]);
+  }, [contact, taskRevision]);
 
   if (!contact) {
     return (
@@ -11093,7 +11109,7 @@ function ContactDrawer({
                       </button>
                     ) : (
                       <span className="rounded bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">
-                        Concluida
+                        {task.status === "CANCELLED" ? "Cancelada" : "Concluída"}
                       </span>
                     )}
                   </div>
