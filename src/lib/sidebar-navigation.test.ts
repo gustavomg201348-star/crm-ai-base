@@ -3,11 +3,35 @@ import test from "node:test";
 import { getVisibleNavigation, navItems } from "./sidebar-navigation";
 
 const agentItems = [
-  "motor-comercial", "next-best-action", "atendimento", "agenda", "kanban", "contatos", "simulacao-clt"
+  "motor-comercial",
+  "next-best-action",
+  "atendimento",
+  "agenda",
+  "kanban",
+  "contatos",
+  "simulacao-clt",
 ];
-const supervisorItems = ["dashboard", ...agentItems, "tags", "recem-aposentados", "equipe"];
+const supervisorItems = [
+  "dashboard",
+  ...agentItems,
+  "tags",
+  "recem-aposentados",
+  "equipe",
+];
 const adminItems = [
-  ...supervisorItems, "multicred", "canais", "templates", "disparos", "chatbot", "inteligencia-artificial", "config"
+  ...supervisorItems,
+  "multicred",
+  "canais",
+  "templates",
+  "disparos",
+  "chatbot",
+  "inteligencia-artificial",
+  "config",
+  "automacoes",
+  "regras-automaticas",
+  "distribuicao-leads",
+  "opencredit",
+  "bancos",
 ];
 
 test("keeps the existing menu visibility for each profile", () => {
@@ -15,31 +39,61 @@ test("keeps the existing menu visibility for each profile", () => {
     { role: "ADMIN", platform: true, expected: [...adminItems, "empresas"] },
     { role: "ADMIN", platform: false, expected: adminItems },
     { role: "SUPERVISOR", platform: false, expected: supervisorItems },
-    { role: "AGENT", platform: false, expected: agentItems }
+    { role: "AGENT", platform: false, expected: agentItems },
   ] as const;
   for (const { role, platform, expected } of cases) {
     const { visibleItems, sections } = getVisibleNavigation(role, platform);
-    const listed = sections.flatMap((section) => "item" in section ? [section.item.id] : section.items.map(({ id }) => id));
-    assert.deepEqual(visibleItems.map(({ id }) => id).sort(), [...expected].sort());
+    const listed = sections.flatMap((section) =>
+      "item" in section ? [section.item.id] : section.items.map(({ id }) => id),
+    );
+    assert.deepEqual(
+      visibleItems.map(({ id }) => id).sort(),
+      [...expected].sort(),
+    );
     assert.deepEqual(listed.sort(), [...expected].sort());
-    assert.ok(sections.every((section) => "item" in section || section.items.length > 0));
+    assert.ok(
+      sections.every(
+        (section) => "item" in section || section.items.length > 0,
+      ),
+    );
   }
 });
 
 test("shows Dashboard once and places Chatbot and AI together under Comunicação", () => {
   const { sections } = getVisibleNavigation("ADMIN", true);
-  assert.deepEqual(sections.map(({ id }) => id), [
-    "dashboard", "operacao-comercial", "relacionamento", "comunicacao",
-    "produtos-financeiros", "administracao-apoio"
-  ]);
+  assert.deepEqual(
+    sections.map(({ id }) => id),
+    [
+      "dashboard",
+      "operacao-comercial",
+      "relacionamento",
+      "comunicacao",
+      "automacoes-grupo",
+      "integracoes-grupo",
+      "produtos-financeiros",
+      "administracao-apoio",
+    ],
+  );
   const [dashboard] = sections;
   assert.ok("item" in dashboard && dashboard.item.id === "dashboard");
   const communication = sections.find(({ id }) => id === "comunicacao");
   assert.ok(communication && "items" in communication);
-  assert.deepEqual(communication.items.map(({ id }) => id), ["canais", "templates", "disparos", "chatbot", "inteligencia-artificial"]);
-  assert.equal(navItems.find(({ id }) => id === "simulacao-clt")?.label, "Simulação CLT");
-  assert.equal(navItems.find(({ id }) => id === "recem-aposentados")?.label, "Recém-aposentados");
+  assert.deepEqual(
+    communication.items.map(({ id }) => id),
+    ["canais", "templates", "disparos", "chatbot", "inteligencia-artificial"],
+  );
+  assert.equal(
+    navItems.find(({ id }) => id === "simulacao-clt")?.label,
+    "Simulação CLT",
+  );
+  assert.equal(
+    navItems.find(({ id }) => id === "recem-aposentados")?.label,
+    "Recém-aposentados",
+  );
   const relationship = sections.find(({ id }) => id === "relacionamento");
   assert.ok(relationship && "items" in relationship);
-  assert.deepEqual(relationship.items.slice(0, 2).map(item => item.id), ["atendimento", "agenda"]);
+  assert.deepEqual(
+    relationship.items.slice(0, 2).map((item) => item.id),
+    ["atendimento", "agenda"],
+  );
 });

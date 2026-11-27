@@ -53,6 +53,9 @@ jobs:
       - name: Validate campaign analytics units, safe attribution and read-only contract
         run: node --unhandled-rejections=strict --import tsx --test src/lib/campaign-analytics.test.ts
 
+      - name: Validate automation monitoring boundaries and module extraction
+        run: node --conditions=react-server --unhandled-rejections=strict --import tsx --test src/lib/automation-monitor.test.ts
+
       - name: Validate campaign analytics SQLite compatibility on synthetic temporary database
         run: |
           export TMPDIR="${RUNNER_TEMP}"
@@ -506,6 +509,11 @@ jobs:
 
       - name: Validate campaign analytics, signed Meta receipts, deduplication and exports
         run: node --conditions=react-server --unhandled-rejections=strict --import tsx --test src/lib/campaign-analytics-postgres.integration.ts
+        env:
+          OPENCREDIT_COMMERCIAL_OPERATION_POSTGRES_TEST: "1"
+
+      - name: Validate automation monitoring, non-mutating navigation and integration security
+        run: node --conditions=react-server --unhandled-rejections=strict --import tsx --test src/lib/automation-monitor-postgres.integration.ts
         env:
           OPENCREDIT_COMMERCIAL_OPERATION_POSTGRES_TEST: "1"
 

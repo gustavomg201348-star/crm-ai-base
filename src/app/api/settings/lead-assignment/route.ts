@@ -1,12 +1,16 @@
 import { NextResponse, type NextRequest } from "next/server";
 import {
-  getLeadAssignmentSettings,
   normalizeAssignmentMode,
-  updateLeadAssignmentSettings
+  updateLeadAssignmentSettings,
 } from "@/lib/lead-assignment";
 import { publicErrorResponse } from "@/lib/http-error-response";
-import { getSessionOrUnauthorized, requireCompanyAdmin } from "@/lib/permissions";
+import {
+  getSessionOrUnauthorized,
+  requireCompanyAdmin,
+} from "@/lib/permissions";
 import { safeLogError } from "@/lib/safe-logger";
+import { prisma } from "@/lib/db";
+import { readAssignmentConfiguration } from "@/lib/automation-monitor.service";
 
 export async function GET(request: NextRequest) {
   try {
@@ -16,7 +20,10 @@ export async function GET(request: NextRequest) {
     const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
 
-    const settings = await getLeadAssignmentSettings(session.companyId);
+    const settings = await readAssignmentConfiguration(
+      prisma,
+      session.companyId,
+    );
     return NextResponse.json({ settings });
   } catch (error) {
     const { session } = await getSessionOrUnauthorized(request);
@@ -27,7 +34,7 @@ export async function GET(request: NextRequest) {
       companyId: session?.companyId,
       currentUserId: session?.id,
       publicErrorCode: "INTERNAL_ERROR",
-      status: 500
+      status: 500,
     });
 
     return publicErrorResponse({ code: "INTERNAL_ERROR", status: 500 });
@@ -42,15 +49,13 @@ export async function PATCH(request: NextRequest) {
     const blocked = requireCompanyAdmin(session);
     if (blocked) return blocked;
 
-    const body = (await request.json().catch(() => null)) as
-      | {
-          mode?: string;
-          onlineOnly?: boolean;
-          maxOpenPerAttendant?: number | null;
-          allowAttendantClaim?: boolean;
-          redistributeWhenOffline?: boolean;
-        }
-      | null;
+    const body = (await request.json().catch(() => null)) as {
+      mode?: string;
+      onlineOnly?: boolean;
+      maxOpenPerAttendant?: number | null;
+      allowAttendantClaim?: boolean;
+      redistributeWhenOffline?: boolean;
+    } | null;
 
     const settings = await updateLeadAssignmentSettings({
       companyId: session.companyId,
@@ -64,8 +69,8 @@ export async function PATCH(request: NextRequest) {
               ? body.maxOpenPerAttendant
               : null,
         allowAttendantClaim: body?.allowAttendantClaim,
-        redistributeWhenOffline: body?.redistributeWhenOffline
-      }
+        redistributeWhenOffline: body?.redistributeWhenOffline,
+      },
     });
 
     return NextResponse.json({ settings });
@@ -78,9 +83,12 @@ export async function PATCH(request: NextRequest) {
       companyId: session?.companyId,
       currentUserId: session?.id,
       publicErrorCode: "USER_SETTINGS_UPDATE_FAILED",
-      status: 500
+      status: 500,
     });
 
-    return publicErrorResponse({ code: "USER_SETTINGS_UPDATE_FAILED", status: 500 });
+    return publicErrorResponse({
+      code: "USER_SETTINGS_UPDATE_FAILED",
+      status: 500,
+    });
   }
 }
