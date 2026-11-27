@@ -1,23 +1,16 @@
 "use client";
-import { OperationalSettings } from "./OperationalSettings";
 import { ReferenceManager } from "./ReferenceManager";
-import type { AssignmentSettings, Attendant } from "./settings-types";
+import type { Section } from "@/lib/sidebar-navigation";
 export function SettingsWorkspace({
   companyName,
   reference,
-  attendants,
-  leadAssignmentSettings,
-  onSaveLeadAssignmentSettings,
   onRefresh,
   onNavigate,
 }: {
   companyName: string;
   reference: { origins: { id: string; name: string }[] };
-  attendants: Attendant[];
-  leadAssignmentSettings: AssignmentSettings;
-  onSaveLeadAssignmentSettings: (settings: AssignmentSettings) => Promise<void>;
   onRefresh: () => Promise<void>;
-  onNavigate: (section: "equipe" | "tags" | "kanban") => void;
+  onNavigate: (section: Section) => void;
 }) {
   return (
     <div className="space-y-4">
@@ -38,6 +31,12 @@ export function SettingsWorkspace({
               ["equipe", "Equipe e Permissões"],
               ["tags", "Tags"],
               ["kanban", "Etapas no Kanban"],
+              ["automacoes", "Automações"],
+              ["distribuicao-leads", "Distribuição de Leads"],
+              ["opencredit", "OpenCredit"],
+              ["bancos", "Bancos"],
+              ["inteligencia-artificial", "Inteligência Artificial"],
+              ["chatbot", "Chatbot"],
             ] as const
           ).map(([id, label]) => (
             <button
@@ -55,11 +54,6 @@ export function SettingsWorkspace({
         kind="origins"
         items={reference.origins}
         onChanged={onRefresh}
-      />
-      <OperationalSettings
-        attendants={attendants}
-        leadAssignmentSettings={leadAssignmentSettings}
-        onSaveLeadAssignmentSettings={onSaveLeadAssignmentSettings}
       />
     </div>
   );
