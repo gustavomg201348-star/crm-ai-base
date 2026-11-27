@@ -1,5 +1,5 @@
 import {
-  BadgeCheck, Bot, BriefcaseBusiness, Building2, CircleDollarSign, ContactRound,
+  BadgeCheck, Bot, BriefcaseBusiness, Building2, CalendarDays, CircleDollarSign, ContactRound,
   Gauge, Headphones, Hourglass, KanbanSquare, Library, Megaphone, MessagesSquare,
   Settings, ShieldCheck, Sparkles, Tags, TrendingUp, UsersRound, Webhook,
   type LucideIcon
@@ -10,6 +10,7 @@ export const navItems = [
   { id: "motor-comercial", label: "Motor Comercial", icon: Sparkles },
   { id: "next-best-action", label: "Próxima Melhor Ação", icon: BadgeCheck },
   { id: "atendimento", label: "Atendimento", icon: Headphones },
+  { id: "agenda", label: "Agenda", icon: CalendarDays },
   { id: "kanban", label: "Kanban", icon: KanbanSquare },
   { id: "contatos", label: "Contatos", icon: ContactRound },
   { id: "tags", label: "Tags", icon: Tags },
@@ -35,14 +36,14 @@ type NavigationSection =
 const navigationSections: readonly NavigationSection[] = [
   { id: "dashboard", itemId: "dashboard" },
   { id: "operacao-comercial", label: "Operação Comercial", icon: TrendingUp, itemIds: ["motor-comercial", "next-best-action"] },
-  { id: "relacionamento", label: "Relacionamento", icon: UsersRound, itemIds: ["atendimento", "kanban", "contatos", "tags"] },
+  { id: "relacionamento", label: "Relacionamento", icon: UsersRound, itemIds: ["atendimento", "agenda", "kanban", "contatos", "tags"] },
   { id: "comunicacao", label: "Comunicação", icon: MessagesSquare, itemIds: ["canais", "templates", "disparos", "chatbot", "inteligencia-artificial"] },
   { id: "produtos-financeiros", label: "Produtos Financeiros", icon: CircleDollarSign, itemIds: ["simulacao-clt", "multicred", "recem-aposentados"] },
   { id: "administracao-apoio", label: "Administração", icon: ShieldCheck, itemIds: ["empresas", "config"] }
 ];
 
 const agentItems: readonly Section[] = [
-  "motor-comercial", "next-best-action", "atendimento", "contatos", "kanban", "simulacao-clt"
+  "motor-comercial", "next-best-action", "atendimento", "agenda", "contatos", "kanban", "simulacao-clt"
 ];
 const supervisorItems: readonly Section[] = [
   ...agentItems, "dashboard", "tags", "recem-aposentados"

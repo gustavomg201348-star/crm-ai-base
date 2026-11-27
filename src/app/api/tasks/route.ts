@@ -1,124 +1,37 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
-import { createActivity } from "@/lib/activities";
 import { prisma } from "@/lib/db";
-import { publicErrorResponse } from "@/lib/http-error-response";
-import { safeLogError } from "@/lib/safe-logger";
 import { mapTask, taskInclude } from "@/lib/tasks";
+import { parseAgendaFilters, taskScope } from "@/lib/agenda-policy";
+import { createAgendaTask, listAgenda, AgendaError } from "@/lib/agenda.service";
+import { agendaBody, agendaFailure } from "@/lib/agenda-http";
 
+export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   try {
-    const session = await getSessionFromRequest(request);
-
-    if (!session) {
-      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
+    const actor = await getSessionFromRequest(request);
+    if (!actor) return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
+    const params = request.nextUrl.searchParams;
+    if (params.get("view") === "agenda") {
+      let filters;
+      try { filters = parseAgendaFilters(params); } catch { throw new AgendaError("INVALID_REQUEST"); }
+      return NextResponse.json(await listAgenda(prisma, actor, filters), { headers: { "Cache-Control": "no-store" } });
     }
-
-    const contactId = request.nextUrl.searchParams.get("contactId") ?? "";
-    const assigneeId = request.nextUrl.searchParams.get("assigneeId") ?? "";
-    const status = request.nextUrl.searchParams.get("status") ?? "PENDING";
-
-    const tasks = await prisma.task.findMany({
-      where: {
-        companyId: session.companyId,
-        ...(contactId ? { contactId } : {}),
-        ...(assigneeId ? { assigneeId } : {}),
-        ...(status === "ALL" ? {} : { status })
-      },
-      include: taskInclude,
-      orderBy: [{ status: "asc" }, { dueAt: "asc" }],
-      take: 100
-    });
-
-    return NextResponse.json({ tasks: tasks.map(mapTask) });
-  } catch (error) {
-    safeLogError("http-api", error, {
-      route: "/api/tasks",
-      method: "GET",
-      publicErrorCode: "INTERNAL_ERROR",
-      status: 500
-    });
-
-    return publicErrorResponse({ code: "INTERNAL_ERROR", status: 500 });
-  }
+    const status = params.get("status") ?? "PENDING";
+    if (!["ALL", "PENDING", "DONE", "CANCELLED"].includes(status)) throw new AgendaError("INVALID_REQUEST");
+    const tasks = await prisma.task.findMany({ where: { AND: [taskScope(actor),
+      { ...(params.get("contactId") ? { contactId: params.get("contactId")! } : {}),
+        ...(params.get("assigneeId") ? { assigneeId: params.get("assigneeId")! } : {}),
+        ...(status === "ALL" ? {} : { status }) }] }, include: taskInclude,
+      orderBy: [{ status: "asc" }, { dueAt: "asc" }, { id: "asc" }], take: 100 });
+    return NextResponse.json({ tasks: tasks.map(mapTask) }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) { return agendaFailure(error); }
 }
-
 export async function POST(request: NextRequest) {
   try {
-    const session = await getSessionFromRequest(request);
-
-    if (!session) {
-      return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
-    }
-
-    const body = (await request.json().catch(() => null)) as
-      | {
-          contactId?: string;
-          assigneeId?: string;
-          title?: string;
-          note?: string;
-          dueAt?: string;
-        }
-      | null;
-    const title = body?.title?.trim();
-    const dueAt = body?.dueAt ? new Date(body.dueAt) : null;
-
-    if (!body?.contactId || !title || !dueAt || Number.isNaN(dueAt.getTime())) {
-      return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
-    }
-
-    const contact = await prisma.contact.findFirst({
-      where: { id: body.contactId, companyId: session.companyId },
-      select: { id: true, name: true }
-    });
-
-    if (!contact) {
-      return publicErrorResponse({ code: "CONTACT_NOT_FOUND", status: 404 });
-    }
-
-    const assignee = body.assigneeId
-      ? await prisma.user.findFirst({
-          where: { id: body.assigneeId, companyId: session.companyId },
-          select: { id: true }
-        })
-      : null;
-
-    const task = await prisma.$transaction(async (tx) => {
-      const created = await tx.task.create({
-        data: {
-          companyId: session.companyId,
-          contactId: contact.id,
-          assigneeId: assignee?.id ?? session.id,
-          title,
-          note: body.note?.trim() || null,
-          dueAt,
-          status: "PENDING"
-        },
-        include: taskInclude
-      });
-
-      await createActivity(tx, {
-        contactId: contact.id,
-        userId: session.id,
-        type: "TASK_CREATED",
-        title: "Tarefa criada",
-        detail: `${created.title} para ${created.dueAt.toLocaleString("pt-BR")}.`
-      });
-
-      return created;
-    });
-
-    return NextResponse.json({ task: mapTask(task) }, { status: 201 });
-  } catch (error) {
-    safeLogError("http-api", error, {
-      route: "/api/tasks",
-      method: "POST",
-      companyId: (await getSessionFromRequest(request))?.companyId,
-      currentUserId: (await getSessionFromRequest(request))?.id,
-      publicErrorCode: "TASK_CREATE_FAILED",
-      status: 500
-    });
-
-    return publicErrorResponse({ code: "TASK_CREATE_FAILED", status: 500 });
-  }
+    const actor = await getSessionFromRequest(request);
+    if (!actor) return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
+    const result = await createAgendaTask(prisma, actor, await agendaBody(request), request.headers.get("idempotency-key"));
+    return NextResponse.json(result, { status: result.duplicate ? 200 : 201, headers: { "Cache-Control": "no-store" } });
+  } catch (error) { return agendaFailure(error); }
 }
