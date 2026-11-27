@@ -50,6 +50,17 @@ jobs:
       - name: Validate OpenCredit Foundation A unit tests
         run: npx --yes tsx@4.20.6 src/lib/opencredit-webhook.test.ts
 
+      - name: Validate campaign analytics units, safe attribution and read-only contract
+        run: node --unhandled-rejections=strict --import tsx --test src/lib/campaign-analytics.test.ts
+
+      - name: Validate campaign analytics SQLite compatibility on synthetic temporary database
+        run: |
+          export TMPDIR="${RUNNER_TEMP}"
+          export DATABASE_URL="file:${RUNNER_TEMP}/qevora_campaign_analytics_test.db"
+          touch "${RUNNER_TEMP}/qevora_campaign_analytics_test.db"
+          npx prisma db push --skip-generate
+          CAMPAIGN_ANALYTICS_SQLITE_TEST=1 node --conditions=react-server --unhandled-rejections=strict --import tsx --test src/lib/campaign-analytics-sqlite.integration.ts
+
       - name: Validate OpenCredit single-job pilot guard
         run: node --import tsx --test scripts/run-opencredit-materialization.test.ts
 
@@ -490,6 +501,11 @@ jobs:
 
       - name: Validate team, platform privilege boundaries, protected tags and contextual settings
         run: node --conditions=react-server --unhandled-rejections=strict --import tsx src/lib/settings-team-postgres.integration.ts
+        env:
+          OPENCREDIT_COMMERCIAL_OPERATION_POSTGRES_TEST: "1"
+
+      - name: Validate campaign analytics, signed Meta receipts, deduplication and exports
+        run: node --conditions=react-server --unhandled-rejections=strict --import tsx --test src/lib/campaign-analytics-postgres.integration.ts
         env:
           OPENCREDIT_COMMERCIAL_OPERATION_POSTGRES_TEST: "1"
 
