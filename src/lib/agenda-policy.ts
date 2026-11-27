@@ -17,6 +17,9 @@ export function taskOrigin(id: string): Exclude<AgendaOrigin, "ALL"> {
 export function saoPauloDate(date = new Date()) {
   return new Intl.DateTimeFormat("en-CA", { timeZone: agendaTimezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
 }
+export function agendaDateLabel(date: string, options: Intl.DateTimeFormatOptions) {
+  return new Intl.DateTimeFormat("pt-BR", { ...options, timeZone: agendaTimezone }).format(new Date(date + "T12:00:00Z"));
+}
 export function shiftDate(date: string, days: number) {
   const value = new Date(date + "T12:00:00Z");
   value.setUTCDate(value.getUTCDate() + days);

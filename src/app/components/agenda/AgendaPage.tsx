@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, Check, CheckCheck, ChevronLeft, ChevronRight, Clock3, Download, Loader2, MessageSquare, Plus, RefreshCw, Search, X } from "lucide-react";
-import { agendaPeriod, localDay, saoPauloDate, shiftDate, type AgendaView } from "@/lib/agenda-policy";
+import { agendaDateLabel, agendaPeriod, localDay, saoPauloDate, shiftDate, type AgendaView } from "@/lib/agenda-policy";
 import { AgendaTaskEditor } from "./AgendaTaskEditor";
 import { notifyTaskChanges, useTaskRefresh } from "./task-updates";
 import { taskError, type AgendaData, type AgendaTask } from "./agenda-types";
@@ -9,7 +9,7 @@ import { taskError, type AgendaData, type AgendaTask } from "./agenda-types";
 const views: { id: AgendaView; label: string }[] = [{ id: "day", label: "Dia" }, { id: "week", label: "Semana" }, { id: "month", label: "Mês" }, { id: "list", label: "Lista" }];
 const statusLabels = { PENDING: "Pendente", DONE: "Concluído", CANCELLED: "Cancelado" };
 const origins = { MANUAL: "Manual", AUTOMATIC: "Automático · Sem margem", UNKNOWN: "Origem não informada" };
-const compactDate = (date: string) => new Date(date + "T12:00:00Z").toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
+const compactDate = (date: string) => agendaDateLabel(date, { day: "2-digit", month: "short" });
 export function AgendaPage({ onOpenConversation }: { onOpenConversation(id: string): Promise<void> }) {
   const [view, setView] = useState<AgendaView>("week"), [date, setDate] = useState(saoPauloDate());
   const [custom, setCustom] = useState<{ from: string; to: string } | null>(null);
@@ -164,7 +164,7 @@ export function AgendaPage({ onOpenConversation }: { onOpenConversation(id: stri
           : <div className={"grid gap-2 " + (view === "day" ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-7")}>
             {view === "month" && !custom && Array.from({ length: (new Date(period.from + "T12:00:00Z").getUTCDay() + 6) % 7 }, (_, i) => <div key={"pad-" + i} className="hidden lg:block" />)}
             {days.map(day => <section key={day} className={"min-w-0 rounded-xl border p-2 " + (day === saoPauloDate() ? "border-blue-300 bg-blue-50/50" : "border-slate-200 bg-slate-50/70")}>
-              <h2 className="mb-3 flex items-center justify-between px-1 text-xs font-semibold text-slate-600"><span>{new Date(day + "T12:00:00Z").toLocaleDateString("pt-BR", { weekday: "short" })}</span><span className={day === saoPauloDate() ? "rounded-full bg-blue-600 px-2 py-1 text-white" : ""}>{compactDate(day)}</span></h2>
+              <h2 className="mb-3 flex items-center justify-between px-1 text-xs font-semibold text-slate-600"><span>{agendaDateLabel(day, { weekday: "short" })}</span><span className={day === saoPauloDate() ? "rounded-full bg-blue-600 px-2 py-1 text-white" : ""}>{compactDate(day)}</span></h2>
               <div className="space-y-2">{(groups.get(day) ?? []).map(card)}</div>
             </section>)}
           </div>}
