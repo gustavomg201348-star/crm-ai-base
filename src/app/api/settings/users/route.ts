@@ -2,11 +2,34 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest, hashPassword } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { publicErrorResponse } from "@/lib/http-error-response";
-import { requireCompanyAdmin } from "@/lib/permissions";
+import { requireCompanyAdmin, requireAdmin, isPlatformAdmin } from "@/lib/permissions";
+import { listAttendants } from "@/lib/lead-assignment";
+import { canManageTeamIdentity, validTeamInput } from "@/lib/team-policy";
 import { isPrismaKnownRequestError } from "@/lib/prisma-errors";
 import { safeLogError } from "@/lib/safe-logger";
 
 const roles = ["ADMIN", "SUPERVISOR", "AGENT"] as const;
+
+export async function GET(request: NextRequest) {
+  const actor = await getSessionFromRequest(request);
+  if (!actor) return publicErrorResponse({ code: "UNAUTHENTICATED", status: 401 });
+  const blocked = requireAdmin(actor);
+  if (blocked) return blocked;
+  try {
+    const users = await listAttendants(actor.companyId);
+    return NextResponse.json({
+      users: users.map(user => ({
+        ...user,
+        platformAdmin: isPlatformAdmin({
+          ...user, role: user.role === "ADMIN" ? "ADMIN" : "AGENT", companyId: actor.companyId
+        }),
+        canManage: canManageTeamIdentity(actor, { ...user, companyId: actor.companyId })
+      }))
+    }, { headers: { "Cache-Control": "no-store" } });
+  } catch {
+    return publicErrorResponse({ code: "INTERNAL_ERROR", status: 503 });
+  }
+}
 
 function isRole(value: unknown): value is (typeof roles)[number] {
   return typeof value === "string" && roles.includes(value as (typeof roles)[number]);
@@ -30,6 +53,7 @@ export async function POST(request: NextRequest) {
           role?: string;
         }
       | null;
+    if (!validTeamInput(body, true)) return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
     const name = body?.name?.trim();
     const email = body?.email?.trim().toLowerCase();
 
@@ -41,6 +65,9 @@ export async function POST(request: NextRequest) {
       return publicErrorResponse({ code: "INVALID_REQUEST", status: 400 });
     }
 
+    if (!canManageTeamIdentity(session, {
+      companyId: session.companyId, email, role: isRole(body.role) ? body.role : "AGENT"
+    })) return publicErrorResponse({ code: "USER_PERMISSION_DENIED", status: 403 });
     const user = await prisma.user.create({
       data: {
         companyId: session.companyId,

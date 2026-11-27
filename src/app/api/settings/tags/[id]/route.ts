@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { requireAdmin } from "@/lib/permissions";
+import { isSemMargemTagName } from "@/lib/sem-margem-return";
 
 export async function PATCH(
   request: NextRequest,
@@ -43,8 +44,11 @@ export async function PATCH(
       return NextResponse.json({ error: "Nome da tag e obrigatorio." }, { status: 400 });
     }
 
+    if (isSemMargemTagName(current.name) && ((name !== undefined && name !== current.name) || body?.isActive === false)) {
+      return NextResponse.json({ error: "A tag SEM MARGEM é protegida pela automação. Nome e ativação devem ser preservados." }, { status: 409 });
+    }
     const tag = await prisma.tag.update({
-      where: { id },
+      where: { id, companyId:session.companyId, name:current.name },
       data: {
         ...(name !== undefined ? { name } : {}),
         ...(color !== undefined ? { color } : {}),
@@ -85,8 +89,11 @@ export async function DELETE(
       return NextResponse.json({ error: "Tag nao encontrada." }, { status: 404 });
     }
 
+    if (isSemMargemTagName(current.name)) {
+      return NextResponse.json({ error: "A tag SEM MARGEM não pode ser desativada ou excluída por este gerenciamento." }, { status: 409 });
+    }
     await prisma.tag.update({
-      where: { id },
+      where: { id, companyId:session.companyId, name:current.name },
       data: { isActive: false }
     });
 
