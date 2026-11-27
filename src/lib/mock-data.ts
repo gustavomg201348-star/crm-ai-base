@@ -1,43 +1,12 @@
 import {
   BadgeCheck,
   BarChart3,
-  Bot,
-  Building2,
   BriefcaseBusiness,
-  CircleDollarSign,
-  ContactRound,
-  Gauge,
-  Headphones,
-  Hourglass,
-  KanbanSquare,
-  Library,
-  Megaphone,
   MessageSquareText,
-  Settings,
   ShieldCheck,
   Sparkles,
-  Tags,
-  Webhook
+  Tags
 } from "lucide-react";
-
-export const navItems = [
-  { id: "dashboard", label: "Dashboard", icon: Gauge },
-  { id: "motor-comercial", label: "Motor Comercial", icon: Sparkles },
-  { id: "next-best-action", label: "Próxima Melhor Ação", icon: BadgeCheck },
-  { id: "atendimento", label: "Atendimento", icon: Headphones, count: 23 },
-  { id: "kanban", label: "Kanban", icon: KanbanSquare },
-  { id: "contatos", label: "Contatos", icon: ContactRound },
-  { id: "tags", label: "Tags", icon: Tags },
-  { id: "simulacao-clt", label: "Simulacao CLT", icon: BriefcaseBusiness },
-  { id: "multicred", label: "Multicred", icon: CircleDollarSign },
-  { id: "canais", label: "Canais", icon: Webhook },
-  { id: "templates", label: "Templates", icon: Library },
-  { id: "disparos", label: "Disparos", icon: Megaphone },
-  { id: "recem-aposentados", label: "Recem-Aposentados", icon: Hourglass },
-  { id: "empresas", label: "Empresas", icon: Building2 },
-  { id: "chatbot", label: "Chatbot", icon: Bot },
-  { id: "config", label: "Configurações", icon: Settings }
-] as const;
 
 export const conversations = [
   {

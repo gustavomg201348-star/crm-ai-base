@@ -44,6 +44,9 @@ jobs:
       - name: Lint
         run: npm run lint:ci
 
+      - name: Validate CRM sidebar navigation and profile visibility
+        run: node --unhandled-rejections=strict --import tsx --test src/lib/sidebar-navigation.test.ts
+
       - name: Validate OpenCredit Foundation A unit tests
         run: npx --yes tsx@4.20.6 src/lib/opencredit-webhook.test.ts
 

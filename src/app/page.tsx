@@ -14,7 +14,6 @@ import NextImage from "next/image";
 import clsx from "clsx";
 import {
   aiActions,
-  navItems,
   MessageSquareText,
   ShieldCheck,
   Sparkles,
@@ -23,6 +22,8 @@ import {
 import { OpenCreditWhatsappCanary } from "@/app/components/conversations/OpenCreditWhatsappCanary";
 import { CampaignAnalyticsDashboard } from "@/app/components/campaigns/CampaignAnalyticsDashboard";
 import { TaskTurnoverExportPanel } from "@/app/components/tasks/TaskTurnoverExportPanel";
+import { SidebarNavigation } from "@/app/components/navigation/SidebarNavigation";
+import { getVisibleNavigation, navItems, type Section } from "@/lib/sidebar-navigation";
 import { ConversationList } from "@/app/components/conversations/ConversationList";
 import { CltSidebarSimulationPanel } from "@/app/components/conversations/CltSidebarSimulationPanel";
 import { QuickRepliesPanel } from "@/app/components/conversations/QuickRepliesPanel";
@@ -78,7 +79,6 @@ import {
   Check,
   CheckCheck,
   ChevronDown,
-  ChevronRight,
   CircleDollarSign,
   Clock3,
   Clipboard,
@@ -114,47 +114,6 @@ import {
   UserRound,
   X
 } from "lucide-react";
-
-type Section = (typeof navItems)[number]["id"];
-
-type NavigationGroup = {
-  id: string;
-  label: string;
-  itemIds: Section[];
-};
-
-const navigationGroups: NavigationGroup[] = [
-  {
-    id: "dashboard",
-    label: "Dashboard",
-    itemIds: ["dashboard"]
-  },
-  {
-    id: "operacao-comercial",
-    label: "Operação Comercial",
-    itemIds: ["motor-comercial", "next-best-action"]
-  },
-  {
-    id: "relacionamento",
-    label: "Relacionamento",
-    itemIds: ["atendimento", "kanban", "contatos", "tags"]
-  },
-  {
-    id: "comunicacao",
-    label: "Comunicação",
-    itemIds: ["canais", "templates", "disparos"]
-  },
-  {
-    id: "produtos-financeiros",
-    label: "Produtos Financeiros",
-    itemIds: ["simulacao-clt", "multicred", "recem-aposentados"]
-  },
-  {
-    id: "administracao-apoio",
-    label: "Administração",
-    itemIds: ["chatbot", "empresas", "config"]
-  }
-];
 
 const INBOUND_MESSAGE_NOTIFICATION_TYPE = "NEW_INBOUND_MESSAGE";
 
@@ -2029,53 +1988,10 @@ export default function Home() {
     [availableChannels]
   );
 
-  const visibleNavItems = useMemo(() => {
-    if (userIsAdmin(session)) {
-      return navItems.filter((item) =>
-        item.id === "empresas" ? userIsPlatformAdmin(session) : true
-      );
-    }
-
-    if (session?.user.role === "SUPERVISOR") {
-      return navItems.filter((item) =>
-        [
-          "dashboard",
-          "motor-comercial",
-          "next-best-action",
-          "atendimento",
-          "kanban",
-          "contatos",
-          "tags",
-          "simulacao-clt",
-          "recem-aposentados"
-        ].includes(item.id)
-      );
-    }
-
-    return navItems.filter((item) =>
-      ["motor-comercial", "next-best-action", "atendimento", "contatos", "kanban", "simulacao-clt"].includes(item.id)
-    );
-  }, [session]);
-
-  const visibleNavigationGroups = useMemo(() => {
-    const visibleItemIds = new Set<Section>(visibleNavItems.map((item) => item.id));
-
-    return navigationGroups
-      .map((group) => ({
-        ...group,
-        items: group.itemIds
-          .filter((itemId) => visibleItemIds.has(itemId))
-          .map((itemId) => visibleNavItems.find((item) => item.id === itemId))
-          .filter((item): item is (typeof visibleNavItems)[number] => Boolean(item))
-      }))
-      .filter((group) => group.items.length > 0);
-  }, [visibleNavItems]);
-
-  const activeNavigationGroupId = useMemo(() => {
-    return visibleNavigationGroups.find((group) =>
-      group.items.some((item) => item.id === active)
-    )?.id;
-  }, [active, visibleNavigationGroups]);
+  const { visibleItems: visibleNavItems, sections: visibleNavigationSections } = useMemo(
+    () => getVisibleNavigation(session?.user.role, userIsPlatformAdmin(session)),
+    [session]
+  );
 
   const toggleNavigationGroup = useCallback((groupId: string) => {
     setCollapsedNavigationGroups((current) => ({
@@ -4447,8 +4363,8 @@ export default function Home() {
         {active === "dashboard" && <svg aria-hidden="true" viewBox="0 0 264 280" preserveAspectRatio="none" className="pointer-events-none absolute inset-x-0 bottom-12 -z-10 h-64 w-full"><defs><linearGradient id="nav-wave-fill" x1="0" y1="0" x2="1" y2="1"><stop stopColor="#004cff" stopOpacity=".5"/><stop offset="1" stopColor="#001e75" stopOpacity="0"/></linearGradient></defs><path d="M0 105 C65 167 102 146 160 90 S225 32 264 55 L264 280 L0 280 Z" fill="url(#nav-wave-fill)"/>{Array.from({length:24},(_,i)=><path key={i} d={"M0 "+(105+i*2.7)+" C65 "+(167+i*2.7)+" 102 "+(146+i*2.7)+" 160 "+(90+i*2.7)+" S225 "+(32+i*2.7)+" 264 "+(55+i*2.7)} fill="none" stroke="#1765ff" strokeWidth=".7" opacity={.36-i*.009}/>)}<path d="M0 141 C65 203 102 182 160 126 S225 68 264 91" fill="none" stroke="#2477ff" strokeWidth="1.5" opacity=".65"/></svg>}
         <div
           className={clsx(
-            "flex h-20 shrink-0 items-center gap-3 px-5",
-            leftSidebarCollapsed && "justify-center px-3"
+            "flex h-20 shrink-0 items-center gap-2 px-3",
+            leftSidebarCollapsed && "justify-center"
           )}
         >
           <div className="grid h-10 w-10 place-items-center rounded-2xl bg-brand text-sm font-bold text-white shadow-soft">
@@ -4461,7 +4377,7 @@ export default function Home() {
                   CRM
                 </p>
                 <h1 className={clsx("truncate text-[15px] font-bold",active === "dashboard" ? "text-white" : "text-slate-950")}>
-                  Operacao Inteligente
+                  Operação Inteligente
                 </h1>
               </div>
               <button
@@ -4489,130 +4405,16 @@ export default function Home() {
           </div>
         )}
 
-        <nav
-          className={clsx(
-            "relative min-h-0 flex-1 space-y-1 overflow-y-scroll pb-4 [scrollbar-color:#CBD5E1_transparent] [scrollbar-width:thin]",
-            leftSidebarCollapsed ? "mt-4 px-3" : "mt-4 px-3 pr-2"
-          )}
-        >
-          {!leftSidebarCollapsed && (
-            <p className={clsx("px-3 pb-3 text-xs font-semibold tracking-wide",active === "dashboard" ? "text-blue-200" : "text-slate-700")}>
-              Navegacao
-            </p>
-          )}
-          {leftSidebarCollapsed
-            ? visibleNavItems.map((item) => {
-                const Icon = item.icon;
-                const itemCount =
-                  item.id === "atendimento"
-                    ? atendimentoUnread
-                    : "count" in item && typeof item.count === "number"
-                      ? item.count
-                      : 0;
-                return (
-                  <button
-                    key={item.id}
-                    className={clsx(
-                      "group relative flex h-10 w-full items-center rounded-xl text-left text-sm font-medium shadow-sm transition-colors",
-                      "justify-center px-0",
-                      active === item.id
-                        ? "bg-white text-brand ring-1 ring-blue-100"
-                        : "bg-white/60 text-slate-600 hover:bg-white hover:text-slate-950"
-                    )}
-                    onClick={() => setActive(item.id)}
-                    title={item.label}
-                  >
-                    <span className="flex items-center justify-center">
-                      <Icon
-                        className={clsx(
-                          "h-4 w-4",
-                          active === item.id
-                            ? "text-brand"
-                            : "text-slate-400 group-hover:text-slate-600"
-                        )}
-                      />
-                    </span>
-                    {itemCount > 0 && (
-                      <span className="absolute ml-7 mt-[-1.6rem] min-w-4 rounded-full bg-rose-500 px-1 text-[9px] font-bold text-white">
-                        {itemCount > 99 ? "99+" : itemCount}
-                      </span>
-                    )}
-                  </button>
-                );
-              })
-            : visibleNavigationGroups.map((group, groupIndex) => {
-                const isActiveGroup = group.id === activeNavigationGroupId;
-                const isCollapsed = collapsedNavigationGroups[group.id] && !isActiveGroup;
-
-                return (
-                  <div
-                    key={group.id}
-                    className={clsx(
-                      "space-y-2 rounded-2xl p-1 transition-colors",
-                      !isCollapsed && (active === "dashboard" ? "border-b border-white/10 pb-3" : "bg-white/45 shadow-sm ring-1 ring-white/70"),
-                      groupIndex > 0 && "mt-4 pt-1"
-                    )}
-                  >
-                    <button
-                      type="button"
-                      className={clsx(
-                        "flex w-full items-center justify-between rounded-xl border-l-[3px] px-3 py-2.5 text-left text-[14px] font-bold tracking-normal shadow-sm transition-colors duration-150",
-                        active === "dashboard"
-                          ? isActiveGroup ? "border-blue-500 bg-blue-600/20 text-white" : "border-transparent text-blue-100 hover:bg-white/10"
-                          : isActiveGroup ? "border-blue-500 bg-white text-slate-950 ring-1 ring-blue-100" : "border-transparent bg-white/65 text-slate-700 hover:border-blue-400 hover:bg-blue-50 hover:text-slate-950 hover:ring-1 hover:ring-blue-100"
-                      )}
-                      onClick={() => toggleNavigationGroup(group.id)}
-                    >
-                      <span>{group.label}</span>
-                      <ChevronRight
-                        className={clsx(
-                          "h-[18px] w-[18px] text-slate-600 transition-transform duration-150",
-                          !isCollapsed && "rotate-90"
-                        )}
-                      />
-                    </button>
-                    {!isCollapsed &&
-                      group.items.map((item) => {
-                        const Icon = item.icon;
-                        const itemCount =
-                          item.id === "atendimento"
-                            ? atendimentoUnread
-                            : "count" in item && typeof item.count === "number"
-                              ? item.count
-                              : 0;
-
-                        return (
-                          <button
-                            key={item.id}
-                            className={clsx(
-                              "group relative flex h-10 w-full items-center justify-between rounded-xl px-3 pl-4 text-left text-sm font-medium transition-colors",
-                              active === "dashboard"
-                                ? active === item.id ? "bg-blue-600 text-white shadow-lg" : "text-blue-100 hover:bg-white/10 hover:text-white"
-                                : active === item.id ? "bg-blue-50 text-brand shadow-[inset_0_0_0_1px_rgba(37,99,235,0.12)]" : "text-slate-600 hover:bg-white/90 hover:text-slate-950"
-                            )}
-                            onClick={() => setActive(item.id)}
-                          >
-                            <span className="flex items-center gap-3">
-                              <Icon
-                                className={clsx(
-                                  "h-4 w-4",
-                                  active === "dashboard" ? "text-blue-200" : active === item.id ? "text-brand" : "text-slate-400 group-hover:text-slate-600"
-                                )}
-                              />
-                              {item.label}
-                            </span>
-                            {itemCount > 0 && (
-                              <span className="rounded-full bg-rose-500 px-2 py-0.5 text-[11px] font-bold text-white">
-                                {itemCount > 99 ? "99+" : itemCount}
-                              </span>
-                            )}
-                          </button>
-                        );
-                      })}
-                  </div>
-                );
-              })}
-        </nav>
+        <SidebarNavigation
+          sections={visibleNavigationSections}
+          active={active}
+          compact={leftSidebarCollapsed}
+          dark={active === "dashboard"}
+          collapsedGroups={collapsedNavigationGroups}
+          unreadCount={atendimentoUnread}
+          onToggleGroup={toggleNavigationGroup}
+          onSelect={setActive}
+        />
 
         <div
           className={clsx(
@@ -4660,7 +4462,7 @@ export default function Home() {
                   CRM
                 </p>
                 <h1 className="truncate text-[15px] font-bold text-slate-950">
-                  Operacao Inteligente
+                  Operação Inteligente
                 </h1>
               </div>
               <button
@@ -4673,89 +4475,17 @@ export default function Home() {
               </button>
             </div>
 
-            <nav className="mt-4 min-h-0 flex-1 space-y-1 overflow-y-auto px-3 pr-2 pb-4 [scrollbar-color:#CBD5E1_transparent] [scrollbar-width:thin]">
-              <p className="px-3 pb-3 text-xs font-semibold tracking-wide text-slate-700">
-                Navegacao
-              </p>
-              {visibleNavigationGroups.map((group, groupIndex) => {
-                const isActiveGroup = group.id === activeNavigationGroupId;
-                const isCollapsed = collapsedNavigationGroups[group.id] && !isActiveGroup;
-
-                return (
-                  <div
-                    key={group.id}
-                    className={clsx(
-                      "space-y-2 rounded-2xl p-1 transition-colors",
-                      !isCollapsed && "bg-white/45 shadow-sm ring-1 ring-white/70",
-                      groupIndex > 0 && "mt-4 pt-1"
-                    )}
-                  >
-                    <button
-                      type="button"
-                      className={clsx(
-                        "flex w-full items-center justify-between rounded-xl border-l-[3px] px-3 py-2.5 text-left text-[14px] font-bold tracking-normal shadow-sm transition-colors duration-150",
-                        isActiveGroup
-                          ? "border-blue-500 bg-white text-slate-950 ring-1 ring-blue-100"
-                          : "border-transparent bg-white/65 text-slate-700 hover:border-blue-400 hover:bg-blue-50 hover:text-slate-950 hover:ring-1 hover:ring-blue-100"
-                      )}
-                      onClick={() => toggleNavigationGroup(group.id)}
-                    >
-                      <span>{group.label}</span>
-                      <ChevronRight
-                        className={clsx(
-                          "h-[18px] w-[18px] text-slate-600 transition-transform duration-150",
-                          !isCollapsed && "rotate-90"
-                        )}
-                      />
-                    </button>
-                    {!isCollapsed &&
-                      group.items.map((item) => {
-                        const Icon = item.icon;
-                        const itemCount =
-                          item.id === "atendimento"
-                            ? atendimentoUnread
-                            : "count" in item && typeof item.count === "number"
-                              ? item.count
-                              : 0;
-
-                        return (
-                          <button
-                            key={item.id}
-                            type="button"
-                            className={clsx(
-                              "group relative flex h-10 w-full items-center justify-between rounded-xl px-3 pl-4 text-left text-sm font-medium transition-colors",
-                              active === item.id
-                                ? "bg-blue-50 text-brand shadow-[inset_0_0_0_1px_rgba(37,99,235,0.12)]"
-                                : "text-slate-600 hover:bg-white/90 hover:text-slate-950"
-                            )}
-                            onClick={() => {
-                              setActive(item.id);
-                              setMobileSidebarOpen(false);
-                            }}
-                          >
-                            <span className="flex items-center gap-3">
-                              <Icon
-                                className={clsx(
-                                  "h-4 w-4",
-                                  active === item.id
-                                    ? "text-brand"
-                                    : "text-slate-400 group-hover:text-slate-600"
-                                )}
-                              />
-                              {item.label}
-                            </span>
-                            {itemCount > 0 && (
-                              <span className="rounded-full bg-rose-500 px-2 py-0.5 text-[11px] font-bold text-white">
-                                {itemCount > 99 ? "99+" : itemCount}
-                              </span>
-                            )}
-                          </button>
-                        );
-                      })}
-                  </div>
-                );
-              })}
-            </nav>
+            <SidebarNavigation
+              sections={visibleNavigationSections}
+              active={active}
+              collapsedGroups={collapsedNavigationGroups}
+              unreadCount={atendimentoUnread}
+              onToggleGroup={toggleNavigationGroup}
+              onSelect={(id) => {
+                setActive(id);
+                setMobileSidebarOpen(false);
+              }}
+            />
 
             <div className="shrink-0 border-t border-slate-200/70 p-4">
               <div className="flex items-center gap-3 rounded-2xl p-2 transition hover:bg-white/70">
