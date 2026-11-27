@@ -500,7 +500,7 @@ export function BankIntegrationsPage() {
                 className={clsx(
                   "w-full rounded-2xl border p-3 text-left",
                   integrationForm.bankId === integration.bankId
-                    ? "border-primary bg-blue-50"
+                    ? "border-brand bg-blue-50"
                     : "border-line bg-white hover:bg-slate-50",
                 )}
                 onClick={() => selectIntegration(integration.bankId)}
@@ -546,7 +546,7 @@ export function BankIntegrationsPage() {
               <label className="text-xs font-bold uppercase text-slate-500">
                 Provider
                 <select
-                  className="mt-2 h-10 w-full rounded-2xl border border-line bg-white px-3 text-sm font-semibold normal-case text-slate-700 outline-none focus:border-primary"
+                  className="mt-2 h-10 w-full rounded-2xl border border-line bg-white px-3 text-sm font-semibold normal-case text-slate-700 outline-none focus:border-brand"
                   value={integrationForm.provider}
                   onChange={(event) =>
                     setIntegrationForm((current) => ({
@@ -565,7 +565,7 @@ export function BankIntegrationsPage() {
               <label className="text-xs font-bold uppercase text-slate-500">
                 Autenticação
                 <select
-                  className="mt-2 h-10 w-full rounded-2xl border border-line bg-white px-3 text-sm font-semibold normal-case text-slate-700 outline-none focus:border-primary"
+                  className="mt-2 h-10 w-full rounded-2xl border border-line bg-white px-3 text-sm font-semibold normal-case text-slate-700 outline-none focus:border-brand"
                   value={integrationForm.authType}
                   onChange={(event) =>
                     setIntegrationForm((current) => ({
@@ -641,7 +641,7 @@ export function BankIntegrationsPage() {
             {integrationForm.provider === "newcorban" && (
               <div className="grid gap-3 rounded-2xl border border-blue-100 bg-blue-50 p-3">
                 <div>
-                  <p className="text-sm font-black text-primary">
+                  <p className="text-sm font-black text-brand">
                     Credenciais Mercantil/Newcorban
                   </p>
                   <p className="mt-1 text-xs text-slate-600">
@@ -654,7 +654,7 @@ export function BankIntegrationsPage() {
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <button
                     type="button"
-                    className="h-10 flex-1 rounded-2xl bg-primary px-4 text-sm font-bold text-white shadow-soft disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
+                    className="h-10 flex-1 rounded-2xl bg-brand px-4 text-sm font-bold text-white shadow-soft disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
                     disabled={
                       !integrationForm.bankId ||
                       (!integrationForm.username.trim() &&
@@ -764,7 +764,7 @@ export function BankIntegrationsPage() {
               <button
                 type="button"
                 disabled={!integrationForm.bankId}
-                className="h-10 flex-1 rounded-2xl bg-primary px-4 text-sm font-bold text-white shadow-soft hover:bg-blue-700"
+                className="h-10 flex-1 rounded-2xl bg-brand px-4 text-sm font-bold text-white shadow-soft hover:bg-blue-700"
                 onClick={() => void runAction(saveIntegration)}
               >
                 Salvar login e senha
@@ -841,7 +841,7 @@ function IntegrationStatusBadge({ status }: { status: string }) {
         normalized === "CONNECTED"
           ? "bg-emerald-50 text-emerald-700"
           : normalized === "ASSISTED"
-            ? "bg-blue-50 text-primary"
+            ? "bg-blue-50 text-brand"
             : normalized === "ERROR"
               ? "bg-rose-50 text-rose-700"
               : normalized === "PENDING"

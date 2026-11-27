@@ -199,6 +199,9 @@ test("bank credentials/admin requests are extracted and no longer present in ope
   assert(bank.includes('autoComplete="off"'));
   assert(!bank.includes("localStorage"));
   assert(bank.includes("fallback"));
+  // The shared theme defines brand, not primary. White action labels need a real background.
+  assert(bank.includes("bg-brand"));
+  assert(!/(?:bg|text|border)-primary/.test(bank));
 });
 test("new monitor handler derives company only from authenticated ADMIN and returns safe failures", () => {
   const src = readFileSync("src/lib/automation-monitor-handler.ts", "utf8");

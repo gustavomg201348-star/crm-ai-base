@@ -120,3 +120,7 @@ recover global com a própria fixture. Uma leitura de Dashboard perdeu conexão
 durante carga concorrente e Disparos excedeu seu timeout existente de 20s durante
 build concorrente. Ambas passaram em repetição sem modificar código ou timeouts.
 Essas ocorrências locais não foram usadas para reduzir asserções ou dispensar CI.
+O Dashboard legado usa uma expressão SQL incompatível com SQLite e retornou 500
+no browser SQLite; seu código não muda neste PR e sua regressão PostgreSQL passou.
+As capturas finais usam PostgreSQL isolado. A inspeção visual corrigiu no formulário
+extraído o uso da cor inexistente `primary`, substituída pela cor `brand` do tema.
